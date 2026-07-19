@@ -82,6 +82,11 @@ function serveAuthorizationError(response: import("node:http").ServerResponse, e
     return;
   }
 
+  if (error instanceof Error && error.message.trim()) {
+    serveJson(response, 400, { message: error.message.trim() });
+    return;
+  }
+
   serveJson(response, 400, { message: "Authorization failed" });
 }
 
