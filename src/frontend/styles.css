@@ -811,24 +811,25 @@ table td:nth-child(3) {
   margin-top: 18px;
   padding-top: 18px;
   border-top: 1px solid var(--line);
+  overflow: hidden;
 }
 
 .auth-card__loading {
   position: absolute;
   z-index: 3;
-  inset: 0;
+  inset: -1px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
-  background: rgba(245, 247, 250, 0.78);
-  backdrop-filter: blur(2px);
+  border-radius: 14px;
+  background: rgba(245, 247, 250, 0.9);
+  backdrop-filter: blur(3px);
 }
 
 .auth-card[data-loading="true"] .auth-form,
 .auth-card[data-loading="true"] .auth-card__header,
 .auth-card[data-loading="true"] .auth-feedback {
-  opacity: 0.35;
+  opacity: 0.22;
 }
 
 .auth-card__loading-content {
