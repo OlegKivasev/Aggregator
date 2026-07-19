@@ -629,6 +629,11 @@ const showAuthorizeError = (feedbackElement, error) => {
   feedbackElement.textContent = error.message;
 };
 
+const showAuthFeedback = (feedbackElement, message = "") => {
+  authStatus.textContent = "";
+  feedbackElement.textContent = message;
+};
+
 const setAuthCardLoading = (form, isLoading) => {
   const card = form.closest(".auth-card");
 
@@ -834,13 +839,11 @@ rosskoAuthForm.addEventListener("submit", async (event) => {
 
 rosskoLogoutButton.addEventListener("click", async () => {
   try {
-    authStatus.textContent = "Отключаем Rossko";
     const payload = await postJson("/api/suppliers/rossko/logout");
     updateRosskoSessionCard(payload.session);
     clearAuthInputs(rosskoLoginInput, rosskoPasswordInput);
-    authStatus.textContent = "Rossko отключен";
   } catch (error) {
-    authStatus.textContent = `Ошибка отключения: ${error.message}`;
+    showAuthFeedback(rosskoAuthFeedback, error.message);
   }
 });
 
@@ -864,13 +867,11 @@ armtekAuthForm.addEventListener("submit", async (event) => {
 
 armtekLogoutButton.addEventListener("click", async () => {
   try {
-    authStatus.textContent = "Отключаем Armtek";
     const payload = await postJson("/api/suppliers/armtek/logout");
     updateArmtekSessionCard(payload.session);
     clearAuthInputs(armtekLoginInput, armtekPasswordInput);
-    authStatus.textContent = "Armtek отключен";
   } catch (error) {
-    authStatus.textContent = `Ошибка отключения: ${error.message}`;
+    showAuthFeedback(armtekAuthFeedback, error.message);
   }
 });
 
@@ -894,13 +895,11 @@ partKomAuthForm.addEventListener("submit", async (event) => {
 
 partKomLogoutButton.addEventListener("click", async () => {
   try {
-    authStatus.textContent = "Отключаем Part-Kom";
     const payload = await postJson("/api/suppliers/part-kom/logout");
     updatePartKomSessionCard(payload.session);
     clearAuthInputs(partKomLoginInput, partKomPasswordInput);
-    authStatus.textContent = "Part-Kom отключен";
   } catch (error) {
-    authStatus.textContent = `Ошибка отключения: ${error.message}`;
+    showAuthFeedback(partKomAuthFeedback, error.message);
   }
 });
 
@@ -924,13 +923,11 @@ stpartsAuthForm.addEventListener("submit", async (event) => {
 
 stpartsLogoutButton.addEventListener("click", async () => {
   try {
-    authStatus.textContent = "Отключаем STParts";
     const payload = await postJson("/api/suppliers/stparts/logout");
     updateStpartsSessionCard(payload.session);
     clearAuthInputs(stpartsLoginInput, stpartsPasswordInput);
-    authStatus.textContent = "STParts отключен";
   } catch (error) {
-    authStatus.textContent = `Ошибка отключения: ${error.message}`;
+    showAuthFeedback(stpartsAuthFeedback, error.message);
   }
 });
 
@@ -954,13 +951,11 @@ motorDetalAuthForm.addEventListener("submit", async (event) => {
 
 motorDetalLogoutButton.addEventListener("click", async () => {
   try {
-    authStatus.textContent = "Отключаем MotorDetal";
     const payload = await postJson("/api/suppliers/motordetal/logout");
     updateMotorDetalSessionCard(payload.session);
     clearAuthInputs(motorDetalLoginInput, motorDetalPasswordInput);
-    authStatus.textContent = "MotorDetal отключен";
   } catch (error) {
-    authStatus.textContent = `Ошибка отключения: ${error.message}`;
+    showAuthFeedback(motorDetalAuthFeedback, error.message);
   }
 });
 
@@ -983,13 +978,11 @@ mladovAuthForm.addEventListener("submit", async (event) => {
 
 mladovLogoutButton.addEventListener("click", async () => {
   try {
-    authStatus.textContent = "Отключаем Механик Ладов";
     const payload = await postJson("/api/suppliers/mladov/logout");
     updateMladovSessionCard(payload.session);
     clearAuthInputs(mladovLoginInput, mladovPasswordInput);
-    authStatus.textContent = "Механик Ладов отключен";
   } catch (error) {
-    authStatus.textContent = `Ошибка отключения: ${error.message}`;
+    showAuthFeedback(mladovAuthFeedback, error.message);
   }
 });
 
@@ -1127,6 +1120,6 @@ if (restoredTab) {
 setSearchUiState(false);
 renderTabs();
 renderResults();
-loadSessions().catch((error) => {
-  authStatus.textContent = `Не удалось загрузить сессии: ${error.message}`;
+loadSessions().catch(() => {
+  authStatus.textContent = "";
 });
