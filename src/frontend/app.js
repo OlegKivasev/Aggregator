@@ -81,11 +81,12 @@ const supplierNames = {
 const supplierSearchToggles = Object.fromEntries(
   supplierEnabledInputs.map((input) => [input.value, input.closest(".supplier-search-toggle")]),
 );
+const supplierEnabledInputsById = Object.fromEntries(supplierEnabledInputs.map((input) => [input.value, input]));
 
 const getEnabledSuppliers = () => supplierEnabledInputs.filter((input) => input.checked).map((input) => input.value);
 
 const updateSupplierSearchToggle = (supplier, authorized) => {
-  const input = supplierEnabledInputs.find((candidate) => candidate.value === supplier);
+  const input = supplierEnabledInputsById[supplier];
   const toggle = supplierSearchToggles[supplier];
 
   if (!input || !toggle) {
@@ -94,11 +95,25 @@ const updateSupplierSearchToggle = (supplier, authorized) => {
 
   toggle.hidden = !authorized;
 
-  if (!authorized) {
+  if (!authorized && input.checked) {
     input.checked = false;
+    syncActiveTab();
+    saveSearchState();
   }
 
   suppliersDropdown.hidden = !supplierEnabledInputs.some((candidate) => !supplierSearchToggles[candidate.value]?.hidden);
+};
+
+const setSupplierEnabled = (supplier, enabled) => {
+  const input = supplierEnabledInputsById[supplier];
+
+  if (!input) {
+    return;
+  }
+
+  input.checked = enabled;
+  syncActiveTab();
+  saveSearchState();
 };
 
 const createSearchTab = (data = {}) => ({
@@ -595,12 +610,13 @@ const postJson = async (url, body) => {
   return payload;
 };
 
-const handleAuthorizeResult = (session, feedbackElement, connectedMessage, rejectedMessage, updateSessionCard) => {
+const handleAuthorizeResult = (session, supplier, feedbackElement, rejectedMessage, updateSessionCard) => {
   updateSessionCard(session);
 
   if (session.authorized) {
-    authStatus.textContent = connectedMessage;
+    authStatus.textContent = "";
     feedbackElement.textContent = "";
+    setSupplierEnabled(supplier, true);
     return;
   }
 
@@ -611,6 +627,13 @@ const handleAuthorizeResult = (session, feedbackElement, connectedMessage, rejec
 const showAuthorizeError = (feedbackElement, error) => {
   authStatus.textContent = "";
   feedbackElement.textContent = error.message;
+};
+
+const setAuthCardLoading = (form, isLoading) => {
+  form.closest(".auth-card")?.toggleAttribute("data-loading", isLoading);
+  form.querySelectorAll("input, button").forEach((element) => {
+    element.disabled = isLoading;
+  });
 };
 
 const clearAuthInputs = (...inputs) => {
@@ -776,16 +799,19 @@ resultsBody.addEventListener("keydown", (event) => {
 
 rosskoAuthForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  setAuthCardLoading(rosskoAuthForm, true);
 
   try {
-    authStatus.textContent = "Подключаем Rossko";
+    authStatus.textContent = "";
     const payload = await postJson("/api/suppliers/rossko/authorize", {
       login: rosskoLoginInput.value.trim(),
       password: rosskoPasswordInput.value.trim(),
     });
-    handleAuthorizeResult(payload.session, rosskoAuthFeedback, "Rossko подключен", "Rossko отклонил авторизацию", updateRosskoSessionCard);
+    handleAuthorizeResult(payload.session, "rossko", rosskoAuthFeedback, "Rossko отклонил авторизацию", updateRosskoSessionCard);
   } catch (error) {
     showAuthorizeError(rosskoAuthFeedback, error);
+  } finally {
+    setAuthCardLoading(rosskoAuthForm, false);
   }
 });
 
@@ -803,16 +829,19 @@ rosskoLogoutButton.addEventListener("click", async () => {
 
 armtekAuthForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  setAuthCardLoading(armtekAuthForm, true);
 
   try {
-    authStatus.textContent = "Подключаем Armtek";
+    authStatus.textContent = "";
     const payload = await postJson("/api/suppliers/armtek/authorize", {
       login: armtekLoginInput.value.trim(),
       password: armtekPasswordInput.value.trim(),
     });
-    handleAuthorizeResult(payload.session, armtekAuthFeedback, "Armtek подключен", "Armtek отклонил авторизацию", updateArmtekSessionCard);
+    handleAuthorizeResult(payload.session, "armtek", armtekAuthFeedback, "Armtek отклонил авторизацию", updateArmtekSessionCard);
   } catch (error) {
     showAuthorizeError(armtekAuthFeedback, error);
+  } finally {
+    setAuthCardLoading(armtekAuthForm, false);
   }
 });
 
@@ -830,16 +859,19 @@ armtekLogoutButton.addEventListener("click", async () => {
 
 partKomAuthForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  setAuthCardLoading(partKomAuthForm, true);
 
   try {
-    authStatus.textContent = "Подключаем Part-Kom";
+    authStatus.textContent = "";
     const payload = await postJson("/api/suppliers/part-kom/authorize", {
       login: partKomLoginInput.value.trim(),
       password: partKomPasswordInput.value.trim(),
     });
-    handleAuthorizeResult(payload.session, partKomAuthFeedback, "Part-Kom подключен", "Part-Kom отклонил авторизацию", updatePartKomSessionCard);
+    handleAuthorizeResult(payload.session, "part-kom", partKomAuthFeedback, "Part-Kom отклонил авторизацию", updatePartKomSessionCard);
   } catch (error) {
     showAuthorizeError(partKomAuthFeedback, error);
+  } finally {
+    setAuthCardLoading(partKomAuthForm, false);
   }
 });
 
@@ -857,16 +889,19 @@ partKomLogoutButton.addEventListener("click", async () => {
 
 stpartsAuthForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  setAuthCardLoading(stpartsAuthForm, true);
 
   try {
-    authStatus.textContent = "Подключаем STParts";
+    authStatus.textContent = "";
     const payload = await postJson("/api/suppliers/stparts/authorize", {
       login: stpartsLoginInput.value.trim(),
       password: stpartsPasswordInput.value.trim(),
     });
-    handleAuthorizeResult(payload.session, stpartsAuthFeedback, "STParts подключен", "STParts отклонил авторизацию", updateStpartsSessionCard);
+    handleAuthorizeResult(payload.session, "stparts", stpartsAuthFeedback, "STParts отклонил авторизацию", updateStpartsSessionCard);
   } catch (error) {
     showAuthorizeError(stpartsAuthFeedback, error);
+  } finally {
+    setAuthCardLoading(stpartsAuthForm, false);
   }
 });
 
@@ -884,16 +919,19 @@ stpartsLogoutButton.addEventListener("click", async () => {
 
 motorDetalAuthForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  setAuthCardLoading(motorDetalAuthForm, true);
 
   try {
-    authStatus.textContent = "Подключаем MotorDetal";
+    authStatus.textContent = "";
     const payload = await postJson("/api/suppliers/motordetal/authorize", {
       login: motorDetalLoginInput.value.trim(),
       password: motorDetalPasswordInput.value.trim(),
     });
-    handleAuthorizeResult(payload.session, motorDetalAuthFeedback, "MotorDetal подключен", "MotorDetal отклонил авторизацию", updateMotorDetalSessionCard);
+    handleAuthorizeResult(payload.session, "motordetal", motorDetalAuthFeedback, "MotorDetal отклонил авторизацию", updateMotorDetalSessionCard);
   } catch (error) {
     showAuthorizeError(motorDetalAuthFeedback, error);
+  } finally {
+    setAuthCardLoading(motorDetalAuthForm, false);
   }
 });
 
@@ -911,15 +949,18 @@ motorDetalLogoutButton.addEventListener("click", async () => {
 
 mladovAuthForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  setAuthCardLoading(mladovAuthForm, true);
   try {
-    authStatus.textContent = "Подключаем Механик Ладов";
+    authStatus.textContent = "";
     const payload = await postJson("/api/suppliers/mladov/authorize", {
       login: mladovLoginInput.value.trim(),
       password: mladovPasswordInput.value.trim(),
     });
-    handleAuthorizeResult(payload.session, mladovAuthFeedback, "Механик Ладов подключен", "Механик Ладов отклонил авторизацию", updateMladovSessionCard);
+    handleAuthorizeResult(payload.session, "mladov", mladovAuthFeedback, "Механик Ладов отклонил авторизацию", updateMladovSessionCard);
   } catch (error) {
     showAuthorizeError(mladovAuthFeedback, error);
+  } finally {
+    setAuthCardLoading(mladovAuthForm, false);
   }
 });
 
