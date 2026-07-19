@@ -18,6 +18,9 @@ const rosskoRetryDelayMs = Number(process.env.ROSSKO_RETRY_DELAY_MS ?? "250");
 const rosskoSettledTimeoutMs = Number(process.env.ROSSKO_SETTLED_TIMEOUT_MS ?? "3000");
 const rosskoSettledFallbackDelayMs = Number(process.env.ROSSKO_SETTLED_FALLBACK_DELAY_MS ?? "800");
 const rosskoLoginFieldVisibleTimeoutMs = Number(process.env.ROSSKO_LOGIN_FIELD_VISIBLE_TIMEOUT_MS ?? "1200");
+const rosskoAuthCookieWaitTimeoutMs = Number(process.env.ROSSKO_AUTH_COOKIE_WAIT_TIMEOUT_MS ?? "8000");
+const rosskoAuthCookiePollIntervalMs = Number(process.env.ROSSKO_AUTH_COOKIE_POLL_INTERVAL_MS ?? "250");
+const rosskoAuthResponseTimeoutMs = Number(process.env.ROSSKO_AUTH_RESPONSE_TIMEOUT_MS ?? "8000");
 const rosskoStorageStatePath = getStateFilePath("rossko-storage-state.json");
 const rosskoStateDir = dirname(rosskoStorageStatePath);
 
@@ -129,6 +132,65 @@ async function waitForVisibleRosskoField(field: any): Promise<boolean> {
   }
 }
 
+async function hasRosskoAuthCookie(context: any): Promise<boolean> {
+  const cookies = await context.cookies(rosskoBusinessUrl);
+  return cookies.some((cookie: { name?: string; value?: string }) => cookie.name === "auth" && Boolean(cookie.value));
+}
+
+async function waitForRosskoAuthCookie(page: any): Promise<boolean> {
+  const deadline = Date.now() + rosskoAuthCookieWaitTimeoutMs;
+  const context = page.context();
+
+  while (Date.now() < deadline) {
+    if (await hasRosskoAuthCookie(context)) {
+      return true;
+    }
+
+    const rosskoErrorText = await getVisibleRosskoError(page);
+    if (rosskoErrorText) {
+      return false;
+    }
+
+    await page.waitForTimeout(rosskoAuthCookiePollIntervalMs);
+  }
+
+  return hasRosskoAuthCookie(context);
+}
+
+async function waitForRosskoAuthResponse(page: any): Promise<RosskoAuthCheckResult | null> {
+  try {
+    const response = await page.waitForResponse(async (candidate: any) => {
+      if (candidate.request().method() !== "POST") {
+        return false;
+      }
+
+      const url = new URL(candidate.url());
+      if (url.origin !== new URL(rosskoBusinessUrl).origin || url.pathname !== "/utils/") {
+        return false;
+      }
+
+      const postData = candidate.request().postData() || "";
+      return postData.includes("action=auth") && postData.includes("type=header");
+    }, { timeout: rosskoAuthResponseTimeoutMs });
+
+    const payload = await response.json() as { err?: boolean; msg?: string; location?: string };
+
+    if (payload.err) {
+      return {
+        authorized: false,
+        details: payload.msg?.trim() || "Rossko rejected the login or password",
+      };
+    }
+
+    return {
+      authorized: true,
+      details: payload.location ? "Rossko login redirect was returned" : "Rossko login was accepted",
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function revealRosskoLoginForm(page: any) {
   let emailField = page.locator('input[name="auth[email]"]:visible').first();
 
@@ -231,6 +293,8 @@ export async function performRosskoLogin(page: any, credentials: RosskoSiteCrede
     .filter({ hasText: /вход/i })
     .first();
 
+  const authResponsePromise = waitForRosskoAuthResponse(page);
+
   if ((await submitButton.count()) > 0) {
     await submitButton.click();
   } else {
@@ -238,6 +302,19 @@ export async function performRosskoLogin(page: any, credentials: RosskoSiteCrede
   }
 
   await waitForRosskoSettled(page);
+
+  const authResponse = await authResponsePromise;
+
+  if (authResponse && !authResponse.authorized) {
+    return authResponse;
+  }
+
+  if (await waitForRosskoAuthCookie(page)) {
+    return {
+      authorized: true,
+      details: authResponse?.details || "Rossko business account login was verified successfully",
+    };
+  }
 
   const authFormStillVisible = (await page.locator('input[name="auth[email]"]:visible').count()) > 0;
   const bodyText = await page.locator("body").innerText();
@@ -256,8 +333,10 @@ export async function performRosskoLogin(page: any, credentials: RosskoSiteCrede
   }
 
   return {
-    authorized: true,
-    details: "Rossko business account login was verified successfully",
+    authorized: false,
+    details: authFormStillVisible
+      ? "Rossko login result could not be confirmed"
+      : "Rossko auth cookie was not created after submit",
   };
 }
 
