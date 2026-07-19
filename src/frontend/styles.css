@@ -807,9 +807,40 @@ table td:nth-child(3) {
 }
 
 .auth-card {
+  position: relative;
   margin-top: 18px;
   padding-top: 18px;
   border-top: 1px solid var(--line);
+}
+
+.auth-card[data-loading="true"]::before {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: rgba(245, 247, 250, 0.72);
+  content: "";
+  backdrop-filter: blur(2px);
+}
+
+.auth-card[data-loading="true"]::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 38px;
+  height: 38px;
+  margin: -19px 0 0 -19px;
+  border: 3px solid rgba(255, 75, 19, 0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 10px rgba(255, 75, 19, 0.08);
+  content: "";
+  animation: search-loading-spin 0.75s linear infinite;
+}
+
+.auth-card[data-loading="true"] .auth-form,
+.auth-card[data-loading="true"] .auth-card__header,
+.auth-card[data-loading="true"] .auth-feedback {
+  opacity: 0.35;
 }
 
 .auth-card__header {
@@ -861,6 +892,22 @@ table td:nth-child(3) {
 
 .auth-actions .btn {
   min-width: 112px;
+}
+
+.auth-form .auth-actions .btn.btn-primary {
+  border-color: var(--accent) !important;
+  background: var(--accent) !important;
+}
+
+.auth-form .auth-actions .btn.btn-primary:hover,
+.auth-form .auth-actions .btn.btn-primary:focus-visible {
+  border-color: var(--accent-dark) !important;
+  background: var(--accent-dark) !important;
+}
+
+.auth-form .auth-actions .btn.btn-primary:disabled {
+  border-color: var(--accent) !important;
+  background: var(--accent) !important;
 }
 
 .status-pill[data-status="completed"] {
