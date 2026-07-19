@@ -647,7 +647,7 @@ const setAuthCardLoading = (form, isLoading) => {
     loadingElement = document.createElement("div");
     loadingElement.className = "auth-card__loading";
     loadingElement.hidden = true;
-    loadingElement.innerHTML = '<div class="auth-card__loading-content"><span class="auth-card__loading-spinner" aria-hidden="true"></span><div><strong>Подключаем</strong><span>Пожалуйста, подождите завершения.</span></div></div>';
+    loadingElement.innerHTML = '<div class="auth-card__loading-content"><span class="auth-card__loading-spinner" aria-hidden="true"></span><div><strong>Подключаем</strong></div></div>';
     card.append(loadingElement);
   }
 
