@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Автозапчасти</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+      crossorigin="anonymous"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="page container-fluid py-4 py-lg-5">
+      <nav class="search-tabs card border-0 shadow-sm mb-4" aria-label="Поисковые вкладки">
+        <div class="search-tabs__list" id="search-tabs-list" role="tablist"></div>
+        <button type="button" class="new-tab-button btn btn-light" id="new-tab-button" aria-label="Открыть новую вкладку">+</button>
+      </nav>
+
+      <div class="workspace">
+        <section class="search-shell">
+          <div class="search-row card shadow-sm border-0">
+            <form class="search-form" id="search-form">
+              <input
+                class="search-input"
+                id="article-input"
+                name="article"
+                type="text"
+                placeholder="Введите артикул"
+                autocomplete="off"
+                required
+              />
+              <details class="suppliers-dropdown">
+                <summary class="suppliers-dropdown__summary">
+                  <span>Поставщики</span>
+                  <svg aria-hidden="true" viewBox="0 0 12 12">
+                    <path d="m2.25 4.25 3.75 3.5 3.75-3.5" />
+                  </svg>
+                </summary>
+                <div class="suppliers-dropdown__menu card border-0 shadow">
+                  <p class="suppliers-dropdown__title">Источники поиска</p>
+                  <label class="supplier-search-toggle form-check form-switch">
+                    <input class="supplier-enabled-input form-check-input" type="checkbox" value="rossko" checked />
+                    <span class="form-check-label">Rossko</span>
+                  </label>
+                  <label class="supplier-search-toggle form-check form-switch">
+                    <input class="supplier-enabled-input form-check-input" type="checkbox" value="armtek" checked />
+                    <span class="form-check-label">Armtek</span>
+                  </label>
+                  <label class="supplier-search-toggle form-check form-switch">
+                    <input class="supplier-enabled-input form-check-input" type="checkbox" value="part-kom" checked />
+                    <span class="form-check-label">Part-Kom</span>
+                  </label>
+                  <label class="supplier-search-toggle form-check form-switch">
+                    <input class="supplier-enabled-input form-check-input" type="checkbox" value="stparts" checked />
+                    <span class="form-check-label">STParts</span>
+                  </label>
+                  <label class="supplier-search-toggle form-check form-switch">
+                    <input class="supplier-enabled-input form-check-input" type="checkbox" value="motordetal" checked />
+                    <span class="form-check-label">MotorDetal</span>
+                  </label>
+                  <label class="supplier-search-toggle form-check form-switch">
+                    <input class="supplier-enabled-input form-check-input" type="checkbox" value="mladov" checked />
+                    <span class="form-check-label">Механик Ладов</span>
+                  </label>
+                </div>
+              </details>
+              <button type="button" class="settings-button" id="settings-toggle" aria-label="Открыть настройки" title="Настройки">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" />
+                  <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.46-2.47 1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58 1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 1.55 2 3.46 2.47-1a8.05 8.05 0 0 0 2.58 1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" />
+                </svg>
+              </button>
+              <button type="submit" id="submit-button" class="btn btn-primary">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <circle cx="10.75" cy="10.75" r="6.25" />
+                  <path d="m15.5 15.5 4 4" />
+                </svg>
+                <span>Поиск</span>
+              </button>
+            </form>
+          </div>
+
+          <div class="results-panel card border-0 shadow-sm overflow-hidden" id="results-panel" aria-busy="false">
+            <div class="results-panel__header card-header bg-white border-0 d-flex justify-content-between align-items-center">
+              <span class="panel__meta text-secondary" id="global-status"></span>
+              <span class="panel__meta badge rounded-pill text-bg-light" id="result-count" tabindex="0" hidden>0 позиций</span>
+            </div>
+
+            <div class="results-empty" id="results-empty">Выполните поиск товара</div>
+
+            <div class="search-loading" id="search-loading" role="status" aria-live="polite" hidden>
+              <div class="search-loading__content">
+                <span class="search-loading__spinner" aria-hidden="true"></span>
+                <div>
+                  <strong>Идет поиск</strong>
+                  <span>Пожалуйста, подождите завершения.</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="results-table table-responsive" id="results-table" hidden>
+              <table class="table table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="supplier">Поставщик<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="brand">Бренд<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="article">Артикул<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="title">Наименование<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="warehouse">Склад<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" aria-sort="ascending"><button type="button" class="table-sort is-active" data-sort-key="price">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="deliveryDate">Дата доставки<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                  </tr>
+                </thead>
+                <tbody id="results-body">
+                  <tr class="results-table__empty">
+                    <td colspan="7">По вашему запросу ничего не найдено.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <aside class="settings-drawer" id="settings-drawer" hidden>
+      <div class="settings-drawer__backdrop" id="settings-backdrop"></div>
+      <div class="settings-drawer__panel card border-0 shadow-lg">
+        <div class="settings-drawer__header">
+          <div>
+            <h2>Настройки</h2>
+            <p class="panel__meta" id="auth-status"></p>
+          </div>
+          <button type="button" class="button-secondary settings-close btn btn-light" id="settings-close" aria-label="Закрыть настройки">×</button>
+        </div>
+
+        <details class="suppliers-panel">
+          <summary class="suppliers-panel__summary">Поставщики</summary>
+
+          <article class="auth-card">
+            <div class="auth-card__header">
+              <div><h3>Механик Ладов</h3></div>
+              <span class="status-pill badge rounded-pill text-bg-secondary" id="mladov-session-pill" data-status="idle">Не подключен</span>
+            </div>
+            <form id="mladov-auth-form" class="auth-form" data-authorized="false">
+              <label class="field"><span>Логин</span><input id="mladov-login" name="login" type="text" autocomplete="username" /></label>
+              <label class="field"><span>Пароль</span><input id="mladov-password" name="password" type="password" autocomplete="current-password" /></label>
+              <div class="auth-actions">
+                <button type="submit" id="mladov-connect-button" class="btn btn-primary">Подключить</button>
+                <button type="button" class="button-secondary btn btn-light" id="mladov-logout-button" hidden>Отключить</button>
+              </div>
+            </form>
+            <p class="auth-feedback" id="mladov-auth-feedback"></p>
+          </article>
+
+          <article class="auth-card">
+            <div class="auth-card__header">
+              <div>
+                <h3>Rossko</h3>
+              </div>
+              <span class="status-pill badge rounded-pill text-bg-secondary" id="rossko-session-pill" data-status="idle">Не подключен</span>
+            </div>
+
+            <form id="rossko-auth-form" class="auth-form" data-authorized="false">
+              <label class="field">
+                <span>Логин</span>
+                <input id="rossko-login" name="login" type="text" autocomplete="username" />
+              </label>
+              <label class="field">
+                <span>Пароль</span>
+                <input id="rossko-password" name="password" type="password" autocomplete="current-password" />
+              </label>
+              <div class="auth-actions">
+              <button type="submit" id="rossko-connect-button" class="btn btn-primary">Подключить</button>
+                <button type="button" class="button-secondary btn btn-light" id="rossko-logout-button" hidden>Отключить</button>
+              </div>
+            </form>
+
+            <p class="auth-feedback" id="rossko-auth-feedback"></p>
+          </article>
+
+          <article class="auth-card">
+            <div class="auth-card__header">
+              <div>
+                <h3>Armtek</h3>
+              </div>
+              <span class="status-pill badge rounded-pill text-bg-secondary" id="armtek-session-pill" data-status="idle">Не подключен</span>
+            </div>
+
+            <form id="armtek-auth-form" class="auth-form" data-authorized="false">
+              <label class="field">
+                <span>Логин</span>
+                <input id="armtek-login" name="login" type="text" autocomplete="username" />
+              </label>
+              <label class="field">
+                <span>Пароль</span>
+                <input id="armtek-password" name="password" type="password" autocomplete="current-password" />
+              </label>
+              <div class="auth-actions">
+              <button type="submit" id="armtek-connect-button" class="btn btn-primary">Подключить</button>
+                <button type="button" class="button-secondary btn btn-light" id="armtek-logout-button" hidden>Отключить</button>
+              </div>
+            </form>
+
+            <p class="auth-feedback" id="armtek-auth-feedback"></p>
+          </article>
+
+          <article class="auth-card">
+            <div class="auth-card__header">
+              <div>
+                <h3>Part-Kom</h3>
+              </div>
+              <span class="status-pill badge rounded-pill text-bg-secondary" id="part-kom-session-pill" data-status="idle">Не подключен</span>
+            </div>
+
+            <form id="part-kom-auth-form" class="auth-form" data-authorized="false">
+              <label class="field">
+                <span>Логин</span>
+                <input id="part-kom-login" name="login" type="text" autocomplete="username" />
+              </label>
+              <label class="field">
+                <span>Пароль</span>
+                <input id="part-kom-password" name="password" type="password" autocomplete="current-password" />
+              </label>
+              <div class="auth-actions">
+              <button type="submit" id="part-kom-connect-button" class="btn btn-primary">Подключить</button>
+                <button type="button" class="button-secondary btn btn-light" id="part-kom-logout-button" hidden>Отключить</button>
+              </div>
+            </form>
+
+            <p class="auth-feedback" id="part-kom-auth-feedback"></p>
+          </article>
+
+          <article class="auth-card">
+            <div class="auth-card__header">
+              <div>
+                <h3>STParts</h3>
+              </div>
+              <span class="status-pill badge rounded-pill text-bg-secondary" id="stparts-session-pill" data-status="idle">Не подключен</span>
+            </div>
+
+            <form id="stparts-auth-form" class="auth-form" data-authorized="false">
+              <label class="field">
+                <span>Логин</span>
+                <input id="stparts-login" name="login" type="text" autocomplete="username" />
+              </label>
+              <label class="field">
+                <span>Пароль</span>
+                <input id="stparts-password" name="password" type="password" autocomplete="current-password" />
+              </label>
+              <div class="auth-actions">
+              <button type="submit" id="stparts-connect-button" class="btn btn-primary">Подключить</button>
+                <button type="button" class="button-secondary btn btn-light" id="stparts-logout-button" hidden>Отключить</button>
+              </div>
+            </form>
+
+            <p class="auth-feedback" id="stparts-auth-feedback"></p>
+          </article>
+
+          <article class="auth-card">
+            <div class="auth-card__header">
+              <div>
+                <h3>MotorDetal</h3>
+              </div>
+              <span class="status-pill badge rounded-pill text-bg-secondary" id="motordetal-session-pill" data-status="idle">Не подключен</span>
+            </div>
+
+            <form id="motordetal-auth-form" class="auth-form" data-authorized="false">
+              <label class="field">
+                <span>Email</span>
+                <input id="motordetal-login" name="login" type="email" autocomplete="username" />
+              </label>
+              <label class="field">
+                <span>Пароль</span>
+                <input id="motordetal-password" name="password" type="password" autocomplete="current-password" />
+              </label>
+              <div class="auth-actions">
+                <button type="submit" id="motordetal-connect-button" class="btn btn-primary">Подключить</button>
+                <button type="button" class="button-secondary btn btn-light" id="motordetal-logout-button" hidden>Отключить</button>
+              </div>
+            </form>
+
+            <p class="auth-feedback" id="motordetal-auth-feedback"></p>
+          </article>
+        </details>
+      </div>
+    </aside>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

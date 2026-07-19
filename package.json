@@ -1,0 +1,22 @@
+{
+  "name": "autoservice-aggregator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types src/backend/server.ts",
+    "dev": "node --watch --experimental-strip-types src/backend/server.ts",
+    "test": "node --test tests/*.test.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "playwright": "1.61.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.0",
+    "typescript": "5.8.3"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
