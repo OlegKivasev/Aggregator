@@ -78,7 +78,26 @@ const supplierNames = {
   mladov: "Механик Ладов",
 };
 
+const supplierSearchToggles = Object.fromEntries(
+  supplierEnabledInputs.map((input) => [input.value, input.closest(".supplier-search-toggle")]),
+);
+
 const getEnabledSuppliers = () => supplierEnabledInputs.filter((input) => input.checked).map((input) => input.value);
+
+const updateSupplierSearchToggle = (supplier, authorized) => {
+  const input = supplierEnabledInputs.find((candidate) => candidate.value === supplier);
+  const toggle = supplierSearchToggles[supplier];
+
+  if (!input || !toggle) {
+    return;
+  }
+
+  toggle.hidden = !authorized;
+
+  if (!authorized) {
+    input.checked = false;
+  }
+};
 
 const createSearchTab = (data = {}) => ({
   id: data.id ?? `tab-${Date.now()}-${tabSequence++}`,
@@ -464,6 +483,7 @@ const closeSettings = () => {
 };
 
 const updateRosskoSessionCard = (session) => {
+  updateSupplierSearchToggle("rossko", session.authorized);
   rosskoSessionPill.dataset.status = sessionPillStatus(session.authorized);
   rosskoSessionPill.textContent = sessionPillText(session.authorized);
   rosskoAuthForm.dataset.authorized = String(session.authorized);
@@ -473,6 +493,7 @@ const updateRosskoSessionCard = (session) => {
 };
 
 const updateArmtekSessionCard = (session) => {
+  updateSupplierSearchToggle("armtek", session.authorized);
   armtekSessionPill.dataset.status = sessionPillStatus(session.authorized);
   armtekSessionPill.textContent = sessionPillText(session.authorized);
   armtekAuthForm.dataset.authorized = String(session.authorized);
@@ -482,6 +503,7 @@ const updateArmtekSessionCard = (session) => {
 };
 
 const updatePartKomSessionCard = (session) => {
+  updateSupplierSearchToggle("part-kom", session.authorized);
   partKomSessionPill.dataset.status = sessionPillStatus(session.authorized);
   partKomSessionPill.textContent = sessionPillText(session.authorized);
   partKomAuthForm.dataset.authorized = String(session.authorized);
@@ -491,6 +513,7 @@ const updatePartKomSessionCard = (session) => {
 };
 
 const updateStpartsSessionCard = (session) => {
+  updateSupplierSearchToggle("stparts", session.authorized);
   stpartsSessionPill.dataset.status = sessionPillStatus(session.authorized);
   stpartsSessionPill.textContent = sessionPillText(session.authorized);
   stpartsAuthForm.dataset.authorized = String(session.authorized);
@@ -500,6 +523,7 @@ const updateStpartsSessionCard = (session) => {
 };
 
 const updateMotorDetalSessionCard = (session) => {
+  updateSupplierSearchToggle("motordetal", session.authorized);
   motorDetalSessionPill.dataset.status = sessionPillStatus(session.authorized);
   motorDetalSessionPill.textContent = sessionPillText(session.authorized);
   motorDetalAuthForm.dataset.authorized = String(session.authorized);
@@ -509,6 +533,7 @@ const updateMotorDetalSessionCard = (session) => {
 };
 
 const updateMladovSessionCard = (session) => {
+  updateSupplierSearchToggle("mladov", session.authorized);
   mladovSessionPill.dataset.status = sessionPillStatus(session.authorized);
   mladovSessionPill.textContent = sessionPillText(session.authorized);
   mladovAuthForm.dataset.authorized = String(session.authorized);
