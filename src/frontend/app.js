@@ -97,6 +97,8 @@ const updateSupplierSearchToggle = (supplier, authorized) => {
   if (!authorized) {
     input.checked = false;
   }
+
+  suppliersDropdown.hidden = !supplierEnabledInputs.some((candidate) => !supplierSearchToggles[candidate.value]?.hidden);
 };
 
 const createSearchTab = (data = {}) => ({
