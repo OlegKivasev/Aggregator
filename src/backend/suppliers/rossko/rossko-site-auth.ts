@@ -17,6 +17,7 @@ const rosskoPostCommitDelayMs = Number(process.env.ROSSKO_POST_COMMIT_DELAY_MS ?
 const rosskoRetryDelayMs = Number(process.env.ROSSKO_RETRY_DELAY_MS ?? "250");
 const rosskoSettledTimeoutMs = Number(process.env.ROSSKO_SETTLED_TIMEOUT_MS ?? "3000");
 const rosskoSettledFallbackDelayMs = Number(process.env.ROSSKO_SETTLED_FALLBACK_DELAY_MS ?? "800");
+const rosskoLoginFieldVisibleTimeoutMs = Number(process.env.ROSSKO_LOGIN_FIELD_VISIBLE_TIMEOUT_MS ?? "1200");
 const rosskoStorageStatePath = getStateFilePath("rossko-storage-state.json");
 const rosskoStateDir = dirname(rosskoStorageStatePath);
 
@@ -119,6 +120,15 @@ export async function waitForRosskoSettled(page: any) {
   }
 }
 
+async function waitForVisibleRosskoField(field: any): Promise<boolean> {
+  try {
+    await field.waitFor({ state: "visible", timeout: rosskoLoginFieldVisibleTimeoutMs });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function revealRosskoLoginForm(page: any) {
   let emailField = page.locator('input[name="auth[email]"]:visible').first();
 
@@ -131,26 +141,42 @@ export async function revealRosskoLoginForm(page: any) {
   }).first();
 
   if ((await loginDropdown.count()) > 0) {
+    const dropdownEmailField = loginDropdown.locator('input[name="auth[email]"]').first();
+
     try {
       await loginDropdown.hover();
-      await page.waitForTimeout(300);
     } catch {
       // Fall through to other activation strategies when hover is not available.
     }
 
-    emailField = page.locator('input[name="auth[email]"]:visible').first();
+    if (await waitForVisibleRosskoField(dropdownEmailField)) {
+      return dropdownEmailField;
+    }
 
-    if ((await emailField.count()) > 0) {
-      return emailField;
+    const loginTrigger = page.getByRole("link", { name: /вход/i }).first();
+
+    if ((await loginTrigger.count()) > 0) {
+      try {
+        await loginTrigger.hover();
+      } catch {
+        // Fall through to direct dropdown activation.
+      }
+
+      if (await waitForVisibleRosskoField(dropdownEmailField)) {
+        return dropdownEmailField;
+      }
     }
 
     try {
       await loginDropdown.evaluate((node: Element) => {
         node.classList.add("h-dropdown--active");
       });
-      await page.waitForTimeout(150);
     } catch {
       // Fall through to link click when the dropdown cannot be toggled directly.
+    }
+
+    if (await waitForVisibleRosskoField(dropdownEmailField)) {
+      return dropdownEmailField;
     }
 
     emailField = page.locator('input[name="auth[email]"]:visible').first();
@@ -164,10 +190,11 @@ export async function revealRosskoLoginForm(page: any) {
 
   if ((await loginTrigger.count()) > 0) {
     await loginTrigger.click();
-    await page.waitForTimeout(300);
   }
 
   emailField = page.locator('input[name="auth[email]"]:visible').first();
+
+  await waitForVisibleRosskoField(emailField);
   return emailField;
 }
 
