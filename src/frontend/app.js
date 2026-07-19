@@ -630,7 +630,24 @@ const showAuthorizeError = (feedbackElement, error) => {
 };
 
 const setAuthCardLoading = (form, isLoading) => {
-  form.closest(".auth-card")?.toggleAttribute("data-loading", isLoading);
+  const card = form.closest(".auth-card");
+
+  if (!card) {
+    return;
+  }
+
+  let loadingElement = card.querySelector(".auth-card__loading");
+
+  if (!loadingElement) {
+    loadingElement = document.createElement("div");
+    loadingElement.className = "auth-card__loading";
+    loadingElement.hidden = true;
+    loadingElement.innerHTML = '<div class="auth-card__loading-content"><span class="auth-card__loading-spinner" aria-hidden="true"></span><div><strong>Подключаем</strong><span>Пожалуйста, подождите завершения.</span></div></div>';
+    card.append(loadingElement);
+  }
+
+  card.toggleAttribute("data-loading", isLoading);
+  loadingElement.hidden = !isLoading;
   form.querySelectorAll("input, button").forEach((element) => {
     element.disabled = isLoading;
   });
