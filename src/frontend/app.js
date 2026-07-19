@@ -568,6 +568,24 @@ const postJson = async (url, body) => {
   return payload;
 };
 
+const handleAuthorizeResult = (session, feedbackElement, connectedMessage, rejectedMessage, updateSessionCard) => {
+  updateSessionCard(session);
+
+  if (session.authorized) {
+    authStatus.textContent = connectedMessage;
+    feedbackElement.textContent = "";
+    return;
+  }
+
+  authStatus.textContent = "";
+  feedbackElement.textContent = session.details ?? rejectedMessage;
+};
+
+const showAuthorizeError = (feedbackElement, error) => {
+  authStatus.textContent = "";
+  feedbackElement.textContent = error.message;
+};
+
 const openSearchStream = (url) => {
   const controller = new AbortController();
   const stream = {
@@ -732,11 +750,9 @@ rosskoAuthForm.addEventListener("submit", async (event) => {
       login: rosskoLoginInput.value.trim(),
       password: rosskoPasswordInput.value.trim(),
     });
-    updateRosskoSessionCard(payload.session);
-    authStatus.textContent = payload.session.authorized ? "Rossko подключен" : "Rossko отклонил авторизацию";
+    handleAuthorizeResult(payload.session, rosskoAuthFeedback, "Rossko подключен", "Rossko отклонил авторизацию", updateRosskoSessionCard);
   } catch (error) {
-    authStatus.textContent = `Ошибка подключения: ${error.message}`;
-    rosskoAuthFeedback.textContent = error.message;
+    showAuthorizeError(rosskoAuthFeedback, error);
   }
 });
 
@@ -760,11 +776,9 @@ armtekAuthForm.addEventListener("submit", async (event) => {
       login: armtekLoginInput.value.trim(),
       password: armtekPasswordInput.value.trim(),
     });
-    updateArmtekSessionCard(payload.session);
-    authStatus.textContent = payload.session.authorized ? "Armtek подключен" : "Armtek отклонил авторизацию";
+    handleAuthorizeResult(payload.session, armtekAuthFeedback, "Armtek подключен", "Armtek отклонил авторизацию", updateArmtekSessionCard);
   } catch (error) {
-    authStatus.textContent = `Ошибка подключения: ${error.message}`;
-    armtekAuthFeedback.textContent = error.message;
+    showAuthorizeError(armtekAuthFeedback, error);
   }
 });
 
@@ -788,11 +802,9 @@ partKomAuthForm.addEventListener("submit", async (event) => {
       login: partKomLoginInput.value.trim(),
       password: partKomPasswordInput.value.trim(),
     });
-    updatePartKomSessionCard(payload.session);
-    authStatus.textContent = payload.session.authorized ? "Part-Kom подключен" : "Part-Kom отклонил авторизацию";
+    handleAuthorizeResult(payload.session, partKomAuthFeedback, "Part-Kom подключен", "Part-Kom отклонил авторизацию", updatePartKomSessionCard);
   } catch (error) {
-    authStatus.textContent = `Ошибка подключения: ${error.message}`;
-    partKomAuthFeedback.textContent = error.message;
+    showAuthorizeError(partKomAuthFeedback, error);
   }
 });
 
@@ -816,11 +828,9 @@ stpartsAuthForm.addEventListener("submit", async (event) => {
       login: stpartsLoginInput.value.trim(),
       password: stpartsPasswordInput.value.trim(),
     });
-    updateStpartsSessionCard(payload.session);
-    authStatus.textContent = payload.session.authorized ? "STParts подключен" : "STParts отклонил авторизацию";
+    handleAuthorizeResult(payload.session, stpartsAuthFeedback, "STParts подключен", "STParts отклонил авторизацию", updateStpartsSessionCard);
   } catch (error) {
-    authStatus.textContent = `Ошибка подключения: ${error.message}`;
-    stpartsAuthFeedback.textContent = error.message;
+    showAuthorizeError(stpartsAuthFeedback, error);
   }
 });
 
@@ -844,11 +854,9 @@ motorDetalAuthForm.addEventListener("submit", async (event) => {
       login: motorDetalLoginInput.value.trim(),
       password: motorDetalPasswordInput.value.trim(),
     });
-    updateMotorDetalSessionCard(payload.session);
-    authStatus.textContent = payload.session.authorized ? "MotorDetal подключен" : "MotorDetal отклонил авторизацию";
+    handleAuthorizeResult(payload.session, motorDetalAuthFeedback, "MotorDetal подключен", "MotorDetal отклонил авторизацию", updateMotorDetalSessionCard);
   } catch (error) {
-    authStatus.textContent = `Ошибка подключения: ${error.message}`;
-    motorDetalAuthFeedback.textContent = error.message;
+    showAuthorizeError(motorDetalAuthFeedback, error);
   }
 });
 
@@ -871,11 +879,9 @@ mladovAuthForm.addEventListener("submit", async (event) => {
       login: mladovLoginInput.value.trim(),
       password: mladovPasswordInput.value.trim(),
     });
-    updateMladovSessionCard(payload.session);
-    authStatus.textContent = payload.session.authorized ? "Механик Ладов подключен" : "Механик Ладов отклонил авторизацию";
+    handleAuthorizeResult(payload.session, mladovAuthFeedback, "Механик Ладов подключен", "Механик Ладов отклонил авторизацию", updateMladovSessionCard);
   } catch (error) {
-    authStatus.textContent = `Ошибка подключения: ${error.message}`;
-    mladovAuthFeedback.textContent = error.message;
+    showAuthorizeError(mladovAuthFeedback, error);
   }
 });
 
