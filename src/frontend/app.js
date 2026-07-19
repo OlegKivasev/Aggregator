@@ -586,6 +586,12 @@ const showAuthorizeError = (feedbackElement, error) => {
   feedbackElement.textContent = error.message;
 };
 
+const clearAuthInputs = (...inputs) => {
+  inputs.forEach((input) => {
+    input.value = "";
+  });
+};
+
 const openSearchStream = (url) => {
   const controller = new AbortController();
   const stream = {
@@ -761,6 +767,7 @@ rosskoLogoutButton.addEventListener("click", async () => {
     authStatus.textContent = "Отключаем Rossko";
     const payload = await postJson("/api/suppliers/rossko/logout");
     updateRosskoSessionCard(payload.session);
+    clearAuthInputs(rosskoLoginInput, rosskoPasswordInput);
     authStatus.textContent = "Rossko отключен";
   } catch (error) {
     authStatus.textContent = `Ошибка отключения: ${error.message}`;
@@ -787,6 +794,7 @@ armtekLogoutButton.addEventListener("click", async () => {
     authStatus.textContent = "Отключаем Armtek";
     const payload = await postJson("/api/suppliers/armtek/logout");
     updateArmtekSessionCard(payload.session);
+    clearAuthInputs(armtekLoginInput, armtekPasswordInput);
     authStatus.textContent = "Armtek отключен";
   } catch (error) {
     authStatus.textContent = `Ошибка отключения: ${error.message}`;
@@ -813,6 +821,7 @@ partKomLogoutButton.addEventListener("click", async () => {
     authStatus.textContent = "Отключаем Part-Kom";
     const payload = await postJson("/api/suppliers/part-kom/logout");
     updatePartKomSessionCard(payload.session);
+    clearAuthInputs(partKomLoginInput, partKomPasswordInput);
     authStatus.textContent = "Part-Kom отключен";
   } catch (error) {
     authStatus.textContent = `Ошибка отключения: ${error.message}`;
@@ -839,6 +848,7 @@ stpartsLogoutButton.addEventListener("click", async () => {
     authStatus.textContent = "Отключаем STParts";
     const payload = await postJson("/api/suppliers/stparts/logout");
     updateStpartsSessionCard(payload.session);
+    clearAuthInputs(stpartsLoginInput, stpartsPasswordInput);
     authStatus.textContent = "STParts отключен";
   } catch (error) {
     authStatus.textContent = `Ошибка отключения: ${error.message}`;
@@ -865,6 +875,7 @@ motorDetalLogoutButton.addEventListener("click", async () => {
     authStatus.textContent = "Отключаем MotorDetal";
     const payload = await postJson("/api/suppliers/motordetal/logout");
     updateMotorDetalSessionCard(payload.session);
+    clearAuthInputs(motorDetalLoginInput, motorDetalPasswordInput);
     authStatus.textContent = "MotorDetal отключен";
   } catch (error) {
     authStatus.textContent = `Ошибка отключения: ${error.message}`;
@@ -890,6 +901,7 @@ mladovLogoutButton.addEventListener("click", async () => {
     authStatus.textContent = "Отключаем Механик Ладов";
     const payload = await postJson("/api/suppliers/mladov/logout");
     updateMladovSessionCard(payload.session);
+    clearAuthInputs(mladovLoginInput, mladovPasswordInput);
     authStatus.textContent = "Механик Ладов отключен";
   } catch (error) {
     authStatus.textContent = `Ошибка отключения: ${error.message}`;
