@@ -126,6 +126,40 @@ export async function revealRosskoLoginForm(page: any) {
     return emailField;
   }
 
+  const loginDropdown = page.locator(".h-dropdown").filter({
+    has: page.locator('form.signin-form input[name="auth[email]"]'),
+  }).first();
+
+  if ((await loginDropdown.count()) > 0) {
+    try {
+      await loginDropdown.hover();
+      await page.waitForTimeout(300);
+    } catch {
+      // Fall through to other activation strategies when hover is not available.
+    }
+
+    emailField = page.locator('input[name="auth[email]"]:visible').first();
+
+    if ((await emailField.count()) > 0) {
+      return emailField;
+    }
+
+    try {
+      await loginDropdown.evaluate((node: Element) => {
+        node.classList.add("h-dropdown--active");
+      });
+      await page.waitForTimeout(150);
+    } catch {
+      // Fall through to link click when the dropdown cannot be toggled directly.
+    }
+
+    emailField = page.locator('input[name="auth[email]"]:visible').first();
+
+    if ((await emailField.count()) > 0) {
+      return emailField;
+    }
+  }
+
   const loginTrigger = page.getByRole("link", { name: /вход/i }).first();
 
   if ((await loginTrigger.count()) > 0) {
