@@ -930,7 +930,7 @@ const shouldCheckSupplierSessions = () => {
   }
 };
 
-const rememberSearchStarted = () => {
+const rememberSupplierSessionsChecked = () => {
   try {
     localStorage.setItem(lastSearchStorageKey, String(Date.now()));
   } catch {
@@ -1504,7 +1504,6 @@ const startSearch = (article, enabledSuppliers) => {
   enabledSuppliers.forEach((supplier) => searchParams.append("supplier", supplier));
 
   const source = openSearchStream(`/api/search?${searchParams.toString()}`);
-  rememberSearchStarted();
   tab.source = source;
   updateSearchProgress(tab);
   startSearchProgressTimer();
@@ -1637,11 +1636,12 @@ form.addEventListener("submit", async (event) => {
 
   if (shouldCheckSupplierSessions()) {
     supplierCheckInProgress = true;
-    const canSearch = await checkSupplierSessions(article, supplierIds);
+    const canSearch = await checkSupplierSessions(article, enabledSuppliers);
     supplierCheckInProgress = false;
     if (!canSearch) {
       return;
     }
+    rememberSupplierSessionsChecked();
   }
 
   startSearch(article, enabledSuppliers);
