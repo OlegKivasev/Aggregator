@@ -70,7 +70,6 @@ let sortState = { key: "price", direction: "ascending" };
 let markupPercent = 35;
 
 const searchStateStorageKey = "autoservice.searchState";
-const markupPercentStorageKey = "autoservice.markupPercent";
 
 const supplierNames = {
   rossko: "Rossko",
@@ -119,6 +118,11 @@ const setSupplierEnabled = (supplier, enabled) => {
   saveSearchState();
 };
 
+const normalizeMarkupPercent = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(1000, Math.max(0, parsed)) : 35;
+};
+
 const createSearchTab = (data = {}) => ({
   id: data.id ?? `tab-${Date.now()}-${tabSequence++}`,
   article: typeof data.article === "string" ? data.article : "",
@@ -129,6 +133,7 @@ const createSearchTab = (data = {}) => ({
     typeof data.hasSearched === "boolean"
       ? data.hasSearched
       : Boolean(data.results?.length) || Boolean(data.status && data.status !== "Ожидание поиска"),
+  markupPercent: normalizeMarkupPercent(data.markupPercent),
   source: null,
 });
 
@@ -161,6 +166,7 @@ const syncActiveTab = () => {
   tab.enabledSuppliers = getEnabledSuppliers();
   tab.status = globalStatus.textContent;
   tab.results = results;
+  tab.markupPercent = markupPercent;
 };
 
 const sessionPillStatus = (authorized) => (authorized ? "completed" : "idle");
@@ -332,6 +338,7 @@ const saveSearchState = () => {
           status: tab.status,
           results: tab.results,
           hasSearched: tab.hasSearched,
+          markupPercent: tab.markupPercent,
         })),
       }),
     );
@@ -397,7 +404,9 @@ const activateTab = (tabId) => {
   syncActiveTab();
   activeTabId = tab.id;
   results = tab.results;
+  markupPercent = tab.markupPercent;
   articleInput.value = tab.article;
+  markupPercentInput.value = String(markupPercent);
   globalStatus.textContent = tab.status;
   supplierEnabledInputs.forEach((input) => {
     input.checked = tab.enabledSuppliers.includes(input.value);
@@ -484,15 +493,14 @@ const renderResults = () => {
 };
 
 const setMarkupPercent = (value) => {
-  const parsed = Number(value);
-  markupPercent = Number.isFinite(parsed) ? Math.min(1000, Math.max(0, parsed)) : 35;
+  markupPercent = normalizeMarkupPercent(value);
   markupPercentInput.value = String(markupPercent);
-  renderResults();
-  try {
-    localStorage.setItem(markupPercentStorageKey, String(markupPercent));
-  } catch {
-    // The markup setting is not required for searching.
+  const tab = getActiveTab();
+  if (tab) {
+    tab.markupPercent = markupPercent;
   }
+  renderResults();
+  saveSearchState();
 };
 
 const resetSearchState = () => {
@@ -1130,16 +1138,6 @@ form.addEventListener("submit", (event) => {
 });
 
 restoreSearchState();
-try {
-  const storedMarkupPercent = Number(localStorage.getItem(markupPercentStorageKey));
-  if (Number.isFinite(storedMarkupPercent)) {
-    markupPercent = Math.min(1000, Math.max(0, storedMarkupPercent));
-  }
-} catch {
-  // Use the default markup when storage is unavailable.
-}
-markupPercentInput.value = String(markupPercent);
-markupPercentInput.addEventListener("change", () => setMarkupPercent(markupPercentInput.value));
 if (!searchTabs.length) {
   const tab = createSearchTab();
   searchTabs.push(tab);
@@ -1148,12 +1146,15 @@ if (!searchTabs.length) {
 const restoredTab = getActiveTab();
 if (restoredTab) {
   results = restoredTab.results;
+  markupPercent = restoredTab.markupPercent;
   articleInput.value = restoredTab.article;
+  markupPercentInput.value = String(markupPercent);
   globalStatus.textContent = restoredTab.status;
   supplierEnabledInputs.forEach((input) => {
     input.checked = restoredTab.enabledSuppliers.includes(input.value);
   });
 }
+markupPercentInput.addEventListener("change", () => setMarkupPercent(markupPercentInput.value));
 setSearchUiState(false);
 renderTabs();
 renderResults();
