@@ -3,11 +3,34 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { request as httpRequest } from "node:http";
 import { test } from "node:test";
+import { armtekEtpCandidateIds, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
 import { findPrimaryPartKomMakerId } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { parseStpartsResults } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
 
 const port = 31847;
 const baseUrl = `http://127.0.0.1:${port}`;
+
+test("Armtek includes every ambiguous brand candidate", () => {
+  const ids = armtekEtpCandidateIds({
+    data: {
+      TBL: {
+        FIRSTDATA: Array.from({ length: 14 }, (_, index) => ({ ARTID: String(index + 1) })),
+      },
+    },
+  });
+
+  assert.deepEqual(ids, Array.from({ length: 14 }, (_, index) => String(index + 1)));
+});
+
+test("Armtek keeps both delivery interval dates", () => {
+  const dates = parseArmtekDeliveryDates("20260725", "20260728");
+
+  assert.ok(dates.deliveryDate);
+  assert.ok(dates.deliveryDateTo);
+  assert.ok(Date.parse(dates.deliveryDate) < Date.parse(dates.deliveryDateTo));
+  assert.equal(new Date(dates.deliveryDate).getDate(), 25);
+  assert.equal(new Date(dates.deliveryDateTo).getDate(), 28);
+});
 
 test("Part-Kom selects the primary autocomplete maker for the requested normalized article", () => {
   const makerId = findPrimaryPartKomMakerId([

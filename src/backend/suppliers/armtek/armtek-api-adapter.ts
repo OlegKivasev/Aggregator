@@ -16,6 +16,7 @@ import {
   getArmtekCookieHeader,
   getArmtekSharedBrowser,
   hasArmtekStorageState,
+  performArmtekLogin,
 } from "./armtek-site-auth.ts";
 
 interface ArmtekResponse<T> {
@@ -94,11 +95,11 @@ interface ArmtekResolvedConfig {
 
 const armtekApiBaseUrl = process.env.ARMTEK_API_BASE_URL?.trim() || "https://ws.armtek.ru/api";
 const armtekEtpBaseUrl = process.env.ARMTEK_ETP_BASE_URL?.trim() || "https://etp.armtek.ru/";
-const armtekEtpAmbiguousLimit = Math.max(1, Number(process.env.ARMTEK_ETP_AMBIGUOUS_LIMIT ?? "8"));
+const armtekEtpAmbiguousLimit = Math.max(1, Number(process.env.ARMTEK_ETP_AMBIGUOUS_LIMIT ?? "20"));
 const armtekEtpRequestDelayMs = Math.max(1000, Number(process.env.ARMTEK_ETP_REQUEST_DELAY_MS ?? "1100"));
+const armtekEtpWorkers = Math.min(3, Math.max(1, Math.floor(Number(process.env.ARMTEK_ETP_WORKERS ?? "3")) || 3));
 
 let cachedArmtekEtpCookie: { storedCookie: string; activeCookie: string } | null = null;
-let lastArmtekEtpSearchAt = 0;
 
 function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
@@ -130,6 +131,20 @@ function parseArmtekDate(value: string | undefined): string | null {
   }
 
   return parseDeliveryText(value);
+}
+
+export function parseArmtekDeliveryDates(deliveryDate: string | undefined, warrantyDate: string | undefined): {
+  deliveryDate: string | null;
+  deliveryDateTo: string | null;
+} {
+  const dates = [parseArmtekDate(deliveryDate), parseArmtekDate(warrantyDate)]
+    .filter((date): date is string => date !== null)
+    .sort();
+
+  return {
+    deliveryDate: dates[0] ?? null,
+    deliveryDateTo: dates[1] ?? null,
+  };
 }
 
 function normalizeConcatenatedDottedDates(value: string): string {
@@ -340,8 +355,6 @@ async function requestArmtekEtpSearch(
   queryData: string,
   signal: AbortSignal,
 ): Promise<ArmtekEtpSearchResponse> {
-  await waitForArmtekEtp(signal);
-  lastArmtekEtpSearchAt = Date.now();
   const body = new URLSearchParams({
     QUERY: query,
     QUERY_TYPE: queryType,
@@ -398,11 +411,14 @@ function exactEtpItems(payload: ArmtekEtpSearchResponse, target: string): Armtek
     .filter((item) => normalizeArticle(item.PIN || "") === target);
 }
 
-function waitForArmtekEtp(signal: AbortSignal): Promise<void> {
-  const delayMs = Math.max(0, armtekEtpRequestDelayMs - (Date.now() - lastArmtekEtpSearchAt));
-  if (delayMs === 0) {
-    return Promise.resolve();
-  }
+export function armtekEtpCandidateIds(payload: ArmtekEtpSearchResponse, limit = armtekEtpAmbiguousLimit): string[] {
+  return (payload.data?.TBL?.FIRSTDATA || [])
+    .map((group) => group.ARTID)
+    .filter((artid): artid is string => Boolean(artid))
+    .slice(0, limit);
+}
+
+function waitForArmtekEtp(signal: AbortSignal, delayMs = armtekEtpRequestDelayMs): Promise<void> {
   return new Promise((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timer);
@@ -416,12 +432,30 @@ function waitForArmtekEtp(signal: AbortSignal): Promise<void> {
   });
 }
 
+async function searchArmtekEtpCandidates(
+  candidateIds: string[],
+  request: (artid: string) => Promise<ArmtekEtpParam[]>,
+  signal: AbortSignal,
+  onItems: (items: ArmtekEtpParam[]) => void,
+  previousRequestStartedAt: number,
+): Promise<void> {
+  let lastRequestStartedAt = previousRequestStartedAt;
+  for (const artid of candidateIds) {
+    const delayMs = Math.max(0, armtekEtpRequestDelayMs - (Date.now() - lastRequestStartedAt));
+    if (delayMs > 0) {
+      await waitForArmtekEtp(signal, delayMs);
+    }
+    lastRequestStartedAt = Date.now();
+    onItems(await request(artid));
+  }
+}
+
 function emitArmtekEtpItems(
   items: ArmtekEtpParam[],
   article: string,
   onResult: (result: NormalizedSearchResult) => void,
+  seen = new Set<string>(),
 ): number {
-  const seen = new Set<string>();
   let emitted = 0;
   for (const item of items) {
     const price = parsePrice(item.PRICES1);
@@ -436,7 +470,7 @@ function emitArmtekEtpItems(
       article: item.PIN || article,
       title: item.NAME || item.PIN || article,
       price,
-      deliveryDate: parseArmtekDate(item.WRNTDT || item.DLVDT),
+      ...parseArmtekDeliveryDates(item.DLVDT, item.WRNTDT),
       warehouse: item.SNAME || null,
       deliveryDateApproximate: false,
       link: buildArmtekResultLink(article),
@@ -478,19 +512,100 @@ async function searchArmtekEtpInBrowser(article: string, signal: AbortSignal): P
         .flatMap((name: any) => name.PARAMS || [])
         .filter((item: any) => normalize(item.PIN || "") === normalize(query));
       const initial = await request(query, "1", "S1");
-      let items = exact(initial);
-      if (items.some((item: any) => Number(item.PRICES1) > 0)) return items;
+      const items = exact(initial);
       const candidates = (initial.data?.TBL?.FIRSTDATA || []).map((group: any) => group.ARTID).filter(Boolean).slice(0, limit);
+      let lastRequestStartedAt = performance.now();
       for (const artid of candidates) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        items = exact(await request(artid, "5", "S2"));
-        if (items.some((item: any) => Number(item.PRICES1) > 0)) return items;
+        const remainingDelayMs = Math.max(0, delayMs - (performance.now() - lastRequestStartedAt));
+        if (remainingDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, remainingDelayMs));
+        lastRequestStartedAt = performance.now();
+        items.push(...exact(await request(artid, "5", "S2")));
       }
-      return [];
+      return items;
     }, { query: article, limit: armtekEtpAmbiguousLimit, delayMs: armtekEtpRequestDelayMs }) as ArmtekEtpParam[];
   } finally {
     signal.removeEventListener("abort", closeOnAbort);
     await context.close().catch(() => undefined);
+  }
+}
+
+async function searchArmtekEtpWithWorkers(
+  credentials: ArmtekCredentials,
+  article: string,
+  signal: AbortSignal,
+  onResult: (result: NormalizedSearchResult) => void,
+): Promise<void> {
+  const browser = await getArmtekSharedBrowser();
+  const contexts: any[] = [];
+  const closeOnAbort = () => Promise.all(contexts.map((context) => context.close().catch(() => undefined)));
+  signal.addEventListener("abort", closeOnAbort, { once: true });
+  const seen = new Set<string>();
+
+  try {
+    await Promise.all(Array.from({ length: armtekEtpWorkers }, async (_, workerIndex) => {
+      const context = await browser.newContext();
+      contexts.push(context);
+      const page = await context.newPage();
+      const authorization = await performArmtekLogin(page, credentials);
+      if (!authorization.authorized) {
+        throw new SupplierAuthError(authorization.details);
+      }
+
+      const items = await page.evaluate(async ({ query, limit, workerIndex, workerCount }: {
+        query: string;
+        limit: number;
+        workerIndex: number;
+        workerCount: number;
+      }) => {
+        const request = async (value: string, queryType: string, queryData: string) => {
+          const body = new URLSearchParams({
+            QUERY: value, QUERY_TYPE: queryType, QUERY_DATA: queryData, QUERY_HYSTORY: query,
+            OPTRS: "true", PKW: "", LKW: "", VIEW: "short", GROUP: "0", ZZSING: "S",
+            cashKey: "", page: "1", TTLLN: "0", SRCNT: "0", FORMAT: "json", LANG: "ru",
+          });
+          const response = await fetch(`/search/getArticlesBySearch/?${Math.random()}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-Requested-With": "XMLHttpRequest" },
+            body,
+          });
+          return await response.json();
+        };
+        const normalize = (value: string) => value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+        const exact = (payload: any) => (payload.data?.TBL?.SRCDATA || [])
+          .filter((group: any) => group.RSTP === "0")
+          .flatMap((group: any) => group.NAMES || [])
+          .flatMap((name: any) => name.PARAMS || [])
+          .filter((item: any) => normalize(item.PIN || "") === normalize(query));
+        const initial = await request(query, "1", "S1");
+        const candidates = (initial.data?.TBL?.FIRSTDATA || [])
+          .map((group: any) => group.ARTID)
+          .filter(Boolean)
+          .slice(0, limit)
+          .filter((_: string, index: number) => index % workerCount === workerIndex);
+        const items = exact(initial);
+
+        for (const artid of candidates) {
+          const startedAt = Date.now();
+          while (true) {
+            const payload = await request(artid, "5", "S2");
+            if (payload.status === true) {
+              items.push(...exact(payload));
+              break;
+            }
+            if (Date.now() - startedAt >= 5000) {
+              throw new Error("Armtek brand search timed out");
+            }
+            await new Promise((resolve) => setTimeout(resolve, 200));
+          }
+        }
+        return items;
+      }, { query: article, limit: armtekEtpAmbiguousLimit, workerIndex, workerCount: armtekEtpWorkers }) as ArmtekEtpParam[];
+
+      emitArmtekEtpItems(items, article, onResult, seen);
+    }));
+  } finally {
+    signal.removeEventListener("abort", closeOnAbort);
+    await Promise.all(contexts.map((context) => context.close().catch(() => undefined)));
   }
 }
 
@@ -501,36 +616,34 @@ async function searchArmtekEtp(
   onResult: (result: NormalizedSearchResult) => void,
 ): Promise<void> {
   const article = query.article.trim();
-  let items: ArmtekEtpParam[];
+  const seen = new Set<string>();
+
+  if (_credentials) {
+    await searchArmtekEtpWithWorkers(_credentials, article, searchContext.signal, onResult);
+    return;
+  }
 
   try {
     const cookie = await getActiveArmtekEtpCookie(searchContext.signal);
     const target = normalizeArticle(article);
+    const initialRequestStartedAt = Date.now();
     const initial = await requestArmtekEtpSearch(cookie, article, article, "1", "S1", searchContext.signal);
-    items = exactEtpItems(initial, target);
-    if (!items.some((item) => (parsePrice(item.PRICES1) ?? 0) > 0)) {
-      const candidates = (initial.data?.TBL?.FIRSTDATA || [])
-        .map((group) => group.ARTID)
-        .filter((artid): artid is string => Boolean(artid))
-        .slice(0, armtekEtpAmbiguousLimit);
-      if (candidates.length > 0) {
-        items = [];
-        for (const artid of candidates) {
-          const selected = await requestArmtekEtpSearch(cookie, article, artid, "5", "S2", searchContext.signal);
-          const selectedItems = exactEtpItems(selected, target);
-          if (selectedItems.some((item) => (parsePrice(item.PRICES1) ?? 0) > 0)) {
-            items = selectedItems;
-            break;
-          }
-        }
-      }
-    }
+    emitArmtekEtpItems(exactEtpItems(initial, target), article, onResult, seen);
+    await searchArmtekEtpCandidates(
+      armtekEtpCandidateIds(initial),
+      async (artid) => exactEtpItems(
+        await requestArmtekEtpSearch(cookie, article, artid, "5", "S2", searchContext.signal),
+        target,
+      ),
+      searchContext.signal,
+      (items) => emitArmtekEtpItems(items, article, onResult, seen),
+      initialRequestStartedAt,
+    );
   } catch (error) {
     if (error instanceof SupplierAuthError || searchContext.signal.aborted) throw error;
-    items = await searchArmtekEtpInBrowser(article, searchContext.signal);
+    const items = await searchArmtekEtpInBrowser(article, searchContext.signal);
+    emitArmtekEtpItems(items, article, onResult, seen);
   }
-
-  emitArmtekEtpItems(items, article, onResult);
 }
 
 export async function verifyArmtekCredentials(credentials: ArmtekCredentials): Promise<string> {
@@ -541,7 +654,7 @@ export async function verifyArmtekCredentials(credentials: ArmtekCredentials): P
 export class ArmtekApiAdapter implements SupplierAdapter {
   readonly id = "armtek";
   readonly displayName = "Armtek";
-  readonly timeoutMs = 15000;
+  readonly timeoutMs = 30000;
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
     const credentials = getConfiguredCredentials(sessionManager);
@@ -637,7 +750,7 @@ export class ArmtekApiAdapter implements SupplierAdapter {
         article: item.PIN || article,
         title: item.NAME || item.PIN || article,
         price,
-        deliveryDate: parseArmtekDate(item.WRNTDT || item.DLVDT),
+        ...parseArmtekDeliveryDates(item.DLVDT, item.WRNTDT),
         warehouse: item.STOCK_NAME || item.WHNAME || item.WAREHOUSE_NAME || item.STOCK || item.WH || item.WAREHOUSE || null,
         deliveryDateApproximate: false,
         link: buildArmtekResultLink(article),
