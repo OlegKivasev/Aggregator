@@ -81,7 +81,7 @@ const supplierSessionStates = new Map();
 
 const searchStateStorageKey = "autoservice.searchState";
 const lastSearchStorageKey = "autoservice.lastSearchStartedAt";
-const supplierCheckIntervalMs = 30 * 1000;
+const supplierCheckIntervalMs = 2 * 60 * 60 * 1000;
 const supplierCheckSuccessDelayMs = 3000;
 
 const supplierNames = {
