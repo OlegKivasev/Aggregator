@@ -1,9 +1,9 @@
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
+import { getStateFilePath } from "../../config.ts";
 import type { NormalizedSearchResult, SearchQuery, SupplierSearchContext, SupplierSessionState } from "../../types.ts";
 import { SupplierAuthError } from "../errors.ts";
-import { siteHttpRequest } from "../site-http.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
-import { getStpartsCookieHeader, hasStpartsStorageState, stpartsBaseUrl } from "./stparts-site-auth.ts";
+import { createStpartsBrowser, getStpartsCookieHeader, hasStpartsStorageState, stpartsBaseUrl } from "./stparts-site-auth.ts";
 
 interface StpartsApiResult {
   brand: string;
@@ -62,7 +62,7 @@ function resultBlocks(html: string): string[] {
   return starts.map((start, index) => html.slice(start, starts[index + 1] ?? html.length));
 }
 
-function parseResults(html: string, requestedArticle: string, pageUrl: string): StpartsApiResult[] {
+export function parseStpartsResults(html: string, requestedArticle: string, pageUrl: string): StpartsApiResult[] {
   const target = normalizeArticle(requestedArticle);
   const results: StpartsApiResult[] = [];
 
@@ -96,19 +96,16 @@ function parseResults(html: string, requestedArticle: string, pageUrl: string): 
   return results;
 }
 
-async function requestPage(url: URL, signal: AbortSignal): Promise<string> {
-  const cookie = getStpartsCookieHeader();
-  if (!cookie) {
-    throw new SupplierAuthError("STParts stored session is not available");
-  }
-  const response = await siteHttpRequest(url, { cookie, signal, headers: { Referer: stpartsBaseUrl } });
-  if (response.status === 401 || response.status === 403) {
+async function requestPage(page: any, url: URL, timeoutMs: number): Promise<string> {
+  const response = await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: timeoutMs });
+  const html = await page.content();
+  if (response?.status() === 401 || response?.status() === 403 || /id=["']lgnform["']|id=["']login["']/i.test(html)) {
     throw new SupplierAuthError("STParts session is not authorized");
   }
-  if (response.status < 200 || response.status >= 300) {
-    throw new Error(`STParts returned HTTP ${response.status}`);
+  if (!response || !response.ok()) {
+    throw new Error(`STParts returned HTTP ${response?.status() ?? 0}`);
   }
-  return response.body;
+  return html;
 }
 
 function exactSearchUrl(html: string, article: string): URL | null {
@@ -142,29 +139,42 @@ export class StpartsApiAdapter implements SupplierAdapter {
     const article = query.article.trim();
     const initialUrl = new URL("/search", stpartsBaseUrl);
     initialUrl.searchParams.set("pcode", article);
-    const initialHtml = await requestPage(initialUrl, context.signal);
-    const exactUrl = exactSearchUrl(initialHtml, article);
-    if (!exactUrl) {
-      return;
-    }
+    const browser = await createStpartsBrowser();
+    let browserContext: any | null = null;
+    const closeOnAbort = () => browserContext?.close().catch(() => undefined);
+    context.signal.addEventListener("abort", closeOnAbort, { once: true });
 
-    const html = await requestPage(exactUrl, context.signal);
-    const results = parseResults(html, article, exactUrl.toString());
-    for (const result of results) {
-      onResult({
-        supplier: this.id,
-        brand: result.brand,
-        article: result.article,
-        title: result.title,
-        price: result.price,
-        warehouse: result.warehouse,
-        warehouseColor: result.warehouseColor,
-        warehouseRating: result.warehouseRating,
-        deliveryDate: result.deliveryDate,
-        deliveryDateTo: result.deliveryDateTo,
-        deliveryDateApproximate: false,
-        link: result.link,
-      });
+    try {
+      browserContext = await browser.newContext({ storageState: getStateFilePath("stparts-storage-state.json") });
+      const page = await browserContext.newPage();
+      const initialHtml = await requestPage(page, initialUrl, context.timeoutMs);
+      const exactUrl = exactSearchUrl(initialHtml, article);
+      if (!exactUrl) {
+        return;
+      }
+
+      const html = await requestPage(page, exactUrl, context.timeoutMs);
+      const results = parseStpartsResults(html, article, exactUrl.toString());
+      for (const result of results) {
+        onResult({
+          supplier: this.id,
+          brand: result.brand,
+          article: result.article,
+          title: result.title,
+          price: result.price,
+          warehouse: result.warehouse,
+          warehouseColor: result.warehouseColor,
+          warehouseRating: result.warehouseRating,
+          deliveryDate: result.deliveryDate,
+          deliveryDateTo: result.deliveryDateTo,
+          deliveryDateApproximate: false,
+          link: result.link,
+        });
+      }
+    } finally {
+      context.signal.removeEventListener("abort", closeOnAbort);
+      await browserContext?.close().catch(() => undefined);
+      await browser.close().catch(() => undefined);
     }
   }
 }

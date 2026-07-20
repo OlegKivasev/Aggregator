@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { request as httpRequest } from "node:http";
 import { test } from "node:test";
 import { findPrimaryPartKomMakerId } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
+import { parseStpartsResults } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
 
 const port = 31847;
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -18,6 +19,20 @@ test("Part-Kom selects the primary autocomplete maker for the requested normaliz
   ], "VAP0212375");
 
   assert.equal(makerId, "10");
+});
+
+test("STParts parses the supplier output price from current result rows", () => {
+  const results = parseStpartsResults(`
+    <tr class="resultTr2" data-is-request-article="1" data-output-price="6900.27" data-availability="38">
+      <td class="resultBrand">ВолгаАвтоПром</td>
+      <td class="resultDescription">ВАЛ КАРДАННЫЙ ВАЗ-2121 ЗАДНИЙ</td>
+      <td class="resultWarehouse"><font color="green">POS1066</font></td>
+    </tr>
+  `, "VAP-021-2375", "https://stparts.ru/search/ВолгаАвтоПром/VAP0212375");
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].price, 6900.27);
+  assert.equal(results[0].warehouse, "POS1066");
 });
 
 async function waitForServer(server) {
