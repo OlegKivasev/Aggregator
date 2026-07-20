@@ -64,6 +64,14 @@ function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
 }
 
+export function findPrimaryPartKomMakerId(items: PartKomAutocompleteItem[], article: string): string | null {
+  const target = normalizeArticle(article);
+  const item = items.find((candidate) =>
+    candidate.maker_id !== undefined && normalizeArticle(candidate.number || "") === target,
+  );
+  return item ? String(item.maker_id) : null;
+}
+
 function parsePrice(value: string | number | undefined): number | null {
   const parsed = typeof value === "number" ? value : Number(value?.replace(/\s+/g, "").replace(",", "."));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
@@ -160,47 +168,46 @@ export class PartKomApiAdapter implements SupplierAdapter {
   ): Promise<void> {
     const article = query.article.trim();
     const baseParams = { number: article, excSubstitutes: "0", excAnalogues: "0", txtAddPrice: "0" };
-    const [autocomplete, initial] = await Promise.all([
-      requestJson<PartKomAutocompleteResponse>("/autocomplete_api_v2/", new URLSearchParams({ q: article }), context.signal),
-      requestJson<PartKomSearchResponse>("/search/", new URLSearchParams({ ...baseParams, maker_id: "", stores: "1" }), context.signal),
-    ]);
+    const autocomplete = await requestJson<PartKomAutocompleteResponse>(
+      "/autocomplete_api_v2/",
+      new URLSearchParams({ q: article }),
+      context.signal,
+    );
     const rows = [
       ...(autocomplete.data?.articul || []),
       ...(autocomplete.data?.parts || []),
       ...(autocomplete.data?.goods || []),
       ...(autocomplete.data?.autocomplete || []),
     ];
-    const makerIds = new Set<string>(rows.map((row) => row.maker_id).filter((value) => value !== undefined).map(String));
-    const initialMakers = Array.isArray(initial.makers) ? initial.makers : Object.values(initial.makers || {});
-    initialMakers.forEach((maker) => { if (maker.id !== undefined) makerIds.add(String(maker.id)); });
-
-    const searches = await Promise.all([...makerIds].map((makerId) =>
-      requestJson<PartKomSearchResponse>("/search/", new URLSearchParams({ ...baseParams, maker_id: makerId, stores: "2" }), context.signal),
-    ));
+    const makerId = findPrimaryPartKomMakerId(rows, article);
+    if (!makerId) {
+      return;
+    }
     const target = normalizeArticle(article);
-    let emitted = 0;
-
-    for (const search of searches) {
-      for (const part of search.exact || []) {
-        if (normalizeArticle(part.number || "") !== target) continue;
-        for (const offer of part.offers || []) {
-          const price = parsePrice(offer.price);
-          if (price === null || Number(offer.quantity) === 0) continue;
-          const offerArticle = offer.number || part.number || article;
-          const offerMakerId = offer.maker_id ?? part.maker_id;
-          emitted += 1;
-          onResult({
-            supplier: this.id,
-            brand: makerName(search.makers, offerMakerId, rows.find((row) => String(row.maker_id) === String(offerMakerId))?.maker || "Part-Kom"),
-            article: offerArticle,
-            title: offer.description || offer.name || part.description || part.name || offerArticle,
-            price,
-            warehouse: warehouse(offer, search.providers || []),
-            deliveryDate: deliveryDate(offer.delivery_wave_date_from, offer.days_guaranteed),
-            deliveryDateApproximate: true,
-            link: new URL(`/new/#/search/0/0/0/${encodeURIComponent(article.replace(/\//g, ""))}/${encodeURIComponent(String(offerMakerId || ""))}`, partKomApiBaseUrl).toString(),
-          });
-        }
+    const search = await requestJson<PartKomSearchResponse>(
+      "/search/",
+      new URLSearchParams({ ...baseParams, maker_id: makerId, stores: "2" }),
+      context.signal,
+    );
+    for (const part of search.exact || []) {
+      if (normalizeArticle(part.number || "") !== target) continue;
+      for (const offer of part.offers || []) {
+        if (offer.number && normalizeArticle(offer.number) !== target) continue;
+        const price = parsePrice(offer.price);
+        if (price === null || Number(offer.quantity) === 0) continue;
+        const offerArticle = offer.number || part.number || article;
+        const offerMakerId = offer.maker_id ?? part.maker_id;
+        onResult({
+          supplier: this.id,
+          brand: makerName(search.makers, offerMakerId, rows.find((row) => String(row.maker_id) === String(offerMakerId))?.maker || "Part-Kom"),
+          article: offerArticle,
+          title: offer.description || offer.name || part.description || part.name || offerArticle,
+          price,
+          warehouse: warehouse(offer, search.providers || []),
+          deliveryDate: deliveryDate(offer.delivery_wave_date_from, offer.days_guaranteed),
+          deliveryDateApproximate: true,
+          link: new URL(`/new/#/search/0/0/0/${encodeURIComponent(article.replace(/\//g, ""))}/${encodeURIComponent(String(offerMakerId || ""))}`, partKomApiBaseUrl).toString(),
+        });
       }
     }
   }

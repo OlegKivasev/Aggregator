@@ -3,9 +3,22 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { request as httpRequest } from "node:http";
 import { test } from "node:test";
+import { findPrimaryPartKomMakerId } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 
 const port = 31847;
 const baseUrl = `http://127.0.0.1:${port}`;
+
+test("Part-Kom selects the primary autocomplete maker for the requested normalized article", () => {
+  const makerId = findPrimaryPartKomMakerId([
+    { maker_id: 10, number: "VAP-021-2375", maker: "ВОЛГААВТОПРОМ" },
+    { maker_id: 20, number: "VAP0212375", maker: "Россия" },
+    { maker_id: 30, number: "VAP-021-2375A", maker: "RUSSIA" },
+    { maker_id: 40, number: "VAP-021-237", maker: "RUSSIA" },
+    { maker_id: 50, number: undefined, maker: "RUSSIA" },
+  ], "VAP0212375");
+
+  assert.equal(makerId, "10");
+});
 
 async function waitForServer(server) {
   const timeout = AbortSignal.timeout(10_000);
