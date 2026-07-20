@@ -8,6 +8,7 @@ const resultsPanel = document.querySelector("#results-panel");
 const resultsTable = document.querySelector("#results-table");
 const resultsEmpty = document.querySelector("#results-empty");
 const searchLoading = document.querySelector("#search-loading");
+const markupPercentInput = document.querySelector("#markup-percent");
 const sortButtons = [...document.querySelectorAll(".table-sort")];
 const searchTabsList = document.querySelector("#search-tabs-list");
 const newTabButton = document.querySelector("#new-tab-button");
@@ -66,8 +67,10 @@ let activeTabId = null;
 let tabSequence = 1;
 let results = [];
 let sortState = { key: "price", direction: "ascending" };
+let markupPercent = 35;
 
 const searchStateStorageKey = "autoservice.searchState";
+const markupPercentStorageKey = "autoservice.markupPercent";
 
 const supplierNames = {
   rossko: "Rossko",
@@ -237,6 +240,13 @@ const renderWarehouse = (result) => {
 
 const resultCollator = new Intl.Collator("ru", { numeric: true, sensitivity: "base" });
 
+const getMarkupPrice = (result) => {
+  const price = Number(result.price);
+  return Number.isFinite(price) && price > 0 ? price * (1 + markupPercent / 100) : null;
+};
+
+const formatPrice = (value) => Number.isFinite(value) ? `${value.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽` : "Не указана";
+
 const getSortValue = (result, key) => {
   if (key === "supplier") {
     return supplierNames[result.supplier] ?? result.supplier;
@@ -245,6 +255,10 @@ const getSortValue = (result, key) => {
   if (key === "deliveryDate") {
     const timestamp = result.deliveryDate ? new Date(result.deliveryDate).getTime() : Number.NaN;
     return Number.isNaN(timestamp) ? null : timestamp;
+  }
+
+  if (key === "markupPrice") {
+    return getMarkupPrice(result);
   }
 
   return result[key];
@@ -435,7 +449,7 @@ const renderResults = () => {
   if (!results.length) {
     resultsBody.innerHTML = `
       <tr class="results-table__empty">
-        <td colspan="7">По вашему запросу ничего не найдено.</td>
+         <td colspan="8">По вашему запросу ничего не найдено.</td>
       </tr>
     `;
     updateResultCount([]);
@@ -459,13 +473,26 @@ const renderResults = () => {
           <td>${escapeHtml(result.article)}</td>
            <td>${escapeHtml(result.title)}</td>
            <td>${renderWarehouse(result)}</td>
-           <td>${escapeHtml(result.price.toLocaleString("ru-RU"))} ₽</td>
+           <td>${escapeHtml(formatPrice(result.price))}</td>
+           <td>${escapeHtml(formatPrice(getMarkupPrice(result)))}</td>
           <td>${escapeHtml(deliveryDate)}</td>
         </tr>
       `;
     })
     .join("");
   updateResultCount(sorted);
+};
+
+const setMarkupPercent = (value) => {
+  const parsed = Number(value);
+  markupPercent = Number.isFinite(parsed) ? Math.min(1000, Math.max(0, parsed)) : 35;
+  markupPercentInput.value = String(markupPercent);
+  renderResults();
+  try {
+    localStorage.setItem(markupPercentStorageKey, String(markupPercent));
+  } catch {
+    // The markup setting is not required for searching.
+  }
 };
 
 const resetSearchState = () => {
@@ -1103,6 +1130,16 @@ form.addEventListener("submit", (event) => {
 });
 
 restoreSearchState();
+try {
+  const storedMarkupPercent = Number(localStorage.getItem(markupPercentStorageKey));
+  if (Number.isFinite(storedMarkupPercent)) {
+    markupPercent = Math.min(1000, Math.max(0, storedMarkupPercent));
+  }
+} catch {
+  // Use the default markup when storage is unavailable.
+}
+markupPercentInput.value = String(markupPercent);
+markupPercentInput.addEventListener("change", () => setMarkupPercent(markupPercentInput.value));
 if (!searchTabs.length) {
   const tab = createSearchTab();
   searchTabs.push(tab);

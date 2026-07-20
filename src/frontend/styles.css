@@ -474,8 +474,35 @@ input {
 }
 
 .results-panel__header {
+  display: flex;
   min-height: 58px;
   padding: 0 20px;
+}
+
+.results-panel__controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.markup-control {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.markup-control input {
+  width: 64px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: #fff;
+  text-align: right;
 }
 
 .panel__meta {
@@ -488,7 +515,7 @@ input {
 }
 
 table {
-  min-width: 960px;
+  min-width: 1080px;
   font-size: 12px;
 }
 
@@ -615,12 +642,25 @@ table th:nth-child(6) .table-sort {
 
 table th:nth-child(7),
 table td:nth-child(7) {
+  width: 135px;
+  text-align: right;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+table th:nth-child(7) .table-sort {
+  justify-content: flex-end;
+  width: 100%;
+}
+
+table th:nth-child(8),
+table td:nth-child(8) {
   width: 145px;
   text-align: center;
   white-space: nowrap;
 }
 
-table th:nth-child(7) .table-sort {
+table th:nth-child(8) .table-sort {
   justify-content: center;
   width: 100%;
 }
