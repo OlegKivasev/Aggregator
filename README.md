@@ -12,6 +12,23 @@ pnpm start
 
 The application listens on `127.0.0.1:3000` by default. `PORT` can override the port.
 
+## Batch Article Audit
+
+With the server running, audit articles through the same SSE API used by the frontend:
+
+```sh
+pnpm audit:articles -- 90915YZZJ1 5050LR VAP-021-2375
+pnpm audit:articles -- --file articles.txt
+Get-Content articles.txt | pnpm audit:articles
+pnpm audit:articles -- --sample
+```
+
+Use one article per line in an input file; blank lines and `#` comments are ignored. Run
+`pnpm audit:articles -- --help` for server URL, supplier, concurrency, timeout, and output
+options. Each run creates `article-audit-reports/<timestamp>/report.md` and `report.json`
+relative to the directory where the command is started. A failed article makes the command
+exit with code `2`; command/configuration failures use code `1`.
+
 ## Production
 
 - Use Node.js 24 and install dependencies from `pnpm-lock.yaml` with `pnpm install --frozen-lockfile`.

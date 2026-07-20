@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node --experimental-strip-types src/backend/server.ts",
     "dev": "node --watch --experimental-strip-types src/backend/server.ts",
+    "audit:articles": "node scripts/audit-articles.mjs",
     "test": "node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },

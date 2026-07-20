@@ -9,6 +9,7 @@ import { parseStpartsResults } from "../src/backend/suppliers/stparts/stparts-ap
 import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.ts";
 import { SupplierAuthError } from "../src/backend/suppliers/errors.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
+import { buildIncompleteSearchWarnings, buildSupplierResultTooltip } from "../src/frontend/supplier-search-summary.js";
 
 const port = 31847;
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -91,6 +92,34 @@ test("supplier authentication failure triggers session disconnection", async () 
 
   assert.equal(disconnected, true);
   assert.equal(events.at(-1).status, "auth_error");
+});
+
+test("incomplete search warnings list only failed suppliers", () => {
+  assert.deepEqual(buildIncompleteSearchWarnings(
+    ["rossko", "armtek", "part-kom", "stparts", "motordetal", "mladov"],
+    {
+      rossko: "completed",
+      armtek: "completed",
+      "part-kom": "timeout",
+      stparts: "auth_error",
+      motordetal: "error",
+    },
+    { rossko: "Rossko", armtek: "Armtek", "part-kom": "Part-Kom", stparts: "STParts", motordetal: "MotorDetal", mladov: "Механик Ладов" },
+  ), [
+    "Part-Kom: время ожидания истекло",
+    "STParts: требуется авторизация",
+    "MotorDetal: поиск не выполнен",
+    "Механик Ладов: нет итогового ответа",
+  ]);
+});
+
+test("supplier result tooltip includes duration for every selected supplier", () => {
+  assert.equal(buildSupplierResultTooltip(
+    ["rossko", "armtek"],
+    [{ supplier: "rossko" }, { supplier: "rossko" }],
+    { rossko: 38_200, armtek: 1_000 },
+    { rossko: "Rossko", armtek: "Armtek" },
+  ), "Rossko: 2 позиций (38,2 с)\nArmtek: 0 позиций (1,0 с)");
 });
 
 async function waitForServer(server) {

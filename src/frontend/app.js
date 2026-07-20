@@ -1,3 +1,5 @@
+import { buildIncompleteSearchWarnings, buildSupplierResultTooltip } from "./supplier-search-summary.js";
+
 const form = document.querySelector("#search-form");
 const articleInput = document.querySelector("#article-input");
 const submitButton = document.querySelector("#submit-button");
@@ -8,14 +10,28 @@ const resultsPanel = document.querySelector("#results-panel");
 const resultsTable = document.querySelector("#results-table");
 const resultsEmpty = document.querySelector("#results-empty");
 const searchLoading = document.querySelector("#search-loading");
+const searchLoadingTitle = document.querySelector("#search-loading-title");
+const searchLoadingDescription = document.querySelector("#search-loading-description");
+const searchLoadingNote = document.querySelector("#search-loading-note");
+const searchLoadingCancel = document.querySelector("#search-loading-cancel");
+const cancelSearchButton = document.querySelector("#cancel-search-button");
 const markupPercentInput = document.querySelector("#markup-percent");
 const sortButtons = [...document.querySelectorAll(".table-sort")];
+const tableColumnInputs = [...document.querySelectorAll(".table-column-input")];
+const tableColumnsReset = document.querySelector("#table-columns-reset");
 const searchTabsList = document.querySelector("#search-tabs-list");
 const newTabButton = document.querySelector("#new-tab-button");
 const authStatus = document.querySelector("#auth-status");
 const settingsToggle = document.querySelector("#settings-toggle");
 const supplierEnabledInputs = [...document.querySelectorAll(".supplier-enabled-input")];
 const suppliersDropdown = document.querySelector(".suppliers-dropdown");
+const filtersDropdown = document.querySelector("#filters-dropdown");
+const filterColumns = document.querySelector("#filter-columns");
+const filterColumnButtons = [...document.querySelectorAll("[data-filter-column]")];
+const filterSubmenu = document.querySelector("#filter-submenu");
+const filterSubmenuTitle = document.querySelector("#filter-submenu-title");
+const filterValues = document.querySelector("#filter-values");
+const filtersReset = document.querySelector("#filters-reset");
 const settingsDrawer = document.querySelector("#settings-drawer");
 const settingsClose = document.querySelector("#settings-close");
 const settingsBackdrop = document.querySelector("#settings-backdrop");
@@ -69,6 +85,7 @@ const supplierCheckOk = document.querySelector("#supplier-check-ok");
 const supplierNotice = document.querySelector("#supplier-notice");
 const supplierNoticeSummary = document.querySelector("#supplier-notice-summary");
 const supplierNoticeList = document.querySelector("#supplier-notice-list");
+const passwordFields = [...document.querySelectorAll(".password-field")];
 
 let searchTabs = [];
 let activeTabId = null;
@@ -77,9 +94,13 @@ let results = [];
 let sortState = { key: "price", direction: "ascending" };
 let markupPercent = 35;
 let supplierCheckInProgress = false;
+let searchProgressTimer = null;
+let activeFilterColumn = "";
+let selectedFilterValues = new Set();
 const supplierSessionStates = new Map();
 
 const searchStateStorageKey = "autoservice.searchState";
+const tableColumnsStorageKey = "autoservice.tableColumns";
 const lastSearchStorageKey = "autoservice.lastSearchStartedAt";
 const supplierCheckIntervalMs = 2 * 60 * 60 * 1000;
 const supplierCheckSuccessDelayMs = 3000;
@@ -93,6 +114,12 @@ const supplierNames = {
   mladov: "Механик Ладов",
 };
 const supplierIds = Object.keys(supplierNames);
+const tableColumnIds = tableColumnInputs.map((input) => input.value);
+let visibleTableColumns = new Set(tableColumnIds);
+const filterColumnNames = Object.fromEntries(filterColumnButtons.map((button) => [
+  button.dataset.filterColumn,
+  button.firstChild.textContent.trim(),
+]));
 
 const supplierSearchToggles = Object.fromEntries(
   supplierEnabledInputs.map((input) => [input.value, input.closest(".supplier-search-toggle")]),
@@ -100,6 +127,66 @@ const supplierSearchToggles = Object.fromEntries(
 const supplierEnabledInputsById = Object.fromEntries(supplierEnabledInputs.map((input) => [input.value, input]));
 
 const getEnabledSuppliers = () => supplierEnabledInputs.filter((input) => input.checked).map((input) => input.value);
+
+const getFilterValue = (result, column) => {
+  if (column === "supplier") {
+    return supplierNames[result.supplier] ?? result.supplier;
+  }
+  if (column === "warehouse") {
+    return formatWarehouse(result.warehouse);
+  }
+  if (column === "price") {
+    return formatPrice(result.price);
+  }
+  if (column === "markupPrice") {
+    return formatPrice(getMarkupPrice(result));
+  }
+  if (column === "deliveryDate") {
+    return result.supplier === "mladov" && !result.deliveryDate
+      ? "-"
+      : formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo);
+  }
+  return String(result[column] ?? "-");
+};
+
+const getFilteredResults = () => !activeFilterColumn || !selectedFilterValues.size
+  ? results
+  : results.filter((result) => selectedFilterValues.has(getFilterValue(result, activeFilterColumn)));
+
+const renderFilterValues = () => {
+  filterValues.replaceChildren();
+  if (!activeFilterColumn) {
+    filterSubmenu.hidden = true;
+    filtersReset.hidden = true;
+    filterColumnButtons.forEach((button) => button.classList.remove("is-active"));
+    return;
+  }
+
+  filterSubmenu.hidden = false;
+  filterSubmenuTitle.textContent = filterColumnNames[activeFilterColumn];
+  filterColumnButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.filterColumn === activeFilterColumn));
+  const values = [...new Set(results.map((result) => getFilterValue(result, activeFilterColumn)))].sort(resultCollator.compare);
+  filterValues.replaceChildren(...values.map((value) => {
+    const label = document.createElement("label");
+    label.className = "filters-dropdown__value";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = selectedFilterValues.has(value);
+    input.value = value;
+    const text = document.createElement("span");
+    text.textContent = value;
+    label.append(input, text);
+    return label;
+  }));
+  filtersReset.hidden = !selectedFilterValues.size;
+};
+
+const hidePassword = (passwordField) => {
+  const input = passwordField.querySelector("input");
+  const toggle = passwordField.querySelector(".password-toggle");
+  input.type = "password";
+  toggle.setAttribute("aria-label", "Показать пароль");
+};
 
 const updateSupplierSearchToggle = (supplier, authorized) => {
   const input = supplierEnabledInputsById[supplier];
@@ -148,11 +235,87 @@ const createSearchTab = (data = {}) => ({
       ? data.hasSearched
       : Boolean(data.results?.length) || Boolean(data.status && data.status !== "Ожидание поиска"),
   markupPercent: normalizeMarkupPercent(data.markupPercent),
+  supplierStatuses: {},
+  supplierSearchStartedAt: {},
+  supplierSearchDurations: {},
   source: null,
 });
 
 const getActiveTab = () => searchTabs.find((tab) => tab.id === activeTabId);
 const getNewSearchTab = () => searchTabs.find((tab) => !tab.hasSearched && !tab.source);
+
+const searchTerminalStatuses = new Set(["completed", "timeout", "auth_error", "error"]);
+const searchWaitingNotes = [
+  "Отправляем запрос поставщикам и начинаем собирать предложения.",
+  "Уточняем, где деталь есть в наличии и когда ее смогут доставить.",
+  "Запросы обрабатываются одновременно, поэтому первые предложения появятся сразу после получения.",
+  "Некоторым поставщикам требуется немного больше времени. Мы уже добавляем полученные варианты в общий список.",
+  "Сравниваем цены, наличие на складах и сроки доставки. Осталось совсем немного.",
+];
+
+const getSearchWaitingNote = (elapsedMs) => searchWaitingNotes[
+  Math.min(Math.floor(elapsedMs / 5_000), searchWaitingNotes.length - 1)
+];
+
+const updateSearchProgress = (tab) => {
+  if (!tab?.source) {
+    return;
+  }
+
+  const pendingSuppliers = tab.enabledSuppliers.filter((supplier) => !searchTerminalStatuses.has(tab.supplierStatuses[supplier]));
+  const searchingSuppliers = pendingSuppliers.filter((supplier) => tab.supplierStatuses[supplier] === "searching");
+  const foundCount = tab.results.length;
+  const elapsedMs = Date.now() - tab.searchStartedAt;
+  let title;
+  let description;
+
+  if (searchingSuppliers.length < pendingSuppliers.length) {
+    const nextSupplier = pendingSuppliers.find((supplier) => !searchingSuppliers.includes(supplier));
+    title = `Подключаемся к ${supplierNames[nextSupplier] ?? nextSupplier}`;
+    description = "Проверяем сессию и отправляем запрос поставщику.";
+  } else if (!pendingSuppliers.length) {
+    title = "Собираем итог поиска";
+    description = foundCount
+      ? `Получено позиций: ${foundCount}. Завершаем обработку ответов.`
+      : "Все поставщики ответили. Завершаем обработку ответов.";
+  } else if (foundCount) {
+    title = `Найдено позиций: ${foundCount}`;
+    description = `Идет поиск: ${pendingSuppliers.map((supplier) => supplierNames[supplier] ?? supplier).join(", ")}.`;
+  } else {
+    title = "Сверяем предложения поставщиков";
+    description = `Получаем наличие и цены: ${pendingSuppliers.map((supplier) => supplierNames[supplier] ?? supplier).join(", ")}.`;
+  }
+
+  if (elapsedMs >= 15_000 && pendingSuppliers.length) {
+    description = `Идет поиск: ${pendingSuppliers.map((supplier) => supplierNames[supplier] ?? supplier).join(", ")}. Это может занять немного больше времени.`;
+  }
+
+  tab.status = title;
+  if (tab.id === activeTabId) {
+    globalStatus.textContent = title;
+    searchLoadingTitle.textContent = title;
+    searchLoadingDescription.textContent = description;
+    searchLoadingNote.textContent = getSearchWaitingNote(elapsedMs);
+    searchLoadingCancel.hidden = elapsedMs < 15_000;
+  }
+};
+
+const updateVisibleSearchProgress = () => {
+  searchTabs.forEach(updateSearchProgress);
+};
+
+const startSearchProgressTimer = () => {
+  if (searchProgressTimer === null) {
+    searchProgressTimer = window.setInterval(updateVisibleSearchProgress, 1000);
+  }
+};
+
+const stopSearchProgressTimerIfIdle = () => {
+  if (searchProgressTimer !== null && !searchTabs.some((tab) => tab.source)) {
+    window.clearInterval(searchProgressTimer);
+    searchProgressTimer = null;
+  }
+};
 
 const setSearchUiState = (isSearching) => {
   const hasSearched = Boolean(getActiveTab()?.hasSearched);
@@ -358,13 +521,49 @@ const updateResultCount = (items) => {
     counts[result.supplier] = (counts[result.supplier] ?? 0) + 1;
     return counts;
   }, {});
-  const breakdown = Object.entries(supplierCounts)
-    .map(([supplier, count]) => `${supplierNames[supplier] ?? supplier}: ${count} позиций`)
-    .join("\n");
+  const tab = getActiveTab();
+  const breakdown = tab
+    ? buildSupplierResultTooltip(tab.enabledSuppliers, items, tab.supplierSearchDurations, supplierNames)
+    : Object.entries(supplierCounts)
+      .map(([supplier, count]) => `${supplierNames[supplier] ?? supplier}: ${count} позиций`)
+      .join("\n");
 
   resultCount.textContent = `${items.length} позиций`;
   resultCount.dataset.tooltip = breakdown;
   resultCount.setAttribute("aria-label", breakdown ? `По поставщикам:\n${breakdown}` : "Нет результатов");
+};
+
+const getVisibleTableColumns = () => tableColumnIds.filter((column) => visibleTableColumns.has(column));
+
+const saveTableColumns = () => {
+  try {
+    localStorage.setItem(tableColumnsStorageKey, JSON.stringify(getVisibleTableColumns()));
+  } catch {
+    // Column preferences are optional; unavailable storage must not affect search.
+  }
+};
+
+const applyTableColumns = () => {
+  const visibleColumns = getVisibleTableColumns();
+  tableColumnsReset.hidden = visibleColumns.length === tableColumnIds.length;
+  document.querySelectorAll("[data-column]").forEach((element) => {
+    element.hidden = !visibleTableColumns.has(element.dataset.column);
+  });
+  resultsBody.querySelectorAll(".results-table__empty td").forEach((cell) => {
+    cell.colSpan = visibleColumns.length;
+  });
+};
+
+const restoreTableColumns = () => {
+  try {
+    const savedColumns = JSON.parse(localStorage.getItem(tableColumnsStorageKey));
+    if (!Array.isArray(savedColumns)) {
+      return;
+    }
+    visibleTableColumns = new Set(savedColumns.filter((column) => tableColumnIds.includes(column)));
+  } catch {
+    localStorage.removeItem(tableColumnsStorageKey);
+  }
 };
 
 const saveSearchState = () => {
@@ -455,6 +654,7 @@ const activateTab = (tabId) => {
     input.checked = tab.enabledSuppliers.includes(input.value);
   });
   setSearchUiState(Boolean(tab.source));
+  updateSearchProgress(tab);
   renderTabs();
   renderResults();
   saveSearchState();
@@ -471,6 +671,8 @@ const closeTab = (tabId) => {
   const [tab] = searchTabs.splice(tabIndex, 1);
   if (tab.source) {
     tab.source.close();
+    tab.source = null;
+    stopSearchProgressTimerIfIdle();
   }
 
   if (!searchTabs.length) {
@@ -498,17 +700,20 @@ const closeTab = (tabId) => {
 const renderResults = () => {
   updateSortHeaders();
 
-  if (!results.length) {
+  const filtered = getFilteredResults();
+  if (!results.length || !filtered.length) {
     resultsBody.innerHTML = `
       <tr class="results-table__empty">
-         <td colspan="8">По вашему запросу ничего не найдено.</td>
+         <td colspan="8">${results.length ? "Нет позиций с выбранным значением фильтра." : "По вашему запросу ничего не найдено."}</td>
       </tr>
     `;
-    updateResultCount([]);
+    applyTableColumns();
+    updateResultCount(filtered);
+    renderFilterValues();
     return;
   }
 
-  const sorted = [...results].sort(compareResults);
+  const sorted = [...filtered].sort(compareResults);
   const isSearching = Boolean(getActiveTab()?.source);
   resultsBody.innerHTML = sorted
     .map((result) => {
@@ -519,20 +724,22 @@ const renderResults = () => {
         : formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo);
 
       return `
-        <tr class="results-table__row" data-link="${escapeHtml(link)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Открыть ${escapeHtml(result.title)}">
-          <td>${escapeHtml(supplierName)}</td>
-          <td>${escapeHtml(result.brand)}</td>
-          <td>${escapeHtml(result.article)}</td>
-           <td>${escapeHtml(result.title)}</td>
-           <td>${renderWarehouse(result)}</td>
-           <td>${escapeHtml(formatPrice(result.price))}</td>
-           <td>${escapeHtml(formatPrice(getMarkupPrice(result)))}</td>
-          <td>${escapeHtml(deliveryDate)}</td>
-        </tr>
+         <tr class="results-table__row" data-link="${escapeHtml(link)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Открыть ${escapeHtml(result.title)}">
+           <td data-column="supplier">${escapeHtml(supplierName)}</td>
+           <td data-column="brand">${escapeHtml(result.brand)}</td>
+           <td data-column="article">${escapeHtml(result.article)}</td>
+            <td data-column="title">${escapeHtml(result.title)}</td>
+            <td data-column="warehouse">${renderWarehouse(result)}</td>
+            <td data-column="price">${escapeHtml(formatPrice(result.price))}</td>
+            <td data-column="markupPrice">${escapeHtml(formatPrice(getMarkupPrice(result)))}</td>
+           <td data-column="deliveryDate">${escapeHtml(deliveryDate)}</td>
+         </tr>
       `;
     })
     .join("");
+  applyTableColumns();
   updateResultCount(sorted);
+  renderFilterValues();
 };
 
 const setMarkupPercent = (value) => {
@@ -548,6 +755,8 @@ const setMarkupPercent = (value) => {
 
 const resetSearchState = () => {
   results = [];
+  activeFilterColumn = "";
+  selectedFilterValues = new Set();
   const tab = getActiveTab();
   if (tab) {
     tab.results = results;
@@ -567,6 +776,7 @@ const closeActiveSource = () => {
   if (tab) {
     tab.source = null;
   }
+  stopSearchProgressTimerIfIdle();
 };
 
 const openSettings = () => {
@@ -761,6 +971,26 @@ const showSupplierCheckError = (expired, unavailable) => {
   supplierCheckOk.focus();
 };
 
+const showIncompleteSearchWarning = (tab) => {
+  const warnings = buildIncompleteSearchWarnings(tab.enabledSuppliers, tab.supplierStatuses, supplierNames);
+  if (!warnings.length) {
+    return;
+  }
+
+  supplierCheck.dataset.state = "error";
+  supplierCheckTitle.textContent = "Поиск завершен не полностью";
+  supplierCheckMessage.textContent = "Не все товары могли попасть в список. Попробуйте запустить поиск заново.";
+  supplierCheckList.replaceChildren(...warnings.map((message) => {
+    const item = document.createElement("li");
+    item.textContent = message;
+    return item;
+  }));
+  supplierCheckOk.hidden = false;
+  supplierCheck.hidden = false;
+  supplierCheck.focus();
+  supplierCheckOk.focus();
+};
+
 const checkSupplierSessions = async (article, suppliers) => {
   showSupplierCheck(suppliers);
 
@@ -911,10 +1141,78 @@ const openSearchStream = (url) => {
 settingsToggle.addEventListener("click", openSettings);
 settingsClose.addEventListener("click", closeSettings);
 settingsBackdrop.addEventListener("click", closeSettings);
+passwordFields.forEach((passwordField) => {
+  const input = passwordField.querySelector("input");
+  const toggle = passwordField.querySelector(".password-toggle");
+
+  toggle.addEventListener("click", () => {
+    const isHidden = input.type === "password";
+    input.type = isHidden ? "text" : "password";
+    toggle.setAttribute("aria-label", isHidden ? "Скрыть пароль" : "Показать пароль");
+  });
+
+  passwordField.addEventListener("focusout", (event) => {
+    if (!passwordField.contains(event.relatedTarget)) {
+      hidePassword(passwordField);
+    }
+  });
+});
 document.addEventListener("click", (event) => {
   if (suppliersDropdown.open && !suppliersDropdown.contains(event.target)) {
     suppliersDropdown.open = false;
   }
+  if (filtersDropdown.open && !filtersDropdown.contains(event.target)) {
+    filtersDropdown.open = false;
+  }
+});
+
+const selectFilterColumn = (column) => {
+  if (activeFilterColumn === column) {
+    return;
+  }
+  activeFilterColumn = column;
+  selectedFilterValues = new Set();
+  renderFilterValues();
+};
+
+filterColumns.addEventListener("mouseover", (event) => {
+  const button = event.target.closest("[data-filter-column]");
+  if (button) {
+    selectFilterColumn(button.dataset.filterColumn);
+  }
+});
+
+filterColumns.addEventListener("focusin", (event) => {
+  const button = event.target.closest("[data-filter-column]");
+  if (button) {
+    selectFilterColumn(button.dataset.filterColumn);
+  }
+});
+
+filterColumns.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-filter-column]");
+  if (button) {
+    selectFilterColumn(button.dataset.filterColumn);
+  }
+});
+
+filterValues.addEventListener("change", (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || input.type !== "checkbox") {
+    return;
+  }
+
+  if (input.checked) {
+    selectedFilterValues.add(input.value);
+  } else {
+    selectedFilterValues.delete(input.value);
+  }
+  renderResults();
+});
+
+filtersReset.addEventListener("click", () => {
+  selectedFilterValues = new Set();
+  renderResults();
 });
 
 searchTabsList.addEventListener("click", (event) => {
@@ -956,6 +1254,21 @@ newTabButton.addEventListener("click", () => {
 
 articleInput.addEventListener("input", saveSearchState);
 supplierEnabledInputs.forEach((input) => input.addEventListener("change", saveSearchState));
+tableColumnInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    visibleTableColumns = new Set(tableColumnInputs.filter((candidate) => candidate.checked).map((candidate) => candidate.value));
+    saveTableColumns();
+    renderResults();
+  });
+});
+tableColumnsReset.addEventListener("click", () => {
+  tableColumnInputs.forEach((input) => {
+    input.checked = true;
+  });
+  visibleTableColumns = new Set(tableColumnIds);
+  saveTableColumns();
+  renderResults();
+});
 
 sortButtons.forEach((button) => {
   button.addEventListener("click", () => {
@@ -1178,8 +1491,13 @@ const startSearch = (article, enabledSuppliers) => {
   tab.enabledSuppliers = enabledSuppliers;
   tab.hasSearched = true;
   tab.status = `Ищем по артикулу ${article}`;
+  tab.supplierStatuses = {};
+  tab.supplierSearchStartedAt = {};
+  tab.supplierSearchDurations = {};
+  tab.searchStartedAt = Date.now();
+  searchLoadingCancel.hidden = true;
 
-  globalStatus.textContent = `Ищем по артикулу ${article}`;
+  globalStatus.textContent = `Подготавливаем поиск по артикулу ${article}`;
 
   const searchParams = new URLSearchParams({ article });
   searchParams.set("stream", "once");
@@ -1188,6 +1506,8 @@ const startSearch = (article, enabledSuppliers) => {
   const source = openSearchStream(`/api/search?${searchParams.toString()}`);
   rememberSearchStarted();
   tab.source = source;
+  updateSearchProgress(tab);
+  startSearchProgressTimer();
   setSearchUiState(true);
   renderTabs();
   saveSearchState();
@@ -1200,16 +1520,16 @@ const startSearch = (article, enabledSuppliers) => {
     const payload = JSON.parse(messageEvent.data);
 
     if (payload.type === "supplier_status") {
+      tab.supplierStatuses[payload.supplier] = payload.status;
       if (payload.status === "searching") {
-        tab.status = `Ищем по ${supplierNames[payload.supplier] ?? payload.supplier}`;
-      } else if (payload.status === "completed") {
-        tab.status = `Поиск по ${supplierNames[payload.supplier] ?? payload.supplier} завершен`;
-      } else if (payload.details) {
-        tab.status = payload.details;
+        tab.supplierSearchStartedAt[payload.supplier] = Date.now();
+      } else if (["completed", "timeout", "auth_error", "error"].includes(payload.status)) {
+        const startedAt = tab.supplierSearchStartedAt[payload.supplier];
+        if (Number.isFinite(startedAt)) {
+          tab.supplierSearchDurations[payload.supplier] = Math.max(0, Date.now() - startedAt);
+        }
       }
-      if (tab.id === activeTabId) {
-        globalStatus.textContent = tab.status;
-      }
+      updateSearchProgress(tab);
       renderTabs();
       saveSearchState();
       return;
@@ -1217,6 +1537,7 @@ const startSearch = (article, enabledSuppliers) => {
 
     if (payload.type === "result") {
       tab.results.push(payload.result);
+      updateSearchProgress(tab);
       if (tab.id === activeTabId) {
         results = tab.results;
         renderResults();
@@ -1230,11 +1551,13 @@ const startSearch = (article, enabledSuppliers) => {
       tab.status = "";
       source.close();
       tab.source = null;
+      stopSearchProgressTimerIfIdle();
       if (tab.id === activeTabId) {
         globalStatus.textContent = tab.status;
         setSearchUiState(false);
         renderResults();
       }
+      showIncompleteSearchWarning(tab);
       renderTabs();
       saveSearchState();
       return;
@@ -1244,6 +1567,7 @@ const startSearch = (article, enabledSuppliers) => {
       tab.status = `Ошибка: ${payload.message}`;
       source.close();
       tab.source = null;
+      stopSearchProgressTimerIfIdle();
       if (tab.id === activeTabId) {
         globalStatus.textContent = tab.status;
         setSearchUiState(false);
@@ -1262,6 +1586,7 @@ const startSearch = (article, enabledSuppliers) => {
     tab.status = "Соединение с потоком поиска было закрыто";
     source.close();
     tab.source = null;
+    stopSearchProgressTimerIfIdle();
     if (tab.id === activeTabId) {
       globalStatus.textContent = tab.status;
       setSearchUiState(false);
@@ -1271,6 +1596,25 @@ const startSearch = (article, enabledSuppliers) => {
     saveSearchState();
   };
 };
+
+cancelSearchButton.addEventListener("click", () => {
+  const tab = getActiveTab();
+
+  if (!tab?.source) {
+    return;
+  }
+
+  tab.source.close();
+  tab.source = null;
+  tab.status = "";
+  globalStatus.textContent = "";
+  searchLoadingCancel.hidden = true;
+  stopSearchProgressTimerIfIdle();
+  setSearchUiState(false);
+  renderResults();
+  renderTabs();
+  saveSearchState();
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1304,6 +1648,10 @@ form.addEventListener("submit", async (event) => {
 });
 
 restoreSearchState();
+restoreTableColumns();
+tableColumnInputs.forEach((input) => {
+  input.checked = visibleTableColumns.has(input.value);
+});
 if (!searchTabs.length) {
   const tab = createSearchTab();
   searchTabs.push(tab);

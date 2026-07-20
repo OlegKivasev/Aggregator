@@ -617,6 +617,7 @@ async function searchArmtekEtp(
 ): Promise<void> {
   const article = query.article.trim();
   const seen = new Set<string>();
+  let emitted = 0;
 
   if (_credentials) {
     await searchArmtekEtpWithWorkers(_credentials, article, searchContext.signal, onResult);
@@ -628,7 +629,7 @@ async function searchArmtekEtp(
     const target = normalizeArticle(article);
     const initialRequestStartedAt = Date.now();
     const initial = await requestArmtekEtpSearch(cookie, article, article, "1", "S1", searchContext.signal);
-    emitArmtekEtpItems(exactEtpItems(initial, target), article, onResult, seen);
+    emitted += emitArmtekEtpItems(exactEtpItems(initial, target), article, onResult, seen);
     await searchArmtekEtpCandidates(
       armtekEtpCandidateIds(initial),
       async (artid) => exactEtpItems(
@@ -636,11 +637,13 @@ async function searchArmtekEtp(
         target,
       ),
       searchContext.signal,
-      (items) => emitArmtekEtpItems(items, article, onResult, seen),
+      (items) => {
+        emitted += emitArmtekEtpItems(items, article, onResult, seen);
+      },
       initialRequestStartedAt,
     );
   } catch (error) {
-    if (error instanceof SupplierAuthError || searchContext.signal.aborted) throw error;
+    if (error instanceof SupplierAuthError || searchContext.signal.aborted || emitted > 0) throw error;
     const items = await searchArmtekEtpInBrowser(article, searchContext.signal);
     emitArmtekEtpItems(items, article, onResult, seen);
   }
@@ -654,7 +657,7 @@ export async function verifyArmtekCredentials(credentials: ArmtekCredentials): P
 export class ArmtekApiAdapter implements SupplierAdapter {
   readonly id = "armtek";
   readonly displayName = "Armtek";
-  readonly timeoutMs = 30000;
+  readonly timeoutMs = 60000;
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
     const credentials = getConfiguredCredentials(sessionManager);

@@ -83,6 +83,31 @@
                   </label>
                 </div>
               </details>
+              <details class="filters-dropdown" id="filters-dropdown">
+                <summary class="filters-dropdown__summary">
+                  <span>Фильтры</span>
+                  <svg aria-hidden="true" viewBox="0 0 12 12">
+                    <path d="m2.25 4.25 3.75 3.5 3.75-3.5" />
+                  </svg>
+                </summary>
+                <div class="filters-dropdown__menu card border-0 shadow">
+                  <div class="filters-dropdown__columns" id="filter-columns">
+                    <button type="button" data-filter-column="supplier">Поставщик<span>›</span></button>
+                    <button type="button" data-filter-column="brand">Бренд<span>›</span></button>
+                    <button type="button" data-filter-column="article">Артикул<span>›</span></button>
+                    <button type="button" data-filter-column="title">Наименование<span>›</span></button>
+                    <button type="button" data-filter-column="warehouse">Склад<span>›</span></button>
+                    <button type="button" data-filter-column="price">Цена<span>›</span></button>
+                    <button type="button" data-filter-column="markupPrice">С наценкой<span>›</span></button>
+                    <button type="button" data-filter-column="deliveryDate">Дата доставки<span>›</span></button>
+                  </div>
+                  <div class="filters-dropdown__submenu" id="filter-submenu" hidden>
+                    <strong id="filter-submenu-title"></strong>
+                    <div class="filters-dropdown__values" id="filter-values" aria-live="polite"></div>
+                    <button type="button" class="filters-dropdown__reset" id="filters-reset" hidden>Сбросить фильтр</button>
+                  </div>
+                </div>
+              </details>
               <button type="button" class="settings-button" id="settings-toggle" aria-label="Открыть настройки" title="Настройки">
                 <svg aria-hidden="true" viewBox="0 0 24 24">
                   <path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" />
@@ -116,8 +141,13 @@
               <div class="search-loading__content">
                 <span class="search-loading__spinner" aria-hidden="true"></span>
                 <div>
-                  <strong>Идет поиск</strong>
-                  <span>Пожалуйста, подождите завершения.</span>
+                  <strong id="search-loading-title">Подготавливаем поиск</strong>
+                  <span id="search-loading-description">Отправляем запросы поставщикам.</span>
+                  <span class="search-loading__note" id="search-loading-note"></span>
+                  <div class="search-loading__cancel" id="search-loading-cancel" hidden>
+                    <span>Вы всегда можете отменить поиск, но лучше подождать: так результаты будут полнее.</span>
+                    <button type="button" id="cancel-search-button" class="btn btn-primary">Отменить поиск</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -126,14 +156,14 @@
               <table class="table table-hover align-middle mb-0">
                 <thead>
                   <tr>
-                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="supplier">Поставщик<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="brand">Бренд<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="article">Артикул<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="title">Наименование<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="warehouse">Склад<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                    <th scope="col" aria-sort="ascending"><button type="button" class="table-sort is-active" data-sort-key="price">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="markupPrice">С наценкой<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                    <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-sort-key="deliveryDate">Дата доставки<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" data-column="supplier" aria-sort="none"><button type="button" class="table-sort" data-sort-key="supplier">Поставщик<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" data-column="brand" aria-sort="none"><button type="button" class="table-sort" data-sort-key="brand">Бренд<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" data-column="article" aria-sort="none"><button type="button" class="table-sort" data-sort-key="article">Артикул<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" data-column="title" aria-sort="none"><button type="button" class="table-sort" data-sort-key="title">Наименование<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" data-column="warehouse" aria-sort="none"><button type="button" class="table-sort" data-sort-key="warehouse">Склад<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" data-column="price" aria-sort="ascending"><button type="button" class="table-sort is-active" data-sort-key="price">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" data-column="markupPrice" aria-sort="none"><button type="button" class="table-sort" data-sort-key="markupPrice">С наценкой<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" data-column="deliveryDate" aria-sort="none"><button type="button" class="table-sort" data-sort-key="deliveryDate">Дата доставки<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                   </tr>
                 </thead>
                 <tbody id="results-body">
@@ -159,6 +189,21 @@
           <button type="button" class="button-secondary settings-close btn btn-light" id="settings-close" aria-label="Закрыть настройки">×</button>
         </div>
 
+        <details class="table-columns-settings">
+          <summary class="table-columns-settings__summary">Столбцы таблицы</summary>
+          <div class="table-columns-settings__list">
+            <label><input class="table-column-input" type="checkbox" value="supplier" checked><span>Поставщик</span></label>
+            <label><input class="table-column-input" type="checkbox" value="brand" checked><span>Бренд</span></label>
+            <label><input class="table-column-input" type="checkbox" value="article" checked><span>Артикул</span></label>
+            <label><input class="table-column-input" type="checkbox" value="title" checked><span>Наименование</span></label>
+            <label><input class="table-column-input" type="checkbox" value="warehouse" checked><span>Склад</span></label>
+            <label><input class="table-column-input" type="checkbox" value="price" checked><span>Цена</span></label>
+            <label><input class="table-column-input" type="checkbox" value="markupPrice" checked><span>С наценкой</span></label>
+            <label><input class="table-column-input" type="checkbox" value="deliveryDate" checked><span>Дата доставки</span></label>
+          </div>
+          <button type="button" class="table-columns-settings__reset" id="table-columns-reset">Показать все столбцы</button>
+        </details>
+
         <details class="suppliers-panel">
           <summary class="suppliers-panel__summary">Поставщики</summary>
 
@@ -169,7 +214,7 @@
             </div>
             <form id="mladov-auth-form" class="auth-form" data-authorized="false">
               <label class="field"><span>Логин</span><input id="mladov-login" name="login" type="text" autocomplete="username" /></label>
-              <label class="field"><span>Пароль</span><input id="mladov-password" name="password" type="password" autocomplete="current-password" /></label>
+              <label class="field"><span>Пароль</span><span class="password-field"><input id="mladov-password" name="password" type="password" autocomplete="current-password" /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="mladov-password"><span aria-hidden="true">&#128065;</span></button></span></label>
               <div class="auth-actions">
                 <button type="submit" id="mladov-connect-button" class="btn btn-primary">Подключить</button>
                 <button type="button" class="button-secondary btn btn-light" id="mladov-logout-button" hidden>Отключить</button>
@@ -193,7 +238,7 @@
               </label>
               <label class="field">
                 <span>Пароль</span>
-                <input id="rossko-password" name="password" type="password" autocomplete="current-password" />
+                <span class="password-field"><input id="rossko-password" name="password" type="password" autocomplete="current-password" /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="rossko-password"><span aria-hidden="true">&#128065;</span></button></span>
               </label>
               <div class="auth-actions">
               <button type="submit" id="rossko-connect-button" class="btn btn-primary">Подключить</button>
@@ -219,7 +264,7 @@
               </label>
               <label class="field">
                 <span>Пароль</span>
-                <input id="armtek-password" name="password" type="password" autocomplete="current-password" />
+                <span class="password-field"><input id="armtek-password" name="password" type="password" autocomplete="current-password" /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="armtek-password"><span aria-hidden="true">&#128065;</span></button></span>
               </label>
               <div class="auth-actions">
               <button type="submit" id="armtek-connect-button" class="btn btn-primary">Подключить</button>
@@ -245,7 +290,7 @@
               </label>
               <label class="field">
                 <span>Пароль</span>
-                <input id="part-kom-password" name="password" type="password" autocomplete="current-password" />
+                <span class="password-field"><input id="part-kom-password" name="password" type="password" autocomplete="current-password" /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="part-kom-password"><span aria-hidden="true">&#128065;</span></button></span>
               </label>
               <div class="auth-actions">
               <button type="submit" id="part-kom-connect-button" class="btn btn-primary">Подключить</button>
@@ -271,7 +316,7 @@
               </label>
               <label class="field">
                 <span>Пароль</span>
-                <input id="stparts-password" name="password" type="password" autocomplete="current-password" />
+                <span class="password-field"><input id="stparts-password" name="password" type="password" autocomplete="current-password" /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="stparts-password"><span aria-hidden="true">&#128065;</span></button></span>
               </label>
               <div class="auth-actions">
               <button type="submit" id="stparts-connect-button" class="btn btn-primary">Подключить</button>
@@ -297,7 +342,7 @@
               </label>
               <label class="field">
                 <span>Пароль</span>
-                <input id="motordetal-password" name="password" type="password" autocomplete="current-password" />
+                <span class="password-field"><input id="motordetal-password" name="password" type="password" autocomplete="current-password" /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="motordetal-password"><span aria-hidden="true">&#128065;</span></button></span>
               </label>
               <div class="auth-actions">
                 <button type="submit" id="motordetal-connect-button" class="btn btn-primary">Подключить</button>
