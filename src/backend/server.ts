@@ -18,6 +18,7 @@ import {
   logoutStparts,
   shutdownSearchService,
   streamSearch,
+  validateSupplierSessions,
 } from "./search-service.ts";
 import type { ArmtekCredentials, MladovCredentials, MotorDetalCredentials, PartKomCredentials, RosskoSiteCredentials, SearchStreamEvent, StpartsCredentials, SupplierId } from "./types.ts";
 
@@ -65,6 +66,22 @@ class RequestBodyError extends Error {
 
 function parseSupplierIds(values: string[]): SupplierId[] {
   return values.filter((value): value is SupplierId => supplierIds.has(value as SupplierId));
+}
+
+function parseSessionValidationPayload(payload: unknown): { article: string; suppliers: SupplierId[] } {
+  if (!payload || typeof payload !== "object") {
+    throw new RequestBodyError(400, "article and suppliers are required");
+  }
+
+  const { article, suppliers } = payload as { article?: unknown; suppliers?: unknown };
+  if (typeof article !== "string" || !article.trim() || article.trim().length > articleLengthLimit) {
+    throw new RequestBodyError(400, "article must be a non-empty string within the allowed length");
+  }
+  if (!Array.isArray(suppliers) || !suppliers.length || suppliers.some((value) => typeof value !== "string" || !supplierIds.has(value as SupplierId))) {
+    throw new RequestBodyError(400, "suppliers must contain supported supplier IDs");
+  }
+
+  return { article: article.trim(), suppliers: [...new Set(parseSupplierIds(suppliers))] };
 }
 
 function writeSseEvent(response: import("node:http").ServerResponse, event: SearchStreamEvent): void {
@@ -149,6 +166,32 @@ const server = createServer(async (request, response) => {
 
   if (request.method === "GET" && url.pathname === "/api/suppliers/sessions") {
     serveJson(response, 200, { sessions: listSupplierSessions() });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/suppliers/sessions/validate") {
+    const controller = new AbortController();
+    const abortValidation = () => {
+      if (!response.writableEnded) {
+        controller.abort(new Error("Client disconnected"));
+      }
+    };
+    response.once("close", abortValidation);
+
+    try {
+      const { article, suppliers } = parseSessionValidationPayload(await readJsonBody(request));
+      serveJson(response, 200, await validateSupplierSessions(article, suppliers, controller.signal));
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        if (error instanceof RequestBodyError) {
+          serveJson(response, error.statusCode, { message: error.message });
+        } else {
+          serveJson(response, 500, { message: "Supplier session validation failed" });
+        }
+      }
+    } finally {
+      response.removeListener("close", abortValidation);
+    }
     return;
   }
 

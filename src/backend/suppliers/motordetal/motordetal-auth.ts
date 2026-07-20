@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname } from "node:path";
 import { getStateFilePath } from "../../config.ts";
 import type { MotorDetalCredentials } from "../../types.ts";
+import { SupplierAuthError } from "../errors.ts";
 
 interface MotorDetalToken {
   token?: string;
@@ -121,6 +122,9 @@ async function refreshMotorDetalToken(state: MotorDetalTokenState): Promise<Moto
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token: state.refreshToken, info: "refresh" }),
   });
+  if (response.status === 401 || response.status === 403) {
+    throw new SupplierAuthError("MotorDetal session has expired");
+  }
   const payload = await readEnvelope<MotorDetalAuthData>(response);
   const refreshed = tokenStateFromAuth(payload.data);
   saveMotorDetalTokenState(refreshed);
@@ -155,6 +159,10 @@ export async function motorDetalApiRequest<T>(path: string, searchParams?: URLSe
 
   if (response.status === 401 || response.status === 403) {
     response = await request(await getMotorDetalAccessToken(true));
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new SupplierAuthError("MotorDetal session has expired");
   }
 
   const payload = await readEnvelope<T>(response);

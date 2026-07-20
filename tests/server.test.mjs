@@ -6,6 +6,9 @@ import { test } from "node:test";
 import { armtekEtpCandidateIds, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
 import { findPrimaryPartKomMakerId } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { parseStpartsResults } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
+import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.ts";
+import { SupplierAuthError } from "../src/backend/suppliers/errors.ts";
+import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
 
 const port = 31847;
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -56,6 +59,38 @@ test("STParts parses the supplier output price from current result rows", () => 
   assert.equal(results.length, 1);
   assert.equal(results[0].price, 6900.27);
   assert.equal(results[0].warehouse, "POS1066");
+});
+
+test("supplier authentication failure triggers session disconnection", async () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.markAuthorized("stparts");
+  let disconnected = false;
+  const events = [];
+  const adapter = {
+    id: "stparts",
+    displayName: "STParts",
+    timeoutMs: 1000,
+    async ensureSession() {
+      return sessionManager.getSession("stparts");
+    },
+    async search() {
+      throw new SupplierAuthError("expired");
+    },
+  };
+
+  await runSupplierSearch({
+    adapter,
+    sessionManager,
+    query: { article: "TEST-1" },
+    signal: new AbortController().signal,
+    emit: (event) => events.push(event),
+    onAuthError: () => {
+      disconnected = true;
+    },
+  });
+
+  assert.equal(disconnected, true);
+  assert.equal(events.at(-1).status, "auth_error");
 });
 
 async function waitForServer(server) {
@@ -120,6 +155,14 @@ test("server production smoke test", async () => {
     });
     assert.equal(oversizedBody.status, 413);
     assert.deepEqual(await oversizedBody.json(), { message: "Request body is too large" });
+
+    const malformedValidation = await fetch(`${baseUrl}/api/suppliers/sessions/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ article: "TEST-1", suppliers: ["unknown"] }),
+    });
+    assert.equal(malformedValidation.status, 400);
+    assert.deepEqual(await malformedValidation.json(), { message: "suppliers must contain supported supplier IDs" });
 
     const traversal = await fetch(`${baseUrl}/%2e%2e/package.json`);
     assert.equal(traversal.status, 404);

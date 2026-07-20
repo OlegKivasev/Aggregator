@@ -13,6 +13,7 @@ interface RunSupplierSearchOptions {
   query: SearchQuery;
   signal: AbortSignal;
   emit: (event: SearchStreamEvent) => void;
+  onAuthError?: () => void;
 }
 
 const createStatusEvent = (
@@ -37,6 +38,7 @@ export async function runSupplierSearch({
   query,
   signal,
   emit,
+  onAuthError,
 }: RunSupplierSearchOptions): Promise<void> {
   emit(createStatusEvent(adapter.id, "searching"));
 
@@ -70,6 +72,7 @@ export async function runSupplierSearch({
     emit(createStatusEvent(adapter.id, "completed"));
   } catch (error) {
     if (error instanceof SupplierAuthError) {
+      onAuthError?.();
       emit(createStatusEvent(adapter.id, "auth_error", error.message));
       return;
     }

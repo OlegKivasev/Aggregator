@@ -36,6 +36,11 @@ export interface SupplierSessionState {
   details?: string;
 }
 
+export interface SupplierSessionValidationResult {
+  supplier: SupplierId;
+  status: "connected" | "expired" | "error";
+}
+
 export interface RosskoSiteCredentials {
   login: string;
   password: string;

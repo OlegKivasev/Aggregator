@@ -61,6 +61,14 @@ const mladovConnectButton = document.querySelector("#mladov-connect-button");
 const mladovLogoutButton = document.querySelector("#mladov-logout-button");
 const mladovSessionPill = document.querySelector("#mladov-session-pill");
 const mladovAuthFeedback = document.querySelector("#mladov-auth-feedback");
+const supplierCheck = document.querySelector("#supplier-check");
+const supplierCheckTitle = document.querySelector("#supplier-check-title");
+const supplierCheckMessage = document.querySelector("#supplier-check-message");
+const supplierCheckList = document.querySelector("#supplier-check-list");
+const supplierCheckOk = document.querySelector("#supplier-check-ok");
+const supplierNotice = document.querySelector("#supplier-notice");
+const supplierNoticeSummary = document.querySelector("#supplier-notice-summary");
+const supplierNoticeList = document.querySelector("#supplier-notice-list");
 
 let searchTabs = [];
 let activeTabId = null;
@@ -68,8 +76,13 @@ let tabSequence = 1;
 let results = [];
 let sortState = { key: "price", direction: "ascending" };
 let markupPercent = 35;
+let supplierCheckInProgress = false;
+const supplierSessionStates = new Map();
 
 const searchStateStorageKey = "autoservice.searchState";
+const lastSearchStorageKey = "autoservice.lastSearchStartedAt";
+const supplierCheckIntervalMs = 30 * 1000;
+const supplierCheckSuccessDelayMs = 3000;
 
 const supplierNames = {
   rossko: "Rossko",
@@ -79,6 +92,7 @@ const supplierNames = {
   motordetal: "MotorDetal",
   mladov: "Механик Ладов",
 };
+const supplierIds = Object.keys(supplierNames);
 
 const supplierSearchToggles = Object.fromEntries(
   supplierEnabledInputs.map((input) => [input.value, input.closest(".supplier-search-toggle")]),
@@ -171,6 +185,28 @@ const syncActiveTab = () => {
 
 const sessionPillStatus = (authorized) => (authorized ? "completed" : "idle");
 const sessionPillText = (authorized) => (authorized ? "Подключен" : "Не подключен");
+
+const updateSupplierNotice = (session) => {
+  supplierSessionStates.set(session.supplier, Boolean(session.authorized));
+  if (supplierSessionStates.size < supplierIds.length) {
+    return;
+  }
+
+  const disconnected = supplierIds.filter((supplier) => !supplierSessionStates.get(supplier));
+  supplierNotice.hidden = disconnected.length === 0;
+  supplierNoticeSummary.textContent = disconnected.length === 1
+    ? "Не подключен 1 поставщик"
+    : `Не подключены поставщики: ${disconnected.length}`;
+  supplierNoticeList.replaceChildren(...disconnected.map((supplier) => {
+    const item = document.createElement("li");
+    item.textContent = supplierNames[supplier] ?? supplier;
+    return item;
+  }));
+
+  if (!disconnected.length) {
+    supplierNotice.open = false;
+  }
+};
 
 const formatDeliveryDate = (value, approximate = false, valueTo = null) => {
   if (!value) {
@@ -542,6 +578,7 @@ const closeSettings = () => {
 };
 
 const updateRosskoSessionCard = (session) => {
+  updateSupplierNotice(session);
   updateSupplierSearchToggle("rossko", session.authorized);
   rosskoSessionPill.dataset.status = sessionPillStatus(session.authorized);
   rosskoSessionPill.textContent = sessionPillText(session.authorized);
@@ -552,6 +589,7 @@ const updateRosskoSessionCard = (session) => {
 };
 
 const updateArmtekSessionCard = (session) => {
+  updateSupplierNotice(session);
   updateSupplierSearchToggle("armtek", session.authorized);
   armtekSessionPill.dataset.status = sessionPillStatus(session.authorized);
   armtekSessionPill.textContent = sessionPillText(session.authorized);
@@ -562,6 +600,7 @@ const updateArmtekSessionCard = (session) => {
 };
 
 const updatePartKomSessionCard = (session) => {
+  updateSupplierNotice(session);
   updateSupplierSearchToggle("part-kom", session.authorized);
   partKomSessionPill.dataset.status = sessionPillStatus(session.authorized);
   partKomSessionPill.textContent = sessionPillText(session.authorized);
@@ -572,6 +611,7 @@ const updatePartKomSessionCard = (session) => {
 };
 
 const updateStpartsSessionCard = (session) => {
+  updateSupplierNotice(session);
   updateSupplierSearchToggle("stparts", session.authorized);
   stpartsSessionPill.dataset.status = sessionPillStatus(session.authorized);
   stpartsSessionPill.textContent = sessionPillText(session.authorized);
@@ -582,6 +622,7 @@ const updateStpartsSessionCard = (session) => {
 };
 
 const updateMotorDetalSessionCard = (session) => {
+  updateSupplierNotice(session);
   updateSupplierSearchToggle("motordetal", session.authorized);
   motorDetalSessionPill.dataset.status = sessionPillStatus(session.authorized);
   motorDetalSessionPill.textContent = sessionPillText(session.authorized);
@@ -592,6 +633,7 @@ const updateMotorDetalSessionCard = (session) => {
 };
 
 const updateMladovSessionCard = (session) => {
+  updateSupplierNotice(session);
   updateSupplierSearchToggle("mladov", session.authorized);
   mladovSessionPill.dataset.status = sessionPillStatus(session.authorized);
   mladovSessionPill.textContent = sessionPillText(session.authorized);
@@ -599,6 +641,21 @@ const updateMladovSessionCard = (session) => {
   mladovConnectButton.hidden = session.authorized;
   mladovLogoutButton.hidden = !session.authorized;
   mladovAuthFeedback.textContent = "";
+};
+
+const sessionCardUpdaters = {
+  rossko: updateRosskoSessionCard,
+  armtek: updateArmtekSessionCard,
+  "part-kom": updatePartKomSessionCard,
+  stparts: updateStpartsSessionCard,
+  motordetal: updateMotorDetalSessionCard,
+  mladov: updateMladovSessionCard,
+};
+
+const updateSessionCards = (sessions) => {
+  if (Array.isArray(sessions)) {
+    sessions.forEach((session) => sessionCardUpdaters[session?.supplier]?.(session));
+  }
 };
 
 const loadSessions = async () => {
@@ -650,6 +707,85 @@ const postJson = async (url, body) => {
   }
 
   return payload;
+};
+
+const wait = (delayMs) => new Promise((resolve) => window.setTimeout(resolve, delayMs));
+
+const shouldCheckSupplierSessions = () => {
+  try {
+    const lastSearchStartedAt = Number(localStorage.getItem(lastSearchStorageKey));
+    return !Number.isFinite(lastSearchStartedAt) || lastSearchStartedAt <= 0 || Date.now() - lastSearchStartedAt >= supplierCheckIntervalMs;
+  } catch {
+    return true;
+  }
+};
+
+const rememberSearchStarted = () => {
+  try {
+    localStorage.setItem(lastSearchStorageKey, String(Date.now()));
+  } catch {
+    // This timestamp only avoids repeated checks; validation remains safe without storage.
+  }
+};
+
+const showSupplierCheck = (suppliers) => {
+  supplierCheck.dataset.state = "checking";
+  supplierCheckTitle.textContent = "Необходимо проверить поставщиков";
+  supplierCheckMessage.textContent = "Пожалуйста, подождите.";
+  supplierCheckList.replaceChildren(...suppliers.map((supplier) => {
+    const item = document.createElement("li");
+    item.textContent = supplierNames[supplier] ?? supplier;
+    return item;
+  }));
+  supplierCheckOk.hidden = true;
+  supplierCheck.hidden = false;
+  supplierCheck.focus();
+};
+
+const showSupplierCheckError = (expired, unavailable) => {
+  supplierCheck.dataset.state = "error";
+  supplierCheckTitle.textContent = expired.length ? "Сессия поставщика истекла" : "Не удалось проверить поставщиков";
+  supplierCheckMessage.textContent = expired.length
+    ? "Необходимо повторно провести авторизацию в настройках."
+    : "Проверка временно недоступна. Попробуйте выполнить поиск еще раз.";
+  const failures = [
+    ...expired.map((supplier) => `${supplierNames[supplier] ?? supplier}: сессия истекла`),
+    ...unavailable.map((supplier) => `${supplierNames[supplier] ?? supplier}: проверка недоступна`),
+  ];
+  supplierCheckList.replaceChildren(...failures.map((message) => {
+    const item = document.createElement("li");
+    item.textContent = message;
+    return item;
+  }));
+  supplierCheckOk.hidden = false;
+  supplierCheckOk.focus();
+};
+
+const checkSupplierSessions = async (article, suppliers) => {
+  showSupplierCheck(suppliers);
+
+  try {
+    const payload = await postJson("/api/suppliers/sessions/validate", { article, suppliers });
+    updateSessionCards(payload.sessions);
+    const expired = payload.results.filter((result) => result.status === "expired").map((result) => result.supplier);
+    const unavailable = payload.results.filter((result) => result.status === "error").map((result) => result.supplier);
+
+    if (expired.length || unavailable.length) {
+      showSupplierCheckError(expired, unavailable);
+      return false;
+    }
+
+    supplierCheck.dataset.state = "success";
+    supplierCheckTitle.textContent = "Все поставщики успешно подключены";
+    supplierCheckMessage.textContent = "Проверка завершена. Поиск начнется автоматически.";
+    supplierCheckList.replaceChildren();
+    await wait(supplierCheckSuccessDelayMs);
+    supplierCheck.hidden = true;
+    return true;
+  } catch {
+    showSupplierCheckError([], suppliers);
+    return false;
+  }
 };
 
 const handleAuthorizeResult = (session, supplier, feedbackElement, rejectedMessage, updateSessionCard) => {
@@ -1028,21 +1164,12 @@ mladovLogoutButton.addEventListener("click", async () => {
   }
 });
 
-form.addEventListener("submit", (event) => {
-  event.preventDefault();
+supplierCheckOk.addEventListener("click", () => {
+  supplierCheck.hidden = true;
+  submitButton.focus();
+});
 
-  const article = articleInput.value.trim();
-  if (!article) {
-    return;
-  }
-
-  const enabledSuppliers = getEnabledSuppliers();
-  if (!enabledSuppliers.length) {
-    globalStatus.textContent = "Выберите хотя бы одного поставщика";
-    saveSearchState();
-    return;
-  }
-
+const startSearch = (article, enabledSuppliers) => {
   closeActiveSource();
   resetSearchState();
 
@@ -1059,6 +1186,7 @@ form.addEventListener("submit", (event) => {
   enabledSuppliers.forEach((supplier) => searchParams.append("supplier", supplier));
 
   const source = openSearchStream(`/api/search?${searchParams.toString()}`);
+  rememberSearchStarted();
   tab.source = source;
   setSearchUiState(true);
   renderTabs();
@@ -1142,6 +1270,37 @@ form.addEventListener("submit", (event) => {
     renderTabs();
     saveSearchState();
   };
+};
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (supplierCheckInProgress) {
+    return;
+  }
+
+  const article = articleInput.value.trim();
+  if (!article) {
+    return;
+  }
+
+  const enabledSuppliers = getEnabledSuppliers();
+  if (!enabledSuppliers.length) {
+    globalStatus.textContent = "Выберите хотя бы одного поставщика";
+    saveSearchState();
+    return;
+  }
+
+  if (shouldCheckSupplierSessions()) {
+    supplierCheckInProgress = true;
+    const canSearch = await checkSupplierSessions(article, supplierIds);
+    supplierCheckInProgress = false;
+    if (!canSearch) {
+      return;
+    }
+  }
+
+  startSearch(article, enabledSuppliers);
 });
 
 restoreSearchState();

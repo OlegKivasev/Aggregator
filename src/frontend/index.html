@@ -23,6 +23,18 @@
         <button type="button" class="new-tab-button btn btn-light" id="new-tab-button" aria-label="Открыть новую вкладку">+</button>
       </nav>
 
+      <details class="supplier-notice" id="supplier-notice" hidden>
+        <summary class="supplier-notice__summary">
+          <span class="supplier-notice__icon" aria-hidden="true">!</span>
+          <span id="supplier-notice-summary">Есть неподключенные поставщики</span>
+          <span class="supplier-notice__hint">Показать</span>
+        </summary>
+        <div class="supplier-notice__content">
+          <p>Поиск по этим поставщикам недоступен. Проведите авторизацию в настройках:</p>
+          <ul id="supplier-notice-list"></ul>
+        </div>
+      </details>
+
       <div class="workspace">
         <section class="search-shell">
           <div class="search-row card shadow-sm border-0">
@@ -298,6 +310,18 @@
         </details>
       </div>
     </aside>
+
+    <div class="supplier-check" id="supplier-check" role="dialog" aria-modal="true" aria-labelledby="supplier-check-title" tabindex="-1" hidden>
+      <div class="supplier-check__card card border-0 shadow-lg">
+        <span class="supplier-check__spinner" aria-hidden="true"></span>
+        <div class="supplier-check__body" aria-live="polite">
+          <h2 id="supplier-check-title">Необходимо проверить поставщиков</h2>
+          <p id="supplier-check-message">Пожалуйста, подождите.</p>
+          <ul class="supplier-check__list" id="supplier-check-list"></ul>
+          <button type="button" class="btn btn-primary supplier-check__ok" id="supplier-check-ok" hidden>OK</button>
+        </div>
+      </div>
+    </div>
 
     <script type="module" src="/app.js"></script>
   </body>

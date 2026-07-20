@@ -31,13 +31,15 @@ import {
 import {
   clearStpartsStorageState,
   hasStpartsStorageState,
+  validateStpartsStoredSession,
   verifyStpartsCredentials,
 } from "./suppliers/stparts/stparts-site-auth.ts";
 import { StpartsApiAdapter } from "./suppliers/stparts/stparts-api-adapter.ts";
 import type { SupplierAdapter } from "./suppliers/supplier-adapter.ts";
+import { SupplierAuthError, SupplierTimeoutError } from "./suppliers/errors.ts";
 import { MladovWebAdapter } from "./suppliers/mladov/mladov-web-adapter.ts";
 import { clearMladovStorageState, closeMladovBrowser, hasMladovStorageState, verifyMladovCredentials } from "./suppliers/mladov/mladov-site-auth.ts";
-import type { ArmtekCredentials, MladovCredentials, MotorDetalCredentials, PartKomCredentials, RosskoSiteCredentials, SearchQuery, SearchStreamEvent, StpartsCredentials } from "./types.ts";
+import type { ArmtekCredentials, MladovCredentials, MotorDetalCredentials, PartKomCredentials, RosskoSiteCredentials, SearchQuery, SearchStreamEvent, StpartsCredentials, SupplierId, SupplierSessionValidationResult } from "./types.ts";
 
 const sessionManager = new SupplierSessionManager();
 const apiAdapters: SupplierAdapter[] = [new RosskoApiAdapter()];
@@ -228,6 +230,83 @@ export function logoutMladov() {
   return sessionManager.markUnauthorized("mladov");
 }
 
+const supplierLogout = new Map<SupplierId, () => unknown>([
+  ["rossko", logoutRossko],
+  ["armtek", logoutArmtek],
+  ["part-kom", logoutPartKom],
+  ["stparts", logoutStparts],
+  ["motordetal", logoutMotorDetal],
+  ["mladov", logoutMladov],
+]);
+
+function disconnectSupplier(supplier: SupplierId): void {
+  supplierLogout.get(supplier)?.();
+}
+
+async function validateSupplierSession(
+  adapter: SupplierAdapter,
+  article: string,
+  signal: AbortSignal,
+): Promise<SupplierSessionValidationResult> {
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort(signal.reason);
+  signal.addEventListener("abort", forwardAbort, { once: true });
+  const timeoutId = setTimeout(
+    () => controller.abort(new SupplierTimeoutError(`Validation timed out after ${adapter.timeoutMs}ms`)),
+    adapter.timeoutMs,
+  );
+
+  try {
+    const session = await adapter.ensureSession(sessionManager);
+    if (!session.authorized) {
+      throw new SupplierAuthError();
+    }
+
+    if (adapter.id === "stparts") {
+      if (!await validateStpartsStoredSession(controller.signal)) {
+        throw new SupplierAuthError("STParts session has expired");
+      }
+    } else {
+      await adapter.search(
+        { article, suppliers: [adapter.id] },
+        { signal: controller.signal, timeoutMs: adapter.timeoutMs },
+        () => undefined,
+        sessionManager,
+      );
+    }
+    sessionManager.markChecked(adapter.id);
+    return { supplier: adapter.id, status: "connected" };
+  } catch (error) {
+    if (error instanceof SupplierAuthError) {
+      disconnectSupplier(adapter.id);
+      return { supplier: adapter.id, status: "expired" };
+    }
+
+    if (signal.aborted) {
+      throw signal.reason;
+    }
+
+    return { supplier: adapter.id, status: "error" };
+  } finally {
+    clearTimeout(timeoutId);
+    signal.removeEventListener("abort", forwardAbort);
+  }
+}
+
+export async function validateSupplierSessions(
+  article: string,
+  suppliers: SupplierId[],
+  signal: AbortSignal,
+): Promise<{ results: SupplierSessionValidationResult[]; sessions: ReturnType<typeof listSupplierSessions> }> {
+  const adapters = getSearchAdapters({ article, suppliers });
+  const results = await Promise.all(adapters.map((adapter) =>
+    adapter instanceof RosskoMockAdapter
+      ? Promise.resolve({ supplier: adapter.id, status: "error" } satisfies SupplierSessionValidationResult)
+      : validateSupplierSession(adapter, article, signal),
+  ));
+  return { results, sessions: listSupplierSessions() };
+}
+
 export async function streamSearch(
   query: SearchQuery,
   emit: (event: SearchStreamEvent) => void,
@@ -249,6 +328,7 @@ export async function streamSearch(
         query,
         signal,
         emit,
+        onAuthError: () => disconnectSupplier(adapter.id),
       }),
     ),
   );

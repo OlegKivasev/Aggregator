@@ -186,3 +186,24 @@ export async function verifyStpartsCredentials(credentials: StpartsCredentials):
     await browser.close();
   }
 }
+
+export async function validateStpartsStoredSession(signal: AbortSignal): Promise<boolean> {
+  if (!hasStpartsStorageState()) {
+    return false;
+  }
+
+  const browser = await createStpartsBrowser();
+  let context: any | null = null;
+  const closeOnAbort = () => context?.close().catch(() => undefined);
+  signal.addEventListener("abort", closeOnAbort, { once: true });
+
+  try {
+    context = await browser.newContext({ storageState: stpartsStorageStatePath });
+    const page = await context.newPage();
+    return await isStpartsAuthenticated(page);
+  } finally {
+    signal.removeEventListener("abort", closeOnAbort);
+    await context?.close().catch(() => undefined);
+    await browser.close().catch(() => undefined);
+  }
+}
