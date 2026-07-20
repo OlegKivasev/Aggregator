@@ -251,7 +251,14 @@ const getMarkupPrice = (result) => {
   return Number.isFinite(price) && price > 0 ? price * (1 + markupPercent / 100) : null;
 };
 
-const formatPrice = (value) => Number.isFinite(value) ? `${value.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽` : "Не указана";
+const formatPrice = (value) => {
+  if (!Number.isFinite(value)) {
+    return "Не указана";
+  }
+
+  const truncated = value < 0 ? Math.ceil(value * 100) / 100 : Math.trunc(value * 100) / 100;
+  return `${truncated.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽`;
+};
 
 const getSortValue = (result, key) => {
   if (key === "supplier") {
