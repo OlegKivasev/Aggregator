@@ -12,9 +12,11 @@ export const stpartsBaseUrl = process.env.STPARTS_BASE_URL?.trim() || "https://s
 
 const stpartsStorageStatePath = getStateFilePath("stparts-storage-state.json");
 const stpartsStateDir = dirname(stpartsStorageStatePath);
-const stpartsNavigationTimeoutMs = Number(process.env.STPARTS_NAVIGATION_TIMEOUT_MS ?? "6000");
+// STParts frequently takes longer than six seconds to commit the authenticated landing page.
+const stpartsNavigationTimeoutMs = Number(process.env.STPARTS_NAVIGATION_TIMEOUT_MS ?? "15000");
 const stpartsSettledTimeoutMs = Number(process.env.STPARTS_SETTLED_TIMEOUT_MS ?? "4000");
 const stpartsPostCommitDelayMs = Number(process.env.STPARTS_POST_COMMIT_DELAY_MS ?? "300");
+const stpartsSessionProbeTimeoutMs = Number(process.env.STPARTS_SESSION_PROBE_TIMEOUT_MS ?? "5000");
 const authErrorPattern = /невер|неправ|ошиб|парол|логин|email|почт|авторизац/i;
 
 function ensureStpartsStateDir() {
@@ -64,6 +66,12 @@ export function getStpartsCookieHeader(url = stpartsBaseUrl): string | null {
   } catch {
     return null;
   }
+}
+
+export function isStpartsSessionPageAuthorized(html: string): boolean {
+  const hasLoginForm = /id=["'](?:lgnform|login)["']/i.test(html);
+  const hasAuthorizedMarker = /href=["'][^"']*(?:logout|\/personal|\/profile)[^"']*["']|basketLegendContainer/i.test(html);
+  return !hasLoginForm && hasAuthorizedMarker;
 }
 
 export async function createStpartsBrowser() {
@@ -188,22 +196,28 @@ export async function verifyStpartsCredentials(credentials: StpartsCredentials):
 }
 
 export async function validateStpartsStoredSession(signal: AbortSignal): Promise<boolean> {
-  if (!hasStpartsStorageState()) {
+  const cookieHeader = getStpartsCookieHeader();
+  if (!cookieHeader) {
     return false;
   }
 
-  const browser = await createStpartsBrowser();
-  let context: any | null = null;
-  const closeOnAbort = () => context?.close().catch(() => undefined);
-  signal.addEventListener("abort", closeOnAbort, { once: true });
+  const timeoutSignal = AbortSignal.timeout(stpartsSessionProbeTimeoutMs);
+  const response = await fetch(stpartsBaseUrl, {
+    headers: {
+      Accept: "text/html",
+      Cookie: cookieHeader,
+    },
+    redirect: "follow",
+    signal: AbortSignal.any([signal, timeoutSignal]),
+  });
 
-  try {
-    context = await browser.newContext({ storageState: stpartsStorageStatePath });
-    const page = await context.newPage();
-    return await isStpartsAuthenticated(page);
-  } finally {
-    signal.removeEventListener("abort", closeOnAbort);
-    await context?.close().catch(() => undefined);
-    await browser.close().catch(() => undefined);
+  if (response.status === 401 || response.status === 403) {
+    return false;
   }
+
+  if (!response.ok) {
+    throw new Error(`STParts session probe returned HTTP ${response.status}`);
+  }
+
+  return isStpartsSessionPageAuthorized(await response.text());
 }

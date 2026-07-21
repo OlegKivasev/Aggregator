@@ -449,12 +449,31 @@ input {
   accent-color: var(--accent);
 }
 
+.filters-dropdown__range {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: #455363;
+  font-size: 13px;
+}
+
+.filters-dropdown__range input {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid #d7dfe7;
+  border-radius: 5px;
+  color: var(--ink);
+}
+
 .filters-dropdown__reset {
-  margin-top: 12px;
-  padding: 0;
+  width: 100%;
+  margin-top: 7px;
+  padding: 8px 10px 3px;
   border: 0;
   color: var(--accent-dark);
   background: transparent;
+  text-align: left;
   font-size: 12px;
   font-weight: 700;
 }

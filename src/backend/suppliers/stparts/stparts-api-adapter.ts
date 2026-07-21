@@ -122,7 +122,7 @@ function exactSearchUrl(html: string, article: string): URL | null {
 export class StpartsApiAdapter implements SupplierAdapter {
   readonly id = "stparts";
   readonly displayName = "STParts";
-  readonly timeoutMs = Number(process.env.STPARTS_SEARCH_TIMEOUT_MS ?? "12000");
+  readonly timeoutMs = Number(process.env.STPARTS_SEARCH_TIMEOUT_MS ?? "20000");
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
     return hasStpartsStorageState() && getStpartsCookieHeader()

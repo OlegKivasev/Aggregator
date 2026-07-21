@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { armtekEtpCandidateIds, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
 import { findPrimaryPartKomMakerId } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { parseStpartsResults } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
+import { gotoStparts, isStpartsSessionPageAuthorized } from "../src/backend/suppliers/stparts/stparts-site-auth.ts";
 import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.ts";
 import { SupplierAuthError } from "../src/backend/suppliers/errors.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
@@ -60,6 +61,25 @@ test("STParts parses the supplier output price from current result rows", () => 
   assert.equal(results.length, 1);
   assert.equal(results[0].price, 6900.27);
   assert.equal(results[0].warehouse, "POS1066");
+});
+
+test("STParts allows fifteen seconds for the initial navigation by default", async () => {
+  let gotoOptions;
+  const page = {
+    async goto(_url, options) {
+      gotoOptions = options;
+    },
+    async waitForTimeout() {},
+  };
+
+  await gotoStparts(page, "https://stparts.ru/");
+
+  assert.equal(gotoOptions.timeout, 15_000);
+});
+
+test("STParts identifies an expired stored session from its login page", () => {
+  assert.equal(isStpartsSessionPageAuthorized('<form id="lgnform"><input name="login" /></form>'), false);
+  assert.equal(isStpartsSessionPageAuthorized('<a href="/logout/">Logout</a>'), true);
 });
 
 test("supplier authentication failure triggers session disconnection", async () => {

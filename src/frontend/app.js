@@ -96,7 +96,8 @@ let markupPercent = 35;
 let supplierCheckInProgress = false;
 let searchProgressTimer = null;
 let activeFilterColumn = "";
-let selectedFilterValues = new Set();
+const selectedFilterValuesByColumn = new Map();
+const filterRangesByColumn = new Map();
 const supplierSessionStates = new Map();
 
 const searchStateStorageKey = "autoservice.searchState";
@@ -120,6 +121,7 @@ const filterColumnNames = Object.fromEntries(filterColumnButtons.map((button) =>
   button.dataset.filterColumn,
   button.firstChild.textContent.trim(),
 ]));
+const rangeFilterColumns = new Set(["price", "markupPrice", "deliveryDate"]);
 
 const supplierSearchToggles = Object.fromEntries(
   supplierEnabledInputs.map((input) => [input.value, input.closest(".supplier-search-toggle")]),
@@ -149,15 +151,61 @@ const getFilterValue = (result, column) => {
   return String(result[column] ?? "-");
 };
 
-const getFilteredResults = () => !activeFilterColumn || !selectedFilterValues.size
-  ? results
-  : results.filter((result) => selectedFilterValues.has(getFilterValue(result, activeFilterColumn)));
+const getRangeFilterValue = (result, column) => {
+  if (column === "price") {
+    return Number(result.price);
+  }
+  if (column === "markupPrice") {
+    return getMarkupPrice(result);
+  }
+  const timestamp = result.deliveryDate ? new Date(result.deliveryDate).getTime() : Number.NaN;
+  return Number.isFinite(timestamp) ? timestamp : null;
+};
+
+const getSelectedFilterValues = (column) => selectedFilterValuesByColumn.get(column) ?? new Set();
+
+const getFilterRange = (column) => filterRangesByColumn.get(column) ?? { from: "", to: "" };
+
+const isRangeFilterActive = (column) => {
+  const range = getFilterRange(column);
+  return Boolean(range.from || range.to);
+};
+
+const hasActiveFilter = (column) => (rangeFilterColumns.has(column)
+  ? isRangeFilterActive(column)
+  : getSelectedFilterValues(column).size > 0);
+
+const hasAnyActiveFilters = () => tableColumnIds.some((column) => hasActiveFilter(column));
+
+const getFilteredResults = () => {
+  return results.filter((result) => tableColumnIds.every((column) => {
+    if (!hasActiveFilter(column)) {
+      return true;
+    }
+
+    if (rangeFilterColumns.has(column)) {
+      const range = getFilterRange(column);
+      const from = column === "deliveryDate" && range.from
+        ? new Date(`${range.from}T00:00:00`).getTime()
+        : Number(range.from);
+      const to = column === "deliveryDate" && range.to
+        ? new Date(`${range.to}T23:59:59.999`).getTime()
+        : Number(range.to);
+      const value = getRangeFilterValue(result, column);
+      return Number.isFinite(value)
+        && (!range.from || value >= from)
+        && (!range.to || value <= to);
+    }
+
+    return getSelectedFilterValues(column).has(getFilterValue(result, column));
+  }));
+};
 
 const renderFilterValues = () => {
   filterValues.replaceChildren();
   if (!activeFilterColumn) {
     filterSubmenu.hidden = true;
-    filtersReset.hidden = true;
+    filtersReset.hidden = !hasAnyActiveFilters();
     filterColumnButtons.forEach((button) => button.classList.remove("is-active"));
     return;
   }
@@ -165,20 +213,45 @@ const renderFilterValues = () => {
   filterSubmenu.hidden = false;
   filterSubmenuTitle.textContent = filterColumnNames[activeFilterColumn];
   filterColumnButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.filterColumn === activeFilterColumn));
+  if (rangeFilterColumns.has(activeFilterColumn)) {
+    const isDate = activeFilterColumn === "deliveryDate";
+    const createRangeInput = (bound, labelText) => {
+      const label = document.createElement("label");
+      label.className = "filters-dropdown__range";
+      const text = document.createElement("span");
+      text.textContent = labelText;
+      const input = document.createElement("input");
+      input.type = isDate ? "date" : "number";
+      input.min = isDate ? "" : "0";
+      input.step = isDate ? "" : "0.01";
+      input.placeholder = isDate ? "дд.мм.гггг" : "0";
+      input.value = getFilterRange(activeFilterColumn)[bound];
+      input.dataset.filterRange = bound;
+      label.append(text, input);
+      return label;
+    };
+    filterValues.replaceChildren(
+      createRangeInput("from", "От"),
+      createRangeInput("to", "До"),
+    );
+    filtersReset.hidden = !hasAnyActiveFilters();
+    return;
+  }
+
   const values = [...new Set(results.map((result) => getFilterValue(result, activeFilterColumn)))].sort(resultCollator.compare);
   filterValues.replaceChildren(...values.map((value) => {
     const label = document.createElement("label");
     label.className = "filters-dropdown__value";
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.checked = selectedFilterValues.has(value);
+    input.checked = getSelectedFilterValues(activeFilterColumn).has(value);
     input.value = value;
     const text = document.createElement("span");
     text.textContent = value;
     label.append(input, text);
     return label;
   }));
-  filtersReset.hidden = !selectedFilterValues.size;
+  filtersReset.hidden = !hasAnyActiveFilters();
 };
 
 const hidePassword = (passwordField) => {
@@ -552,6 +625,16 @@ const applyTableColumns = () => {
   resultsBody.querySelectorAll(".results-table__empty td").forEach((cell) => {
     cell.colSpan = visibleColumns.length;
   });
+  filterColumnButtons.forEach((button) => {
+    button.hidden = !visibleTableColumns.has(button.dataset.filterColumn);
+  });
+  if (activeFilterColumn && !visibleTableColumns.has(activeFilterColumn)) {
+    activeFilterColumn = "";
+  }
+  tableColumnIds.filter((column) => !visibleTableColumns.has(column)).forEach((column) => {
+    selectedFilterValuesByColumn.delete(column);
+    filterRangesByColumn.delete(column);
+  });
 };
 
 const restoreTableColumns = () => {
@@ -700,6 +783,14 @@ const closeTab = (tabId) => {
 const renderResults = () => {
   updateSortHeaders();
 
+  if (activeFilterColumn && !visibleTableColumns.has(activeFilterColumn)) {
+    activeFilterColumn = "";
+  }
+  tableColumnIds.filter((column) => !visibleTableColumns.has(column)).forEach((column) => {
+    selectedFilterValuesByColumn.delete(column);
+    filterRangesByColumn.delete(column);
+  });
+
   const filtered = getFilteredResults();
   if (!results.length || !filtered.length) {
     resultsBody.innerHTML = `
@@ -756,7 +847,8 @@ const setMarkupPercent = (value) => {
 const resetSearchState = () => {
   results = [];
   activeFilterColumn = "";
-  selectedFilterValues = new Set();
+  selectedFilterValuesByColumn.clear();
+  filterRangesByColumn.clear();
   const tab = getActiveTab();
   if (tab) {
     tab.results = results;
@@ -940,13 +1032,9 @@ const rememberSupplierSessionsChecked = () => {
 
 const showSupplierCheck = (suppliers) => {
   supplierCheck.dataset.state = "checking";
-  supplierCheckTitle.textContent = "Необходимо проверить поставщиков";
-  supplierCheckMessage.textContent = "Пожалуйста, подождите.";
-  supplierCheckList.replaceChildren(...suppliers.map((supplier) => {
-    const item = document.createElement("li");
-    item.textContent = supplierNames[supplier] ?? supplier;
-    return item;
-  }));
+  supplierCheckTitle.textContent = "Выполняется проверка сессий, пожалуйста подождите.";
+  supplierCheckMessage.textContent = "";
+  supplierCheckList.replaceChildren();
   supplierCheckOk.hidden = true;
   supplierCheck.hidden = false;
   supplierCheck.focus();
@@ -1171,7 +1259,6 @@ const selectFilterColumn = (column) => {
     return;
   }
   activeFilterColumn = column;
-  selectedFilterValues = new Set();
   renderFilterValues();
 };
 
@@ -1198,20 +1285,35 @@ filterColumns.addEventListener("click", (event) => {
 
 filterValues.addEventListener("change", (event) => {
   const input = event.target;
-  if (!(input instanceof HTMLInputElement) || input.type !== "checkbox") {
+  if (!(input instanceof HTMLInputElement)) {
+    return;
+  }
+
+  if (input.dataset.filterRange) {
+    filterRangesByColumn.set(activeFilterColumn, {
+      ...getFilterRange(activeFilterColumn),
+      [input.dataset.filterRange]: input.value,
+    });
+    renderResults();
+    return;
+  }
+
+  if (input.type !== "checkbox") {
     return;
   }
 
   if (input.checked) {
-    selectedFilterValues.add(input.value);
+    getSelectedFilterValues(activeFilterColumn).add(input.value);
   } else {
-    selectedFilterValues.delete(input.value);
+    getSelectedFilterValues(activeFilterColumn).delete(input.value);
   }
+  selectedFilterValuesByColumn.set(activeFilterColumn, getSelectedFilterValues(activeFilterColumn));
   renderResults();
 });
 
 filtersReset.addEventListener("click", () => {
-  selectedFilterValues = new Set();
+  selectedFilterValuesByColumn.clear();
+  filterRangesByColumn.clear();
   renderResults();
 });
 
