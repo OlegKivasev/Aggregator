@@ -60,6 +60,8 @@ interface PartKomSearchResponse {
   makers?: Array<{ id?: string | number; name?: string }> | Record<string, { id?: string | number; name?: string }>;
 }
 
+const partKomSearchMaxResponseBytes = 5 * 1024 * 1024;
+
 function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
 }
@@ -139,6 +141,14 @@ function warehouse(offer: PartKomOffer, providers: PartKomProvider[]): string | 
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+export function isPartKomUnauthorizedResponse(payload: { success?: boolean; msg?: string; message?: string }): boolean {
+  if (payload.success !== false) {
+    return false;
+  }
+
+  return [payload.msg, payload.message].some((message) => message?.trim().toLowerCase() === "unauthorized");
+}
+
 async function requestJson<T>(path: string, params: URLSearchParams, signal: AbortSignal): Promise<T> {
   const cookie = getPartKomCookieHeader();
   if (!cookie) {
@@ -150,6 +160,7 @@ async function requestJson<T>(path: string, params: URLSearchParams, signal: Abo
     cookie,
     signal,
     headers: { "X-Requested-With": "XMLHttpRequest", Referer: partKomApiBaseUrl },
+    ...(path === "/search/" ? { maxResponseBytes: partKomSearchMaxResponseBytes } : {}),
   });
   if (response.status === 401 || response.status === 403) {
     throw new SupplierAuthError(`Part-Kom API returned HTTP ${response.status}`);
@@ -158,7 +169,7 @@ async function requestJson<T>(path: string, params: URLSearchParams, signal: Abo
     throw new Error(`Part-Kom API returned HTTP ${response.status}`);
   }
   const payload = JSON.parse(response.body) as T & { success?: boolean; msg?: string; message?: string };
-  if (payload.success === false && /unauthorized/i.test(payload.msg || payload.message || "")) {
+  if (isPartKomUnauthorizedResponse(payload)) {
     throw new SupplierAuthError(payload.msg || payload.message || "Part-Kom session is not authorized");
   }
   return payload;
@@ -167,7 +178,7 @@ async function requestJson<T>(path: string, params: URLSearchParams, signal: Abo
 export class PartKomApiAdapter implements SupplierAdapter {
   readonly id = "part-kom";
   readonly displayName = "Part-Kom";
-  readonly timeoutMs = Number(process.env.PARTKOM_SEARCH_TIMEOUT_MS ?? "15000");
+  readonly timeoutMs = Number(process.env.PARTKOM_SEARCH_TIMEOUT_MS ?? "45000");
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
     return hasPartKomStorageState() && getPartKomCookieHeader()

@@ -2,7 +2,7 @@ import { Agent, request as httpsRequest } from "node:https";
 import { SupplierIntegrationError, SupplierTimeoutError } from "./errors.ts";
 
 const siteAgent = new Agent({ keepAlive: true, family: 4, maxSockets: 12 });
-const maxResponseBytes = 2 * 1024 * 1024;
+const defaultMaxResponseBytes = 2 * 1024 * 1024;
 
 export interface SiteHttpResponse {
   status: number;
@@ -12,7 +12,7 @@ export interface SiteHttpResponse {
 
 export async function siteHttpRequest(
   url: URL,
-  options: { cookie?: string; headers?: Record<string, string>; signal: AbortSignal; timeoutMs?: number; method?: "GET" | "POST"; body?: string },
+  options: { cookie?: string; headers?: Record<string, string>; signal: AbortSignal; timeoutMs?: number; method?: "GET" | "POST"; body?: string; maxResponseBytes?: number },
 ): Promise<SiteHttpResponse> {
   const controller = new AbortController();
   const forwardAbort = () => controller.abort(options.signal.reason);
@@ -42,7 +42,7 @@ export async function siteHttpRequest(
         response.setEncoding("utf-8");
         response.on("data", (chunk: string) => {
           bodyBytes += Buffer.byteLength(chunk);
-          if (bodyBytes > maxResponseBytes) {
+          if (bodyBytes > (options.maxResponseBytes ?? defaultMaxResponseBytes)) {
             response.destroy(new SupplierIntegrationError("Supplier response is too large"));
             return;
           }

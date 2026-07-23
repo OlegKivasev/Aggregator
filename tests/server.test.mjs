@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { armtekSearchItems, armtekVkorgItems, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
 import { createHash } from "node:crypto";
 import { parseArmtekApiAccountState } from "../src/backend/suppliers/armtek/armtek-api-account-state.ts";
-import { findPrimaryPartKomMakerId } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
+import { findPrimaryPartKomMakerId, isPartKomUnauthorizedResponse } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
 import { parseStpartsResults } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
 import { gotoStparts, isStpartsSessionPageAuthorized } from "../src/backend/suppliers/stparts/stparts-site-auth.ts";
@@ -75,6 +75,11 @@ test("Part-Kom selects the primary autocomplete maker for the requested normaliz
   ], "VAP0212375");
 
   assert.equal(makerId, "10");
+});
+
+test("Part-Kom recognizes its unauthorized JSON response", () => {
+  assert.equal(isPartKomUnauthorizedResponse({ success: false, message: "unauthorized", msg: "unauthorized" }), true);
+  assert.equal(isPartKomUnauthorizedResponse({ success: false, message: "temporarily unavailable" }), false);
 });
 
 test("STParts parses the supplier output price from current result rows", () => {
