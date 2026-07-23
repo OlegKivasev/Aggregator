@@ -1,53 +1,35 @@
+import { createHash } from "node:crypto";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
-import { getStateFilePath } from "../../config.ts";
+import { getStpartsApiConfig } from "../../config.ts";
 import type { NormalizedSearchResult, SearchQuery, SupplierSearchContext, SupplierSessionState } from "../../types.ts";
-import { SupplierAuthError } from "../errors.ts";
+import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
-import { getStpartsCookieHeader, getStpartsSharedBrowser, hasStpartsStorageState, stpartsBaseUrl } from "./stparts-site-auth.ts";
+import { siteHttpRequest } from "../site-http.ts";
+import { stpartsBaseUrl } from "./stparts-site-auth.ts";
 
-interface StpartsApiResult {
-  brand: string;
-  article: string;
-  title: string;
-  price: number;
-  warehouse: string | null;
-  warehouseColor: "green" | "blue" | "red" | null;
-  warehouseRating: string | null;
-  deliveryDate: string | null;
-  deliveryDateTo: string | null;
-  link: string;
+interface AbcpBrand {
+  brand?: unknown;
+  number?: unknown;
+}
+
+interface AbcpArticle {
+  availability?: unknown;
+  brand?: unknown;
+  deliveryPeriod?: unknown;
+  deliveryPeriodMax?: unknown;
+  description?: unknown;
+  distributorCode?: unknown;
+  number?: unknown;
+  price?: unknown;
+  supplierColor?: unknown;
+  supplierDescription?: unknown;
 }
 
 function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
 }
 
-function decodeHtml(value: string): string {
-  return value
-    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([\da-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)))
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function attribute(block: string, name: string): string | null {
-  return block.match(new RegExp(`${name}=["']([^"']*)["']`, "i"))?.[1] || null;
-}
-
-function cell(block: string, className: string): string {
-  const match = block.match(new RegExp(`<td\\b[^>]*class=["'][^"']*\\b${className}\\b[^"']*["'][^>]*>([\\s\\S]*?)(?=<td\\b|<\\/tr>)`, "i"));
-  return decodeHtml(match?.[1] || "");
-}
-
-function dateFromHours(value: string | null): string | null {
+function dateFromHours(value: unknown): string | null {
   const hours = Number(value);
   if (!Number.isFinite(hours) || hours < 0) {
     return null;
@@ -56,128 +38,132 @@ function dateFromHours(value: string | null): string | null {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate() + Math.ceil(hours / 24)).toISOString();
 }
 
-function resultBlocks(html: string): string[] {
-  const starts = [...html.matchAll(/<tr\b[^>]*class=["'][^"']*\bresultTr2(?:Group|Route)?\b[^"']*["'][^>]*>/gi)]
-    .map((match) => match.index);
-  return starts.map((start, index) => html.slice(start, starts[index + 1] ?? html.length));
+function color(value: unknown): "green" | "blue" | "red" | null {
+  return value === "green" || value === "blue" || value === "red" ? value : null;
 }
 
-export function parseStpartsResults(html: string, requestedArticle: string, pageUrl: string): StpartsApiResult[] {
+function abcpItems(payload: unknown, responseName: string): unknown[] {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  if (payload && typeof payload === "object") {
+    return Object.values(payload);
+  }
+  throw new SupplierIntegrationError(`STParts API returned an invalid ${responseName} response`);
+}
+
+export function parseStpartsApiResults(payload: unknown, requestedArticle: string): NormalizedSearchResult[] {
   const target = normalizeArticle(requestedArticle);
-  const results: StpartsApiResult[] = [];
+  const results: NormalizedSearchResult[] = [];
 
-  for (const block of resultBlocks(html)) {
-    if (attribute(block, "data-is-request-article") !== "1") {
+  for (const value of abcpItems(payload, "search")) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
       continue;
     }
-    const article = requestedArticle;
-    const price = Number(attribute(block, "data-output-price"));
-    const brand = cell(block, "resultBrand");
-    const title = cell(block, "resultDescription");
-    if (normalizeArticle(article) !== target || !brand || !title || !Number.isFinite(price) || price <= 0 || Number(attribute(block, "data-availability")) === 0) {
-      continue;
-    }
-    const warehouseMatch = block.match(/<td\b[^>]*class=["'][^"']*\bresultWarehouse\b[^"']*["'][^>]*>[\s\S]*?<font\b[^>]*color=["']?(green|blue|red)["']?[^>]*>([\s\S]*?)<\/font>/i);
-    const ratingMatch = block.match(/class=["'][^"']*supplier-rating-badge[^"']*["'][^>]*>([^<]+)/i);
-    const linkMatch = block.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*searchInfoLink/i);
-    const warehouseColor = warehouseMatch?.[1]?.toLowerCase();
-
-    const link = linkMatch ? new URL(decodeHtml(linkMatch[1]), stpartsBaseUrl) : new URL(pageUrl);
-    if (link.protocol !== "https:" || link.origin !== new URL(stpartsBaseUrl).origin) {
+    const item = value as AbcpArticle;
+    const brand = typeof item.brand === "string" ? item.brand.trim() : "";
+    const article = typeof item.number === "string" ? item.number.trim() : "";
+    const title = typeof item.description === "string" ? item.description.trim() : "";
+    const price = Number(item.price);
+    if (!brand || !article || !title || normalizeArticle(article) !== target || !Number.isFinite(price) || price <= 0 || Number(item.availability) === 0) {
       continue;
     }
     results.push({
+      supplier: "stparts",
       brand,
       article,
       title,
       price,
-      warehouse: warehouseMatch ? decodeHtml(warehouseMatch[2]) : null,
-      warehouseColor: warehouseColor === "green" || warehouseColor === "blue" || warehouseColor === "red" ? warehouseColor : null,
-      warehouseRating: ratingMatch ? decodeHtml(ratingMatch[1]).replace(",", ".") : null,
-      deliveryDate: dateFromHours(attribute(block, "data-deadline")),
-      deliveryDateTo: dateFromHours(attribute(block, "data-deadline-max")),
-      link: link.toString(),
+      warehouse: typeof item.supplierDescription === "string" && item.supplierDescription.trim()
+        ? item.supplierDescription.trim()
+        : typeof item.distributorCode === "string" && item.distributorCode.trim() ? item.distributorCode.trim() : null,
+      warehouseColor: color(item.supplierColor),
+      deliveryDate: dateFromHours(item.deliveryPeriod),
+      deliveryDateTo: dateFromHours(item.deliveryPeriodMax),
+      deliveryDateApproximate: true,
+      link: new URL(`/search/${encodeURIComponent(brand)}/${encodeURIComponent(article)}`, stpartsBaseUrl).toString(),
     });
   }
   return results;
 }
 
-async function requestPage(page: any, url: URL, timeoutMs: number): Promise<string> {
-  const response = await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: timeoutMs });
-  const html = await page.content();
-  if (response?.status() === 401 || response?.status() === 403 || /id=["']lgnform["']|id=["']login["']/i.test(html)) {
-    throw new SupplierAuthError("STParts session is not authorized");
+async function stpartsApiRequest(path: string, params: URLSearchParams, signal: AbortSignal, timeoutMs: number): Promise<unknown> {
+  const config = getStpartsApiConfig();
+  if (!config) {
+    throw new SupplierAuthError("STParts API credentials are not configured");
   }
-  if (!response || !response.ok()) {
-    throw new Error(`STParts returned HTTP ${response?.status() ?? 0}`);
+  const url = new URL(path, config.url);
+  params.set("userlogin", config.login);
+  params.set("userpsw", createHash("md5").update(config.password).digest("hex"));
+  url.search = params.toString();
+  const response = await siteHttpRequest(url, {
+    headers: { Accept: "application/json" },
+    signal,
+    timeoutMs,
+  });
+  let payload: unknown;
+  try {
+    payload = JSON.parse(response.body);
+  } catch {
+    throw new SupplierIntegrationError("STParts API returned invalid JSON");
   }
-  return html;
+  const errorCodeValue = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? (payload as { errorCode?: unknown }).errorCode
+    : null;
+  const errorCode = typeof errorCodeValue === "number" || typeof errorCodeValue === "string"
+    ? Number(errorCodeValue)
+    : null;
+  if (response.status === 401 || response.status === 403 || errorCode === 102 || errorCode === 103 || errorCode === 104) {
+    throw new SupplierAuthError("STParts API rejected the configured credentials");
+  }
+  if (response.status < 200 || response.status >= 300) {
+    if (path === "search/articles/" && errorCode === 301) {
+      return [];
+    }
+    throw new SupplierIntegrationError(`STParts API returned HTTP ${response.status}`);
+  }
+  return payload;
 }
 
-function exactSearchUrl(html: string, article: string): URL | null {
-  const target = normalizeArticle(article);
-  let result: URL | null = null;
-  for (const match of html.matchAll(/href=["']([^"']*\/search\/([^/"']+)\/([^?"']+))[^"']*["']/gi)) {
-    if (normalizeArticle(decodeHtml(match[3])) === target) {
-      const url = new URL(decodeHtml(match[1]), stpartsBaseUrl);
-      if (url.protocol === "https:" && url.origin === new URL(stpartsBaseUrl).origin) {
-        result = url;
+async function searchStpartsBrands(
+  brands: string[],
+  article: string,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<unknown[]> {
+  const results: unknown[] = [];
+  let nextIndex = 0;
+  const workerCount = Math.min(brands.length, 12);
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (!signal.aborted) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const brand = brands[index];
+      if (!brand) {
+        return;
       }
+      results.push(await stpartsApiRequest(
+        "search/articles/",
+        new URLSearchParams({ brand, number: article, useOnlineStocks: "1", withOutAnalogs: "1" }),
+        signal,
+        timeoutMs,
+      ));
     }
-  }
-  return result;
-}
+  }));
 
-interface CachedSearchUrl {
-  url: string;
-  expiresAt: number;
-}
-
-export class StpartsSearchUrlCache {
-  private readonly entries = new Map<string, CachedSearchUrl>();
-  private readonly ttlMs: number;
-  private readonly maxEntries: number;
-
-  constructor(ttlMs = 5 * 60_000, maxEntries = 100) {
-    this.ttlMs = ttlMs;
-    this.maxEntries = maxEntries;
-  }
-
-  get(article: string, now = Date.now()): URL | null {
-    const key = normalizeArticle(article);
-    const cached = this.entries.get(key);
-    if (!cached || cached.expiresAt <= now) {
-      this.entries.delete(key);
-      return null;
-    }
-    this.entries.delete(key);
-    this.entries.set(key, cached);
-    return new URL(cached.url);
-  }
-
-  set(article: string, url: URL, now = Date.now()): void {
-    const key = normalizeArticle(article);
-    this.entries.delete(key);
-    this.entries.set(key, { url: url.toString(), expiresAt: now + this.ttlMs });
-    while (this.entries.size > this.maxEntries) {
-      const oldestKey = this.entries.keys().next().value;
-      if (oldestKey) {
-        this.entries.delete(oldestKey);
-      }
-    }
-  }
+  return results;
 }
 
 export class StpartsApiAdapter implements SupplierAdapter {
   readonly id = "stparts";
   readonly displayName = "STParts";
-  readonly timeoutMs = Number(process.env.STPARTS_SEARCH_TIMEOUT_MS ?? "30000");
-  private readonly searchUrlCache = new StpartsSearchUrlCache();
+  readonly timeoutMs = Number(process.env.STPARTS_SEARCH_TIMEOUT_MS ?? "10000");
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
-    return hasStpartsStorageState() && getStpartsCookieHeader()
-      ? sessionManager.markChecked(this.id, "STParts stored HTTP session is available")
-      : sessionManager.markUnauthorized(this.id, "STParts login is required");
+    return getStpartsApiConfig()
+      ? sessionManager.markChecked(this.id, "STParts API credentials are configured")
+      : sessionManager.markUnauthorized(this.id, "STParts API credentials are not configured");
   }
 
   async search(
@@ -187,49 +173,16 @@ export class StpartsApiAdapter implements SupplierAdapter {
     _sessionManager: SupplierSessionManager,
   ): Promise<void> {
     const article = query.article.trim();
-    const initialUrl = new URL("/search", stpartsBaseUrl);
-    initialUrl.searchParams.set("pcode", article);
-    const browser = await getStpartsSharedBrowser();
-    let browserContext: any | null = null;
-    const closeOnAbort = () => browserContext?.close().catch(() => undefined);
-    context.signal.addEventListener("abort", closeOnAbort, { once: true });
-
-    try {
-      browserContext = await browser.newContext({ storageState: getStateFilePath("stparts-storage-state.json") });
-      const page = await browserContext.newPage();
-      let exactUrl = this.searchUrlCache.get(article);
-      if (!exactUrl) {
-        const initialHtml = await requestPage(page, initialUrl, context.timeoutMs);
-        exactUrl = exactSearchUrl(initialHtml, article);
-        if (exactUrl) {
-          this.searchUrlCache.set(article, exactUrl);
-        }
+    const brandsPayload = await stpartsApiRequest("search/brands/", new URLSearchParams({ number: article, useOnlineStocks: "1" }), context.signal, context.timeoutMs);
+    const brands = [...new Set(abcpItems(brandsPayload, "brand")
+      .filter((value): value is AbcpBrand => Boolean(value) && typeof value === "object" && !Array.isArray(value))
+      .map((value) => typeof value.brand === "string" ? value.brand.trim() : "")
+      .filter(Boolean))];
+    const articlePayloads = await searchStpartsBrands(brands, article, context.signal, context.timeoutMs);
+    for (const payload of articlePayloads) {
+      for (const result of parseStpartsApiResults(payload, article)) {
+        onResult(result);
       }
-      if (!exactUrl) {
-        return;
-      }
-
-      const html = await requestPage(page, exactUrl, context.timeoutMs);
-      const results = parseStpartsResults(html, article, exactUrl.toString());
-      for (const result of results) {
-        onResult({
-          supplier: this.id,
-          brand: result.brand,
-          article: result.article,
-          title: result.title,
-          price: result.price,
-          warehouse: result.warehouse,
-          warehouseColor: result.warehouseColor,
-          warehouseRating: result.warehouseRating,
-          deliveryDate: result.deliveryDate,
-          deliveryDateTo: result.deliveryDateTo,
-          deliveryDateApproximate: false,
-          link: result.link,
-        });
-      }
-    } finally {
-      context.signal.removeEventListener("abort", closeOnAbort);
-      await browserContext?.close().catch(() => undefined);
     }
   }
 }

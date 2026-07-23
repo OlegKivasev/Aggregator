@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { parseArmtekApiAccountState } from "../src/backend/suppliers/armtek/armtek-api-account-state.ts";
 import { findPrimaryPartKomMakerId, isPartKomUnauthorizedResponse } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
-import { parseStpartsResults, StpartsSearchUrlCache } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
+import { parseStpartsApiResults } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
 import { gotoStparts, isStpartsSessionPageAuthorized } from "../src/backend/suppliers/stparts/stparts-site-auth.ts";
 import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.ts";
 import { SupplierAuthError } from "../src/backend/suppliers/errors.ts";
@@ -82,28 +82,35 @@ test("Part-Kom recognizes its unauthorized JSON response", () => {
   assert.equal(isPartKomUnauthorizedResponse({ success: false, message: "temporarily unavailable" }), false);
 });
 
-test("STParts parses the supplier output price from current result rows", () => {
-  const results = parseStpartsResults(`
-    <tr class="resultTr2" data-is-request-article="1" data-article="VAP-021-2375" data-output-price="6900.27" data-availability="38">
-      <td class="resultBrand">ВолгаАвтоПром</td>
-      <td class="resultDescription">ВАЛ КАРДАННЫЙ ВАЗ-2121 ЗАДНИЙ</td>
-      <td class="resultWarehouse"><font color="green">POS1066</font></td>
-    </tr>
-  `, "VAP-021-2375", "https://stparts.ru/search/ВолгаАвтоПром/VAP0212375");
+test("STParts normalizes exact API offers", () => {
+  const results = parseStpartsApiResults({ "VAP0212375": {
+    availability: "38",
+    brand: "ВолгаАвтоПром",
+    deliveryPeriod: 24,
+    description: "ВАЛ КАРДАННЫЙ ВАЗ-2121 ЗАДНИЙ",
+    distributorCode: "POS1066",
+    number: "VAP-021-2375",
+    price: 6900.27,
+    supplierColor: "green",
+  } }, "VAP-021-2375");
 
   assert.equal(results.length, 1);
   assert.equal(results[0].price, 6900.27);
   assert.equal(results[0].warehouse, "POS1066");
 });
 
-test("STParts caches an exact search URL only until its short expiry", () => {
-  const cache = new StpartsSearchUrlCache(1_000, 2);
-  const url = new URL("https://stparts.ru/search/Stellox/0590554SX");
+test("STParts rejects malformed and non-exact API offers", () => {
+  const results = parseStpartsApiResults([
+    { brand: "Brand", number: "ABC-123", description: "Part", price: 100, availability: 1 },
+    { brand: "Brand", number: "ABC-1234", description: "Other", price: 100, availability: 1 },
+    { brand: "Brand", number: "ABC-123", description: "No price", price: 0, availability: 1 },
+  ], "ABC-123");
 
-  cache.set("05-90554-SX", url, 1_000);
+  assert.deepEqual(results.map((result) => result.title), ["Part"]);
+});
 
-  assert.equal(cache.get("0590554SX", 1_999)?.toString(), url.toString());
-  assert.equal(cache.get("05-90554-SX", 2_000), null);
+test("STParts treats an empty API result map as no offers", () => {
+  assert.deepEqual(parseStpartsApiResults({}, "1072"), []);
 });
 
 test("STParts allows fifteen seconds for the initial navigation by default", async () => {
@@ -125,14 +132,9 @@ test("STParts identifies an expired stored session from its login page", () => {
   assert.equal(isStpartsSessionPageAuthorized('<a href="/logout/">Logout</a>'), true);
 });
 
-test("STParts ignores product rows without supplier product identity", () => {
-  const results = parseStpartsResults(`
-    <tr class="resultTr2" data-is-request-article="1" data-output-price="100" data-availability="1">
-      <td class="resultBrand">Brand</td>
-    </tr>
-  `, "ABC-123", "https://stparts.ru/search/Brand/ABC123");
+test("STParts rejects an invalid API search payload", () => {
+  assert.throws(() => parseStpartsApiResults("invalid", "ABC-123"), /invalid search response/);
 
-  assert.deepEqual(results, []);
 });
 
 test("Part-Kom rejects a failed authorization probe", async () => {

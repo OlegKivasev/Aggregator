@@ -1,4 +1,4 @@
-import { getArmtekApiConfig } from "./config.ts";
+import { getArmtekApiConfig, getStpartsApiConfig } from "./config.ts";
 import { SupplierSessionManager } from "./session/session-manager.ts";
 import { ArmtekApiAdapter, verifyArmtekCredentials } from "./suppliers/armtek/armtek-api-adapter.ts";
 import { clearArmtekApiAccountState } from "./suppliers/armtek/armtek-api-account-state.ts";
@@ -23,9 +23,6 @@ import {
 } from "./suppliers/rossko/rossko-site-auth.ts";
 import {
   clearStpartsStorageState,
-  closeStpartsBrowser,
-  hasStpartsStorageState,
-  validateStpartsStoredSession,
   verifyStpartsCredentials,
 } from "./suppliers/stparts/stparts-site-auth.ts";
 import { StpartsApiAdapter } from "./suppliers/stparts/stparts-api-adapter.ts";
@@ -66,8 +63,8 @@ function bootstrapPersistedSessions() {
     sessionManager.markAuthorized("part-kom", "Part-Kom stored session is available");
   }
 
-  if (hasStpartsStorageState()) {
-    sessionManager.markAuthorized("stparts", "STParts stored session is available");
+  if (getStpartsApiConfig()) {
+    sessionManager.markAuthorized("stparts", "STParts API credentials are configured");
   }
 
   if (hasMotorDetalTokenState()) {
@@ -86,7 +83,7 @@ export function listSupplierSessions() {
 }
 
 export async function shutdownSearchService(): Promise<void> {
-  await Promise.all([closeMladovBrowser(), closeStpartsBrowser()]);
+  await closeMladovBrowser();
 }
 
 export async function authorizeRossko(credentials: RosskoSiteCredentials) {
@@ -218,18 +215,12 @@ async function validateSupplierSession(
       throw new SupplierAuthError();
     }
 
-    if (adapter.id === "stparts") {
-      if (!await validateStpartsStoredSession(controller.signal)) {
-        throw new SupplierAuthError("STParts session has expired");
-      }
-    } else {
-      await adapter.search(
-        { article, suppliers: [adapter.id] },
-        { signal: controller.signal, timeoutMs: adapter.timeoutMs },
-        () => undefined,
-        sessionManager,
-      );
-    }
+    await adapter.search(
+      { article, suppliers: [adapter.id] },
+      { signal: controller.signal, timeoutMs: adapter.timeoutMs },
+      () => undefined,
+      sessionManager,
+    );
     sessionManager.markChecked(adapter.id);
     return { supplier: adapter.id, status: "connected" };
   } catch (error) {

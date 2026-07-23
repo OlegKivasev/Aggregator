@@ -10,6 +10,12 @@ export interface ArmtekApiConfig {
   queryType: string;
 }
 
+export interface StpartsApiConfig {
+  url: URL;
+  login: string;
+  password: string;
+}
+
 export function getStateFilePath(fileName: string): string {
   const configuredStateDir = process.env.STATE_DIR?.trim();
   const stateDir = configuredStateDir ? resolve(configuredStateDir) : resolve(process.cwd(), ".state");
@@ -35,5 +41,27 @@ export function getArmtekApiConfig(): ArmtekApiConfig | null {
     program: process.env.ARMTEK_PROGRAM?.trim(),
     queryType: process.env.ARMTEK_QUERY_TYPE?.trim() || "1",
   };
+}
+
+export function getStpartsApiConfig(): StpartsApiConfig | null {
+  const login = process.env.STPARTS_API_LOGIN?.trim();
+  const password = process.env.STPARTS_API_PASSWORD;
+  const configuredUrl = process.env.STPARTS_API_URL?.trim() || "https://stpartsru.public.api.abcp.ru/";
+
+  if (!login || !password) {
+    return null;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(configuredUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.hostname !== "stpartsru.public.api.abcp.ru") {
+    return null;
+  }
+
+  return { url, login, password };
 }
 import { resolve } from "node:path";
