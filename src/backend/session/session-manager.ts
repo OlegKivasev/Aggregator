@@ -2,6 +2,7 @@ import type {
   ArmtekCredentials,
   MotorDetalCredentials,
   MladovCredentials,
+  StpartsCredentials,
   SupplierId,
   SupplierSessionState,
 } from "../types.ts";
@@ -14,6 +15,7 @@ export class SupplierSessionManager {
   private armtekCredentials: ArmtekCredentials | null = null;
   private motorDetalCredentials: MotorDetalCredentials | null = null;
   private mladovCredentials: MladovCredentials | null = null;
+  private stpartsCredentials: StpartsCredentials | null = null;
 
   getSession(supplier: SupplierId): SupplierSessionState {
     const current = this.sessions.get(supplier);
@@ -113,5 +115,17 @@ export class SupplierSessionManager {
 
   clearMladovCredentials(): void {
     this.mladovCredentials = null;
+  }
+
+  setStpartsCredentials(credentials: StpartsCredentials): void {
+    this.stpartsCredentials = { login: credentials.login.trim(), password: credentials.password };
+  }
+
+  getStpartsCredentials(): StpartsCredentials | null {
+    return this.stpartsCredentials;
+  }
+
+  clearStpartsCredentials(): void {
+    this.stpartsCredentials = null;
   }
 }

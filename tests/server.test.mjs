@@ -88,15 +88,16 @@ test("STParts normalizes exact API offers", () => {
     brand: "ВолгаАвтоПром",
     deliveryPeriod: 24,
     description: "ВАЛ КАРДАННЫЙ ВАЗ-2121 ЗАДНИЙ",
-    distributorCode: "POS1066",
+    supplierDescription: '<b><font color="green">OD880</font></b>',
     number: "VAP-021-2375",
     price: 6900.27,
-    supplierColor: "green",
+    supplierColor: "D5F5D9",
   } }, "VAP-021-2375");
 
   assert.equal(results.length, 1);
   assert.equal(results[0].price, 6900.27);
-  assert.equal(results[0].warehouse, "POS1066");
+  assert.equal(results[0].warehouse, "OD880");
+  assert.equal(results[0].warehouseColor, "green");
 });
 
 test("STParts rejects malformed and non-exact API offers", () => {
@@ -279,6 +280,15 @@ test("session manager preserves password whitespace", () => {
   const sessionManager = new SupplierSessionManager();
   sessionManager.setArmtekCredentials({ login: " user ", password: " password " });
   assert.deepEqual(sessionManager.getArmtekCredentials(), { login: "user", password: " password " });
+});
+
+test("session manager keeps STParts API credentials only in runtime memory", () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setStpartsCredentials({ login: "api-user", password: " password " });
+
+  assert.deepEqual(sessionManager.getStpartsCredentials(), { login: "api-user", password: " password " });
+  sessionManager.clearStpartsCredentials();
+  assert.equal(sessionManager.getStpartsCredentials(), null);
 });
 
 test("incomplete search warnings list only failed suppliers", () => {

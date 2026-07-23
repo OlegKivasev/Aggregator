@@ -1522,7 +1522,7 @@ stpartsAuthForm.addEventListener("submit", async (event) => {
   try {
     const payload = await postJson("/api/suppliers/stparts/authorize", {
       login: stpartsLoginInput.value.trim(),
-      password: stpartsPasswordInput.value.trim(),
+      password: stpartsPasswordInput.value,
     });
     handleAuthorizeResult(payload.session, "stparts", stpartsAuthFeedback, "STParts отклонил авторизацию", updateStpartsSessionCard);
   } catch (error) {

@@ -43,9 +43,9 @@ export function getArmtekApiConfig(): ArmtekApiConfig | null {
   };
 }
 
-export function getStpartsApiConfig(): StpartsApiConfig | null {
-  const login = process.env.STPARTS_API_LOGIN?.trim();
-  const password = process.env.STPARTS_API_PASSWORD;
+export function getStpartsApiConfig(credentials?: { login: string; password: string }): StpartsApiConfig | null {
+  const login = credentials?.login.trim() || process.env.STPARTS_API_LOGIN?.trim();
+  const password = credentials?.password || process.env.STPARTS_API_PASSWORD;
   const configuredUrl = process.env.STPARTS_API_URL?.trim() || "https://stpartsru.public.api.abcp.ru/";
 
   if (!login || !password) {

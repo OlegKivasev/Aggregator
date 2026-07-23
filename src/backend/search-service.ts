@@ -21,11 +21,7 @@ import {
   hasRosskoStorageState,
   verifyRosskoCredentials,
 } from "./suppliers/rossko/rossko-site-auth.ts";
-import {
-  clearStpartsStorageState,
-  verifyStpartsCredentials,
-} from "./suppliers/stparts/stparts-site-auth.ts";
-import { StpartsApiAdapter } from "./suppliers/stparts/stparts-api-adapter.ts";
+import { StpartsApiAdapter, verifyStpartsApiCredentials } from "./suppliers/stparts/stparts-api-adapter.ts";
 import type { SupplierAdapter } from "./suppliers/supplier-adapter.ts";
 import { SupplierAuthError, SupplierTimeoutError } from "./suppliers/errors.ts";
 import { MladovWebAdapter } from "./suppliers/mladov/mladov-web-adapter.ts";
@@ -132,18 +128,21 @@ export function logoutPartKom() {
 }
 
 export async function authorizeStparts(credentials: StpartsCredentials) {
-  const result = await verifyStpartsCredentials(credentials);
-
-  if (!result.authorized) {
-    clearStpartsStorageState();
-    return sessionManager.markUnauthorized("stparts", result.details);
+  try {
+    await verifyStpartsApiCredentials(credentials);
+  } catch (error) {
+    sessionManager.clearStpartsCredentials();
+    if (error instanceof SupplierAuthError) {
+      return sessionManager.markUnauthorized("stparts", "STParts API rejected the login or password");
+    }
+    throw error;
   }
-
-  return sessionManager.markAuthorized("stparts", result.details);
+  sessionManager.setStpartsCredentials(credentials);
+  return sessionManager.markAuthorized("stparts", "STParts API credentials were verified successfully");
 }
 
 export function logoutStparts() {
-  clearStpartsStorageState();
+  sessionManager.clearStpartsCredentials();
   return sessionManager.markUnauthorized("stparts");
 }
 
