@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { parseArmtekApiAccountState } from "../src/backend/suppliers/armtek/armtek-api-account-state.ts";
 import { findPrimaryPartKomMakerId, isPartKomUnauthorizedResponse } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
-import { parseStpartsResults } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
+import { parseStpartsResults, StpartsSearchUrlCache } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
 import { gotoStparts, isStpartsSessionPageAuthorized } from "../src/backend/suppliers/stparts/stparts-site-auth.ts";
 import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.ts";
 import { SupplierAuthError } from "../src/backend/suppliers/errors.ts";
@@ -94,6 +94,16 @@ test("STParts parses the supplier output price from current result rows", () => 
   assert.equal(results.length, 1);
   assert.equal(results[0].price, 6900.27);
   assert.equal(results[0].warehouse, "POS1066");
+});
+
+test("STParts caches an exact search URL only until its short expiry", () => {
+  const cache = new StpartsSearchUrlCache(1_000, 2);
+  const url = new URL("https://stparts.ru/search/Stellox/0590554SX");
+
+  cache.set("05-90554-SX", url, 1_000);
+
+  assert.equal(cache.get("0590554SX", 1_999)?.toString(), url.toString());
+  assert.equal(cache.get("05-90554-SX", 2_000), null);
 });
 
 test("STParts allows fifteen seconds for the initial navigation by default", async () => {

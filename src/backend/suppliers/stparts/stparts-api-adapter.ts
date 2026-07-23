@@ -119,16 +119,60 @@ function exactSearchUrl(html: string, article: string): URL | null {
   let result: URL | null = null;
   for (const match of html.matchAll(/href=["']([^"']*\/search\/([^/"']+)\/([^?"']+))[^"']*["']/gi)) {
     if (normalizeArticle(decodeHtml(match[3])) === target) {
-      result = new URL(decodeHtml(match[1]), stpartsBaseUrl);
+      const url = new URL(decodeHtml(match[1]), stpartsBaseUrl);
+      if (url.protocol === "https:" && url.origin === new URL(stpartsBaseUrl).origin) {
+        result = url;
+      }
     }
   }
   return result;
+}
+
+interface CachedSearchUrl {
+  url: string;
+  expiresAt: number;
+}
+
+export class StpartsSearchUrlCache {
+  private readonly entries = new Map<string, CachedSearchUrl>();
+  private readonly ttlMs: number;
+  private readonly maxEntries: number;
+
+  constructor(ttlMs = 5 * 60_000, maxEntries = 100) {
+    this.ttlMs = ttlMs;
+    this.maxEntries = maxEntries;
+  }
+
+  get(article: string, now = Date.now()): URL | null {
+    const key = normalizeArticle(article);
+    const cached = this.entries.get(key);
+    if (!cached || cached.expiresAt <= now) {
+      this.entries.delete(key);
+      return null;
+    }
+    this.entries.delete(key);
+    this.entries.set(key, cached);
+    return new URL(cached.url);
+  }
+
+  set(article: string, url: URL, now = Date.now()): void {
+    const key = normalizeArticle(article);
+    this.entries.delete(key);
+    this.entries.set(key, { url: url.toString(), expiresAt: now + this.ttlMs });
+    while (this.entries.size > this.maxEntries) {
+      const oldestKey = this.entries.keys().next().value;
+      if (oldestKey) {
+        this.entries.delete(oldestKey);
+      }
+    }
+  }
 }
 
 export class StpartsApiAdapter implements SupplierAdapter {
   readonly id = "stparts";
   readonly displayName = "STParts";
   readonly timeoutMs = Number(process.env.STPARTS_SEARCH_TIMEOUT_MS ?? "30000");
+  private readonly searchUrlCache = new StpartsSearchUrlCache();
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
     return hasStpartsStorageState() && getStpartsCookieHeader()
@@ -153,8 +197,14 @@ export class StpartsApiAdapter implements SupplierAdapter {
     try {
       browserContext = await browser.newContext({ storageState: getStateFilePath("stparts-storage-state.json") });
       const page = await browserContext.newPage();
-      const initialHtml = await requestPage(page, initialUrl, context.timeoutMs);
-      const exactUrl = exactSearchUrl(initialHtml, article);
+      let exactUrl = this.searchUrlCache.get(article);
+      if (!exactUrl) {
+        const initialHtml = await requestPage(page, initialUrl, context.timeoutMs);
+        exactUrl = exactSearchUrl(initialHtml, article);
+        if (exactUrl) {
+          this.searchUrlCache.set(article, exactUrl);
+        }
+      }
       if (!exactUrl) {
         return;
       }
