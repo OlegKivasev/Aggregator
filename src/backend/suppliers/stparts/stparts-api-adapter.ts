@@ -3,7 +3,7 @@ import { getStateFilePath } from "../../config.ts";
 import type { NormalizedSearchResult, SearchQuery, SupplierSearchContext, SupplierSessionState } from "../../types.ts";
 import { SupplierAuthError } from "../errors.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
-import { createStpartsBrowser, getStpartsCookieHeader, hasStpartsStorageState, stpartsBaseUrl } from "./stparts-site-auth.ts";
+import { getStpartsCookieHeader, getStpartsSharedBrowser, hasStpartsStorageState, stpartsBaseUrl } from "./stparts-site-auth.ts";
 
 interface StpartsApiResult {
   brand: string;
@@ -128,7 +128,7 @@ function exactSearchUrl(html: string, article: string): URL | null {
 export class StpartsApiAdapter implements SupplierAdapter {
   readonly id = "stparts";
   readonly displayName = "STParts";
-  readonly timeoutMs = Number(process.env.STPARTS_SEARCH_TIMEOUT_MS ?? "20000");
+  readonly timeoutMs = Number(process.env.STPARTS_SEARCH_TIMEOUT_MS ?? "30000");
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
     return hasStpartsStorageState() && getStpartsCookieHeader()
@@ -145,7 +145,7 @@ export class StpartsApiAdapter implements SupplierAdapter {
     const article = query.article.trim();
     const initialUrl = new URL("/search", stpartsBaseUrl);
     initialUrl.searchParams.set("pcode", article);
-    const browser = await createStpartsBrowser();
+    const browser = await getStpartsSharedBrowser();
     let browserContext: any | null = null;
     const closeOnAbort = () => browserContext?.close().catch(() => undefined);
     context.signal.addEventListener("abort", closeOnAbort, { once: true });
@@ -180,7 +180,6 @@ export class StpartsApiAdapter implements SupplierAdapter {
     } finally {
       context.signal.removeEventListener("abort", closeOnAbort);
       await browserContext?.close().catch(() => undefined);
-      await browser.close().catch(() => undefined);
     }
   }
 }

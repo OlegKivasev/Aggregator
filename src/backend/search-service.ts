@@ -23,6 +23,7 @@ import {
 } from "./suppliers/rossko/rossko-site-auth.ts";
 import {
   clearStpartsStorageState,
+  closeStpartsBrowser,
   hasStpartsStorageState,
   validateStpartsStoredSession,
   verifyStpartsCredentials,
@@ -85,7 +86,7 @@ export function listSupplierSessions() {
 }
 
 export async function shutdownSearchService(): Promise<void> {
-  await closeMladovBrowser();
+  await Promise.all([closeMladovBrowser(), closeStpartsBrowser()]);
 }
 
 export async function authorizeRossko(credentials: RosskoSiteCredentials) {

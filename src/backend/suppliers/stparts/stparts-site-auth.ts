@@ -18,6 +18,7 @@ const stpartsSettledTimeoutMs = Number(process.env.STPARTS_SETTLED_TIMEOUT_MS ??
 const stpartsPostCommitDelayMs = Number(process.env.STPARTS_POST_COMMIT_DELAY_MS ?? "300");
 const stpartsSessionProbeTimeoutMs = Number(process.env.STPARTS_SESSION_PROBE_TIMEOUT_MS ?? "5000");
 const authErrorPattern = /невер|неправ|ошиб|парол|логин|email|почт|авторизац/i;
+let sharedStpartsBrowserPromise: Promise<any> | null = null;
 
 function ensureStpartsStateDir() {
   mkdirSync(stpartsStateDir, { recursive: true, mode: 0o700 });
@@ -81,6 +82,35 @@ export async function createStpartsBrowser() {
     headless: true,
     executablePath: findBrowserExecutable(),
   });
+}
+
+export async function getStpartsSharedBrowser() {
+  if (!sharedStpartsBrowserPromise) {
+    sharedStpartsBrowserPromise = createStpartsBrowser().then(
+      (browser) => {
+        browser.once("disconnected", () => {
+          sharedStpartsBrowserPromise = null;
+        });
+        return browser;
+      },
+      (error) => {
+        sharedStpartsBrowserPromise = null;
+        throw error;
+      },
+    );
+  }
+
+  return sharedStpartsBrowserPromise;
+}
+
+export async function closeStpartsBrowser(): Promise<void> {
+  const browserPromise = sharedStpartsBrowserPromise;
+  sharedStpartsBrowserPromise = null;
+
+  if (browserPromise) {
+    const browser = await browserPromise;
+    await browser.close();
+  }
 }
 
 export async function saveStpartsStorageState(context: any): Promise<void> {
