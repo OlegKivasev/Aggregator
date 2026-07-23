@@ -11,3 +11,10 @@ export class SupplierTimeoutError extends Error {
     this.name = "SupplierTimeoutError";
   }
 }
+
+export class SupplierIntegrationError extends Error {
+  constructor(message = "Supplier integration error") {
+    super(message);
+    this.name = "SupplierIntegrationError";
+  }
+}

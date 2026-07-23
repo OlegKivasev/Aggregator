@@ -2,7 +2,6 @@ import type {
   ArmtekCredentials,
   MotorDetalCredentials,
   MladovCredentials,
-  RosskoSiteCredentials,
   SupplierId,
   SupplierSessionState,
 } from "../types.ts";
@@ -12,7 +11,6 @@ const supplierIds = ["rossko", "armtek", "part-kom", "stparts", "motordetal", "m
 
 export class SupplierSessionManager {
   private readonly sessions = new Map<SupplierId, SupplierSessionState>();
-  private rosskoCredentials: RosskoSiteCredentials | null = null;
   private armtekCredentials: ArmtekCredentials | null = null;
   private motorDetalCredentials: MotorDetalCredentials | null = null;
   private mladovCredentials: MladovCredentials | null = null;
@@ -75,25 +73,10 @@ export class SupplierSessionManager {
     return next;
   }
 
-  setRosskoCredentials(credentials: RosskoSiteCredentials): void {
-    this.rosskoCredentials = {
-      login: credentials.login.trim(),
-      password: credentials.password.trim(),
-    };
-  }
-
-  getRosskoCredentials(): RosskoSiteCredentials | null {
-    return this.rosskoCredentials;
-  }
-
-  clearRosskoCredentials(): void {
-    this.rosskoCredentials = null;
-  }
-
   setArmtekCredentials(credentials: ArmtekCredentials): void {
     this.armtekCredentials = {
       login: credentials.login.trim(),
-      password: credentials.password.trim(),
+      password: credentials.password,
     };
   }
 
@@ -108,7 +91,7 @@ export class SupplierSessionManager {
   setMotorDetalCredentials(credentials: MotorDetalCredentials): void {
     this.motorDetalCredentials = {
       login: credentials.login.trim().toLowerCase(),
-      password: credentials.password.trim(),
+      password: credentials.password,
     };
   }
 
@@ -121,7 +104,7 @@ export class SupplierSessionManager {
   }
 
   setMladovCredentials(credentials: MladovCredentials): void {
-    this.mladovCredentials = { login: credentials.login.trim(), password: credentials.password.trim() };
+    this.mladovCredentials = { login: credentials.login.trim(), password: credentials.password };
   }
 
   getMladovCredentials(): MladovCredentials | null {

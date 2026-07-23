@@ -72,7 +72,9 @@ export function parseStpartsResults(html: string, requestedArticle: string, page
     }
     const article = requestedArticle;
     const price = Number(attribute(block, "data-output-price"));
-    if (normalizeArticle(article) !== target || !Number.isFinite(price) || price <= 0 || Number(attribute(block, "data-availability")) === 0) {
+    const brand = cell(block, "resultBrand");
+    const title = cell(block, "resultDescription");
+    if (normalizeArticle(article) !== target || !brand || !title || !Number.isFinite(price) || price <= 0 || Number(attribute(block, "data-availability")) === 0) {
       continue;
     }
     const warehouseMatch = block.match(/<td\b[^>]*class=["'][^"']*\bresultWarehouse\b[^"']*["'][^>]*>[\s\S]*?<font\b[^>]*color=["']?(green|blue|red)["']?[^>]*>([\s\S]*?)<\/font>/i);
@@ -80,17 +82,21 @@ export function parseStpartsResults(html: string, requestedArticle: string, page
     const linkMatch = block.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*searchInfoLink/i);
     const warehouseColor = warehouseMatch?.[1]?.toLowerCase();
 
+    const link = linkMatch ? new URL(decodeHtml(linkMatch[1]), stpartsBaseUrl) : new URL(pageUrl);
+    if (link.protocol !== "https:" || link.origin !== new URL(stpartsBaseUrl).origin) {
+      continue;
+    }
     results.push({
-      brand: cell(block, "resultBrand") || "STParts",
+      brand,
       article,
-      title: cell(block, "resultDescription") || article,
+      title,
       price,
       warehouse: warehouseMatch ? decodeHtml(warehouseMatch[2]) : null,
       warehouseColor: warehouseColor === "green" || warehouseColor === "blue" || warehouseColor === "red" ? warehouseColor : null,
       warehouseRating: ratingMatch ? decodeHtml(ratingMatch[1]).replace(",", ".") : null,
       deliveryDate: dateFromHours(attribute(block, "data-deadline")),
       deliveryDateTo: dateFromHours(attribute(block, "data-deadline-max")),
-      link: linkMatch ? new URL(decodeHtml(linkMatch[1]), stpartsBaseUrl).toString() : pageUrl,
+      link: link.toString(),
     });
   }
   return results;

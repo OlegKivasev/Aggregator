@@ -16,12 +16,12 @@ const searchLoadingNote = document.querySelector("#search-loading-note");
 const searchLoadingCancel = document.querySelector("#search-loading-cancel");
 const cancelSearchButton = document.querySelector("#cancel-search-button");
 const markupPercentInput = document.querySelector("#markup-percent");
+const tableSearchInput = document.querySelector("#table-search");
 const sortButtons = [...document.querySelectorAll(".table-sort")];
 const tableColumnInputs = [...document.querySelectorAll(".table-column-input")];
 const tableColumnsReset = document.querySelector("#table-columns-reset");
 const searchTabsList = document.querySelector("#search-tabs-list");
 const newTabButton = document.querySelector("#new-tab-button");
-const authStatus = document.querySelector("#auth-status");
 const settingsToggle = document.querySelector("#settings-toggle");
 const supplierEnabledInputs = [...document.querySelectorAll(".supplier-enabled-input")];
 const suppliersDropdown = document.querySelector(".suppliers-dropdown");
@@ -93,6 +93,7 @@ let tabSequence = 1;
 let results = [];
 let sortState = { key: "price", direction: "ascending" };
 let markupPercent = 35;
+let tableSearchTerm = "";
 let supplierCheckInProgress = false;
 let searchProgressTimer = null;
 let activeFilterColumn = "";
@@ -178,27 +179,44 @@ const hasActiveFilter = (column) => (rangeFilterColumns.has(column)
 const hasAnyActiveFilters = () => tableColumnIds.some((column) => hasActiveFilter(column));
 
 const getFilteredResults = () => {
-  return results.filter((result) => tableColumnIds.every((column) => {
-    if (!hasActiveFilter(column)) {
-      return true;
+  const normalizedSearchTerm = tableSearchTerm.trim().toLocaleLowerCase();
+
+  return results.filter((result) => {
+    if (normalizedSearchTerm) {
+      const searchableValues = [
+        supplierNames[result.supplier] ?? result.supplier,
+        result.brand,
+        result.article,
+        result.title,
+        result.warehouse,
+      ];
+      if (!searchableValues.some((value) => String(value ?? "").toLocaleLowerCase().includes(normalizedSearchTerm))) {
+        return false;
+      }
     }
 
-    if (rangeFilterColumns.has(column)) {
-      const range = getFilterRange(column);
-      const from = column === "deliveryDate" && range.from
-        ? new Date(`${range.from}T00:00:00`).getTime()
-        : Number(range.from);
-      const to = column === "deliveryDate" && range.to
-        ? new Date(`${range.to}T23:59:59.999`).getTime()
-        : Number(range.to);
-      const value = getRangeFilterValue(result, column);
-      return Number.isFinite(value)
-        && (!range.from || value >= from)
-        && (!range.to || value <= to);
-    }
+    return tableColumnIds.every((column) => {
+      if (!hasActiveFilter(column)) {
+        return true;
+      }
 
-    return getSelectedFilterValues(column).has(getFilterValue(result, column));
-  }));
+      if (rangeFilterColumns.has(column)) {
+        const range = getFilterRange(column);
+        const from = column === "deliveryDate" && range.from
+          ? new Date(`${range.from}T00:00:00`).getTime()
+          : Number(range.from);
+        const to = column === "deliveryDate" && range.to
+          ? new Date(`${range.to}T23:59:59.999`).getTime()
+          : Number(range.to);
+        const value = getRangeFilterValue(result, column);
+        return Number.isFinite(value)
+          && (!range.from || value >= from)
+          && (!range.to || value <= to);
+      }
+
+      return getSelectedFilterValues(column).has(getFilterValue(result, column));
+    });
+  });
 };
 
 const renderFilterValues = () => {
@@ -879,7 +897,7 @@ const closeSettings = () => {
   settingsDrawer.hidden = true;
 };
 
-const updateRosskoSessionCard = (session) => {
+const updateRosskoSessionCard = (session, enableSearch = false) => {
   updateSupplierNotice(session);
   updateSupplierSearchToggle("rossko", session.authorized);
   rosskoSessionPill.dataset.status = sessionPillStatus(session.authorized);
@@ -888,9 +906,13 @@ const updateRosskoSessionCard = (session) => {
   rosskoConnectButton.hidden = session.authorized;
   rosskoLogoutButton.hidden = !session.authorized;
   rosskoAuthFeedback.textContent = "";
+
+  if (enableSearch && session.authorized) {
+    setSupplierEnabled("rossko", true);
+  }
 };
 
-const updateArmtekSessionCard = (session) => {
+const updateArmtekSessionCard = (session, enableSearch = false) => {
   updateSupplierNotice(session);
   updateSupplierSearchToggle("armtek", session.authorized);
   armtekSessionPill.dataset.status = sessionPillStatus(session.authorized);
@@ -899,6 +921,10 @@ const updateArmtekSessionCard = (session) => {
   armtekConnectButton.hidden = session.authorized;
   armtekLogoutButton.hidden = !session.authorized;
   armtekAuthFeedback.textContent = "";
+
+  if (enableSearch && session.authorized) {
+    setSupplierEnabled("armtek", true);
+  }
 };
 
 const updatePartKomSessionCard = (session) => {
@@ -971,11 +997,11 @@ const loadSessions = async () => {
   const mladovSession = payload.sessions.find((session) => session.supplier === "mladov");
 
   if (rosskoSession) {
-    updateRosskoSessionCard(rosskoSession);
+    updateRosskoSessionCard(rosskoSession, true);
   }
 
   if (armtekSession) {
-    updateArmtekSessionCard(armtekSession);
+    updateArmtekSessionCard(armtekSession, true);
   }
 
   if (partKomSession) {
@@ -1110,23 +1136,19 @@ const handleAuthorizeResult = (session, supplier, feedbackElement, rejectedMessa
   updateSessionCard(session);
 
   if (session.authorized) {
-    authStatus.textContent = "";
     feedbackElement.textContent = "";
     setSupplierEnabled(supplier, true);
     return;
   }
 
-  authStatus.textContent = "";
   feedbackElement.textContent = session.details ?? rejectedMessage;
 };
 
 const showAuthorizeError = (feedbackElement, error) => {
-  authStatus.textContent = "";
   feedbackElement.textContent = error.message;
 };
 
 const showAuthFeedback = (feedbackElement, message = "") => {
-  authStatus.textContent = "";
   feedbackElement.textContent = message;
 };
 
@@ -1417,10 +1439,9 @@ rosskoAuthForm.addEventListener("submit", async (event) => {
   setAuthCardLoading(rosskoAuthForm, true);
 
   try {
-    authStatus.textContent = "";
     const payload = await postJson("/api/suppliers/rossko/authorize", {
       login: rosskoLoginInput.value.trim(),
-      password: rosskoPasswordInput.value.trim(),
+      password: rosskoPasswordInput.value,
     });
     handleAuthorizeResult(payload.session, "rossko", rosskoAuthFeedback, "Rossko отклонил авторизацию", updateRosskoSessionCard);
   } catch (error) {
@@ -1445,7 +1466,6 @@ armtekAuthForm.addEventListener("submit", async (event) => {
   setAuthCardLoading(armtekAuthForm, true);
 
   try {
-    authStatus.textContent = "";
     const payload = await postJson("/api/suppliers/armtek/authorize", {
       login: armtekLoginInput.value.trim(),
       password: armtekPasswordInput.value.trim(),
@@ -1473,7 +1493,6 @@ partKomAuthForm.addEventListener("submit", async (event) => {
   setAuthCardLoading(partKomAuthForm, true);
 
   try {
-    authStatus.textContent = "";
     const payload = await postJson("/api/suppliers/part-kom/authorize", {
       login: partKomLoginInput.value.trim(),
       password: partKomPasswordInput.value.trim(),
@@ -1501,7 +1520,6 @@ stpartsAuthForm.addEventListener("submit", async (event) => {
   setAuthCardLoading(stpartsAuthForm, true);
 
   try {
-    authStatus.textContent = "";
     const payload = await postJson("/api/suppliers/stparts/authorize", {
       login: stpartsLoginInput.value.trim(),
       password: stpartsPasswordInput.value.trim(),
@@ -1529,7 +1547,6 @@ motorDetalAuthForm.addEventListener("submit", async (event) => {
   setAuthCardLoading(motorDetalAuthForm, true);
 
   try {
-    authStatus.textContent = "";
     const payload = await postJson("/api/suppliers/motordetal/authorize", {
       login: motorDetalLoginInput.value.trim(),
       password: motorDetalPasswordInput.value.trim(),
@@ -1556,7 +1573,6 @@ mladovAuthForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   setAuthCardLoading(mladovAuthForm, true);
   try {
-    authStatus.textContent = "";
     const payload = await postJson("/api/suppliers/mladov/authorize", {
       login: mladovLoginInput.value.trim(),
       password: mladovPasswordInput.value.trim(),
@@ -1771,9 +1787,12 @@ if (restoredTab) {
   });
 }
 markupPercentInput.addEventListener("change", () => setMarkupPercent(markupPercentInput.value));
+
+tableSearchInput.addEventListener("input", () => {
+  tableSearchTerm = tableSearchInput.value;
+  renderResults();
+});
 setSearchUiState(false);
 renderTabs();
 renderResults();
-loadSessions().catch(() => {
-  authStatus.textContent = "";
-});
+loadSessions().catch(() => undefined);

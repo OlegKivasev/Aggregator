@@ -5,6 +5,7 @@ import type {
   SearchStreamEvent,
   SearchSupplierStatusEvent,
   SearchQuery,
+  NormalizedSearchResult,
 } from "../types.ts";
 
 interface RunSupplierSearchOptions {
@@ -27,9 +28,29 @@ const createStatusEvent = (
   details,
 });
 
-function isTimeoutLikeError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /timeout|timed out|Timeout/i.test(message);
+function isValidDate(value: string | null | undefined): boolean {
+  return value === null || value === undefined || (typeof value === "string" && Number.isFinite(Date.parse(value)));
+}
+
+function isValidResult(result: NormalizedSearchResult, supplier: SupplierAdapter["id"]): boolean {
+  if (result.supplier !== supplier) {
+    return false;
+  }
+  if (!result.brand.trim() || !result.article.trim() || !result.title.trim()) {
+    return false;
+  }
+  if (!Number.isFinite(result.price) || result.price <= 0) {
+    return false;
+  }
+  if (!isValidDate(result.deliveryDate) || !isValidDate(result.deliveryDateTo)) {
+    return false;
+  }
+  try {
+    const link = new URL(result.link);
+    return link.protocol === "http:" || link.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 export async function runSupplierSearch({
@@ -40,6 +61,10 @@ export async function runSupplierSearch({
   emit,
   onAuthError,
 }: RunSupplierSearchOptions): Promise<void> {
+  if (signal.aborted) {
+    return;
+  }
+
   emit(createStatusEvent(adapter.id, "searching"));
 
   const controller = new AbortController();
@@ -64,32 +89,33 @@ export async function runSupplierSearch({
         timeoutMs: adapter.timeoutMs,
       },
       (result) => {
-        emit({ type: "result", result });
+        if (isValidResult(result, adapter.id)) {
+          emit({ type: "result", result });
+        }
       },
       sessionManager,
     );
 
-    emit(createStatusEvent(adapter.id, "completed"));
+    if (!signal.aborted) {
+      emit(createStatusEvent(adapter.id, "completed"));
+    }
   } catch (error) {
+    if (signal.aborted) {
+      return;
+    }
+
     if (error instanceof SupplierAuthError) {
       onAuthError?.();
-      emit(createStatusEvent(adapter.id, "auth_error", error.message));
+      emit(createStatusEvent(adapter.id, "auth_error", "Supplier authorization is required"));
       return;
     }
 
-    if (error instanceof SupplierTimeoutError || controller.signal.reason instanceof SupplierTimeoutError || isTimeoutLikeError(error)) {
-      const timeoutMessage = error instanceof Error ? error.message : "Supplier timeout";
-      emit(createStatusEvent(adapter.id, "timeout", timeoutMessage));
+    if (error instanceof SupplierTimeoutError || controller.signal.reason instanceof SupplierTimeoutError) {
+      emit(createStatusEvent(adapter.id, "timeout", "Supplier search timed out"));
       return;
     }
 
-    if (controller.signal.aborted && signal.aborted) {
-      emit(createStatusEvent(adapter.id, "error", "Search was aborted"));
-      return;
-    }
-
-    const message = error instanceof Error ? error.message : "Unknown supplier error";
-    emit(createStatusEvent(adapter.id, "error", message));
+    emit(createStatusEvent(adapter.id, "error", "Supplier search failed"));
   } finally {
     clearTimeout(timeoutId);
     signal.removeEventListener("abort", abortForwarder);

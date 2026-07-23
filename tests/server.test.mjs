@@ -3,29 +3,22 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { request as httpRequest } from "node:http";
 import { test } from "node:test";
-import { armtekEtpCandidateIds, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
+import { armtekSearchItems, armtekVkorgItems, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
+import { createHash } from "node:crypto";
+import { parseArmtekApiAccountState } from "../src/backend/suppliers/armtek/armtek-api-account-state.ts";
 import { findPrimaryPartKomMakerId } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
+import { rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
 import { parseStpartsResults } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
 import { gotoStparts, isStpartsSessionPageAuthorized } from "../src/backend/suppliers/stparts/stparts-site-auth.ts";
 import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.ts";
 import { SupplierAuthError } from "../src/backend/suppliers/errors.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
 import { buildIncompleteSearchWarnings, buildSupplierResultTooltip } from "../src/frontend/supplier-search-summary.js";
+import { SupplierTimeoutError } from "../src/backend/suppliers/errors.ts";
+import { isPartKomAuthenticated } from "../src/backend/suppliers/part-kom/part-kom-site-auth.ts";
 
 const port = 31847;
 const baseUrl = `http://127.0.0.1:${port}`;
-
-test("Armtek includes every ambiguous brand candidate", () => {
-  const ids = armtekEtpCandidateIds({
-    data: {
-      TBL: {
-        FIRSTDATA: Array.from({ length: 14 }, (_, index) => ({ ARTID: String(index + 1) })),
-      },
-    },
-  });
-
-  assert.deepEqual(ids, Array.from({ length: 14 }, (_, index) => String(index + 1)));
-});
 
 test("Armtek keeps both delivery interval dates", () => {
   const dates = parseArmtekDeliveryDates("20260725", "20260728");
@@ -35,6 +28,41 @@ test("Armtek keeps both delivery interval dates", () => {
   assert.ok(Date.parse(dates.deliveryDate) < Date.parse(dates.deliveryDateTo));
   assert.equal(new Date(dates.deliveryDate).getDate(), 25);
   assert.equal(new Date(dates.deliveryDateTo).getDate(), 28);
+});
+
+test("Armtek rejects impossible calendar delivery dates", () => {
+  assert.deepEqual(parseArmtekDeliveryDates("20260230", undefined), {
+    deliveryDate: null,
+    deliveryDateTo: null,
+  });
+});
+
+test("Armtek accepts the direct VKORG array returned by WebService", () => {
+  assert.deepEqual(armtekVkorgItems([{ VKORG: "4000" }]), [{ VKORG: "4000" }]);
+  assert.deepEqual(armtekVkorgItems({ ARRAY: { VKORG: "4000" } }), [{ VKORG: "4000" }]);
+});
+
+test("Armtek accepts the direct search array returned by WebService", () => {
+  assert.deepEqual(armtekSearchItems([{ PIN: "90915YZZJ1", PRICE: "691.22" }]), [{ PIN: "90915YZZJ1", PRICE: "691.22" }]);
+});
+
+test("Armtek account state is accepted only for the login that discovered it", () => {
+  const login = "test-account";
+  const loginHash = createHash("sha256").update(login).digest("hex");
+  const state = { loginHash, vkorg: "4000", kunnrRg: "123456" };
+
+  assert.deepEqual(parseArmtekApiAccountState(state, login), { vkorg: "4000", kunnrRg: "123456" });
+  assert.equal(parseArmtekApiAccountState(state, "another-account"), null);
+  assert.equal(parseArmtekApiAccountState({ ...state, kunnrRg: "" }, login), null);
+});
+
+test("Rossko keeps every exact article product returned by web search", () => {
+  assert.deepEqual(rosskoExactProductIds({
+    results: [
+      { searchResults: [{ id: "bardahl", article: "1072", part: { price: 1613 } }, { id: "other", article: "01072", part: { price: 100 } }] },
+      { searchResults: [{ id: "smilga", article: "1072", part: { price: 35.175 } }, { id: "without-price", article: "1072" }, { id: "bardahl", article: "1072", part: { price: 1613 } }] },
+    ],
+  }, "1072"), ["bardahl", "smilga"]);
 });
 
 test("Part-Kom selects the primary autocomplete maker for the requested normalized article", () => {
@@ -51,7 +79,7 @@ test("Part-Kom selects the primary autocomplete maker for the requested normaliz
 
 test("STParts parses the supplier output price from current result rows", () => {
   const results = parseStpartsResults(`
-    <tr class="resultTr2" data-is-request-article="1" data-output-price="6900.27" data-availability="38">
+    <tr class="resultTr2" data-is-request-article="1" data-article="VAP-021-2375" data-output-price="6900.27" data-availability="38">
       <td class="resultBrand">ВолгаАвтоПром</td>
       <td class="resultDescription">ВАЛ КАРДАННЫЙ ВАЗ-2121 ЗАДНИЙ</td>
       <td class="resultWarehouse"><font color="green">POS1066</font></td>
@@ -80,6 +108,29 @@ test("STParts allows fifteen seconds for the initial navigation by default", asy
 test("STParts identifies an expired stored session from its login page", () => {
   assert.equal(isStpartsSessionPageAuthorized('<form id="lgnform"><input name="login" /></form>'), false);
   assert.equal(isStpartsSessionPageAuthorized('<a href="/logout/">Logout</a>'), true);
+});
+
+test("STParts ignores product rows without supplier product identity", () => {
+  const results = parseStpartsResults(`
+    <tr class="resultTr2" data-is-request-article="1" data-output-price="100" data-availability="1">
+      <td class="resultBrand">Brand</td>
+    </tr>
+  `, "ABC-123", "https://stparts.ru/search/Brand/ABC123");
+
+  assert.deepEqual(results, []);
+});
+
+test("Part-Kom rejects a failed authorization probe", async () => {
+  const page = {
+    async goto() {},
+    async waitForTimeout() {},
+    async waitForLoadState() {},
+    async evaluate() {
+      return { probeFailed: true };
+    },
+  };
+
+  await assert.rejects(isPartKomAuthenticated(page), /authorization probe failed/);
 });
 
 test("supplier authentication failure triggers session disconnection", async () => {
@@ -112,6 +163,105 @@ test("supplier authentication failure triggers session disconnection", async () 
 
   assert.equal(disconnected, true);
   assert.equal(events.at(-1).status, "auth_error");
+});
+
+test("supplier search discards invalid results without stopping valid supplier output", async () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.markAuthorized("rossko");
+  const events = [];
+  const adapter = {
+    id: "rossko",
+    displayName: "Rossko",
+    timeoutMs: 1000,
+    async ensureSession() {
+      return sessionManager.getSession("rossko");
+    },
+    async search(_query, _context, onResult) {
+      onResult({
+        supplier: "rossko",
+        brand: "Brand",
+        article: "ABC-123",
+        title: "Part",
+        price: 1,
+        warehouse: null,
+        deliveryDate: null,
+        deliveryDateApproximate: false,
+        link: "javascript:bad",
+      });
+      onResult({
+        supplier: "rossko",
+        brand: "Brand",
+        article: "ABC-123",
+        title: "Part",
+        price: 1,
+        warehouse: null,
+        deliveryDate: null,
+        deliveryDateApproximate: false,
+        link: "https://rossko.ru/product",
+      });
+    },
+  };
+
+  await runSupplierSearch({
+    adapter,
+    sessionManager,
+    query: { article: "ABC-123" },
+    signal: new AbortController().signal,
+    emit: (event) => events.push(event),
+  });
+
+  assert.deepEqual(events.map((event) => event.type === "supplier_status" ? [event.status, event.details] : event.type), [
+    ["searching", undefined],
+    "result",
+    ["completed", undefined],
+  ]);
+});
+
+test("supplier search only recognizes typed timeout errors", async () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.markAuthorized("rossko");
+  const events = [];
+  const adapter = {
+    id: "rossko",
+    displayName: "Rossko",
+    timeoutMs: 1000,
+    async ensureSession() {
+      return sessionManager.getSession("rossko");
+    },
+    async search() {
+      throw new Error("response contains timeout marker https://private.invalid/?token=secret");
+    },
+  };
+
+  await runSupplierSearch({ adapter, sessionManager, query: { article: "ABC-123" }, signal: new AbortController().signal, emit: (event) => events.push(event) });
+  assert.deepEqual(events.at(-1), { type: "supplier_status", supplier: "rossko", status: "error", details: "Supplier search failed" });
+
+  adapter.search = async () => {
+    throw new SupplierTimeoutError("internal timeout details");
+  };
+  events.length = 0;
+  await runSupplierSearch({ adapter, sessionManager, query: { article: "ABC-123" }, signal: new AbortController().signal, emit: (event) => events.push(event) });
+  assert.deepEqual(events.at(-1), { type: "supplier_status", supplier: "rossko", status: "timeout", details: "Supplier search timed out" });
+});
+
+test("supplier search does not emit events for an already aborted request", async () => {
+  const controller = new AbortController();
+  controller.abort(new Error("Client disconnected"));
+  const events = [];
+  await runSupplierSearch({
+    adapter: { id: "rossko", displayName: "Rossko", timeoutMs: 1000, async ensureSession() { throw new Error("unreachable"); }, async search() {} },
+    sessionManager: new SupplierSessionManager(),
+    query: { article: "ABC-123" },
+    signal: controller.signal,
+    emit: (event) => events.push(event),
+  });
+  assert.deepEqual(events, []);
+});
+
+test("session manager preserves password whitespace", () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setArmtekCredentials({ login: " user ", password: " password " });
+  assert.deepEqual(sessionManager.getArmtekCredentials(), { login: "user", password: " password " });
 });
 
 test("incomplete search warnings list only failed suppliers", () => {

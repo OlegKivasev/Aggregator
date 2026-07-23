@@ -1,12 +1,7 @@
-import { getArmtekApiConfig, getRosskoApiConfig } from "./config.ts";
+import { getArmtekApiConfig } from "./config.ts";
 import { SupplierSessionManager } from "./session/session-manager.ts";
 import { ArmtekApiAdapter, verifyArmtekCredentials } from "./suppliers/armtek/armtek-api-adapter.ts";
-import {
-  clearArmtekStorageState,
-  closeArmtekBrowser,
-  hasArmtekStorageState,
-  verifyArmtekEtpCredentials,
-} from "./suppliers/armtek/armtek-site-auth.ts";
+import { clearArmtekApiAccountState } from "./suppliers/armtek/armtek-api-account-state.ts";
 import { runSupplierSearch } from "./suppliers/run-supplier-search.ts";
 import { MotorDetalApiAdapter } from "./suppliers/motordetal/motordetal-api-adapter.ts";
 import {
@@ -20,8 +15,6 @@ import {
   verifyPartKomCredentials,
 } from "./suppliers/part-kom/part-kom-site-auth.ts";
 import { PartKomApiAdapter } from "./suppliers/part-kom/part-kom-api-adapter.ts";
-import { RosskoApiAdapter } from "./suppliers/rossko/rossko-api-adapter.ts";
-import { RosskoMockAdapter } from "./suppliers/rossko/rossko-mock-adapter.ts";
 import { RosskoSiteApiAdapter } from "./suppliers/rossko/rossko-site-api-adapter.ts";
 import {
   clearRosskoStorageState,
@@ -42,32 +35,15 @@ import { clearMladovStorageState, closeMladovBrowser, hasMladovStorageState, ver
 import type { ArmtekCredentials, MladovCredentials, MotorDetalCredentials, PartKomCredentials, RosskoSiteCredentials, SearchQuery, SearchStreamEvent, StpartsCredentials, SupplierId, SupplierSessionValidationResult } from "./types.ts";
 
 const sessionManager = new SupplierSessionManager();
-const apiAdapters: SupplierAdapter[] = [new RosskoApiAdapter()];
-const webAdapters: SupplierAdapter[] = [new RosskoSiteApiAdapter()];
+const rosskoAdapter = new RosskoSiteApiAdapter();
 const armtekAdapter = new ArmtekApiAdapter();
 const partKomAdapter = new PartKomApiAdapter();
 const stpartsAdapter = new StpartsApiAdapter();
 const motorDetalAdapter = new MotorDetalApiAdapter();
 const mladovAdapter = new MladovWebAdapter();
 
-function getRosskoSearchAdapters(): SupplierAdapter[] {
-  if (process.env.ROSSKO_USE_STUB === "1") {
-    return [new RosskoMockAdapter()];
-  }
-
-  if (hasRosskoStorageState() || sessionManager.getRosskoCredentials()) {
-    return webAdapters;
-  }
-
-  if (getRosskoApiConfig()) {
-    return apiAdapters;
-  }
-
-  return apiAdapters;
-}
-
 function getSearchAdapters(query: SearchQuery): SupplierAdapter[] {
-  const adapters = [...getRosskoSearchAdapters(), armtekAdapter, partKomAdapter, stpartsAdapter, motorDetalAdapter, mladovAdapter];
+  const adapters = [rosskoAdapter, armtekAdapter, partKomAdapter, stpartsAdapter, motorDetalAdapter, mladovAdapter];
 
   if (!query.suppliers) {
     return adapters;
@@ -83,10 +59,6 @@ function bootstrapPersistedSessions() {
 
   if (getArmtekApiConfig()) {
     sessionManager.markAuthorized("armtek", "Armtek API credentials are configured in environment");
-  }
-
-  if (hasArmtekStorageState()) {
-    sessionManager.markAuthorized("armtek", "Armtek ETP stored session is available");
   }
 
   if (hasPartKomStorageState()) {
@@ -113,44 +85,27 @@ export function listSupplierSessions() {
 }
 
 export async function shutdownSearchService(): Promise<void> {
-  await Promise.all([closeArmtekBrowser(), closeMladovBrowser()]);
+  await closeMladovBrowser();
 }
 
 export async function authorizeRossko(credentials: RosskoSiteCredentials) {
   const result = await verifyRosskoCredentials(credentials);
 
   if (!result.authorized) {
-    sessionManager.clearRosskoCredentials();
     clearRosskoStorageState();
     return sessionManager.markUnauthorized("rossko", result.details);
   }
 
-  sessionManager.setRosskoCredentials(credentials);
   return sessionManager.markAuthorized("rossko", result.details);
 }
 
 export function logoutRossko() {
-  sessionManager.clearRosskoCredentials();
   clearRosskoStorageState();
   return sessionManager.markUnauthorized("rossko");
 }
 
 export async function authorizeArmtek(credentials: ArmtekCredentials) {
-  let details: string;
-
-  try {
-    details = await verifyArmtekCredentials(credentials);
-  } catch {
-    const etpResult = await verifyArmtekEtpCredentials(credentials);
-
-    if (!etpResult.authorized) {
-      sessionManager.clearArmtekCredentials();
-      clearArmtekStorageState();
-      return sessionManager.markUnauthorized("armtek", etpResult.details);
-    }
-
-    details = etpResult.details;
-  }
+  const details = await verifyArmtekCredentials(credentials);
 
   sessionManager.setArmtekCredentials(credentials);
   return sessionManager.markAuthorized("armtek", details);
@@ -158,7 +113,7 @@ export async function authorizeArmtek(credentials: ArmtekCredentials) {
 
 export function logoutArmtek() {
   sessionManager.clearArmtekCredentials();
-  clearArmtekStorageState();
+  clearArmtekApiAccountState();
   return sessionManager.markUnauthorized("armtek");
 }
 
@@ -299,11 +254,7 @@ export async function validateSupplierSessions(
   signal: AbortSignal,
 ): Promise<{ results: SupplierSessionValidationResult[]; sessions: ReturnType<typeof listSupplierSessions> }> {
   const adapters = getSearchAdapters({ article, suppliers });
-  const results = await Promise.all(adapters.map((adapter) =>
-    adapter instanceof RosskoMockAdapter
-      ? Promise.resolve({ supplier: adapter.id, status: "error" } satisfies SupplierSessionValidationResult)
-      : validateSupplierSession(adapter, article, signal),
-  ));
+  const results = await Promise.all(adapters.map((adapter) => validateSupplierSession(adapter, article, signal)));
   return { results, sessions: listSupplierSessions() };
 }
 
@@ -332,6 +283,10 @@ export async function streamSearch(
       }),
     ),
   );
+
+  if (signal.aborted) {
+    return;
+  }
 
   emit({
     type: "search_completed",

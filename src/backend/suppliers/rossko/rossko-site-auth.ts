@@ -251,11 +251,33 @@ export async function revealRosskoLoginForm(page: any) {
   const loginTrigger = page.getByRole("link", { name: /вход/i }).first();
 
   if ((await loginTrigger.count()) > 0) {
-    await loginTrigger.click();
+    try {
+      await loginTrigger.hover();
+    } catch {
+      // The form can also be opened by directly activating its hidden container.
+    }
   }
 
   emailField = page.locator('input[name="auth[email]"]:visible').first();
 
+  if (await waitForVisibleRosskoField(emailField)) {
+    return emailField;
+  }
+
+  const hiddenEmailField = page.locator('input[name="auth[email]"]').first();
+  if ((await hiddenEmailField.count()) > 0) {
+    await hiddenEmailField.evaluate((field: Element) => {
+      let container = field.closest("form")?.parentElement;
+
+      while (container && getComputedStyle(container).display === "none") {
+        container.style.display = "block";
+        container.style.visibility = "visible";
+        container = container.parentElement;
+      }
+    });
+  }
+
+  emailField = page.locator('input[name="auth[email]"]:visible').first();
   await waitForVisibleRosskoField(emailField);
   return emailField;
 }

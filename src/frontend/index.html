@@ -128,6 +128,10 @@
             <div class="results-panel__header card-header bg-white border-0 d-flex justify-content-between align-items-center">
               <span class="panel__meta text-secondary" id="global-status"></span>
               <div class="results-panel__controls">
+                <label class="table-search-control" for="table-search">
+                  <span class="visually-hidden">Поиск по таблице</span>
+                  <input id="table-search" type="search" placeholder="Поиск по таблице" autocomplete="off" />
+                </label>
                 <label class="markup-control" for="markup-percent">Наценка, %
                   <input id="markup-percent" type="number" min="0" max="1000" step="1" value="35" inputmode="decimal">
                 </label>
@@ -182,10 +186,7 @@
       <div class="settings-drawer__backdrop" id="settings-backdrop"></div>
       <div class="settings-drawer__panel card border-0 shadow-lg">
         <div class="settings-drawer__header">
-          <div>
-            <h2>Настройки</h2>
-            <p class="panel__meta" id="auth-status"></p>
-          </div>
+          <h2>Настройки</h2>
           <button type="button" class="button-secondary settings-close btn btn-light" id="settings-close" aria-label="Закрыть настройки">×</button>
         </div>
 
@@ -234,14 +235,14 @@
             <form id="rossko-auth-form" class="auth-form" data-authorized="false">
               <label class="field">
                 <span>Логин</span>
-                <input id="rossko-login" name="login" type="text" autocomplete="username" />
+                <input id="rossko-login" name="login" type="text" autocomplete="username" required />
               </label>
               <label class="field">
                 <span>Пароль</span>
-                <span class="password-field"><input id="rossko-password" name="password" type="password" autocomplete="current-password" /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="rossko-password"><span aria-hidden="true">&#128065;</span></button></span>
+                <span class="password-field"><input id="rossko-password" name="password" type="password" autocomplete="current-password" required /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="rossko-password"><span aria-hidden="true">&#128065;</span></button></span>
               </label>
-              <div class="auth-actions">
-              <button type="submit" id="rossko-connect-button" class="btn btn-primary">Подключить</button>
+               <div class="auth-actions">
+                 <button type="submit" id="rossko-connect-button" class="btn btn-primary">Войти</button>
                 <button type="button" class="button-secondary btn btn-light" id="rossko-logout-button" hidden>Отключить</button>
               </div>
             </form>

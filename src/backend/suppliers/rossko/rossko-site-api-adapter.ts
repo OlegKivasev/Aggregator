@@ -14,11 +14,7 @@ interface RosskoDeliverySchema {
 interface RosskoSearchItem {
   id?: string;
   article?: string;
-}
-
-interface RosskoAutocompleteItem {
-  article?: string;
-  goodsCode?: string;
+  part?: { price?: number };
 }
 
 interface RosskoSearchResponse {
@@ -51,6 +47,7 @@ interface RosskoCardResponse {
 const requestAttempts = Math.max(1, Number(process.env.ROSSKO_API_REQUEST_ATTEMPTS ?? "3"));
 const hedgeDelayMs = Math.max(100, Number(process.env.ROSSKO_API_HEDGE_DELAY_MS ?? "1200"));
 const requestTimeoutMs = Math.max(1000, Number(process.env.ROSSKO_API_REQUEST_TIMEOUT_MS ?? "6000"));
+const cardRequestConcurrency = 12;
 const rosskoHttpsAgent = new Agent({ keepAlive: true, family: 4, maxSockets: 6 });
 
 let cachedDeliverySettings: {
@@ -61,6 +58,22 @@ let cachedDeliverySettings: {
 
 function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9А-Я]/gi, "").toUpperCase();
+}
+
+export function rosskoExactProductIds(search: RosskoSearchResponse, article: string): string[] {
+  const target = normalizeArticle(article);
+  return [...new Set(search.results?.flatMap((group) =>
+    (group.searchResults || []).flatMap((candidate) => {
+      const price = candidate.part?.price;
+      return candidate.id &&
+        normalizeArticle(candidate.article || "") === target &&
+        typeof price === "number" &&
+        Number.isFinite(price) &&
+        price > 0
+        ? [candidate.id]
+        : [];
+    }),
+  ) || [])];
 }
 
 function serviceUrl(service: string, path: string): URL {
@@ -163,7 +176,7 @@ async function rosskoRequest<T>(url: URL, signal: AbortSignal): Promise<T> {
 }
 
 function selectedValue<T extends { selected?: boolean }>(items: T[] | undefined): T | undefined {
-  return items?.find((item) => item.selected) || items?.[0];
+  return items?.find((item) => item.selected);
 }
 
 async function getDeliverySettings(signal: AbortSignal): Promise<{ addressGuid: string; deliveryType: string }> {
@@ -187,22 +200,6 @@ async function getDeliverySettings(signal: AbortSignal): Promise<{ addressGuid: 
 
   cachedDeliverySettings = { authorizationSession, addressGuid, deliveryType };
   return cachedDeliverySettings;
-}
-
-async function findProductId(article: string, signal: AbortSignal): Promise<string | null> {
-  const target = normalizeArticle(article);
-  const autocompleteUrl = serviceUrl("searchform", "/api/Search/Autocomplete");
-  autocompleteUrl.searchParams.set("searchString", article.trim());
-
-  try {
-    const items = await rosskoRequest<RosskoAutocompleteItem[]>(autocompleteUrl, signal);
-    return items.find((item) => item.goodsCode && normalizeArticle(item.article || "") === target)?.goodsCode || null;
-  } catch (error) {
-    if (error instanceof SupplierAuthError || signal.aborted) {
-      throw error;
-    }
-    return null;
-  }
 }
 
 function productLink(part: RosskoCardPart, article: string): string {
@@ -234,76 +231,75 @@ export class RosskoSiteApiAdapter implements SupplierAdapter {
     _sessionManager: SupplierSessionManager,
   ): Promise<void> {
     const article = query.article.trim();
-    const [{ addressGuid, deliveryType }, autocompleteProductId] = await Promise.all([
-      getDeliverySettings(context.signal),
-      findProductId(article, context.signal),
-    ]);
-
-    let productId = autocompleteProductId;
-
-    if (!productId) {
-      const searchUrl = serviceUrl("searchresult", "/api/Search");
-      searchUrl.search = new URLSearchParams({
-        searchString: article,
-        CurrencyCode: "643",
-        tariffTimings: "true",
-        addressGuid,
-        deliveryType,
-        newCart: "true",
-        isFullTextSearch: "false",
-        sid: randomUUID().replaceAll("-", ""),
-        oemCatalog: "true",
-      }).toString();
-      const search = await rosskoRequest<RosskoSearchResponse>(searchUrl, context.signal);
-      const target = normalizeArticle(article);
-      productId = search.results
-        ?.flatMap((group) => group.searchResults || [])
-        .find((candidate) => candidate.id && normalizeArticle(candidate.article || "") === target)
-        ?.id || null;
-
-      if (search.errorFlag || !productId) {
-        return;
-      }
-    }
-
-    const cardUrl = serviceUrl("productcard", `/api/Product/Card/${encodeURIComponent(productId)}`);
-    cardUrl.search = new URLSearchParams({
+    const { addressGuid, deliveryType } = await getDeliverySettings(context.signal);
+    const searchUrl = serviceUrl("searchresult", "/api/Search");
+    searchUrl.search = new URLSearchParams({
+      searchString: article,
       CurrencyCode: "643",
       tariffTimings: "true",
-      newCart: "true",
       addressGuid,
       deliveryType,
+      newCart: "true",
+      isFullTextSearch: "false",
+      sid: randomUUID().replaceAll("-", ""),
+      oemCatalog: "true",
     }).toString();
-    const card = await rosskoRequest<RosskoCardResponse>(cardUrl, context.signal);
+    const search = await rosskoRequest<RosskoSearchResponse>(searchUrl, context.signal);
+    const target = normalizeArticle(article);
+    const productIds = rosskoExactProductIds(search, article);
 
-    if (card.isAuthorized === false) {
-      throw new SupplierAuthError("Rossko API session is no longer authorized");
-    }
-
-    const part = card.mainPart;
-    if (!part || normalizeArticle(part.partNumber || "") !== normalizeArticle(article)) {
+    if (search.errorFlag || !productIds.length) {
       return;
     }
 
-    let emitted = 0;
-    for (const stock of part.stocks || []) {
-      if (!stock.basePrice || stock.basePrice <= 0 || !stock.inventory || stock.inventory <= 0) {
-        continue;
+    const searchProductCard = async (productId: string) => {
+      const cardUrl = serviceUrl("productcard", `/api/Product/Card/${encodeURIComponent(productId)}`);
+      cardUrl.search = new URLSearchParams({
+        CurrencyCode: "643",
+        tariffTimings: "true",
+        newCart: "true",
+        addressGuid,
+        deliveryType,
+      }).toString();
+      const card = await rosskoRequest<RosskoCardResponse>(cardUrl, context.signal);
+
+      if (card.isAuthorized === false) {
+        throw new SupplierAuthError("Rossko API session is no longer authorized");
       }
 
-      emitted += 1;
-      onResult({
-        supplier: this.id,
-        brand: part.brandName || "Rossko",
-        article: part.partNumber || query.article,
-        title: part.goodsName || part.partNumber || query.article,
-        price: stock.basePrice,
-        warehouse: stock.name || stock.cartItemDto?.stock_name || null,
-        warehouseFull: stock.name || stock.cartItemDto?.stock_name || null,
-        deliveryDate: stock.tariffDeliveryTimingWithTimezone?.start || stock.tariffDeliveryTimingWithTimezone?.end || null,
-        deliveryDateApproximate: Boolean(stock.isApproximateDeliveryInterval),
-        link: productLink(part, query.article),
-      });
+      const part = card.mainPart;
+      if (!part || normalizeArticle(part.partNumber || "") !== target) {
+        return;
+      }
+      const brand = part.brandName?.trim();
+      const partNumber = part.partNumber?.trim();
+      const title = part.goodsName?.trim();
+      if (!brand || !partNumber || !title) {
+        return;
+      }
+
+      for (const stock of part.stocks || []) {
+        if (!stock.basePrice || stock.basePrice <= 0 || !stock.inventory || stock.inventory <= 0) {
+          continue;
+        }
+
+        onResult({
+          supplier: this.id,
+          brand,
+          article: partNumber,
+          title,
+          price: stock.basePrice,
+          warehouse: stock.name || stock.cartItemDto?.stock_name || null,
+          warehouseFull: stock.name || stock.cartItemDto?.stock_name || null,
+          deliveryDate: stock.tariffDeliveryTimingWithTimezone?.start || stock.tariffDeliveryTimingWithTimezone?.end || null,
+          deliveryDateApproximate: Boolean(stock.isApproximateDeliveryInterval),
+          link: productLink(part, query.article),
+        });
+      }
+    };
+
+    for (let index = 0; index < productIds.length; index += cardRequestConcurrency) {
+      await Promise.all(productIds.slice(index, index + cardRequestConcurrency).map(searchProductCard));
     }
 
   }

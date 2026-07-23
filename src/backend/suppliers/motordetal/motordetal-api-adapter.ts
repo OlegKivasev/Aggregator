@@ -103,16 +103,12 @@ async function getDeliveryDates(products: MotorDetalProduct[], signal: AbortSign
     warehouseGroups: JSON.stringify(warehouseGroups),
   });
 
-  try {
-    const rows = await motorDetalApiRequest<MotorDetalDeliveryDate[]>("delivery-date/", params, signal);
-    return new Map(
-      rows
-        .filter((row) => row.productUid && row.warehouseGroupId !== undefined && row.deliveryDate)
-        .map((row) => [`${row.productUid}|${row.warehouseGroupId}`, row.deliveryDate as string]),
-    );
-  } catch (error) {
-    return new Map();
-  }
+  const rows = await motorDetalApiRequest<MotorDetalDeliveryDate[]>("delivery-date/", params, signal);
+  return new Map(
+    rows
+      .filter((row) => row.productUid && row.warehouseGroupId !== undefined && row.deliveryDate)
+      .map((row) => [`${row.productUid}|${row.warehouseGroupId}`, row.deliveryDate as string]),
+  );
 }
 
 export class MotorDetalApiAdapter implements SupplierAdapter {
@@ -162,9 +158,13 @@ export class MotorDetalApiAdapter implements SupplierAdapter {
       const target = normalizeArticle(query.article);
       const products = (page.content || []).filter((product) => normalizeArticle(product.articul || "") === target);
       const deliveryDates = await getDeliveryDates(products, context.signal);
-      let emitted = 0;
-
       for (const product of products) {
+        const brand = product.manufacturerHeader?.trim();
+        const article = product.articul?.trim();
+        const title = product.fullHeader?.trim() || product.header?.trim();
+        if (!brand || !article || !title) {
+          continue;
+        }
         const link = product.url
           ? new URL(`/product/${product.url}`, motorDetalBaseUrl).toString()
           : new URL(`/catalog?keyword=${encodeURIComponent(query.article)}&page=1`, motorDetalBaseUrl).toString();
@@ -177,12 +177,11 @@ export class MotorDetalApiAdapter implements SupplierAdapter {
           }
 
           const deliveryDate = offer.deliveryDate || deliveryDates.get(`${product.syncUid}|${offer.warehouseGroupId}`) || dateFromSupplyTerm(product.supplyTerm);
-          emitted += 1;
           onResult({
             supplier: this.id,
-            brand: product.manufacturerHeader || "MotorDetal",
-            article: product.articul || query.article,
-            title: product.fullHeader || product.header || product.articul || query.article,
+            brand,
+            article,
+            title,
             price,
             warehouse: offer.warehouseGroupShortHeader || offer.warehouseGroupHeader || null,
             warehouseFull: offer.warehouseGroupAddress || offer.warehouseGroupHeader || null,
@@ -192,7 +191,6 @@ export class MotorDetalApiAdapter implements SupplierAdapter {
           });
         }
       }
-
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/authoriz|session|token|HTTP 40[13]|доступ|авторизац/i.test(message)) {

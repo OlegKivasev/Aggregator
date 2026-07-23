@@ -740,8 +740,10 @@ input {
 
 .results-panel__controls {
   display: flex;
+  flex: 1;
   align-items: center;
   gap: 14px;
+  min-width: 0;
 }
 
 .markup-control {
@@ -762,6 +764,26 @@ input {
   color: var(--ink);
   background: #fff;
   text-align: right;
+}
+
+.table-search-control {
+  flex: 1;
+  min-width: 160px;
+}
+
+.table-search-control input {
+  width: 100%;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 12px;
+}
+
+.table-search-control input:focus {
+  outline: 2px solid rgba(255, 75, 19, 0.25);
+  outline-offset: 1px;
 }
 
 .panel__meta {

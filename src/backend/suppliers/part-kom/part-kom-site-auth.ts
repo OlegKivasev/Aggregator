@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { getStateFilePath } from "../../config.ts";
+import { SupplierIntegrationError } from "../errors.ts";
 import type { PartKomCredentials } from "../../types.ts";
 
 export interface PartKomAuthCheckResult {
@@ -148,7 +149,7 @@ export async function isPartKomAuthenticated(page: any): Promise<boolean> {
   }, partKomAuthProbeTimeoutMs)) as PartKomAuthProbeResponse & { probeFailed?: boolean };
 
   if (probe.probeFailed) {
-    return true;
+    throw new SupplierIntegrationError("Part-Kom authorization probe failed");
   }
 
   const message = probe.msg || probe.message;

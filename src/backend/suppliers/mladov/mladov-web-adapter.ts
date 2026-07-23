@@ -100,7 +100,7 @@ async function fetchMladovResults(context: any, page: any, article: string): Pro
 
       return {
         article,
-        brand: text(".col-md-1.hidden-xs") || "Механик Ладов",
+        brand: text(".col-md-1.hidden-xs"),
         title: text('[itemprop="name"], .col-md-3.col-xs-8'),
         price,
         warehouse: detail(0),
@@ -110,7 +110,9 @@ async function fetchMladovResults(context: any, page: any, article: string): Pro
   )) as MladovResultItem[];
 
   const target = normalizeArticle(article);
-  const exactItems = items.filter((item) => normalizeArticle(item.article) === target && Number.isFinite(item.price));
+  const exactItems = items.filter((item) =>
+    normalizeArticle(item.article) === target && item.brand && item.title && Number.isFinite(item.price) && item.price > 0,
+  );
   return exactItems;
 }
 
@@ -137,11 +139,11 @@ export class MladovWebAdapter implements SupplierAdapter {
   ): Promise<void> {
     const browser = await getMladovSharedBrowser();
     const context = await createMladovContext(browser);
-    const page = await context.newPage();
     const closeOnAbort = () => context.close().catch(() => undefined);
     searchContext.signal.addEventListener("abort", closeOnAbort, { once: true });
 
     try {
+      const page = await context.newPage();
       let authorized = await isMladovAuthenticated(page);
       if (!authorized) {
         const credentials = sessionManager.getMladovCredentials();
@@ -169,7 +171,7 @@ export class MladovWebAdapter implements SupplierAdapter {
           supplier: this.id,
           brand: item.brand,
           article: item.article,
-          title: item.title || item.article,
+          title: item.title,
           price: item.price,
           warehouse: item.warehouse,
           deliveryDate: delivery.date,

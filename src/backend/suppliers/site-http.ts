@@ -1,6 +1,8 @@
 import { Agent, request as httpsRequest } from "node:https";
+import { SupplierIntegrationError, SupplierTimeoutError } from "./errors.ts";
 
 const siteAgent = new Agent({ keepAlive: true, family: 4, maxSockets: 12 });
+const maxResponseBytes = 2 * 1024 * 1024;
 
 export interface SiteHttpResponse {
   status: number;
@@ -14,7 +16,10 @@ export async function siteHttpRequest(
 ): Promise<SiteHttpResponse> {
   const controller = new AbortController();
   const forwardAbort = () => controller.abort(options.signal.reason);
-  const timeout = setTimeout(() => controller.abort(new Error(`Request timed out after ${options.timeoutMs ?? 8000}ms`)), options.timeoutMs ?? 8000);
+  const timeout = setTimeout(
+    () => controller.abort(new SupplierTimeoutError("Supplier request timed out")),
+    options.timeoutMs ?? 8000,
+  );
   options.signal.addEventListener("abort", forwardAbort, { once: true });
 
   try {
@@ -33,8 +38,17 @@ export async function siteHttpRequest(
         },
       }, (response) => {
         let body = "";
+        let bodyBytes = 0;
         response.setEncoding("utf-8");
-        response.on("data", (chunk) => { body += chunk; });
+        response.on("data", (chunk: string) => {
+          bodyBytes += Buffer.byteLength(chunk);
+          if (bodyBytes > maxResponseBytes) {
+            response.destroy(new SupplierIntegrationError("Supplier response is too large"));
+            return;
+          }
+          body += chunk;
+        });
+        response.on("error", reject);
         response.on("end", () => resolve({
           status: response.statusCode || 0,
           body,

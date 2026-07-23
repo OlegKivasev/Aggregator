@@ -90,6 +90,13 @@ function dateFromDays(value: string | number | undefined): string | null {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate() + Math.ceil(days)).toISOString();
 }
 
+function isCalendarDate(date: Date, year: number, monthIndex: number, day: number): boolean {
+  return !Number.isNaN(date.getTime()) &&
+    date.getFullYear() === year &&
+    date.getMonth() === monthIndex &&
+    date.getDate() === day;
+}
+
 function deliveryDate(value: string | undefined, days: string | number | undefined): string | null {
   if (value) {
     const normalized = value.trim().replace(/^~/, "");
@@ -97,11 +104,19 @@ function deliveryDate(value: string | undefined, days: string | number | undefin
     if (match) {
       const now = new Date();
       let year = match[3] ? Number(match[3].length === 2 ? `20${match[3]}` : match[3]) : now.getFullYear();
-      let result = new Date(year, Number(match[2]) - 1, Number(match[1]));
-      if (!match[3] && result.getTime() < now.getTime() - 30 * 86400000) {
-        result = new Date(year + 1, Number(match[2]) - 1, Number(match[1]));
+      const monthIndex = Number(match[2]) - 1;
+      const day = Number(match[1]);
+      let result = new Date(year, monthIndex, day);
+      if (!isCalendarDate(result, year, monthIndex, day)) {
+        return dateFromDays(days);
       }
-      return Number.isNaN(result.getTime()) ? dateFromDays(days) : result.toISOString();
+      if (!match[3] && result.getTime() < now.getTime() - 30 * 86400000) {
+        result = new Date(year + 1, monthIndex, day);
+        if (!isCalendarDate(result, year + 1, monthIndex, day)) {
+          return dateFromDays(days);
+        }
+      }
+      return result.toISOString();
     }
     const parsed = new Date(value);
     if (!Number.isNaN(parsed.getTime())) {
@@ -111,10 +126,10 @@ function deliveryDate(value: string | undefined, days: string | number | undefin
   return dateFromDays(days);
 }
 
-function makerName(makers: PartKomSearchResponse["makers"], makerId: string | number | undefined, fallback: string): string {
+function makerName(makers: PartKomSearchResponse["makers"], makerId: string | number | undefined): string | null {
   const target = String(makerId ?? "");
   const rows = Array.isArray(makers) ? makers : Object.values(makers || {});
-  return rows.find((maker) => String(maker.id ?? "") === target)?.name || fallback;
+  return rows.find((maker) => String(maker.id ?? "") === target)?.name?.trim() || null;
 }
 
 function warehouse(offer: PartKomOffer, providers: PartKomProvider[]): string | null {
@@ -195,13 +210,16 @@ export class PartKomApiAdapter implements SupplierAdapter {
         if (offer.number && normalizeArticle(offer.number) !== target) continue;
         const price = parsePrice(offer.price);
         if (price === null || Number(offer.quantity) === 0) continue;
-        const offerArticle = offer.number || part.number || article;
+        const offerArticle = offer.number?.trim() || part.number?.trim();
         const offerMakerId = offer.maker_id ?? part.maker_id;
+        const brand = makerName(search.makers, offerMakerId);
+        const title = offer.description?.trim() || offer.name?.trim() || part.description?.trim() || part.name?.trim();
+        if (!offerArticle || !brand || !title) continue;
         onResult({
           supplier: this.id,
-          brand: makerName(search.makers, offerMakerId, rows.find((row) => String(row.maker_id) === String(offerMakerId))?.maker || "Part-Kom"),
+          brand,
           article: offerArticle,
-          title: offer.description || offer.name || part.description || part.name || offerArticle,
+          title,
           price,
           warehouse: warehouse(offer, search.providers || []),
           deliveryDate: deliveryDate(offer.delivery_wave_date_from, offer.days_guaranteed),
