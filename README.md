@@ -67,5 +67,6 @@ limit, and returns at most 80 product cards and 80 crosses per product.
 - Pass supplier credentials and API keys through environment variables or the runtime authorization UI. Do not store them in files in the checkout.
 - Armtek stores API-discovered `VKORG` and `KUNNR_RG` in `STATE_DIR/armtek-api-account-state.json`, bound to a hash of the active login and protected with mode `0600`. Explicit `ARMTEK_VKORG` and `ARMTEK_KUNNR_RG` take precedence.
 - Armtek uses only its WebService API for authorization and search. API failures are reported as Armtek errors; the service does not query ETP or use a browser-session fallback.
+- STParts uses ABCP `user/info` for session checks and combines up to 100 brand/article pairs in each `search/batch` request. Batch search excludes online stocks by ABCP design; successful searches are cached in memory for one minute to reduce repeated API usage.
 
 Copy the variable names from `.env.example` into the server's secret manager or service environment. The application does not load `.env` files itself.

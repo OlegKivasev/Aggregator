@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { parseArmtekApiAccountState } from "../src/backend/suppliers/armtek/armtek-api-account-state.ts";
 import { findPrimaryPartKomMakerId, isPartKomUnauthorizedResponse } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
-import { parseStpartsApiResults } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
+import { createStpartsBatchParams, parseStpartsApiResults, StpartsApiAdapter } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
 import { gotoStparts, isStpartsSessionPageAuthorized } from "../src/backend/suppliers/stparts/stparts-site-auth.ts";
 import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.ts";
 import { SupplierAuthError } from "../src/backend/suppliers/errors.ts";
@@ -112,6 +112,58 @@ test("STParts rejects malformed and non-exact API offers", () => {
 
 test("STParts treats an empty API result map as no offers", () => {
   assert.deepEqual(parseStpartsApiResults({}, "1072"), []);
+});
+
+test("STParts splits batch searches at the ABCP limit", () => {
+  const batches = createStpartsBatchParams(Array.from({ length: 101 }, (_value, index) => `Brand ${index}`), "ABC-123");
+
+  assert.equal(batches.length, 2);
+  assert.equal(batches[0].get("search[99][brand]"), "Brand 99");
+  assert.equal(batches[1].get("search[0][brand]"), "Brand 100");
+  assert.equal(batches[1].get("search[0][number]"), "ABC-123");
+});
+
+test("STParts batches brands and caches repeated searches", async () => {
+  const calls = [];
+  const requester = async (path, params, _signal, _timeoutMs, _credentials, options) => {
+    calls.push({ path, params: new URLSearchParams(params), method: options?.method ?? "GET" });
+    if (path === "search/brands/") {
+      return [{ brand: "Brand A" }, { brand: "Brand B" }, { brand: "Brand A" }];
+    }
+    return [{ brand: "Brand A", number: "ABC-123", description: "Part", price: 100, availability: 1 }];
+  };
+  const adapter = new StpartsApiAdapter(requester);
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setStpartsCredentials({ login: "test", password: "secret" });
+  const results = [];
+  const context = { signal: new AbortController().signal, timeoutMs: 1000 };
+
+  await Promise.all([
+    adapter.search({ article: "ABC-123" }, context, (result) => results.push(result), sessionManager),
+    adapter.search({ article: "ABC123" }, context, (result) => results.push(result), sessionManager),
+  ]);
+  await adapter.search({ article: "ABC-123" }, context, (result) => results.push(result), sessionManager);
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map((call) => [call.path, call.method]), [["search/brands/", "GET"], ["search/batch", "POST"]]);
+  assert.equal(calls[0].params.get("useOnlineStocks"), "0");
+  assert.equal(calls[1].params.get("search[0][brand]"), "Brand A");
+  assert.equal(calls[1].params.get("search[1][brand]"), "Brand B");
+  assert.equal(results.length, 3);
+});
+
+test("STParts validates sessions without running a product search", async () => {
+  const calls = [];
+  const adapter = new StpartsApiAdapter(async (path) => {
+    calls.push(path);
+    return { id: "test-user" };
+  });
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setStpartsCredentials({ login: "test", password: "secret" });
+
+  await adapter.validateSession({ signal: new AbortController().signal, timeoutMs: 1000 }, sessionManager);
+
+  assert.deepEqual(calls, ["user/info"]);
 });
 
 test("STParts allows fifteen seconds for the initial navigation by default", async () => {

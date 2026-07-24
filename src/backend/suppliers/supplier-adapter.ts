@@ -13,6 +13,7 @@ export interface SupplierAdapter {
   readonly timeoutMs: number;
 
   ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState>;
+  validateSession?(context: SupplierSearchContext, sessionManager: SupplierSessionManager): Promise<void>;
   search(
     query: SearchQuery,
     context: SupplierSearchContext,

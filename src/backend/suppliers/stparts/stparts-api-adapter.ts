@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import { getStpartsApiConfig } from "../../config.ts";
 import type { NormalizedSearchResult, SearchQuery, SupplierSearchContext, SupplierSessionState, StpartsCredentials } from "../../types.ts";
-import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
+import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../errors.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
 import { siteHttpRequest } from "../site-http.ts";
 import { stpartsBaseUrl } from "./stparts-site-auth.ts";
@@ -24,6 +24,34 @@ interface AbcpArticle {
   supplierColor?: unknown;
   supplierDescription?: unknown;
 }
+
+interface StpartsApiRequestOptions {
+  method?: "GET" | "POST";
+}
+
+type StpartsApiRequester = (
+  path: string,
+  params: URLSearchParams,
+  signal: AbortSignal,
+  timeoutMs: number,
+  credentials?: StpartsCredentials,
+  options?: StpartsApiRequestOptions,
+) => Promise<unknown>;
+
+interface CachedStpartsSearch {
+  expiresAt: number;
+  results: NormalizedSearchResult[];
+}
+
+interface StpartsSearchInProgress {
+  controller: AbortController;
+  promise: Promise<NormalizedSearchResult[]>;
+  waiters: number;
+}
+
+const stpartsSearchCacheTtlMs = 60_000;
+const stpartsSearchCacheMaxEntries = 100;
+const stpartsBatchSize = 100;
 
 function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
@@ -133,6 +161,7 @@ async function stpartsApiRequest(
   signal: AbortSignal,
   timeoutMs: number,
   credentials?: StpartsCredentials,
+  options: StpartsApiRequestOptions = {},
 ): Promise<unknown> {
   const config = getStpartsApiConfig(credentials);
   if (!config) {
@@ -141,11 +170,19 @@ async function stpartsApiRequest(
   const url = new URL(path, config.url);
   params.set("userlogin", config.login);
   params.set("userpsw", createHash("md5").update(config.password).digest("hex"));
-  url.search = params.toString();
+  const method = options.method ?? "GET";
+  if (method === "GET") {
+    url.search = params.toString();
+  }
   const response = await siteHttpRequest(url, {
-    headers: { Accept: "application/json" },
+    headers: {
+      Accept: "application/json",
+      ...(method === "POST" ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
+    },
     signal,
     timeoutMs,
+    method,
+    body: method === "POST" ? params.toString() : undefined,
   });
   let payload: unknown;
   try {
@@ -163,12 +200,25 @@ async function stpartsApiRequest(
     throw new SupplierAuthError("STParts API rejected the configured credentials");
   }
   if (response.status < 200 || response.status >= 300) {
-    if (path === "search/articles/" && errorCode === 301) {
+    if ((path === "search/articles/" || path === "search/batch") && errorCode === 301) {
       return [];
     }
     throw new SupplierIntegrationError(`STParts API returned HTTP ${response.status}`);
   }
   return payload;
+}
+
+export function createStpartsBatchParams(brands: string[], article: string): URLSearchParams[] {
+  const batches: URLSearchParams[] = [];
+  for (let offset = 0; offset < brands.length; offset += stpartsBatchSize) {
+    const params = new URLSearchParams();
+    for (const [index, brand] of brands.slice(offset, offset + stpartsBatchSize).entries()) {
+      params.set(`search[${index}][brand]`, brand);
+      params.set(`search[${index}][number]`, article);
+    }
+    batches.push(params);
+  }
+  return batches;
 }
 
 async function searchStpartsBrands(
@@ -177,36 +227,22 @@ async function searchStpartsBrands(
   signal: AbortSignal,
   timeoutMs: number,
   credentials: StpartsCredentials | undefined,
+  request: StpartsApiRequester,
 ): Promise<unknown[]> {
-  const results: unknown[] = [];
-  let nextIndex = 0;
-  const workerCount = Math.min(brands.length, 12);
-
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (!signal.aborted) {
-      const index = nextIndex;
-      nextIndex += 1;
-      const brand = brands[index];
-      if (!brand) {
-        return;
-      }
-      results.push(await stpartsApiRequest(
-        "search/articles/",
-        new URLSearchParams({ brand, number: article, useOnlineStocks: "1", withOutAnalogs: "1" }),
-        signal,
-        timeoutMs,
-        credentials,
-      ));
-    }
-  }));
-
-  return results;
+  return Promise.all(createStpartsBatchParams(brands, article).map((params) => request(
+    "search/batch",
+    params,
+    signal,
+    timeoutMs,
+    credentials,
+    { method: "POST" },
+  )));
 }
 
 export async function verifyStpartsApiCredentials(credentials: StpartsCredentials): Promise<void> {
   await stpartsApiRequest(
-    "search/brands/",
-    new URLSearchParams({ number: "000000", useOnlineStocks: "0" }),
+    "user/info",
+    new URLSearchParams(),
     AbortSignal.timeout(10_000),
     10_000,
     credentials,
@@ -217,11 +253,28 @@ export class StpartsApiAdapter implements SupplierAdapter {
   readonly id = "stparts";
   readonly displayName = "STParts";
   readonly timeoutMs = Number(process.env.STPARTS_SEARCH_TIMEOUT_MS ?? "10000");
+  private readonly request: StpartsApiRequester;
+  private readonly searchCache = new Map<string, CachedStpartsSearch>();
+  private readonly searchesInProgress = new Map<string, StpartsSearchInProgress>();
+
+  constructor(request: StpartsApiRequester = stpartsApiRequest) {
+    this.request = request;
+  }
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
     return getStpartsApiConfig(sessionManager.getStpartsCredentials() ?? undefined)
       ? sessionManager.markChecked(this.id, "STParts API credentials are configured")
       : sessionManager.markUnauthorized(this.id, "STParts API credentials are not configured");
+  }
+
+  async validateSession(context: SupplierSearchContext, sessionManager: SupplierSessionManager): Promise<void> {
+    await this.request(
+      "user/info",
+      new URLSearchParams(),
+      context.signal,
+      context.timeoutMs,
+      sessionManager.getStpartsCredentials() ?? undefined,
+    );
   }
 
   async search(
@@ -232,16 +285,90 @@ export class StpartsApiAdapter implements SupplierAdapter {
   ): Promise<void> {
     const article = query.article.trim();
     const credentials = sessionManager.getStpartsCredentials() ?? undefined;
-    const brandsPayload = await stpartsApiRequest("search/brands/", new URLSearchParams({ number: article, useOnlineStocks: "1" }), context.signal, context.timeoutMs, credentials);
+    const config = getStpartsApiConfig(credentials);
+    if (!config) {
+      throw new SupplierAuthError("STParts API credentials are not configured");
+    }
+    const cacheKey = createHash("sha256")
+      .update(`${config.login}\0${config.password}\0${normalizeArticle(article)}`)
+      .digest("hex");
+    const cached = this.searchCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      cached.results.forEach(onResult);
+      return;
+    }
+    if (cached) {
+      this.searchCache.delete(cacheKey);
+    }
+
+    let search = this.searchesInProgress.get(cacheKey);
+    if (!search) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(new SupplierTimeoutError(`STParts search timed out after ${context.timeoutMs}ms`)),
+        context.timeoutMs,
+      );
+      const promise = this.searchUncached(article, cacheKey, controller.signal, context.timeoutMs, credentials);
+      search = { controller, promise, waiters: 0 };
+      this.searchesInProgress.set(cacheKey, search);
+      void promise.finally(() => {
+        clearTimeout(timeoutId);
+        if (this.searchesInProgress.get(cacheKey)?.promise === promise) {
+          this.searchesInProgress.delete(cacheKey);
+        }
+      }).catch(() => undefined);
+    }
+    search.waiters += 1;
+    try {
+      const results = await this.waitForSearch(search.promise, context.signal);
+      results.forEach(onResult);
+    } finally {
+      search.waiters -= 1;
+      if (search.waiters === 0 && this.searchesInProgress.get(cacheKey) === search) {
+        search.controller.abort(context.signal.reason ?? new Error("STParts search has no active clients"));
+      }
+    }
+  }
+
+  private async waitForSearch(searchPromise: Promise<NormalizedSearchResult[]>, signal: AbortSignal): Promise<NormalizedSearchResult[]> {
+    if (signal.aborted) {
+      throw signal.reason;
+    }
+    let rejectAbort: (reason: unknown) => void = () => undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      rejectAbort = reject;
+    });
+    const abort = () => rejectAbort(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      return await Promise.race([searchPromise, aborted]);
+    } finally {
+      signal.removeEventListener("abort", abort);
+    }
+  }
+
+  private async searchUncached(
+    article: string,
+    cacheKey: string,
+    signal: AbortSignal,
+    timeoutMs: number,
+    credentials: StpartsCredentials | undefined,
+  ): Promise<NormalizedSearchResult[]> {
+    const brandsPayload = await this.request("search/brands/", new URLSearchParams({ number: article, useOnlineStocks: "0" }), signal, timeoutMs, credentials);
     const brands = [...new Set(abcpItems(brandsPayload, "brand")
       .filter((value): value is AbcpBrand => Boolean(value) && typeof value === "object" && !Array.isArray(value))
       .map((value) => typeof value.brand === "string" ? value.brand.trim() : "")
       .filter(Boolean))];
-    const articlePayloads = await searchStpartsBrands(brands, article, context.signal, context.timeoutMs, credentials);
-    for (const payload of articlePayloads) {
-      for (const result of parseStpartsApiResults(payload, article)) {
-        onResult(result);
+    const articlePayloads = await searchStpartsBrands(brands, article, signal, timeoutMs, credentials, this.request);
+    const results = articlePayloads.flatMap((payload) => parseStpartsApiResults(payload, article));
+
+    if (this.searchCache.size >= stpartsSearchCacheMaxEntries) {
+      const oldestKey = this.searchCache.keys().next().value;
+      if (typeof oldestKey === "string") {
+        this.searchCache.delete(oldestKey);
       }
     }
+    this.searchCache.set(cacheKey, { expiresAt: Date.now() + stpartsSearchCacheTtlMs, results });
+    return results;
   }
 }

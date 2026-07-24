@@ -214,12 +214,17 @@ async function validateSupplierSession(
       throw new SupplierAuthError();
     }
 
-    await adapter.search(
-      { article, suppliers: [adapter.id] },
-      { signal: controller.signal, timeoutMs: adapter.timeoutMs },
-      () => undefined,
-      sessionManager,
-    );
+    const context = { signal: controller.signal, timeoutMs: adapter.timeoutMs };
+    if (adapter.validateSession) {
+      await adapter.validateSession(context, sessionManager);
+    } else {
+      await adapter.search(
+        { article, suppliers: [adapter.id] },
+        context,
+        () => undefined,
+        sessionManager,
+      );
+    }
     sessionManager.markChecked(adapter.id);
     return { supplier: adapter.id, status: "connected" };
   } catch (error) {
