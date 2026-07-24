@@ -1,4 +1,4 @@
-import { buildIncompleteSearchWarnings, buildSupplierResultTooltip } from "./supplier-search-summary.js";
+import { buildIncompleteSearchWarnings, buildSupplierResultTooltip, formatDeliveryDate } from "./supplier-search-summary.js";
 
 const form = document.querySelector("#search-form");
 const articleInput = document.querySelector("#article-input");
@@ -460,23 +460,6 @@ const updateSupplierNotice = (session) => {
   if (!disconnected.length) {
     supplierNotice.open = false;
   }
-};
-
-const formatDeliveryDate = (value, approximate = false, valueTo = null) => {
-  if (!value) {
-    return "Не указана";
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return `${approximate ? "~" : ""}${value}`;
-  }
-
-  const formattedFrom = parsed.toLocaleDateString("ru-RU");
-  const parsedTo = valueTo ? new Date(valueTo) : null;
-  const formattedTo = parsedTo && !Number.isNaN(parsedTo.getTime()) ? ` - ${parsedTo.toLocaleDateString("ru-RU")}` : "";
-
-  return `${approximate ? "~" : ""}${formattedFrom}${formattedTo}`;
 };
 
 const formatWarehouse = (value) => {
@@ -1756,10 +1739,10 @@ form.addEventListener("submit", async (event) => {
     supplierCheckInProgress = true;
     const canSearch = await checkSupplierSessions(article, enabledSuppliers);
     supplierCheckInProgress = false;
+    rememberSupplierSessionsChecked();
     if (!canSearch) {
       return;
     }
-    rememberSupplierSessionsChecked();
   }
 
   startSearch(article, enabledSuppliers);

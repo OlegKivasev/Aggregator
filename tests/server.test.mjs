@@ -13,7 +13,7 @@ import { gotoStparts, isStpartsSessionPageAuthorized } from "../src/backend/supp
 import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.ts";
 import { SupplierAuthError } from "../src/backend/suppliers/errors.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
-import { buildIncompleteSearchWarnings, buildSupplierResultTooltip } from "../src/frontend/supplier-search-summary.js";
+import { buildIncompleteSearchWarnings, buildSupplierResultTooltip, formatDeliveryDate } from "../src/frontend/supplier-search-summary.js";
 import { SupplierTimeoutError } from "../src/backend/suppliers/errors.ts";
 import { isPartKomAuthenticated } from "../src/backend/suppliers/part-kom/part-kom-site-auth.ts";
 
@@ -98,6 +98,62 @@ test("STParts normalizes exact API offers", () => {
   assert.equal(results[0].price, 6900.27);
   assert.equal(results[0].warehouse, "OD880");
   assert.equal(results[0].warehouseColor, "green");
+});
+
+test("STParts reads warehouse color from supplier description HTML", () => {
+  const quoted = parseStpartsApiResults([{
+    availability: 1,
+    brand: "Brand",
+    description: "Part",
+    number: "ABC-123",
+    price: 100,
+    supplierDescription: '<font color="#0000ff">POS123</font>',
+  }], "ABC-123");
+  const unquoted = parseStpartsApiResults([{
+    availability: 1,
+    brand: "Brand",
+    description: "Part",
+    number: "ABC-123",
+    price: 100,
+    supplierDescription: "<font color=red>POS456</font>",
+  }], "ABC-123");
+
+  assert.equal(quoted[0].warehouseColor, "blue");
+  assert.equal(unquoted[0].warehouseColor, "red");
+});
+
+test("STParts accepts a CSS hex supplier color", () => {
+  const results = parseStpartsApiResults([{
+    availability: 1,
+    brand: "Brand",
+    description: "Part",
+    number: "ABC-123",
+    price: 100,
+    supplierColor: "#0000ff",
+    supplierDescription: "POS123",
+  }], "ABC-123");
+
+  assert.equal(results[0].warehouseColor, "blue");
+});
+
+test("STParts omits a duplicate delivery interval end", () => {
+  const results = parseStpartsApiResults([{
+    availability: 1,
+    brand: "Stellox",
+    deliveryPeriod: 48,
+    deliveryPeriodMax: 48,
+    description: "Part",
+    number: "0590554SX",
+    price: 4669,
+  }], "0590554SX");
+
+  assert.ok(results[0].deliveryDate);
+  assert.equal(results[0].deliveryDateTo, null);
+});
+
+test("delivery formatter omits equal calendar dates", () => {
+  assert.equal(formatDeliveryDate("2026-07-26T00:00:00.000Z", true, "2026-07-26T12:00:00.000Z"), "~26.07.2026");
+  assert.equal(formatDeliveryDate("2026-07-26T00:00:00.000Z", true, "2026-07-27T00:00:00.000Z"), "~26.07.2026 - 27.07.2026");
 });
 
 test("STParts rejects malformed and non-exact API offers", () => {

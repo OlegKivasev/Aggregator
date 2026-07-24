@@ -67,15 +67,20 @@ function dateFromHours(value: unknown): string | null {
 }
 
 function color(value: unknown): "green" | "blue" | "red" | null {
-  if (value === "green" || value === "blue" || value === "red") {
-    return value;
-  }
-  if (typeof value !== "string" || !/^[\da-f]{6}$/i.test(value)) {
+  if (typeof value !== "string") {
     return null;
   }
-  const red = Number.parseInt(value.slice(0, 2), 16) / 255;
-  const green = Number.parseInt(value.slice(2, 4), 16) / 255;
-  const blue = Number.parseInt(value.slice(4, 6), 16) / 255;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "green" || normalized === "blue" || normalized === "red") {
+    return normalized;
+  }
+  const hex = normalized.replace(/^#/, "");
+  if (!/^[\da-f]{6}$/.test(hex)) {
+    return null;
+  }
+  const red = Number.parseInt(hex.slice(0, 2), 16) / 255;
+  const green = Number.parseInt(hex.slice(2, 4), 16) / 255;
+  const blue = Number.parseInt(hex.slice(4, 6), 16) / 255;
   const maximum = Math.max(red, green, blue);
   const minimum = Math.min(red, green, blue);
   if (maximum === minimum) {
@@ -94,6 +99,14 @@ function color(value: unknown): "green" | "blue" | "red" | null {
     return "blue";
   }
   return "red";
+}
+
+function supplierDescriptionColor(value: unknown): "green" | "blue" | "red" | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = value.match(/\bcolor\s*=\s*(?:(["'])([^"']+)\1|([^\s>]+))/i);
+  return color(match?.[2] ?? match?.[3]);
 }
 
 function warehouse(value: unknown): string | null {
@@ -138,6 +151,8 @@ export function parseStpartsApiResults(payload: unknown, requestedArticle: strin
     if (!brand || !article || !title || normalizeArticle(article) !== target || !Number.isFinite(price) || price <= 0 || Number(item.availability) === 0) {
       continue;
     }
+    const deliveryDate = dateFromHours(item.deliveryPeriod);
+    const deliveryDateTo = dateFromHours(item.deliveryPeriodMax);
     results.push({
       supplier: "stparts",
       brand,
@@ -145,9 +160,9 @@ export function parseStpartsApiResults(payload: unknown, requestedArticle: strin
       title,
       price,
       warehouse: warehouse(item.supplierDescription) || warehouse(item.distributorCode),
-      warehouseColor: color(item.supplierColor),
-      deliveryDate: dateFromHours(item.deliveryPeriod),
-      deliveryDateTo: dateFromHours(item.deliveryPeriodMax),
+      warehouseColor: color(item.supplierColor) ?? supplierDescriptionColor(item.supplierDescription),
+      deliveryDate,
+      deliveryDateTo: deliveryDateTo === deliveryDate ? null : deliveryDateTo,
       deliveryDateApproximate: true,
       link: new URL(`/search/${encodeURIComponent(brand)}/${encodeURIComponent(article)}`, stpartsBaseUrl).toString(),
     });

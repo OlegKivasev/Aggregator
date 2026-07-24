@@ -3,6 +3,25 @@ const formatDuration = (durationMs) => `${(durationMs / 1000).toLocaleString("ru
   maximumFractionDigits: 1,
 })} с`;
 
+export const formatDeliveryDate = (value, approximate = false, valueTo = null) => {
+  if (!value) {
+    return "Не указана";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return `${approximate ? "~" : ""}${value}`;
+  }
+
+  const formattedFrom = parsed.toLocaleDateString("ru-RU");
+  const parsedTo = valueTo ? new Date(valueTo) : null;
+  const formattedTo = parsedTo && !Number.isNaN(parsedTo.getTime()) && parsedTo.toLocaleDateString("ru-RU") !== formattedFrom
+    ? ` - ${parsedTo.toLocaleDateString("ru-RU")}`
+    : "";
+
+  return `${approximate ? "~" : ""}${formattedFrom}${formattedTo}`;
+};
+
 export const buildSupplierResultTooltip = (suppliers, results, durations, supplierNames) => {
   const resultCounts = results.reduce((counts, result) => {
     if (result && suppliers.includes(result.supplier)) {
