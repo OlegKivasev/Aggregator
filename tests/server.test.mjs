@@ -205,9 +205,9 @@ test("STParts omits a duplicate delivery interval end", () => {
   assert.equal(results[0].deliveryDateTo, null);
 });
 
-test("delivery formatter omits equal calendar dates", () => {
+test("delivery formatter omits an approximate marker for date ranges", () => {
   assert.equal(formatDeliveryDate("2026-07-26T00:00:00.000Z", true, "2026-07-26T12:00:00.000Z"), "~26.07.2026");
-  assert.equal(formatDeliveryDate("2026-07-26T00:00:00.000Z", true, "2026-07-27T00:00:00.000Z"), "~26.07.2026 - 27.07.2026");
+  assert.equal(formatDeliveryDate("2026-07-26T00:00:00.000Z", true, "2026-07-27T00:00:00.000Z"), "26.07.2026 - 27.07.2026");
 });
 
 test("STParts rejects malformed and non-exact API offers", () => {

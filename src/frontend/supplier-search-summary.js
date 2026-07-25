@@ -19,7 +19,7 @@ export const formatDeliveryDate = (value, approximate = false, valueTo = null) =
     ? ` - ${parsedTo.toLocaleDateString("ru-RU")}`
     : "";
 
-  return `${approximate ? "~" : ""}${formattedFrom}${formattedTo}`;
+  return `${approximate && !formattedTo ? "~" : ""}${formattedFrom}${formattedTo}`;
 };
 
 export const buildSupplierResultTooltip = (suppliers, results, durations, supplierNames) => {
