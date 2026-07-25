@@ -534,7 +534,8 @@ test("supplier search discards invalid results without stopping valid supplier o
         warehouse: null,
         deliveryDate: null,
         deliveryDateApproximate: false,
-        link: "javascript:bad",
+        isAnalog: "yes",
+        link: "https://rossko.ru/invalid-analog-flag",
       });
       onResult({
         supplier: "rossko",

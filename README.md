@@ -139,7 +139,7 @@ frontend / HTTP transport
 - Credentials проверяются через `getUserVkorgList` и `getUserInfo`. Найденные `VKORG` и `KUNNR_RG` сохраняются с hash активного login; state другого login применять нельзя.
 - `getUserVkorgList`, `search` и `getStoreList` могут возвращать либо прямой массив, либо объект с `ARRAY`. Обе документированные/наблюдаемые формы поддерживаются.
 - Основной search отправляет `VKORG`, `KUNNR_RG`, `PIN`, `QUERY_TYPE=1` и только реально настроенные optional parameters.
-- После основного поиска Armtek выполняет поиск аналогов с `QUERY_TYPE=2` отдельно для каждой валидной пары `PIN`/`BRAND`, найденной основным поиском. Из дополнительных ответов выдаются только позиции с признаком `ANALOG`, без дублирования основных предложений.
+- После основного поиска Armtek выполняет поиск аналогов с `QUERY_TYPE=2` отдельно для каждой валидной пары `PIN`/`BRAND`, найденной основным поиском. Из дополнительных ответов выдаются только позиции с признаком `ANALOG`, без дублирования основных предложений; нормализованный результат помечается `isAnalog: true`.
 - `DLVDT` и `WRNTDT` образуют интервал поставки; невозможные календарные даты отбрасываются.
 - `KEYZAK` по документации является реальным кодом склада. `getStoreList` нужен только для optional преобразования `KEYZAK -> SKLNAME`.
 - Ошибка или timeout `getStoreList` не должны отменять уже полученные валидные offers. В таком случае показывайте `KEYZAK`; authorization и parent abort при этом не подавляются.
@@ -184,6 +184,7 @@ frontend / HTTP transport
 ### Frontend contract
 
 - Frontend остается vanilla JavaScript с native ESM и без bundler/framework.
+- Основные предложения и аналоги отображаются в отдельных таблицах. У каждой таблицы собственные поиск, наценка и сортировка; общие фильтры и выбранная видимость столбцов применяются к обеим.
 - `index.html` загружает `/app.js` через `type="module"`; новые модули импортируются относительными путями и должны обслуживаться static server.
 - `app.js` отвечает за DOM state и wiring. Изолированные transport/formatting функции размещаются в `search-stream.js`, `result-formatting.js` и `supplier-search-summary.js`, если не требуют общего mutable UI state.
 - Backend, supplier и `localStorage` data недоверенны. Предпочитайте `textContent`; при `innerHTML` экранируйте каждое значение и отдельно проверяйте URL.

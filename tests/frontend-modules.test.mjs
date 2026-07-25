@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   escapeHtml,
@@ -33,7 +34,7 @@ test("warehouse rendering escapes tooltip and validates supplier metadata", () =
   assert.match(markup, /&lt;4\.5/);
 });
 
-test("result formatting separates analogs below exact results", () => {
+test("result formatting separates analogs from exact results", () => {
   const result = splitAnalogResults([
     { article: "A", isAnalog: true },
     { article: "B" },
@@ -42,6 +43,16 @@ test("result formatting separates analogs below exact results", () => {
 
   assert.deepEqual(result.exact.map((item) => item.article), ["B", "C"]);
   assert.deepEqual(result.analogs.map((item) => item.article), ["A"]);
+});
+
+test("frontend provides independent controls and a table for analogs", async () => {
+  const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+
+  assert.match(html, /id="analog-results-panel"/);
+  assert.match(html, /id="analog-table-search"/);
+  assert.match(html, /id="analog-markup-percent"/);
+  assert.match(html, /id="analog-results-body"/);
+  assert.match(html, /class="table-sort analog-table-sort"/);
 });
 
 test("search stream parses fragmented multiline SSE data", async () => {

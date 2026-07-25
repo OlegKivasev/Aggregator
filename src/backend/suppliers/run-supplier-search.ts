@@ -54,6 +54,7 @@ function isValidResult(result: NormalizedSearchResult, supplier: SupplierAdapter
   }
   if (
     typeof result.deliveryDateApproximate !== "boolean" ||
+    (result.isAnalog !== undefined && typeof result.isAnalog !== "boolean") ||
     (result.warehouse !== null && typeof result.warehouse !== "string") ||
     (result.warehouseFull !== undefined && result.warehouseFull !== null && typeof result.warehouseFull !== "string")
   ) {
