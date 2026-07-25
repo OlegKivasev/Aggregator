@@ -66,7 +66,6 @@ interface ArmtekResolvedConfig {
   incoterms?: string;
   vbeln?: string;
   program?: string;
-  queryType: string;
 }
 
 const armtekStoreNamesByAccount = new Map<string, Map<string, string>>();
@@ -177,7 +176,6 @@ function defaultedConfig(credentials: ArmtekCredentials): ArmtekApiConfig {
     incoterms: configuredAccount?.incoterms,
     vbeln: configuredAccount?.vbeln,
     program: configuredAccount?.program,
-    queryType: configuredAccount?.queryType || "1",
   };
 }
 
@@ -314,7 +312,6 @@ async function resolveArmtekConfig(
     incoterms: config.incoterms,
     vbeln: config.vbeln,
     program: config.program,
-    queryType: config.queryType,
   };
   saveArmtekApiAccountState(credentials.login, resolved.vkorg, resolved.kunnrRg, accountStateGeneration);
   return resolved;
@@ -349,6 +346,38 @@ function hasArmtekWarehouseName(item: ArmtekSearchItem): boolean {
   return Boolean(item.STOCK_NAME || item.WHNAME || item.WAREHOUSE_NAME || item.STORE_NAME || item.SNAME || item.RNAME);
 }
 
+function isArmtekAnalog(item: ArmtekSearchItem): boolean {
+  return Boolean(item.ANALOG?.trim());
+}
+
+export function getArmtekAnalogSearchTargets(items: ArmtekSearchItem[], requestedArticle: string): Array<{ article: string; brand: string }> {
+  const normalizedTarget = normalizeArticle(requestedArticle);
+  const targets = new Map<string, { article: string; brand: string }>();
+
+  for (const item of items) {
+    const article = item.PIN?.trim();
+    const brand = item.BRAND?.trim();
+    const title = item.NAME?.trim();
+    if (
+      isArmtekAnalog(item) ||
+      !article ||
+      normalizeArticle(article) !== normalizedTarget ||
+      !brand ||
+      !title ||
+      parsePrice(item.PRICE) === null
+    ) {
+      continue;
+    }
+
+    const key = `${normalizeArticle(article)}\u0000${brand.toUpperCase()}`;
+    if (!targets.has(key)) {
+      targets.set(key, { article, brand });
+    }
+  }
+
+  return [...targets.values()];
+}
+
 export function getArmtekWarehouse(item: ArmtekSearchItem, storeNames: Map<string, string>): string | null {
   return item.STOCK_NAME || item.WHNAME || item.WAREHOUSE_NAME || item.STORE_NAME || item.SNAME || item.RNAME ||
     (item.KEYZAK ? storeNames.get(item.KEYZAK) || item.KEYZAK : undefined) || item.STOCK || item.WH ||
@@ -374,6 +403,65 @@ function buildArmtekResultLink(article: string): string {
   const url = new URL("https://etp.armtek.ru/");
   url.searchParams.set("search", article);
   return url.toString();
+}
+
+function buildArmtekSearchParams(
+  resolved: ArmtekResolvedConfig,
+  article: string,
+  queryType: string,
+  brand?: string,
+): URLSearchParams {
+  const params = new URLSearchParams({
+    VKORG: resolved.vkorg,
+    KUNNR_RG: resolved.kunnrRg,
+    PIN: article,
+    QUERY_TYPE: queryType,
+  });
+
+  appendOptional(params, "BRAND", brand);
+  appendOptional(params, "KUNNR_ZA", resolved.kunnrZa);
+  appendOptional(params, "INCOTERMS", resolved.incoterms);
+  appendOptional(params, "VBELN", resolved.vbeln);
+  appendOptional(params, "PROGRAM", resolved.program);
+  return params;
+}
+
+function normalizeArmtekResult(
+  item: ArmtekSearchItem,
+  storeNames: Map<string, string>,
+): NormalizedSearchResult | null {
+  const price = parsePrice(item.PRICE);
+  const brand = item.BRAND?.trim();
+  const article = item.PIN?.trim();
+  const title = item.NAME?.trim();
+
+  if (price === null || !brand || !article || !title) {
+    return null;
+  }
+
+  return {
+    supplier: "armtek",
+    brand,
+    article,
+    title,
+    price,
+    ...parseArmtekDeliveryDates(item.DLVDT, item.WRNTDT),
+    warehouse: getArmtekWarehouse(item, storeNames),
+    deliveryDateApproximate: false,
+    link: buildArmtekResultLink(article),
+  };
+}
+
+function armtekResultKey(result: NormalizedSearchResult): string {
+  return JSON.stringify([
+    result.brand,
+    result.article,
+    result.title,
+    result.price,
+    result.warehouse,
+    result.deliveryDate,
+    result.deliveryDateTo,
+  ]);
 }
 
 function rethrowArmtekStageError(error: unknown, publicMessage: string, diagnosticCode: string): never {
@@ -437,23 +525,12 @@ export class ArmtekApiAdapter implements SupplierAdapter {
 
     const resolved = await resolveArmtekConfig(credentials, searchContext.signal);
     const article = query.article.trim();
-    const params = new URLSearchParams({
-      VKORG: resolved.vkorg,
-      KUNNR_RG: resolved.kunnrRg,
-      PIN: article,
-      QUERY_TYPE: resolved.queryType,
-    });
-
-    appendOptional(params, "KUNNR_ZA", resolved.kunnrZa);
-    appendOptional(params, "INCOTERMS", resolved.incoterms);
-    appendOptional(params, "VBELN", resolved.vbeln);
-    appendOptional(params, "PROGRAM", resolved.program);
 
     let searchResponse: { ARRAY?: ArmtekSearchItem | ArmtekSearchItem[] } | ArmtekSearchItem[];
     try {
       searchResponse = await requestArmtek("ws_search/search", credentials, {
         method: "POST",
-        params,
+        params: buildArmtekSearchParams(resolved, article, "1"),
         signal: searchContext.signal,
       });
     } catch (error) {
@@ -461,9 +538,10 @@ export class ArmtekApiAdapter implements SupplierAdapter {
     }
     const normalizedTarget = normalizeArticle(article);
     const items = armtekSearchItems(searchResponse);
-    const requiresStoreNames = items.some((item) =>
-      normalizeArticle(item.PIN ?? "") === normalizedTarget && Boolean(item.KEYZAK) && !hasArmtekWarehouseName(item),
+    const exactItems = items.filter((item) =>
+      !isArmtekAnalog(item) && normalizeArticle(item.PIN ?? "") === normalizedTarget,
     );
+    const requiresStoreNames = exactItems.some((item) => Boolean(item.KEYZAK) && !hasArmtekWarehouseName(item));
     let storeNames = new Map<string, string>();
     if (requiresStoreNames) {
       storeNames = await getOptionalArmtekStoreNames(
@@ -471,31 +549,46 @@ export class ArmtekApiAdapter implements SupplierAdapter {
         searchContext.signal,
       );
     }
-    for (const item of items) {
-      if (normalizeArticle(item.PIN ?? "") !== normalizedTarget) {
-        continue;
+    const emittedResults = new Set<string>();
+    for (const item of exactItems) {
+      const result = normalizeArmtekResult(item, storeNames);
+      if (result) {
+        emittedResults.add(armtekResultKey(result));
+        onResult(result);
+      }
+    }
+
+    for (const target of getArmtekAnalogSearchTargets(exactItems, article)) {
+      let analogResponse: { ARRAY?: ArmtekSearchItem | ArmtekSearchItem[] } | ArmtekSearchItem[];
+      try {
+        analogResponse = await requestArmtek("ws_search/search", credentials, {
+          method: "POST",
+          params: buildArmtekSearchParams(resolved, target.article, "2", target.brand),
+          signal: searchContext.signal,
+        });
+      } catch (error) {
+        rethrowArmtekStageError(error, "Armtek analog search request failed", "armtek_analog_search_request");
       }
 
-      const price = parsePrice(item.PRICE);
-      const brand = item.BRAND?.trim();
-      const itemArticle = item.PIN?.trim();
-      const title = item.NAME?.trim();
-
-      if (price === null || !brand || !itemArticle || !title) {
-        continue;
+      const analogItems = armtekSearchItems(analogResponse).filter(isArmtekAnalog);
+      if (!storeNames.size && analogItems.some((item) => Boolean(item.KEYZAK) && !hasArmtekWarehouseName(item))) {
+        storeNames = await getOptionalArmtekStoreNames(
+          () => getCachedArmtekStoreNames(credentials, resolved.vkorg, searchContext.signal),
+          searchContext.signal,
+        );
       }
 
-      onResult({
-        supplier: this.id,
-        brand,
-        article: itemArticle,
-        title,
-        price,
-        ...parseArmtekDeliveryDates(item.DLVDT, item.WRNTDT),
-        warehouse: getArmtekWarehouse(item, storeNames),
-        deliveryDateApproximate: false,
-        link: buildArmtekResultLink(article),
-      });
+      for (const item of analogItems) {
+        const result = normalizeArmtekResult(item, storeNames);
+        if (!result) {
+          continue;
+        }
+        const resultKey = armtekResultKey(result);
+        if (!emittedResults.has(resultKey)) {
+          emittedResults.add(resultKey);
+          onResult(result);
+        }
+      }
     }
   }
 }

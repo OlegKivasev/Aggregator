@@ -18,7 +18,6 @@ const configurationVariables = [
   "ARMTEK_INCOTERMS",
   "ARMTEK_VBELN",
   "ARMTEK_PROGRAM",
-  "ARMTEK_QUERY_TYPE",
   "ARMTEK_REQUEST_TIMEOUT_MS",
   "ARMTEK_SEARCH_TIMEOUT_MS",
   "SUPPLIER_AUTHORIZATION_TIMEOUT_MS",
@@ -192,6 +191,5 @@ test("environment credentials preserve password whitespace", () => {
   assert.deepEqual(JSON.parse(execution.stdout), {
     login: "api-user",
     password: " secret ",
-    queryType: "1",
   });
 });

@@ -138,7 +138,8 @@ frontend / HTTP transport
 - Используется только официальный WebService API; не возвращайте ETP/browser fallback.
 - Credentials проверяются через `getUserVkorgList` и `getUserInfo`. Найденные `VKORG` и `KUNNR_RG` сохраняются с hash активного login; state другого login применять нельзя.
 - `getUserVkorgList`, `search` и `getStoreList` могут возвращать либо прямой массив, либо объект с `ARRAY`. Обе документированные/наблюдаемые формы поддерживаются.
-- Search отправляет `VKORG`, `KUNNR_RG`, `PIN`, `QUERY_TYPE` и только реально настроенные optional parameters.
+- Основной search отправляет `VKORG`, `KUNNR_RG`, `PIN`, `QUERY_TYPE=1` и только реально настроенные optional parameters.
+- После основного поиска Armtek выполняет поиск аналогов с `QUERY_TYPE=2` отдельно для каждой валидной пары `PIN`/`BRAND`, найденной основным поиском. Из дополнительных ответов выдаются только позиции с признаком `ANALOG`, без дублирования основных предложений.
 - `DLVDT` и `WRNTDT` образуют интервал поставки; невозможные календарные даты отбрасываются.
 - `KEYZAK` по документации является реальным кодом склада. `getStoreList` нужен только для optional преобразования `KEYZAK -> SKLNAME`.
 - Ошибка или timeout `getStoreList` не должны отменять уже полученные валидные offers. В таком случае показывайте `KEYZAK`; authorization и parent abort при этом не подавляются.

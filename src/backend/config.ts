@@ -11,7 +11,6 @@ export interface ArmtekApiConfig {
   incoterms?: string;
   vbeln?: string;
   program?: string;
-  queryType: string;
 }
 
 export interface StpartsApiConfig {
@@ -214,7 +213,6 @@ export function getArmtekApiConfig(): ArmtekApiConfig | null {
     incoterms: optionalEnvironmentValue("ARMTEK_INCOTERMS"),
     vbeln: optionalEnvironmentValue("ARMTEK_VBELN"),
     program: optionalEnvironmentValue("ARMTEK_PROGRAM"),
-    queryType: optionalEnvironmentValue("ARMTEK_QUERY_TYPE") || "1",
   };
 }
 

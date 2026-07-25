@@ -6,7 +6,7 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { armtekSearchItems, armtekVkorgItems, getArmtekWarehouse, getOptionalArmtekStoreNames, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
+import { armtekSearchItems, armtekVkorgItems, getArmtekAnalogSearchTargets, getArmtekWarehouse, getOptionalArmtekStoreNames, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
 import { createHash } from "node:crypto";
 import { parseArmtekApiAccountState } from "../src/backend/suppliers/armtek/armtek-api-account-state.ts";
 import { parsePartKomApiResponse, parsePartKomApiResults, PartKomApiAdapter, verifyPartKomApiCredentials } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
@@ -45,6 +45,20 @@ test("Armtek accepts the direct VKORG array returned by WebService", () => {
 
 test("Armtek accepts the direct search array returned by WebService", () => {
   assert.deepEqual(armtekSearchItems([{ PIN: "90915YZZJ1", PRICE: "691.22" }]), [{ PIN: "90915YZZJ1", PRICE: "691.22" }]);
+});
+
+test("Armtek requests analogs for every unique valid exact brand", () => {
+  assert.deepEqual(getArmtekAnalogSearchTargets([
+    { PIN: "90915-YZZJ1", BRAND: "TOYOTA", NAME: "Oil filter", PRICE: "505.07" },
+    { PIN: "90915YZZJ1", BRAND: "toyota", NAME: "Oil filter", PRICE: "519.78" },
+    { PIN: "90915YZZJ1", BRAND: "DENSO", NAME: "Oil filter", PRICE: "600" },
+    { PIN: "90915YZZJ1", BRAND: "MANN", NAME: "Analog", PRICE: "450", ANALOG: "X" },
+    { PIN: "OTHER", BRAND: "OTHER", NAME: "Other part", PRICE: "100" },
+    { PIN: "90915YZZJ1", BRAND: "INVALID", NAME: "No price", PRICE: "0" },
+  ], "90915YZZJ1"), [
+    { article: "90915-YZZJ1", brand: "TOYOTA" },
+    { article: "90915YZZJ1", brand: "DENSO" },
+  ]);
 });
 
 test("Armtek keeps search results when optional store-name lookup fails", async () => {
