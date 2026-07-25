@@ -295,7 +295,7 @@ limit, and returns at most 80 product cards and 80 crosses per product.
 - Use Node.js 26 and install dependencies from `pnpm-lock.yaml` with `pnpm install --frozen-lockfile`.
 - Run `pnpm exec playwright install chromium` when no system Chrome or Edge path is configured.
 - Set `STATE_DIR` to a directory outside the application checkout. Restrict it to the dedicated service account because it contains supplier cookies, tokens, and optionally encrypted credentials.
-- Set `SUPPLIER_CREDENTIALS_ENCRYPTION_KEY` from the deployment secret manager to a base64-encoded random 32-byte key. Do not put the key in the checkout or `STATE_DIR`; losing or rotating it requires deleting `supplier-credentials.enc.json` and authorizing suppliers again.
+- Set `SUPPLIER_CREDENTIALS_ENCRYPTION_KEY` from the deployment secret manager to a base64-encoded random 32-byte key. Do not put the key in the checkout or `STATE_DIR`; losing it requires restoring the original key or moving the unreadable credential file aside and authorizing suppliers again.
 - Log in to Rossko from the supplier settings using the business-account login and password.
 - Terminate TLS and require authentication at the reverse proxy before exposing `/api/*`.
 - Keep the service bound to loopback and proxy only from a trusted local endpoint.
@@ -309,6 +309,61 @@ limit, and returns at most 80 product cards and 80 crosses per product.
 - STParts uses ABCP `user/info` for session checks and combines up to 100 brand/article pairs in each `search/batch` request. Batch search excludes online stocks by ABCP design; successful searches are cached in memory for one minute to reduce repeated API usage.
 
 Copy the variable names from `.env.example` into the server's secret manager or service environment. The application does not load `.env` files itself.
+
+## Encrypted Supplier Credentials
+
+Supplier session artifacts and supplier credentials are stored separately:
+
+- supplier cookies, browser storage state, and API tokens use supplier-specific files in `STATE_DIR`;
+- login/password pairs successfully verified through the runtime authorization UI use the shared `STATE_DIR/supplier-credentials.enc.json` file;
+- the credential file contains only an AES-256-GCM envelope with a random IV, ciphertext, and authentication tag;
+- `SUPPLIER_CREDENTIALS_ENCRYPTION_KEY` is never written to `STATE_DIR` and must be supplied independently by the deployment secret manager or service environment.
+
+Create `STATE_DIR` outside the application checkout and restrict it to the service account. For example:
+
+```sh
+install -d -o <service-user> -g <service-group> -m 0700 /var/lib/autoservice-aggregator
+```
+
+Generate one persistent 32-byte master key encoded as Base64:
+
+```sh
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+```
+
+Store the generated value in the deployment secret manager. The application environment must contain:
+
+```text
+NODE_ENV=production
+STATE_DIR=/var/lib/autoservice-aggregator
+SUPPLIER_CREDENTIALS_ENCRYPTION_KEY=<base64-encoded-32-byte-key>
+```
+
+Do not commit the value, put it in `.env.example`, log it, or store it inside `STATE_DIR`. A systemd `EnvironmentFile` containing the key must be owned by root and have mode `0600`. The application does not parse `.env` files by itself.
+
+After the key is configured, authorize each runtime-configured supplier once through the application settings. A successful authorization atomically creates or updates `supplier-credentials.enc.json` with mode `0600`. Password whitespace is preserved. Credentials already supplied directly through the service environment, such as Armtek or STParts API credentials, remain available after restart without being copied from the environment into this file.
+
+On restart, the application loads the encrypted credentials using the same master key. Existing cookies or tokens are reused. A lightweight session validation that receives `SupplierAuthError` performs one bounded full authorization attempt with the stored credentials. Timeout and integration failures do not cause unbounded login retries. Explicit supplier logout invalidates active operations and removes that supplier's persisted session and credential entry.
+
+The same `STATE_DIR` and master key must be retained across deployments and restarts. If the key is missing or does not authenticate an existing credential file, startup fails instead of ignoring the file. Restore the original key whenever possible. If the key is permanently lost, stop the service, move `supplier-credentials.enc.json` to a protected backup location, start the service with a new key, and authorize every supplier again. Do not delete unrelated supplier state files.
+
+Check the encrypted file metadata without printing its contents:
+
+```sh
+stat -c '%A %a %U:%G %n' /var/lib/autoservice-aggregator/supplier-credentials.enc.json
+```
+
+Expected ownership is the service account and expected mode is `600`. Verify all sessions through the dedicated validation endpoint; this does not run a product search:
+
+```sh
+curl -fsS \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  --data '{"article":"90915YZZJ1","suppliers":["rossko","armtek","part-kom","stparts","motordetal","mladov"]}' \
+  http://127.0.0.1:3000/api/suppliers/sessions/validate
+```
+
+Use the configured local port instead of `3000` when `PORT` is overridden. A result status of `connected` means validation or automatic recovery succeeded, `expired` means manual authorization is required, and `error` means validation was temporarily unavailable.
 
 ## Configuration Validation
 
