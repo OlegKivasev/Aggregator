@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { armtekSearchItems, armtekVkorgItems, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
 import { createHash } from "node:crypto";
 import { parseArmtekApiAccountState } from "../src/backend/suppliers/armtek/armtek-api-account-state.ts";
-import { findPrimaryPartKomMakerId, isPartKomUnauthorizedResponse } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
+import { parsePartKomApiResults, PartKomApiAdapter, verifyPartKomApiCredentials } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
 import { createStpartsBatchParams, parseStpartsApiResults, StpartsApiAdapter } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
 import { gotoStparts, isStpartsSessionPageAuthorized } from "../src/backend/suppliers/stparts/stparts-site-auth.ts";
@@ -15,7 +15,6 @@ import { SupplierAuthError } from "../src/backend/suppliers/errors.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
 import { buildIncompleteSearchWarnings, buildSupplierResultTooltip, formatDeliveryDate } from "../src/frontend/supplier-search-summary.js";
 import { SupplierTimeoutError } from "../src/backend/suppliers/errors.ts";
-import { isPartKomAuthenticated } from "../src/backend/suppliers/part-kom/part-kom-site-auth.ts";
 
 const port = 31847;
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -65,21 +64,62 @@ test("Rossko keeps every exact article product returned by web search", () => {
   }, "1072"), ["bardahl", "smilga"]);
 });
 
-test("Part-Kom selects the primary autocomplete maker for the requested normalized article", () => {
-  const makerId = findPrimaryPartKomMakerId([
-    { maker_id: 10, number: "VAP-021-2375", maker: "ВОЛГААВТОПРОМ" },
-    { maker_id: 20, number: "VAP0212375", maker: "Россия" },
-    { maker_id: 30, number: "VAP-021-2375A", maker: "RUSSIA" },
-    { maker_id: 40, number: "VAP-021-237", maker: "RUSSIA" },
-    { maker_id: 50, number: undefined, maker: "RUSSIA" },
+test("PartKOM normalizes exact official API offers", () => {
+  const results = parsePartKomApiResults([
+    {
+      number: "VAP-021-2375",
+      maker: "ВОЛГААВТОПРОМ",
+      makerId: 346351,
+      description: "Вал карданный",
+      price: "6900,27",
+      quantity: 3,
+      placement: "Москва",
+      expectedDate: "2026-07-28 10:30:00",
+      guaranteedDate: "2026-07-29 18:00:00",
+    },
+    { number: "VAP-021-2375A", maker: "Brand", description: "Other", price: 100, quantity: 1 },
   ], "VAP0212375");
 
-  assert.equal(makerId, "10");
+  assert.equal(results.length, 1);
+  assert.equal(results[0].price, 6900.27);
+  assert.equal(results[0].warehouse, "Москва");
+  assert.equal(results[0].deliveryDateApproximate, false);
+  assert.ok(results[0].deliveryDate);
+  assert.ok(results[0].deliveryDateTo);
 });
 
-test("Part-Kom recognizes its unauthorized JSON response", () => {
-  assert.equal(isPartKomUnauthorizedResponse({ success: false, message: "unauthorized", msg: "unauthorized" }), true);
-  assert.equal(isPartKomUnauthorizedResponse({ success: false, message: "temporarily unavailable" }), false);
+test("PartKOM discards a reversed delivery interval returned by the API", () => {
+  const [result] = parsePartKomApiResults([{
+    number: "2084001",
+    maker: "FEBEST",
+    makerId: 346351,
+    description: "Шпилька колёсная",
+    price: 176.49,
+    quantity: 1,
+    placement: "Н. Новгород",
+    expectedDate: "2026-07-28 04:24:00",
+    guaranteedDate: "2026-07-28 01:00:00",
+  }], "2084-001");
+
+  assert.ok(result.deliveryDate);
+  assert.equal(result.deliveryDateTo, null);
+  assert.equal(result.deliveryDateApproximate, false);
+});
+
+test("PartKOM does not treat null delivery duration as zero hours", () => {
+  const [result] = parsePartKomApiResults([{
+    number: "ABC-123",
+    maker: "Brand",
+    description: "Part",
+    price: 100,
+    quantity: 1,
+    expectedHours: null,
+    expectedDays: null,
+  }], "ABC-123");
+
+  assert.equal(result.deliveryDate, null);
+  assert.equal(result.deliveryDateTo, null);
+  assert.equal(result.deliveryDateApproximate, true);
 });
 
 test("STParts normalizes exact API offers", () => {
@@ -246,17 +286,39 @@ test("STParts rejects an invalid API search payload", () => {
 
 });
 
-test("Part-Kom rejects a failed authorization probe", async () => {
-  const page = {
-    async goto() {},
-    async waitForTimeout() {},
-    async waitForLoadState() {},
-    async evaluate() {
-      return { probeFailed: true };
-    },
-  };
+test("PartKOM validates API credentials without running a product search", async () => {
+  const calls = [];
+  const adapter = new PartKomApiAdapter(async (path, params, _signal, _timeoutMs, credentials) => {
+    calls.push({ path, params: params.toString(), credentials });
+    return [{ id: 1, name: "Brand", country: "RU" }];
+  });
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setPartKomCredentials({ login: "api-user", password: " secret " });
 
-  await assert.rejects(isPartKomAuthenticated(page), /authorization probe failed/);
+  await adapter.validateSession({ signal: new AbortController().signal, timeoutMs: 1000 }, sessionManager);
+
+  assert.deepEqual(calls, [{
+    path: "search/brands",
+    params: "",
+    credentials: { login: "api-user", password: " secret " },
+  }]);
+});
+
+test("PartKOM connection accepts a successful non-array brands payload", async () => {
+  const calls = [];
+  await verifyPartKomApiCredentials({ login: "api-user", password: "secret" }, async (path, params) => {
+    calls.push({ path, params: params.toString() });
+    return { brands: [{ id: 1, name: "Brand" }] };
+  });
+
+  assert.deepEqual(calls, [{ path: "search/brands", params: "" }]);
+});
+
+test("PartKOM connection reports an explicit API error payload", async () => {
+  await assert.rejects(
+    verifyPartKomApiCredentials({ login: "api-user", password: "secret" }, async () => ({ message: "Wrong IP address" })),
+    /rejected the server IP address/,
+  );
 });
 
 test("supplier authentication failure triggers session disconnection", async () => {
@@ -399,6 +461,15 @@ test("session manager keeps STParts API credentials only in runtime memory", () 
   assert.equal(sessionManager.getStpartsCredentials(), null);
 });
 
+test("session manager keeps PartKOM API credentials only in runtime memory", () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setPartKomCredentials({ login: " api-user ", password: " password " });
+
+  assert.deepEqual(sessionManager.getPartKomCredentials(), { login: "api-user", password: " password " });
+  sessionManager.clearPartKomCredentials();
+  assert.equal(sessionManager.getPartKomCredentials(), null);
+});
+
 test("incomplete search warnings list only failed suppliers", () => {
   assert.deepEqual(buildIncompleteSearchWarnings(
     ["rossko", "armtek", "part-kom", "stparts", "motordetal", "mladov"],
@@ -409,9 +480,9 @@ test("incomplete search warnings list only failed suppliers", () => {
       stparts: "auth_error",
       motordetal: "error",
     },
-    { rossko: "Rossko", armtek: "Armtek", "part-kom": "Part-Kom", stparts: "STParts", motordetal: "MotorDetal", mladov: "Механик Ладов" },
+    { rossko: "Rossko", armtek: "Armtek", "part-kom": "PartKOM", stparts: "STParts", motordetal: "MotorDetal", mladov: "Механик Ладов" },
   ), [
-    "Part-Kom: время ожидания истекло",
+    "PartKOM: время ожидания истекло",
     "STParts: требуется авторизация",
     "MotorDetal: поиск не выполнен",
     "Механик Ладов: нет итогового ответа",

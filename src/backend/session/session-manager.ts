@@ -2,6 +2,7 @@ import type {
   ArmtekCredentials,
   MotorDetalCredentials,
   MladovCredentials,
+  PartKomCredentials,
   StpartsCredentials,
   SupplierId,
   SupplierSessionState,
@@ -15,6 +16,7 @@ export class SupplierSessionManager {
   private armtekCredentials: ArmtekCredentials | null = null;
   private motorDetalCredentials: MotorDetalCredentials | null = null;
   private mladovCredentials: MladovCredentials | null = null;
+  private partKomCredentials: PartKomCredentials | null = null;
   private stpartsCredentials: StpartsCredentials | null = null;
 
   getSession(supplier: SupplierId): SupplierSessionState {
@@ -115,6 +117,18 @@ export class SupplierSessionManager {
 
   clearMladovCredentials(): void {
     this.mladovCredentials = null;
+  }
+
+  setPartKomCredentials(credentials: PartKomCredentials): void {
+    this.partKomCredentials = { login: credentials.login.trim(), password: credentials.password };
+  }
+
+  getPartKomCredentials(): PartKomCredentials | null {
+    return this.partKomCredentials;
+  }
+
+  clearPartKomCredentials(): void {
+    this.partKomCredentials = null;
   }
 
   setStpartsCredentials(credentials: StpartsCredentials): void {

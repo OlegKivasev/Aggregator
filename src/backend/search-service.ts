@@ -9,12 +9,7 @@ import {
   hasMotorDetalTokenState,
   verifyMotorDetalCredentials,
 } from "./suppliers/motordetal/motordetal-auth.ts";
-import {
-  clearPartKomStorageState,
-  hasPartKomStorageState,
-  verifyPartKomCredentials,
-} from "./suppliers/part-kom/part-kom-site-auth.ts";
-import { PartKomApiAdapter } from "./suppliers/part-kom/part-kom-api-adapter.ts";
+import { PartKomApiAdapter, verifyPartKomApiCredentials } from "./suppliers/part-kom/part-kom-api-adapter.ts";
 import { RosskoSiteApiAdapter } from "./suppliers/rossko/rossko-site-api-adapter.ts";
 import {
   clearRosskoStorageState,
@@ -53,10 +48,6 @@ function bootstrapPersistedSessions() {
 
   if (getArmtekApiConfig()) {
     sessionManager.markAuthorized("armtek", "Armtek API credentials are configured in environment");
-  }
-
-  if (hasPartKomStorageState()) {
-    sessionManager.markAuthorized("part-kom", "Part-Kom stored session is available");
   }
 
   if (getStpartsApiConfig()) {
@@ -112,18 +103,22 @@ export function logoutArmtek() {
 }
 
 export async function authorizePartKom(credentials: PartKomCredentials) {
-  const result = await verifyPartKomCredentials(credentials);
-
-  if (!result.authorized) {
-    clearPartKomStorageState();
-    return sessionManager.markUnauthorized("part-kom", result.details);
+  try {
+    await verifyPartKomApiCredentials(credentials);
+  } catch (error) {
+    sessionManager.clearPartKomCredentials();
+    if (error instanceof SupplierAuthError) {
+      return sessionManager.markUnauthorized("part-kom", "PartKOM API rejected the login or password");
+    }
+    sessionManager.markUnauthorized("part-kom", "PartKOM API connection check failed");
+    throw error;
   }
-
-  return sessionManager.markAuthorized("part-kom", result.details);
+  sessionManager.setPartKomCredentials(credentials);
+  return sessionManager.markAuthorized("part-kom", "PartKOM API credentials were verified successfully");
 }
 
 export function logoutPartKom() {
-  clearPartKomStorageState();
+  sessionManager.clearPartKomCredentials();
   return sessionManager.markUnauthorized("part-kom");
 }
 

@@ -1,243 +1,226 @@
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
-import type { NormalizedSearchResult, SearchQuery, SupplierSearchContext, SupplierSessionState } from "../../types.ts";
-import { SupplierAuthError } from "../errors.ts";
+import type {
+  NormalizedSearchResult,
+  PartKomCredentials,
+  SearchQuery,
+  SupplierSearchContext,
+  SupplierSessionState,
+} from "../../types.ts";
+import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
 import { siteHttpRequest } from "../site-http.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
-import { getPartKomCookieHeader, hasPartKomStorageState, partKomApiBaseUrl } from "./part-kom-site-auth.ts";
-
-interface PartKomAutocompleteItem {
-  maker?: string;
-  maker_id?: string | number;
-  number?: string;
-  title?: string;
-}
-
-interface PartKomAutocompleteResponse {
-  success?: boolean;
-  msg?: string;
-  data?: {
-    autocomplete?: PartKomAutocompleteItem[];
-    articul?: PartKomAutocompleteItem[];
-    parts?: PartKomAutocompleteItem[];
-    goods?: PartKomAutocompleteItem[];
-  };
-}
 
 interface PartKomOffer {
-  [key: string]: unknown;
-  price?: string | number;
-  quantity?: string | number;
-  maker_id?: string | number;
-  number?: string;
-  description?: string;
-  name?: string;
-  provider_id?: string | number;
-  delivery_wave_date_from?: string;
-  days_guaranteed?: string | number;
-  stock_data?: Record<string, unknown>;
+  number?: unknown;
+  maker?: unknown;
+  makerId?: unknown;
+  description?: unknown;
+  price?: unknown;
+  quantity?: unknown;
+  placement?: unknown;
+  expectedDate?: unknown;
+  guaranteedDate?: unknown;
+  expectedHours?: unknown;
+  guaranteedHours?: unknown;
+  expectedDays?: unknown;
+  guaranteedDays?: unknown;
 }
 
-interface PartKomPart {
-  maker_id?: string | number;
-  number?: string;
-  description?: string;
-  name?: string;
-  offers?: PartKomOffer[];
-}
+export type PartKomApiRequester = (
+  path: "search/brands" | "search/offers",
+  params: URLSearchParams,
+  signal: AbortSignal,
+  timeoutMs: number,
+  credentials: PartKomCredentials,
+) => Promise<unknown>;
 
-interface PartKomProvider {
-  id?: string | number;
-  store_name?: string;
-  city_placement?: string;
-}
+const partKomApiBaseUrl = new URL("https://ws.part-kom.ru/v4/");
+const partKomSiteBaseUrl = new URL("https://www.part-kom.ru/");
+const partKomMaxResponseBytes = 5 * 1024 * 1024;
 
-interface PartKomSearchResponse {
-  success?: boolean;
-  msg?: string;
-  message?: string;
-  exact?: PartKomPart[];
-  providers?: PartKomProvider[];
-  makers?: Array<{ id?: string | number; name?: string }> | Record<string, { id?: string | number; name?: string }>;
+function readPartKomSearchTimeoutMs(): number {
+  const timeoutMs = Number(process.env.PARTKOM_SEARCH_TIMEOUT_MS ?? "15000");
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) {
+    throw new Error("PARTKOM_SEARCH_TIMEOUT_MS must be between 1 and 120000");
+  }
+  return timeoutMs;
 }
-
-const partKomSearchMaxResponseBytes = 5 * 1024 * 1024;
 
 function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
 }
 
-export function findPrimaryPartKomMakerId(items: PartKomAutocompleteItem[], article: string): string | null {
-  const target = normalizeArticle(article);
-  const item = items.find((candidate) =>
-    candidate.maker_id !== undefined && normalizeArticle(candidate.number || "") === target,
-  );
-  return item ? String(item.maker_id) : null;
-}
-
-function parsePrice(value: string | number | undefined): number | null {
-  const parsed = typeof value === "number" ? value : Number(value?.replace(/\s+/g, "").replace(",", "."));
+function parsePositiveNumber(value: unknown): number | null {
+  const parsed = typeof value === "string" ? Number(value.replace(/\s+/g, "").replace(",", ".")) : Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-function dateFromDays(value: string | number | undefined): string | null {
-  const raw = String(value ?? "").replace(/[^\d.]/g, "");
-  if (!raw) {
+function parseApiDate(value: unknown): string | null {
+  if (typeof value !== "string") {
     return null;
   }
-  const days = Number(raw);
-  if (!Number.isFinite(days)) {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}):(\d{2}))?$/);
+  if (!match) {
     return null;
   }
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate() + Math.ceil(days)).toISOString();
-}
-
-function isCalendarDate(date: Date, year: number, monthIndex: number, day: number): boolean {
-  return !Number.isNaN(date.getTime()) &&
-    date.getFullYear() === year &&
-    date.getMonth() === monthIndex &&
-    date.getDate() === day;
-}
-
-function deliveryDate(value: string | undefined, days: string | number | undefined): string | null {
-  if (value) {
-    const normalized = value.trim().replace(/^~/, "");
-    const match = normalized.match(/^(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?/);
-    if (match) {
-      const now = new Date();
-      let year = match[3] ? Number(match[3].length === 2 ? `20${match[3]}` : match[3]) : now.getFullYear();
-      const monthIndex = Number(match[2]) - 1;
-      const day = Number(match[1]);
-      let result = new Date(year, monthIndex, day);
-      if (!isCalendarDate(result, year, monthIndex, day)) {
-        return dateFromDays(days);
-      }
-      if (!match[3] && result.getTime() < now.getTime() - 30 * 86400000) {
-        result = new Date(year + 1, monthIndex, day);
-        if (!isCalendarDate(result, year + 1, monthIndex, day)) {
-          return dateFromDays(days);
-        }
-      }
-      return result.toISOString();
-    }
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString();
-    }
+  const [, year, month, day, hours = "00", minutes = "00", seconds = "00"] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds));
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== Number(year) ||
+    date.getMonth() !== Number(month) - 1 ||
+    date.getDate() !== Number(day) ||
+    date.getHours() !== Number(hours) ||
+    date.getMinutes() !== Number(minutes) ||
+    date.getSeconds() !== Number(seconds)
+  ) {
+    return null;
   }
-  return dateFromDays(days);
+  return date.toISOString();
 }
 
-function makerName(makers: PartKomSearchResponse["makers"], makerId: string | number | undefined): string | null {
-  const target = String(makerId ?? "");
-  const rows = Array.isArray(makers) ? makers : Object.values(makers || {});
-  return rows.find((maker) => String(maker.id ?? "") === target)?.name?.trim() || null;
+function dateFromDuration(hours: unknown, days: unknown): string | null {
+  const parsedHours = typeof hours === "number" || typeof hours === "string" && hours.trim() ? Number(hours) : Number.NaN;
+  const parsedDays = typeof days === "number" || typeof days === "string" && days.trim() ? Number(days) : Number.NaN;
+  const durationHours = Number.isFinite(parsedHours) && parsedHours >= 0
+    ? parsedHours
+    : Number.isFinite(parsedDays) && parsedDays >= 0 ? parsedDays * 24 : null;
+  return durationHours === null ? null : new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
 }
 
-function warehouse(offer: PartKomOffer, providers: PartKomProvider[]): string | null {
-  const provider = providers.find((item) => String(item.id ?? "") === String(offer.provider_id ?? ""));
-  const value = offer.warehouse ?? offer.warehouse_name ?? offer.store_name ?? offer.stock_name ??
-    offer.stock_data?.warehouse_name ?? offer.stock_data?.warehouse ?? provider?.store_name ?? provider?.city_placement;
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-export function isPartKomUnauthorizedResponse(payload: { success?: boolean; msg?: string; message?: string }): boolean {
-  if (payload.success !== false) {
-    return false;
-  }
-
-  return [payload.msg, payload.message].some((message) => message?.trim().toLowerCase() === "unauthorized");
-}
-
-async function requestJson<T>(path: string, params: URLSearchParams, signal: AbortSignal): Promise<T> {
-  const cookie = getPartKomCookieHeader();
-  if (!cookie) {
-    throw new SupplierAuthError("Part-Kom stored session is not available");
-  }
-  const url = new URL(path, partKomApiBaseUrl);
-  url.search = params.toString();
-  const response = await siteHttpRequest(url, {
-    cookie,
-    signal,
-    headers: { "X-Requested-With": "XMLHttpRequest", Referer: partKomApiBaseUrl },
-    ...(path === "/search/" ? { maxResponseBytes: partKomSearchMaxResponseBytes } : {}),
-  });
-  if (response.status === 401 || response.status === 403) {
-    throw new SupplierAuthError(`Part-Kom API returned HTTP ${response.status}`);
-  }
-  if (response.status < 200 || response.status >= 300) {
-    throw new Error(`Part-Kom API returned HTTP ${response.status}`);
-  }
-  const payload = JSON.parse(response.body) as T & { success?: boolean; msg?: string; message?: string };
-  if (isPartKomUnauthorizedResponse(payload)) {
-    throw new SupplierAuthError(payload.msg || payload.message || "Part-Kom session is not authorized");
+function apiItems(payload: unknown, responseName: string): unknown[] {
+  if (!Array.isArray(payload)) {
+    throw new SupplierIntegrationError(`PartKOM API returned an invalid ${responseName} response`);
   }
   return payload;
 }
 
+export function parsePartKomApiResults(payload: unknown, requestedArticle: string): NormalizedSearchResult[] {
+  const target = normalizeArticle(requestedArticle);
+  const results: NormalizedSearchResult[] = [];
+
+  for (const value of apiItems(payload, "offers")) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      continue;
+    }
+    const offer = value as PartKomOffer;
+    const article = typeof offer.number === "string" ? offer.number.trim() : "";
+    const brand = typeof offer.maker === "string" ? offer.maker.trim() : "";
+    const title = typeof offer.description === "string" ? offer.description.trim() : "";
+    const price = parsePositiveNumber(offer.price);
+    const quantity = Number(offer.quantity);
+    if (!article || normalizeArticle(article) !== target || !brand || !title || price === null || !Number.isFinite(quantity) || quantity <= 0) {
+      continue;
+    }
+    const expectedDate = parseApiDate(offer.expectedDate) ?? dateFromDuration(offer.expectedHours, offer.expectedDays);
+    const guaranteedDate = parseApiDate(offer.guaranteedDate) ?? dateFromDuration(offer.guaranteedHours, offer.guaranteedDays);
+    const deliveryDateTo = expectedDate && guaranteedDate && Date.parse(guaranteedDate) > Date.parse(expectedDate)
+      ? guaranteedDate
+      : null;
+    const makerId = typeof offer.makerId === "string" || typeof offer.makerId === "number" ? String(offer.makerId) : "";
+    results.push({
+      supplier: "part-kom",
+      brand,
+      article,
+      title,
+      price,
+      warehouse: typeof offer.placement === "string" && offer.placement.trim() ? offer.placement.trim() : null,
+      deliveryDate: expectedDate,
+      deliveryDateTo,
+      deliveryDateApproximate: !parseApiDate(offer.expectedDate),
+      link: new URL(`/new/#/search/0/0/0/${encodeURIComponent(article.replace(/\//g, ""))}/${encodeURIComponent(makerId)}`, partKomSiteBaseUrl).toString(),
+    });
+  }
+  return results;
+}
+
+async function partKomApiRequest(
+  path: "search/brands" | "search/offers",
+  params: URLSearchParams,
+  signal: AbortSignal,
+  timeoutMs: number,
+  credentials: PartKomCredentials,
+): Promise<unknown> {
+  const url = new URL(path, partKomApiBaseUrl);
+  url.search = params.toString();
+  const authorization = Buffer.from(`${credentials.login}:${credentials.password}`, "utf8").toString("base64");
+  const response = await siteHttpRequest(url, {
+    headers: { Accept: "application/json", Authorization: `Basic ${authorization}` },
+    signal,
+    timeoutMs,
+    maxResponseBytes: partKomMaxResponseBytes,
+  });
+  if (response.status === 401 || response.status === 403) {
+    throw new SupplierAuthError("PartKOM API rejected the configured credentials");
+  }
+  if (response.status < 200 || response.status >= 300) {
+    throw new SupplierIntegrationError(`PartKOM API returned HTTP ${response.status}`);
+  }
+  try {
+    return JSON.parse(response.body) as unknown;
+  } catch {
+    throw new SupplierIntegrationError("PartKOM API returned invalid JSON");
+  }
+}
+
+export async function verifyPartKomApiCredentials(
+  credentials: PartKomCredentials,
+  request: PartKomApiRequester = partKomApiRequest,
+): Promise<void> {
+  const payload = await request("search/brands", new URLSearchParams(), AbortSignal.timeout(10_000), 10_000, credentials);
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const message = (payload as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) {
+      const details = /wrong ip address/i.test(message)
+        ? "PartKOM API rejected the server IP address"
+        : "PartKOM API rejected the connection check";
+      throw new SupplierIntegrationError(details);
+    }
+  }
+}
+
 export class PartKomApiAdapter implements SupplierAdapter {
   readonly id = "part-kom";
-  readonly displayName = "Part-Kom";
-  readonly timeoutMs = Number(process.env.PARTKOM_SEARCH_TIMEOUT_MS ?? "45000");
+  readonly displayName = "PartKOM";
+  readonly timeoutMs = readPartKomSearchTimeoutMs();
+  private readonly request: PartKomApiRequester;
+
+  constructor(request: PartKomApiRequester = partKomApiRequest) {
+    this.request = request;
+  }
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
-    return hasPartKomStorageState() && getPartKomCookieHeader()
-      ? sessionManager.markChecked(this.id, "Part-Kom stored API session is available")
-      : sessionManager.markUnauthorized(this.id, "Part-Kom login is required");
+    return sessionManager.getPartKomCredentials()
+      ? sessionManager.markChecked(this.id, "PartKOM API credentials are configured")
+      : sessionManager.markUnauthorized(this.id, "PartKOM API credentials are not configured");
+  }
+
+  async validateSession(context: SupplierSearchContext, sessionManager: SupplierSessionManager): Promise<void> {
+    const credentials = sessionManager.getPartKomCredentials();
+    if (!credentials) {
+      throw new SupplierAuthError("PartKOM API credentials are not configured");
+    }
+    await this.request("search/brands", new URLSearchParams(), context.signal, context.timeoutMs, credentials);
   }
 
   async search(
     query: SearchQuery,
     context: SupplierSearchContext,
     onResult: (result: NormalizedSearchResult) => void,
-    _sessionManager: SupplierSessionManager,
+    sessionManager: SupplierSessionManager,
   ): Promise<void> {
+    const credentials = sessionManager.getPartKomCredentials();
+    if (!credentials) {
+      throw new SupplierAuthError("PartKOM API credentials are not configured");
+    }
     const article = query.article.trim();
-    const baseParams = { number: article, excSubstitutes: "0", excAnalogues: "0", txtAddPrice: "0" };
-    const autocomplete = await requestJson<PartKomAutocompleteResponse>(
-      "/autocomplete_api_v2/",
-      new URLSearchParams({ q: article }),
+    const payload = await this.request(
+      "search/offers",
+      new URLSearchParams({ number: article, find_substitutes: "0" }),
       context.signal,
+      context.timeoutMs,
+      credentials,
     );
-    const rows = [
-      ...(autocomplete.data?.articul || []),
-      ...(autocomplete.data?.parts || []),
-      ...(autocomplete.data?.goods || []),
-      ...(autocomplete.data?.autocomplete || []),
-    ];
-    const makerId = findPrimaryPartKomMakerId(rows, article);
-    if (!makerId) {
-      return;
-    }
-    const target = normalizeArticle(article);
-    const search = await requestJson<PartKomSearchResponse>(
-      "/search/",
-      new URLSearchParams({ ...baseParams, maker_id: makerId, stores: "2" }),
-      context.signal,
-    );
-    for (const part of search.exact || []) {
-      if (normalizeArticle(part.number || "") !== target) continue;
-      for (const offer of part.offers || []) {
-        if (offer.number && normalizeArticle(offer.number) !== target) continue;
-        const price = parsePrice(offer.price);
-        if (price === null || Number(offer.quantity) === 0) continue;
-        const offerArticle = offer.number?.trim() || part.number?.trim();
-        const offerMakerId = offer.maker_id ?? part.maker_id;
-        const brand = makerName(search.makers, offerMakerId);
-        const title = offer.description?.trim() || offer.name?.trim() || part.description?.trim() || part.name?.trim();
-        if (!offerArticle || !brand || !title) continue;
-        onResult({
-          supplier: this.id,
-          brand,
-          article: offerArticle,
-          title,
-          price,
-          warehouse: warehouse(offer, search.providers || []),
-          deliveryDate: deliveryDate(offer.delivery_wave_date_from, offer.days_guaranteed),
-          deliveryDateApproximate: true,
-          link: new URL(`/new/#/search/0/0/0/${encodeURIComponent(article.replace(/\//g, ""))}/${encodeURIComponent(String(offerMakerId || ""))}`, partKomApiBaseUrl).toString(),
-        });
-      }
-    }
+    parsePartKomApiResults(payload, article).forEach(onResult);
   }
 }

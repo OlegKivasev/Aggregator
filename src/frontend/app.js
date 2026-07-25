@@ -110,7 +110,7 @@ const supplierCheckSuccessDelayMs = 3000;
 const supplierNames = {
   rossko: "Rossko",
   armtek: "Armtek",
-  "part-kom": "Part-Kom",
+  "part-kom": "PartKOM",
   stparts: "STParts",
   motordetal: "MotorDetal",
   mladov: "Механик Ладов",
@@ -1478,9 +1478,9 @@ partKomAuthForm.addEventListener("submit", async (event) => {
   try {
     const payload = await postJson("/api/suppliers/part-kom/authorize", {
       login: partKomLoginInput.value.trim(),
-      password: partKomPasswordInput.value.trim(),
+      password: partKomPasswordInput.value,
     });
-    handleAuthorizeResult(payload.session, "part-kom", partKomAuthFeedback, "Part-Kom отклонил авторизацию", updatePartKomSessionCard);
+    handleAuthorizeResult(payload.session, "part-kom", partKomAuthFeedback, "PartKOM API отклонил авторизацию", updatePartKomSessionCard);
   } catch (error) {
     showAuthorizeError(partKomAuthFeedback, error);
   } finally {
