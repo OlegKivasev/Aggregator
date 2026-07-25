@@ -134,7 +134,7 @@ test("configuration validates the supplier credential encryption key", () => {
 
   const validKey = runConfig(`
     const { supplierCredentialsEncryptionKey } = await import("./src/backend/config.ts");
-    console.log(supplierCredentialsEncryptionKey?.length);
+    process.stdout.write(String(supplierCredentialsEncryptionKey?.length));
   `, { SUPPLIER_CREDENTIALS_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" });
   assert.equal(validKey.status, 0, validKey.stderr);
   assert.equal(validKey.stdout.trim(), "32");
