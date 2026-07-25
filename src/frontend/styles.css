@@ -1033,6 +1033,14 @@ table td:nth-child(3) {
   text-align: center;
 }
 
+.results-table__section th {
+  background: var(--bs-tertiary-bg);
+  color: var(--bs-secondary-color);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .supplier-search-toggle {
   display: flex;
   align-items: center;

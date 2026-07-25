@@ -26,6 +26,7 @@ export interface NormalizedSearchResult {
   deliveryDateTo?: string | null;
   deliveryDateApproximate: boolean;
   link: string;
+  isAnalog?: boolean;
 }
 
 export interface SupplierSessionState {

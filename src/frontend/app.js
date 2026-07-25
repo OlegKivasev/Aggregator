@@ -1,5 +1,5 @@
 import { buildIncompleteSearchWarnings, buildSupplierResultTooltip, formatDeliveryDate } from "./supplier-search-summary.js";
-import { escapeHtml, formatPrice, formatWarehouse, getSafeResultLink, renderWarehouse } from "./result-formatting.js";
+import { escapeHtml, formatPrice, formatWarehouse, getSafeResultLink, renderWarehouse, splitAnalogResults } from "./result-formatting.js";
 import { openSearchStream } from "./search-stream.js";
 
 const form = document.querySelector("#search-form");
@@ -743,9 +743,9 @@ const renderResults = () => {
   }
 
   const sorted = [...filtered].sort(compareResults);
+  const { exact, analogs } = splitAnalogResults(sorted);
   const isSearching = Boolean(getActiveTab()?.source);
-  resultsBody.innerHTML = sorted
-    .map((result) => {
+  const renderResult = (result) => {
       const supplierName = supplierNames[result.supplier] ?? result.supplier;
       const link = getSafeResultLink(result.link);
       const deliveryDate = result.supplier === "mladov" && !result.deliveryDate
@@ -753,7 +753,7 @@ const renderResults = () => {
         : formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo);
 
       return `
-         <tr class="results-table__row" data-link="${escapeHtml(link)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Открыть ${escapeHtml(result.title)}">
+          <tr class="results-table__row" data-link="${escapeHtml(link)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Открыть ${escapeHtml(result.title)}">
            <td data-column="supplier">${escapeHtml(supplierName)}</td>
            <td data-column="brand">${escapeHtml(result.brand)}</td>
            <td data-column="article">${escapeHtml(result.article)}</td>
@@ -762,10 +762,16 @@ const renderResults = () => {
             <td data-column="price">${escapeHtml(formatPrice(result.price))}</td>
             <td data-column="markupPrice">${escapeHtml(formatPrice(getMarkupPrice(result)))}</td>
            <td data-column="deliveryDate">${escapeHtml(deliveryDate)}</td>
-         </tr>
-      `;
-    })
-    .join("");
+          </tr>
+       `;
+  };
+  const sectionRow = (title) => `
+    <tr class="results-table__section"><th colspan="${Math.max(getVisibleTableColumns().length, 1)}" scope="colgroup">${title}</th></tr>
+  `;
+  resultsBody.innerHTML = [
+    exact.map(renderResult).join(""),
+    analogs.length ? `${sectionRow("Аналоги")}${analogs.map(renderResult).join("")}` : "",
+  ].join("");
   applyTableColumns();
   updateResultCount(sorted);
   renderFilterValues();

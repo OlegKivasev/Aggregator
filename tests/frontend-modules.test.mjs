@@ -6,6 +6,7 @@ import {
   formatWarehouse,
   getSafeResultLink,
   renderWarehouse,
+  splitAnalogResults,
 } from "../src/frontend/result-formatting.js";
 import { openSearchStream } from "../src/frontend/search-stream.js";
 
@@ -30,6 +31,17 @@ test("warehouse rendering escapes tooltip and validates supplier metadata", () =
   assert.match(markup, /data-tooltip="Основной &lt;склад&gt; &quot;A&quot;"/);
   assert.doesNotMatch(markup, /warehouse-code--purple/);
   assert.match(markup, /&lt;4\.5/);
+});
+
+test("result formatting separates analogs below exact results", () => {
+  const result = splitAnalogResults([
+    { article: "A", isAnalog: true },
+    { article: "B" },
+    { article: "C", isAnalog: false },
+  ]);
+
+  assert.deepEqual(result.exact.map((item) => item.article), ["B", "C"]);
+  assert.deepEqual(result.analogs.map((item) => item.article), ["A"]);
 });
 
 test("search stream parses fragmented multiline SSE data", async () => {

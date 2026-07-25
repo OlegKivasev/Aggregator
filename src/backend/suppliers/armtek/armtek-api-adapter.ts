@@ -347,7 +347,8 @@ function hasArmtekWarehouseName(item: ArmtekSearchItem): boolean {
 }
 
 function isArmtekAnalog(item: ArmtekSearchItem): boolean {
-  return Boolean(item.ANALOG?.trim());
+  const value = item.ANALOG?.trim().toUpperCase();
+  return Boolean(value && value !== "0");
 }
 
 export function getArmtekAnalogSearchTargets(items: ArmtekSearchItem[], requestedArticle: string): Array<{ article: string; brand: string }> {
@@ -429,6 +430,7 @@ function buildArmtekSearchParams(
 function normalizeArmtekResult(
   item: ArmtekSearchItem,
   storeNames: Map<string, string>,
+  isAnalog = false,
 ): NormalizedSearchResult | null {
   const price = parsePrice(item.PRICE);
   const brand = item.BRAND?.trim();
@@ -449,6 +451,7 @@ function normalizeArmtekResult(
     warehouse: getArmtekWarehouse(item, storeNames),
     deliveryDateApproximate: false,
     link: buildArmtekResultLink(article),
+    ...(isAnalog ? { isAnalog: true } : {}),
   };
 }
 
@@ -579,7 +582,7 @@ export class ArmtekApiAdapter implements SupplierAdapter {
       }
 
       for (const item of analogItems) {
-        const result = normalizeArmtekResult(item, storeNames);
+        const result = normalizeArmtekResult(item, storeNames, true);
         if (!result) {
           continue;
         }

@@ -61,3 +61,8 @@ export const formatPrice = (value) => {
   const truncated = value < 0 ? Math.ceil(value * 100) / 100 : Math.trunc(value * 100) / 100;
   return `${truncated.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽`;
 };
+
+export const splitAnalogResults = (results) => ({
+  exact: results.filter((result) => result.isAnalog !== true),
+  analogs: results.filter((result) => result.isAnalog === true),
+});
