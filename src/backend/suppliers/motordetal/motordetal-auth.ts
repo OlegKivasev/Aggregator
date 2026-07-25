@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { getStateFilePath } from "../../config.ts";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { createBoundedAbortSignal } from "../../abort.ts";
+import { getStateFilePath, motorDetalConfig, supplierMaxResponseBytes } from "../../config.ts";
+import { writeJsonStateFileAtomic } from "../../session/state-file.ts";
 import type { MotorDetalCredentials } from "../../types.ts";
-import { SupplierAuthError } from "../errors.ts";
+import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
+import { readBoundedJsonResponse } from "../fetch-json.ts";
 
 interface MotorDetalToken {
   token?: string;
@@ -31,14 +33,41 @@ export interface MotorDetalAuthCheckResult {
   details: string;
 }
 
-export const motorDetalBaseUrl = process.env.MOTORDETAL_BASE_URL?.trim() || "https://sales.motordetal.ru/";
+export const motorDetalBaseUrl = motorDetalConfig.baseUrl;
 export const motorDetalApiUrl = new URL("/api/v1/", motorDetalBaseUrl).toString();
 
 const motorDetalTokenStatePath = getStateFilePath("motordetal-token-state.json");
-const motorDetalStateDir = dirname(motorDetalTokenStatePath);
+let tokenStateGeneration = 0;
 
 function apiUrl(path: string): string {
   return new URL(path.replace(/^\//, ""), motorDetalApiUrl).toString();
+}
+
+async function requestMotorDetal<T>(
+  input: string | URL,
+  init: RequestInit,
+  signal?: AbortSignal,
+): Promise<{ status: number; ok: boolean; payload: MotorDetalApiEnvelope<T> }> {
+  const parentSignal = signal ?? new AbortController().signal;
+  const requestSignal = createBoundedAbortSignal(parentSignal, motorDetalConfig.requestTimeoutMs, "MotorDetal API request timed out");
+  try {
+    let response: Response;
+    try {
+      response = await fetch(input, { ...init, signal: requestSignal.signal, redirect: "error" });
+    } catch (error) {
+      if (requestSignal.signal.aborted) {
+        throw requestSignal.signal.reason;
+      }
+      throw new SupplierIntegrationError("MotorDetal API request failed", { cause: error });
+    }
+    if (response.status === 401 || response.status === 403) {
+      return { status: response.status, ok: false, payload: {} };
+    }
+    const payload = await readBoundedJsonResponse(response, supplierMaxResponseBytes, "MotorDetal API") as MotorDetalApiEnvelope<T>;
+    return { status: response.status, ok: response.ok, payload };
+  } finally {
+    requestSignal.dispose();
+  }
 }
 
 function formatApiError(payload: MotorDetalApiEnvelope<unknown>, fallback: string): string {
@@ -56,14 +85,30 @@ function formatApiError(payload: MotorDetalApiEnvelope<unknown>, fallback: strin
   return fallback;
 }
 
-async function readEnvelope<T>(response: Response): Promise<MotorDetalApiEnvelope<T>> {
-  const payload = (await response.json().catch(() => ({}))) as MotorDetalApiEnvelope<T>;
+function isMotorDetalAuthorizationFailure(payload: MotorDetalApiEnvelope<unknown>): boolean {
+  const details = [
+    payload.message,
+    ...(Array.isArray(payload.errors) ? payload.errors.map(String) : []),
+  ].filter((value): value is string => typeof value === "string").join(" ");
+  return /authoriz|unauthor|forbidden|session|token|доступ|авторизац|сесси|токен/i.test(details);
+}
 
-  if (!response.ok || payload.success === false) {
-    throw new Error(formatApiError(payload, `MotorDetal API returned HTTP ${response.status}`));
+function readEnvelope<T>(
+  response: { status: number; ok: boolean; payload: MotorDetalApiEnvelope<T> },
+  failedEnvelopeMeansAuthorization = false,
+): MotorDetalApiEnvelope<T> {
+  if (
+    response.ok &&
+    response.payload.success === false &&
+    (failedEnvelopeMeansAuthorization || isMotorDetalAuthorizationFailure(response.payload))
+  ) {
+    throw new SupplierAuthError("MotorDetal session has expired");
+  }
+  if (!response.ok || response.payload.success === false) {
+    throw new SupplierIntegrationError(formatApiError(response.payload, `MotorDetal API returned HTTP ${response.status}`));
   }
 
-  return payload;
+  return response.payload;
 }
 
 function tokenStateFromAuth(data: MotorDetalAuthData | undefined): MotorDetalTokenState {
@@ -71,15 +116,18 @@ function tokenStateFromAuth(data: MotorDetalAuthData | undefined): MotorDetalTok
   const refreshToken = data?.refresh?.token;
 
   if (!accessToken || !refreshToken) {
-    throw new Error("MotorDetal authorization did not return access and refresh tokens");
+    throw new SupplierIntegrationError("MotorDetal authorization did not return access and refresh tokens");
   }
 
   return { accessToken, refreshToken };
 }
 
-function saveMotorDetalTokenState(state: MotorDetalTokenState): void {
-  mkdirSync(motorDetalStateDir, { recursive: true });
-  writeFileSync(motorDetalTokenStatePath, JSON.stringify(state), { encoding: "utf-8", mode: 0o600 });
+function saveMotorDetalTokenState(state: MotorDetalTokenState, expectedGeneration: number): void {
+  writeJsonStateFileAtomic(
+    motorDetalTokenStatePath,
+    state,
+    () => tokenStateGeneration === expectedGeneration,
+  );
 }
 
 function isAccessTokenFresh(token: string): boolean {
@@ -111,38 +159,41 @@ export function loadMotorDetalTokenState(): MotorDetalTokenState | null {
 }
 
 export function clearMotorDetalTokenState(): void {
+  tokenStateGeneration += 1;
   if (hasMotorDetalTokenState()) {
     rmSync(motorDetalTokenStatePath, { force: true });
   }
 }
 
-async function refreshMotorDetalToken(state: MotorDetalTokenState): Promise<MotorDetalTokenState> {
-  const response = await fetch(apiUrl("refresh/"), {
+async function refreshMotorDetalToken(state: MotorDetalTokenState, signal?: AbortSignal): Promise<MotorDetalTokenState> {
+  const expectedGeneration = tokenStateGeneration;
+  const response = await requestMotorDetal<MotorDetalAuthData>(apiUrl("refresh/"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token: state.refreshToken, info: "refresh" }),
-  });
+  }, signal);
   if (response.status === 401 || response.status === 403) {
     throw new SupplierAuthError("MotorDetal session has expired");
   }
-  const payload = await readEnvelope<MotorDetalAuthData>(response);
+  const payload = readEnvelope(response, true);
   const refreshed = tokenStateFromAuth(payload.data);
-  saveMotorDetalTokenState(refreshed);
+  signal?.throwIfAborted();
+  saveMotorDetalTokenState(refreshed, expectedGeneration);
   return refreshed;
 }
 
-export async function getMotorDetalAccessToken(forceRefresh = false): Promise<string> {
+export async function getMotorDetalAccessToken(forceRefresh = false, signal?: AbortSignal): Promise<string> {
   const state = loadMotorDetalTokenState();
 
   if (!state) {
-    throw new Error("MotorDetal session is not configured");
+    throw new SupplierAuthError("MotorDetal session is not configured");
   }
 
   if (!forceRefresh && isAccessTokenFresh(state.accessToken)) {
     return state.accessToken;
   }
 
-  return (await refreshMotorDetalToken(state)).accessToken;
+  return (await refreshMotorDetalToken(state, signal)).accessToken;
 }
 
 export async function motorDetalApiRequest<T>(path: string, searchParams?: URLSearchParams, signal?: AbortSignal): Promise<T> {
@@ -151,31 +202,35 @@ export async function motorDetalApiRequest<T>(path: string, searchParams?: URLSe
     url.search = searchParams.toString();
   }
 
-  const request = async (token: string) => fetch(url, {
+  const request = async (token: string) => requestMotorDetal<T>(url, {
     headers: { Authorization: `Bearer ${token}` },
-    signal,
-  });
-  let response = await request(await getMotorDetalAccessToken());
+  }, signal);
+  let response = await request(await getMotorDetalAccessToken(false, signal));
 
   if (response.status === 401 || response.status === 403) {
-    response = await request(await getMotorDetalAccessToken(true));
+    response = await request(await getMotorDetalAccessToken(true, signal));
   }
 
   if (response.status === 401 || response.status === 403) {
     throw new SupplierAuthError("MotorDetal session has expired");
   }
 
-  const payload = await readEnvelope<T>(response);
+  const payload = readEnvelope(response);
   if (payload.data === undefined) {
-    throw new Error("MotorDetal API returned an empty response");
+    throw new SupplierIntegrationError("MotorDetal API returned an empty response");
   }
 
   return payload.data;
 }
 
-export async function verifyMotorDetalCredentials(credentials: MotorDetalCredentials): Promise<MotorDetalAuthCheckResult> {
+export async function verifyMotorDetalCredentials(
+  credentials: MotorDetalCredentials,
+  signal?: AbortSignal,
+): Promise<MotorDetalAuthCheckResult> {
+  tokenStateGeneration += 1;
+  const expectedGeneration = tokenStateGeneration;
   try {
-    const response = await fetch(apiUrl("sign-in/"), {
+    const response = await requestMotorDetal<MotorDetalAuthData>(apiUrl("sign-in/"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -183,21 +238,38 @@ export async function verifyMotorDetalCredentials(credentials: MotorDetalCredent
         password: credentials.password,
         remember: true,
       }),
-    });
-    const payload = await readEnvelope<MotorDetalAuthData>(response);
+    }, signal);
+    if (response.status === 401 || response.status === 403) {
+      throw new SupplierAuthError("MotorDetal rejected login or password");
+    }
+    const payload = response.payload;
+    if (!response.ok) {
+      throw new SupplierIntegrationError(formatApiError(payload, `MotorDetal API returned HTTP ${response.status}`));
+    }
+    if (payload.success === false) {
+      throw new SupplierAuthError("MotorDetal rejected login or password");
+    }
     const state = tokenStateFromAuth(payload.data);
-    saveMotorDetalTokenState(state);
-
-    await motorDetalApiRequest<unknown>("init");
+    const initialization = await requestMotorDetal<unknown>(apiUrl("init"), {
+      headers: { Authorization: `Bearer ${state.accessToken}` },
+    }, signal);
+    if (initialization.status === 401 || initialization.status === 403) {
+      throw new SupplierAuthError("MotorDetal rejected the authorized session");
+    }
+    readEnvelope(initialization);
+    signal?.throwIfAborted();
+    saveMotorDetalTokenState(state, expectedGeneration);
     return {
       authorized: true,
       details: "MotorDetal account login was verified successfully",
     };
   } catch (error) {
-    clearMotorDetalTokenState();
-    return {
-      authorized: false,
-      details: error instanceof Error ? error.message : "MotorDetal rejected authorization",
-    };
+    if (error instanceof SupplierAuthError) {
+      return {
+        authorized: false,
+        details: "MotorDetal rejected login or password",
+      };
+    }
+    throw error;
   }
 }

@@ -1,9 +1,12 @@
+import { mladovConfig, supplierMaxResponseBytes } from "../../config.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type { NormalizedSearchResult, SearchQuery, SupplierSearchContext, SupplierSessionState } from "../../types.ts";
-import { SupplierAuthError } from "../errors.ts";
+import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
+import { siteHttpRequest } from "../site-http.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
 import {
   createMladovContext,
+  getMladovStorageStateGeneration,
   getMladovSharedBrowser,
   hasMladovStorageState,
   isMladovAuthenticated,
@@ -71,18 +74,45 @@ function parseDeliveryDate(value: string | null): { date: string | null; approxi
   return { date: date.toISOString(), approximate: true };
 }
 
-async function fetchMladovResults(context: any, page: any, article: string): Promise<MladovResultItem[]> {
-  const response = await context.request.post(new URL("/ajaxshop3.php", mladovBaseUrl).toString(), {
-    form: { artikul: article },
-    timeout: Number(process.env.MLADOV_SEARCH_TIMEOUT_MS ?? "15000"),
+async function fetchMladovResults(
+  context: any,
+  page: any,
+  article: string,
+  signal: AbortSignal,
+): Promise<MladovResultItem[]> {
+  const cookies = await context.cookies(mladovBaseUrl) as Array<{ name?: string; value?: string }>;
+  const cookie = cookies
+    .filter((item) => item.name && item.value)
+    .map((item) => `${item.name}=${item.value}`)
+    .join("; ");
+  const response = await siteHttpRequest(new URL("/ajaxshop3.php", mladovBaseUrl), {
+    method: "POST",
+    headers: {
+      Accept: "text/html",
+      "Content-Type": "application/x-www-form-urlencoded",
+      Referer: mladovBaseUrl,
+    },
+    cookie,
+    body: new URLSearchParams({ artikul: article }).toString(),
+    signal,
+    timeoutMs: mladovConfig.requestTimeoutMs,
+    maxResponseBytes: supplierMaxResponseBytes,
+    returnRawBody: true,
   });
-
-  if (!response.ok()) {
-    throw new Error(`Поиск Механик Ладов вернул HTTP ${response.status()}`);
+  if (response.status < 200 || response.status >= 300) {
+    throw new SupplierIntegrationError(`Поиск Механик Ладов вернул HTTP ${response.status}`);
   }
-
-  const html = new TextDecoder("windows-1251").decode(await response.body());
+  if (!response.contentType?.toLowerCase().includes("text/html")) {
+    throw new SupplierIntegrationError("Поиск Механик Ладов вернул неожиданный тип ответа");
+  }
+  if (!response.rawBody) {
+    throw new SupplierIntegrationError("Поиск Механик Ладов вернул пустой ответ");
+  }
+  const html = new TextDecoder("windows-1251").decode(response.rawBody);
   await page.setContent(html);
+  if ((await page.locator('input[name="username"], input[name="userpassword"]').count()) > 0) {
+    throw new SupplierAuthError("Сессия Механик Ладов истекла");
+  }
   const items = (await page.locator("div.trtable2").evaluateAll((rows: Element[]) =>
     rows.map((row) => {
       const text = (selector: string) => row.querySelector(selector)?.textContent?.replace(/\s+/g, " ").trim() || "";
@@ -109,17 +139,29 @@ async function fetchMladovResults(context: any, page: any, article: string): Pro
     }),
   )) as MladovResultItem[];
 
+  if (!items.length) {
+    const bodyText = (await page.locator("body").innerText()).replace(/\s+/g, " ").trim();
+    if (/ничего не найден|не найдено|нет предложений|товар отсутствует|по вашему запросу/i.test(bodyText)) {
+      return [];
+    }
+    throw new SupplierIntegrationError("Механик Ладов вернул нераспознанный пустой результат");
+  }
+
   const target = normalizeArticle(article);
-  const exactItems = items.filter((item) =>
-    normalizeArticle(item.article) === target && item.brand && item.title && Number.isFinite(item.price) && item.price > 0,
+  const validItems = items.filter((item) =>
+    item.article && item.brand && item.title && Number.isFinite(item.price) && item.price > 0,
   );
+  if (!validItems.length) {
+    throw new SupplierIntegrationError("Механик Ладов вернул только некорректные строки результатов");
+  }
+  const exactItems = validItems.filter((item) => normalizeArticle(item.article) === target);
   return exactItems;
 }
 
 export class MladovWebAdapter implements SupplierAdapter {
   readonly id = "mladov";
   readonly displayName = "Механик Ладов";
-  readonly timeoutMs = Number(process.env.MLADOV_SEARCH_TIMEOUT_MS ?? "20000");
+  readonly timeoutMs = mladovConfig.searchTimeoutMs;
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
     if (hasMladovStorageState()) {
@@ -131,26 +173,45 @@ export class MladovWebAdapter implements SupplierAdapter {
     return sessionManager.markChecked(this.id, "Учетные данные Механик Ладов доступны");
   }
 
+  async validateSession(context: SupplierSearchContext, _sessionManager: SupplierSessionManager): Promise<void> {
+    context.signal.throwIfAborted();
+    const browser = await getMladovSharedBrowser(context.signal);
+    const browserContext = await createMladovContext(browser, true, context.signal);
+    const closeOnAbort = () => browserContext.close().catch(() => undefined);
+    context.signal.addEventListener("abort", closeOnAbort, { once: true });
+    try {
+      const page = await browserContext.newPage();
+      if (!await isMladovAuthenticated(page, context.signal)) {
+        throw new SupplierAuthError("Сессия Механик Ладов истекла");
+      }
+    } finally {
+      context.signal.removeEventListener("abort", closeOnAbort);
+      await browserContext.close().catch(() => undefined);
+    }
+  }
+
   async search(
     query: SearchQuery,
     searchContext: SupplierSearchContext,
     onResult: (result: NormalizedSearchResult) => void,
     sessionManager: SupplierSessionManager,
   ): Promise<void> {
-    const browser = await getMladovSharedBrowser();
-    const context = await createMladovContext(browser);
+    const expectedStateGeneration = getMladovStorageStateGeneration();
+    searchContext.signal.throwIfAborted();
+    const browser = await getMladovSharedBrowser(searchContext.signal);
+    const context = await createMladovContext(browser, true, searchContext.signal);
     const closeOnAbort = () => context.close().catch(() => undefined);
     searchContext.signal.addEventListener("abort", closeOnAbort, { once: true });
 
     try {
       const page = await context.newPage();
-      let authorized = await isMladovAuthenticated(page);
+      let authorized = await isMladovAuthenticated(page, searchContext.signal);
       if (!authorized) {
         const credentials = sessionManager.getMladovCredentials();
         if (!credentials) {
           throw new SupplierAuthError("Сессия Механик Ладов истекла, учетные данные отсутствуют");
         }
-        const result = await performMladovLogin(page, credentials);
+        const result = await performMladovLogin(page, credentials, searchContext.signal);
         if (!result.authorized) {
           throw new SupplierAuthError(result.details);
         }
@@ -162,7 +223,8 @@ export class MladovWebAdapter implements SupplierAdapter {
       }
 
       const article = query.article.trim();
-      const items = await fetchMladovResults(context, page, article);
+      searchContext.signal.throwIfAborted();
+      const items = await fetchMladovResults(context, page, article, searchContext.signal);
       const link = new URL(`/shop.php?artikul=${encodeWindows1251(article)}`, mladovBaseUrl).toString();
 
       for (const item of items) {
@@ -180,7 +242,8 @@ export class MladovWebAdapter implements SupplierAdapter {
         });
       }
 
-      await saveMladovStorageState(context);
+      searchContext.signal.throwIfAborted();
+      await saveMladovStorageState(context, expectedStateGeneration, searchContext.signal);
     } finally {
       searchContext.signal.removeEventListener("abort", closeOnAbort);
       await context.close().catch(() => undefined);

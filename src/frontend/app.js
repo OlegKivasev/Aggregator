@@ -1,4 +1,6 @@
 import { buildIncompleteSearchWarnings, buildSupplierResultTooltip, formatDeliveryDate } from "./supplier-search-summary.js";
+import { escapeHtml, formatPrice, formatWarehouse, getSafeResultLink, renderWarehouse } from "./result-formatting.js";
+import { openSearchStream } from "./search-stream.js";
 
 const form = document.querySelector("#search-form");
 const articleInput = document.querySelector("#article-input");
@@ -105,7 +107,6 @@ const searchStateStorageKey = "autoservice.searchState";
 const tableColumnsStorageKey = "autoservice.tableColumns";
 const lastSearchStorageKey = "autoservice.lastSearchStartedAt";
 const supplierCheckIntervalMs = 2 * 60 * 60 * 1000;
-const supplierCheckSuccessDelayMs = 3000;
 
 const supplierNames = {
   rossko: "Rossko",
@@ -462,75 +463,11 @@ const updateSupplierNotice = (session) => {
   }
 };
 
-const formatWarehouse = (value) => {
-  const normalized = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
-
-  if (!normalized || normalized.length > 80 || /возврат|требован|упаков|установ|поставщик|не подлежат/i.test(normalized)) {
-    return "-";
-  }
-
-  return normalized;
-};
-
-const formatWarehouseFull = (value) => {
-  const normalized = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
-  return normalized && normalized.length <= 300 ? normalized : "-";
-};
-
-const escapeHtml = (value) => String(value)
-  .replaceAll("&", "&amp;")
-  .replaceAll("<", "&lt;")
-  .replaceAll(">", "&gt;")
-  .replaceAll('"', "&quot;")
-  .replaceAll("'", "&#039;");
-
-const getSafeResultLink = (value) => {
-  try {
-    const url = new URL(String(value));
-    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
-  } catch {
-    return "";
-  }
-};
-
-const renderWarehouse = (result) => {
-  const warehouse = formatWarehouse(result.warehouse);
-  const warehouseFull = formatWarehouseFull(result.warehouseFull);
-  const tooltip = warehouseFull !== "-" && warehouseFull !== warehouse
-    ? ` data-tooltip="${escapeHtml(warehouseFull)}" tabindex="0"`
-    : "";
-
-  if (warehouse === "-") {
-    return warehouse;
-  }
-
-  if (result.supplier !== "stparts") {
-    return `<span class="warehouse-code"${tooltip}>${escapeHtml(warehouse)}</span>`;
-  }
-
-  const color = ["green", "blue", "red"].includes(result.warehouseColor) ? result.warehouseColor : "";
-  const rating = typeof result.warehouseRating === "string" && /^<?\d(?:\.\d)?$/.test(result.warehouseRating)
-    ? result.warehouseRating.replace("<", "&lt;")
-    : "";
-  const ratingMarkup = rating ? `<span class="warehouse-rating">${rating}<span class="warehouse-rating__star" aria-hidden="true">★</span></span>` : "";
-
-  return `<span class="warehouse-code${color ? ` warehouse-code--${color}` : ""}"${tooltip}>${escapeHtml(warehouse)}</span>${ratingMarkup}`;
-};
-
 const resultCollator = new Intl.Collator("ru", { numeric: true, sensitivity: "base" });
 
 const getMarkupPrice = (result) => {
   const price = Number(result.price);
   return Number.isFinite(price) && price > 0 ? price * (1 + markupPercent / 100) : null;
-};
-
-const formatPrice = (value) => {
-  if (!Number.isFinite(value)) {
-    return "Не указана";
-  }
-
-  const truncated = value < 0 ? Math.ceil(value * 100) / 100 : Math.trunc(value * 100) / 100;
-  return `${truncated.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽`;
 };
 
 const getSortValue = (result, key) => {
@@ -1020,8 +957,6 @@ const postJson = async (url, body) => {
   return payload;
 };
 
-const wait = (delayMs) => new Promise((resolve) => window.setTimeout(resolve, delayMs));
-
 const shouldCheckSupplierSessions = () => {
   try {
     const lastSearchStartedAt = Number(localStorage.getItem(lastSearchStorageKey));
@@ -1037,16 +972,6 @@ const rememberSupplierSessionsChecked = () => {
   } catch {
     // This timestamp only avoids repeated checks; validation remains safe without storage.
   }
-};
-
-const showSupplierCheck = (suppliers) => {
-  supplierCheck.dataset.state = "checking";
-  supplierCheckTitle.textContent = "Выполняется проверка сессий, пожалуйста подождите.";
-  supplierCheckMessage.textContent = "";
-  supplierCheckList.replaceChildren();
-  supplierCheckOk.hidden = true;
-  supplierCheck.hidden = false;
-  supplierCheck.focus();
 };
 
 const showSupplierCheckError = (expired, unavailable) => {
@@ -1065,6 +990,8 @@ const showSupplierCheckError = (expired, unavailable) => {
     return item;
   }));
   supplierCheckOk.hidden = false;
+  supplierCheck.hidden = false;
+  supplierCheck.focus();
   supplierCheckOk.focus();
 };
 
@@ -1089,8 +1016,6 @@ const showIncompleteSearchWarning = (tab) => {
 };
 
 const checkSupplierSessions = async (article, suppliers) => {
-  showSupplierCheck(suppliers);
-
   try {
     const payload = await postJson("/api/suppliers/sessions/validate", { article, suppliers });
     updateSessionCards(payload.sessions);
@@ -1102,12 +1027,6 @@ const checkSupplierSessions = async (article, suppliers) => {
       return false;
     }
 
-    supplierCheck.dataset.state = "success";
-    supplierCheckTitle.textContent = "Все поставщики успешно подключены";
-    supplierCheckMessage.textContent = "Проверка завершена. Поиск начнется автоматически.";
-    supplierCheckList.replaceChildren();
-    await wait(supplierCheckSuccessDelayMs);
-    supplierCheck.hidden = true;
     return true;
   } catch {
     showSupplierCheckError([], suppliers);
@@ -1163,72 +1082,6 @@ const clearAuthInputs = (...inputs) => {
   inputs.forEach((input) => {
     input.value = "";
   });
-};
-
-const openSearchStream = (url) => {
-  const controller = new AbortController();
-  const stream = {
-    closed: false,
-    onmessage: null,
-    onerror: null,
-    close() {
-      this.closed = true;
-      controller.abort();
-    },
-  };
-
-  queueMicrotask(async () => {
-    try {
-      const response = await fetch(url, {
-        headers: { Accept: "text/event-stream" },
-        signal: controller.signal,
-      });
-
-      if (!response.ok || !response.body) {
-        throw new Error(`Search stream returned HTTP ${response.status}`);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (!stream.closed) {
-        const { value, done } = await reader.read();
-        buffer += decoder.decode(value, { stream: !done });
-
-        let eventEnd = buffer.indexOf("\n\n");
-        while (eventEnd !== -1) {
-          const event = buffer.slice(0, eventEnd);
-          buffer = buffer.slice(eventEnd + 2);
-          const data = event
-            .split("\n")
-            .filter((line) => line.startsWith("data:"))
-            .map((line) => line.slice(5).trimStart())
-            .join("\n");
-
-          if (data) {
-            stream.onmessage?.({ data });
-          }
-
-          eventEnd = buffer.indexOf("\n\n");
-        }
-
-        if (done) {
-          break;
-        }
-      }
-
-      if (!stream.closed) {
-        stream.onerror?.(new Error("Search stream closed before completion"));
-      }
-    } catch (error) {
-      if (!stream.closed) {
-        stream.onerror?.(error);
-      }
-    }
-  });
-
-  return stream;
 };
 
 settingsToggle.addEventListener("click", openSettings);
@@ -1739,10 +1592,10 @@ form.addEventListener("submit", async (event) => {
     supplierCheckInProgress = true;
     const canSearch = await checkSupplierSessions(article, enabledSuppliers);
     supplierCheckInProgress = false;
-    rememberSupplierSessionsChecked();
     if (!canSearch) {
       return;
     }
+    rememberSupplierSessionsChecked();
   }
 
   startSearch(article, enabledSuppliers);

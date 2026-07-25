@@ -1,36 +1,34 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
-import { dirname } from "node:path";
-import { getStateFilePath } from "../../config.ts";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { getStateFilePath, rosskoConfig } from "../../config.ts";
+import { writeJsonStateFileAtomic } from "../../session/state-file.ts";
 import type { RosskoSiteCredentials } from "../../types.ts";
+import { SupplierIntegrationError } from "../errors.ts";
 
 export interface RosskoAuthCheckResult {
   authorized: boolean;
   details: string;
+  failure?: "authorization" | "integration";
 }
 
-export const rosskoBusinessUrl = process.env.ROSSKO_BASE_URL?.trim() || "https://samara.rossko.ru/";
+export const rosskoBusinessUrl = rosskoConfig.businessUrl;
 
 const authErrorPattern = /невер|неправ|ошиб|парол|логин|email|почт/i;
-const rosskoNavigationTimeoutMs = Number(process.env.ROSSKO_NAVIGATION_TIMEOUT_MS ?? "7000");
-const rosskoNavigationAttempts = Number(process.env.ROSSKO_NAVIGATION_ATTEMPTS ?? "2");
-const rosskoPostCommitDelayMs = Number(process.env.ROSSKO_POST_COMMIT_DELAY_MS ?? "200");
-const rosskoRetryDelayMs = Number(process.env.ROSSKO_RETRY_DELAY_MS ?? "250");
-const rosskoSettledTimeoutMs = Number(process.env.ROSSKO_SETTLED_TIMEOUT_MS ?? "3000");
-const rosskoSettledFallbackDelayMs = Number(process.env.ROSSKO_SETTLED_FALLBACK_DELAY_MS ?? "800");
-const rosskoLoginFieldVisibleTimeoutMs = Number(process.env.ROSSKO_LOGIN_FIELD_VISIBLE_TIMEOUT_MS ?? "1200");
-const rosskoAuthCookieWaitTimeoutMs = Number(process.env.ROSSKO_AUTH_COOKIE_WAIT_TIMEOUT_MS ?? "8000");
-const rosskoAuthCookiePollIntervalMs = Number(process.env.ROSSKO_AUTH_COOKIE_POLL_INTERVAL_MS ?? "250");
-const rosskoAuthResponseTimeoutMs = Number(process.env.ROSSKO_AUTH_RESPONSE_TIMEOUT_MS ?? "8000");
+const rosskoNavigationTimeoutMs = rosskoConfig.navigationTimeoutMs;
+const rosskoNavigationAttempts = rosskoConfig.navigationAttempts;
+const rosskoPostCommitDelayMs = rosskoConfig.postCommitDelayMs;
+const rosskoRetryDelayMs = rosskoConfig.retryDelayMs;
+const rosskoSettledTimeoutMs = rosskoConfig.settledTimeoutMs;
+const rosskoSettledFallbackDelayMs = rosskoConfig.settledFallbackDelayMs;
+const rosskoLoginFieldVisibleTimeoutMs = rosskoConfig.loginFieldVisibleTimeoutMs;
+const rosskoAuthCookieWaitTimeoutMs = rosskoConfig.authCookieWaitTimeoutMs;
+const rosskoAuthCookiePollIntervalMs = rosskoConfig.authCookiePollIntervalMs;
+const rosskoAuthResponseTimeoutMs = rosskoConfig.authResponseTimeoutMs;
 const rosskoStorageStatePath = getStateFilePath("rossko-storage-state.json");
-const rosskoStateDir = dirname(rosskoStorageStatePath);
-
-function ensureRosskoStateDir() {
-  mkdirSync(rosskoStateDir, { recursive: true, mode: 0o700 });
-}
+let storageStateGeneration = 0;
 
 function findBrowserExecutable(): string | undefined {
   const candidates = [
-    process.env.ROSSKO_BROWSER_PATH,
+    rosskoConfig.browserPath,
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
@@ -45,6 +43,7 @@ export function hasRosskoStorageState(): boolean {
 }
 
 export function clearRosskoStorageState(): void {
+  storageStateGeneration += 1;
   if (existsSync(rosskoStorageStatePath)) {
     rmSync(rosskoStorageStatePath, { force: true });
   }
@@ -74,10 +73,19 @@ export async function createRosskoBrowser() {
   });
 }
 
-export async function saveRosskoStorageState(context: any): Promise<void> {
-  ensureRosskoStateDir();
-  await context.storageState({ path: rosskoStorageStatePath });
-  chmodSync(rosskoStorageStatePath, 0o600);
+export async function saveRosskoStorageState(
+  context: any,
+  expectedGeneration: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  const state = await context.storageState();
+  signal?.throwIfAborted();
+  writeJsonStateFileAtomic(
+    rosskoStorageStatePath,
+    state,
+    () => storageStateGeneration === expectedGeneration && !signal?.aborted,
+  );
 }
 
 export async function gotoRossko(page: any, url: string, label: string): Promise<void> {
@@ -179,6 +187,7 @@ async function waitForRosskoAuthResponse(page: any): Promise<RosskoAuthCheckResu
       return {
         authorized: false,
         details: payload.msg?.trim() || "Rossko rejected the login or password",
+        failure: "authorization",
       };
     }
 
@@ -303,6 +312,7 @@ export async function performRosskoLogin(page: any, credentials: RosskoSiteCrede
     return {
       authorized: false,
       details: `Rossko login form was not found on ${rosskoBusinessUrl}`,
+      failure: "integration",
     };
   }
 
@@ -351,6 +361,7 @@ export async function performRosskoLogin(page: any, credentials: RosskoSiteCrede
     return {
       authorized: false,
       details: message,
+      failure: rosskoErrorText || authErrorPattern.test(bodyText) ? "authorization" : "integration",
     };
   }
 
@@ -359,23 +370,70 @@ export async function performRosskoLogin(page: any, credentials: RosskoSiteCrede
     details: authFormStillVisible
       ? "Rossko login result could not be confirmed"
       : "Rossko auth cookie was not created after submit",
+    failure: "integration",
   };
 }
 
-export async function verifyRosskoCredentials(credentials: RosskoSiteCredentials): Promise<RosskoAuthCheckResult> {
-  const browser = await createRosskoBrowser();
+export async function verifyRosskoCredentials(
+  credentials: RosskoSiteCredentials,
+  signal?: AbortSignal,
+): Promise<RosskoAuthCheckResult> {
+  storageStateGeneration += 1;
+  const expectedGeneration = storageStateGeneration;
+  let browser: any;
+  const closeOnAbort = () => browser?.close().catch(() => undefined);
 
   try {
+    signal?.throwIfAborted();
+    const browserPromise = createRosskoBrowser();
+    if (signal) {
+      browser = await new Promise<any>((resolve, reject) => {
+        const abortLaunch = () => reject(signal.reason);
+        signal.addEventListener("abort", abortLaunch, { once: true });
+        browserPromise.then(
+          (launchedBrowser) => {
+            signal.removeEventListener("abort", abortLaunch);
+            if (signal.aborted) {
+              launchedBrowser.close().catch(() => undefined);
+              reject(signal.reason);
+              return;
+            }
+            resolve(launchedBrowser);
+          },
+          (error) => {
+            signal.removeEventListener("abort", abortLaunch);
+            reject(error);
+          },
+        );
+      });
+    } else {
+      browser = await browserPromise;
+    }
+    signal?.addEventListener("abort", closeOnAbort, { once: true });
+    signal?.throwIfAborted();
     const context = await browser.newContext();
     const page = await context.newPage();
     const result = await performRosskoLogin(page, credentials);
 
     if (result.authorized) {
-      await saveRosskoStorageState(context);
+      signal?.throwIfAborted();
+      await saveRosskoStorageState(context, expectedGeneration, signal);
     }
 
     return result;
+  } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason;
+    }
+    if (error instanceof SupplierIntegrationError) {
+      throw error;
+    }
+    throw new SupplierIntegrationError("Rossko authorization check failed", { cause: error });
   } finally {
-    await browser.close();
+    signal?.removeEventListener("abort", closeOnAbort);
+    if (browser) {
+      // Cleanup failure must not replace the authorization, timeout, or abort result.
+      await browser.close().catch(() => undefined);
+    }
   }
 }

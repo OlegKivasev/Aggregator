@@ -1,6 +1,7 @@
+import { motorDetalConfig } from "../../config.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type { NormalizedSearchResult, SearchQuery, SupplierSearchContext, SupplierSessionState } from "../../types.ts";
-import { SupplierAuthError } from "../errors.ts";
+import { SupplierIntegrationError } from "../errors.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
 import {
   hasMotorDetalTokenState,
@@ -114,7 +115,7 @@ async function getDeliveryDates(products: MotorDetalProduct[], signal: AbortSign
 export class MotorDetalApiAdapter implements SupplierAdapter {
   readonly id = "motordetal";
   readonly displayName = "MotorDetal";
-  readonly timeoutMs = Number(process.env.MOTORDETAL_SEARCH_TIMEOUT_MS ?? "15000");
+  readonly timeoutMs = motorDetalConfig.searchTimeoutMs;
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
     if (hasMotorDetalTokenState()) {
@@ -128,75 +129,74 @@ export class MotorDetalApiAdapter implements SupplierAdapter {
     return sessionManager.markChecked(this.id, "MotorDetal credentials are available");
   }
 
+  async validateSession(context: SupplierSearchContext, _sessionManager: SupplierSessionManager): Promise<void> {
+    await motorDetalApiRequest<MotorDetalInitData>("init", undefined, context.signal);
+  }
+
   async search(
     query: SearchQuery,
     context: SupplierSearchContext,
     onResult: (result: NormalizedSearchResult) => void,
     _sessionManager: SupplierSessionManager,
   ): Promise<void> {
-    try {
-      const init = await motorDetalApiRequest<MotorDetalInitData>("init", undefined, context.signal);
-      const params = new URLSearchParams({
-        keyword: query.article.trim(),
-        catalog_id: "0",
-        limit: "100",
-      });
-      const region = init.user?.customerGroup?.id ?? init.user?.customerGroupId ?? getSetting(init.settings, ["region", "regionId"]);
-      const zone = init.user?.customerGroup?.zone ?? init.user?.zone ?? getSetting(init.settings, ["zone", "zoneId"]);
+    const init = await motorDetalApiRequest<MotorDetalInitData>("init", undefined, context.signal);
+    const params = new URLSearchParams({
+      keyword: query.article.trim(),
+      catalog_id: "0",
+      limit: "100",
+    });
+    const region = init.user?.customerGroup?.id ?? init.user?.customerGroupId ?? getSetting(init.settings, ["region", "regionId"]);
+    const zone = init.user?.customerGroup?.zone ?? init.user?.zone ?? getSetting(init.settings, ["zone", "zoneId"]);
 
-      if (region !== undefined && region !== null) {
-        params.set("region", String(region));
-      }
-      if (zone !== undefined && zone !== null) {
-        params.set("zone", String(zone));
-      }
-      if (init.user?.warehouseId !== undefined && init.user.warehouseId !== null) {
-        params.set("warehouse", String(init.user.warehouseId));
-      }
+    if (region !== undefined && region !== null) {
+      params.set("region", String(region));
+    }
+    if (zone !== undefined && zone !== null) {
+      params.set("zone", String(zone));
+    }
+    if (init.user?.warehouseId !== undefined && init.user.warehouseId !== null) {
+      params.set("warehouse", String(init.user.warehouseId));
+    }
 
-      const page = await motorDetalApiRequest<MotorDetalPage>("product/filter", params, context.signal);
-      const target = normalizeArticle(query.article);
-      const products = (page.content || []).filter((product) => normalizeArticle(product.articul || "") === target);
-      const deliveryDates = await getDeliveryDates(products, context.signal);
-      for (const product of products) {
-        const brand = product.manufacturerHeader?.trim();
-        const article = product.articul?.trim();
-        const title = product.fullHeader?.trim() || product.header?.trim();
-        if (!brand || !article || !title) {
+    const page = await motorDetalApiRequest<MotorDetalPage>("product/filter", params, context.signal);
+    if (!Array.isArray(page.content)) {
+      throw new SupplierIntegrationError("MotorDetal API returned an invalid product page");
+    }
+    const target = normalizeArticle(query.article);
+    const products = page.content.filter((product) => normalizeArticle(product.articul || "") === target);
+    const deliveryDates = await getDeliveryDates(products, context.signal);
+    for (const product of products) {
+      const brand = product.manufacturerHeader?.trim();
+      const article = product.articul?.trim();
+      const title = product.fullHeader?.trim() || product.header?.trim();
+      if (!brand || !article || !title) {
+        continue;
+      }
+      const link = product.url
+        ? new URL(`/product/${product.url}`, motorDetalBaseUrl).toString()
+        : new URL(`/catalog?keyword=${encodeURIComponent(query.article)}&page=1`, motorDetalBaseUrl).toString();
+      const prices = product.prices?.length ? product.prices : [{ price: product.commercePrice?.price }];
+
+      for (const offer of prices) {
+        const price = parsePrice(offer.price);
+        if (price === null || offer.quantity === 0) {
           continue;
         }
-        const link = product.url
-          ? new URL(`/product/${product.url}`, motorDetalBaseUrl).toString()
-          : new URL(`/catalog?keyword=${encodeURIComponent(query.article)}&page=1`, motorDetalBaseUrl).toString();
-        const prices = product.prices?.length ? product.prices : [{ price: product.commercePrice?.price }];
 
-        for (const offer of prices) {
-          const price = parsePrice(offer.price);
-          if (price === null || offer.quantity === 0) {
-            continue;
-          }
-
-          const deliveryDate = offer.deliveryDate || deliveryDates.get(`${product.syncUid}|${offer.warehouseGroupId}`) || dateFromSupplyTerm(product.supplyTerm);
-          onResult({
-            supplier: this.id,
-            brand,
-            article,
-            title,
-            price,
-            warehouse: offer.warehouseGroupShortHeader || offer.warehouseGroupHeader || null,
-            warehouseFull: offer.warehouseGroupAddress || offer.warehouseGroupHeader || null,
-            deliveryDate,
-            deliveryDateApproximate: !offer.deliveryDate && !deliveryDates.has(`${product.syncUid}|${offer.warehouseGroupId}`),
-            link,
-          });
-        }
+        const deliveryDate = offer.deliveryDate || deliveryDates.get(`${product.syncUid}|${offer.warehouseGroupId}`) || dateFromSupplyTerm(product.supplyTerm);
+        onResult({
+          supplier: this.id,
+          brand,
+          article,
+          title,
+          price,
+          warehouse: offer.warehouseGroupShortHeader || offer.warehouseGroupHeader || null,
+          warehouseFull: offer.warehouseGroupAddress || offer.warehouseGroupHeader || null,
+          deliveryDate,
+          deliveryDateApproximate: !offer.deliveryDate && !deliveryDates.has(`${product.syncUid}|${offer.warehouseGroupId}`),
+          link,
+        });
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/authoriz|session|token|HTTP 40[13]|доступ|авторизац/i.test(message)) {
-        throw new SupplierAuthError(message);
-      }
-      throw error;
     }
   }
 }

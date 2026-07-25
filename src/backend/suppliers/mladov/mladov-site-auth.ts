@@ -1,6 +1,6 @@
-import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { dirname } from "node:path";
-import { getStateFilePath } from "../../config.ts";
+import { existsSync, rmSync } from "node:fs";
+import { getStateFilePath, mladovConfig } from "../../config.ts";
+import { writeJsonStateFileAtomic } from "../../session/state-file.ts";
 import type { MladovCredentials } from "../../types.ts";
 
 export interface MladovAuthCheckResult {
@@ -8,19 +8,56 @@ export interface MladovAuthCheckResult {
   details: string;
 }
 
-export const mladovBaseUrl = process.env.MLADOV_BASE_URL?.trim() || "https://mladov.ru/";
+export const mladovBaseUrl = mladovConfig.baseUrl;
 
 const storageStatePath = getStateFilePath("mladov-storage-state.json");
-const stateDir = dirname(storageStatePath);
-const navigationTimeoutMs = Number(process.env.MLADOV_NAVIGATION_TIMEOUT_MS ?? "15000");
+const navigationTimeoutMs = mladovConfig.navigationTimeoutMs;
 let sharedBrowserPromise: Promise<any> | null = null;
+let storageStateGeneration = 0;
+
+export function getMladovStorageStateGeneration(): number {
+  return storageStateGeneration;
+}
+
+async function waitForResource<T>(
+  resourcePromise: Promise<T>,
+  signal?: AbortSignal,
+  disposeLateResource?: (resource: T) => Promise<void>,
+): Promise<T> {
+  if (!signal) {
+    return resourcePromise;
+  }
+  if (signal.aborted) {
+    if (disposeLateResource) {
+      resourcePromise.then(disposeLateResource).catch(() => undefined);
+    }
+    throw signal.reason;
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    resourcePromise.then(
+      (resource) => {
+        signal.removeEventListener("abort", abort);
+        if (signal.aborted) {
+          disposeLateResource?.(resource).catch(() => undefined);
+          reject(signal.reason);
+          return;
+        }
+        resolve(resource);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+}
 
 function findBrowserExecutable(): string | undefined {
   const candidates = [
-    process.env.MLADOV_BROWSER_PATH,
-    process.env.PARTKOM_BROWSER_PATH,
-    process.env.ARMTEK_BROWSER_PATH,
-    process.env.ROSSKO_BROWSER_PATH,
+    mladovConfig.browserPath,
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
@@ -39,12 +76,13 @@ export function hasMladovStorageState(): boolean {
 }
 
 export function clearMladovStorageState(): void {
+  storageStateGeneration += 1;
   if (existsSync(storageStatePath)) {
     rmSync(storageStatePath, { force: true });
   }
 }
 
-export async function getMladovSharedBrowser() {
+export async function getMladovSharedBrowser(signal?: AbortSignal): Promise<any> {
   if (!sharedBrowserPromise) {
     sharedBrowserPromise = createBrowser().then(
       (browser) => {
@@ -60,7 +98,7 @@ export async function getMladovSharedBrowser() {
     );
   }
 
-  return sharedBrowserPromise;
+  return waitForResource(sharedBrowserPromise, signal);
 }
 
 export async function closeMladovBrowser(): Promise<void> {
@@ -73,28 +111,46 @@ export async function closeMladovBrowser(): Promise<void> {
   }
 }
 
-export async function createMladovContext(browser: any, useStoredState = true) {
-  return useStoredState && hasMladovStorageState()
+export async function createMladovContext(browser: any, useStoredState = true, signal?: AbortSignal): Promise<any> {
+  const contextPromise: Promise<any> = useStoredState && hasMladovStorageState()
     ? browser.newContext({ storageState: storageStatePath })
     : browser.newContext();
+  return waitForResource(contextPromise, signal, (context) => context.close());
 }
 
-export async function saveMladovStorageState(context: any): Promise<void> {
-  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-  await context.storageState({ path: storageStatePath });
-  chmodSync(storageStatePath, 0o600);
+export async function saveMladovStorageState(
+  context: any,
+  expectedGeneration: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  const state = await context.storageState();
+  signal?.throwIfAborted();
+  writeJsonStateFileAtomic(
+    storageStatePath,
+    state,
+    () => storageStateGeneration === expectedGeneration && !signal?.aborted,
+  );
 }
 
-export async function isMladovAuthenticated(page: any): Promise<boolean> {
+export async function isMladovAuthenticated(page: any, signal?: AbortSignal): Promise<boolean> {
+  signal?.throwIfAborted();
   await page.goto(new URL("/account.php", mladovBaseUrl).toString(), {
     waitUntil: "domcontentloaded",
     timeout: navigationTimeoutMs,
   });
+  signal?.throwIfAborted();
   const hasLoginForm = (await page.locator('input[name="username"], input[name="userpassword"]').count()) > 0;
-  return new URL(page.url()).pathname === "/account.php" && !hasLoginForm;
+  const hasAuthorizedMarker = (await page.locator('a[href*="logout"], a[href*="exit"], form[action*="logout"]').count()) > 0;
+  return new URL(page.url()).pathname === "/account.php" && !hasLoginForm && hasAuthorizedMarker;
 }
 
-export async function performMladovLogin(page: any, credentials: MladovCredentials): Promise<MladovAuthCheckResult> {
+export async function performMladovLogin(
+  page: any,
+  credentials: MladovCredentials,
+  signal?: AbortSignal,
+): Promise<MladovAuthCheckResult> {
+  signal?.throwIfAborted();
   await page.goto(mladovBaseUrl, { waitUntil: "domcontentloaded", timeout: navigationTimeoutMs });
   const loginForm = page.locator('form:has(input[name="username"]):has(input[name="userpassword"])');
   await loginForm.locator('input[name="username"]').fill(credentials.login);
@@ -105,25 +161,41 @@ export async function performMladovLogin(page: any, credentials: MladovCredentia
     loginForm.locator('input[type="submit"][name="submit"]').click(),
   ]);
 
-  const authorized = await isMladovAuthenticated(page);
+  signal?.throwIfAborted();
+  const authorized = await isMladovAuthenticated(page, signal);
   return {
     authorized,
     details: authorized ? "Авторизация Механик Ладов успешно проверена" : "Механик Ладов отклонил логин или пароль",
   };
 }
 
-export async function verifyMladovCredentials(credentials: MladovCredentials): Promise<MladovAuthCheckResult> {
-  const browser = await getMladovSharedBrowser();
-  const context = await createMladovContext(browser, false);
+export async function verifyMladovCredentials(
+  credentials: MladovCredentials,
+  signal?: AbortSignal,
+): Promise<MladovAuthCheckResult> {
+  storageStateGeneration += 1;
+  const expectedGeneration = storageStateGeneration;
+  const browser = await getMladovSharedBrowser(signal);
+  const context = await createMladovContext(browser, false, signal);
+  const closeOnAbort = () => context.close().catch(() => undefined);
+  signal?.addEventListener("abort", closeOnAbort, { once: true });
 
   try {
+    signal?.throwIfAborted();
     const page = await context.newPage();
-    const result = await performMladovLogin(page, credentials);
+    const result = await performMladovLogin(page, credentials, signal);
     if (result.authorized) {
-      await saveMladovStorageState(context);
+      signal?.throwIfAborted();
+      await saveMladovStorageState(context, expectedGeneration, signal);
     }
     return result;
+  } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason;
+    }
+    throw error;
   } finally {
-    await context.close();
+    signal?.removeEventListener("abort", closeOnAbort);
+    await context.close().catch(() => undefined);
   }
 }

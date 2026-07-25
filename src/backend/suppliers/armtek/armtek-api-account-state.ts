@@ -1,7 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { getStateFilePath } from "../../config.ts";
+import { writeJsonStateFileAtomic } from "../../session/state-file.ts";
 
 interface ArmtekApiAccountState {
   loginHash: string;
@@ -10,7 +10,15 @@ interface ArmtekApiAccountState {
 }
 
 const statePath = getStateFilePath("armtek-api-account-state.json");
-const stateDir = dirname(statePath);
+let stateGeneration = 0;
+
+export function getArmtekApiAccountStateGeneration(): number {
+  return stateGeneration;
+}
+
+export function invalidateArmtekApiAccountStateWrites(): void {
+  stateGeneration += 1;
+}
 
 function hashLogin(login: string): string {
   return createHash("sha256").update(login).digest("hex");
@@ -45,27 +53,22 @@ export function getArmtekApiAccountState(login: string): Pick<ArmtekApiAccountSt
   }
 }
 
-export function saveArmtekApiAccountState(login: string, vkorg: string, kunnrRg: string): void {
+export function saveArmtekApiAccountState(
+  login: string,
+  vkorg: string,
+  kunnrRg: string,
+  expectedGeneration = stateGeneration,
+): void {
   if (!isAccountValue(vkorg) || !isAccountValue(kunnrRg)) {
     throw new Error("Armtek returned invalid account configuration");
   }
 
-  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-  const temporaryPath = `${statePath}.${randomUUID()}.tmp`;
   const state: ArmtekApiAccountState = { loginHash: hashLogin(login), vkorg, kunnrRg };
-
-  try {
-    writeFileSync(temporaryPath, JSON.stringify(state), { encoding: "utf-8", mode: 0o600 });
-    chmodSync(temporaryPath, 0o600);
-    renameSync(temporaryPath, statePath);
-    chmodSync(statePath, 0o600);
-  } finally {
-    // A failed atomic replacement can leave only this non-sensitive temporary state file.
-    if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true });
-  }
+  writeJsonStateFileAtomic(statePath, state, () => stateGeneration === expectedGeneration);
 }
 
 export function clearArmtekApiAccountState(): void {
+  stateGeneration += 1;
   if (existsSync(statePath)) {
     rmSync(statePath, { force: true });
   }

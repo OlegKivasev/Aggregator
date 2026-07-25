@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
-import { getStpartsApiConfig } from "../../config.ts";
+import { getStpartsApiConfig, stpartsConfig } from "../../config.ts";
 import type { NormalizedSearchResult, SearchQuery, SupplierSearchContext, SupplierSessionState, StpartsCredentials } from "../../types.ts";
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../errors.ts";
+import { isJsonContentType } from "../fetch-json.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
 import { siteHttpRequest } from "../site-http.ts";
 import { stpartsBaseUrl } from "./stparts-site-auth.ts";
@@ -199,6 +200,12 @@ async function stpartsApiRequest(
     method,
     body: method === "POST" ? params.toString() : undefined,
   });
+  if (response.status === 401 || response.status === 403) {
+    throw new SupplierAuthError("STParts API rejected the configured credentials");
+  }
+  if (!isJsonContentType(response.contentType)) {
+    throw new SupplierIntegrationError("STParts API returned an unexpected content type");
+  }
   let payload: unknown;
   try {
     payload = JSON.parse(response.body);
@@ -211,13 +218,13 @@ async function stpartsApiRequest(
   const errorCode = typeof errorCodeValue === "number" || typeof errorCodeValue === "string"
     ? Number(errorCodeValue)
     : null;
-  if (response.status === 401 || response.status === 403 || errorCode === 102 || errorCode === 103 || errorCode === 104) {
+  if (errorCode === 102 || errorCode === 103 || errorCode === 104) {
     throw new SupplierAuthError("STParts API rejected the configured credentials");
   }
+  if (errorCode !== null) {
+    throw new SupplierIntegrationError(`STParts API returned error code ${errorCode}`);
+  }
   if (response.status < 200 || response.status >= 300) {
-    if ((path === "search/articles/" || path === "search/batch") && errorCode === 301) {
-      return [];
-    }
     throw new SupplierIntegrationError(`STParts API returned HTTP ${response.status}`);
   }
   return payload;
@@ -254,20 +261,38 @@ async function searchStpartsBrands(
   )));
 }
 
-export async function verifyStpartsApiCredentials(credentials: StpartsCredentials): Promise<void> {
-  await stpartsApiRequest(
+export async function verifyStpartsApiCredentials(
+  credentials: StpartsCredentials,
+  signal: AbortSignal = AbortSignal.timeout(10_000),
+): Promise<void> {
+  const payload = await stpartsApiRequest(
     "user/info",
     new URLSearchParams(),
-    AbortSignal.timeout(10_000),
+    signal,
     10_000,
     credentials,
   );
+  validateStpartsUserInfo(payload);
+}
+
+function validateStpartsUserInfo(payload: unknown): void {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new SupplierIntegrationError("STParts API returned invalid user information");
+  }
+  const user = payload as Record<string, unknown>;
+  const identityFields = ["id", "userId", "userCode", "login", "username", "name"];
+  if (!identityFields.some((field) => {
+    const value = user[field];
+    return (typeof value === "string" && value.trim().length > 0) || (typeof value === "number" && Number.isFinite(value));
+  })) {
+    throw new SupplierIntegrationError("STParts API returned invalid user information");
+  }
 }
 
 export class StpartsApiAdapter implements SupplierAdapter {
   readonly id = "stparts";
   readonly displayName = "STParts";
-  readonly timeoutMs = Number(process.env.STPARTS_SEARCH_TIMEOUT_MS ?? "10000");
+  readonly timeoutMs = stpartsConfig.searchTimeoutMs;
   private readonly request: StpartsApiRequester;
   private readonly searchCache = new Map<string, CachedStpartsSearch>();
   private readonly searchesInProgress = new Map<string, StpartsSearchInProgress>();
@@ -283,13 +308,14 @@ export class StpartsApiAdapter implements SupplierAdapter {
   }
 
   async validateSession(context: SupplierSearchContext, sessionManager: SupplierSessionManager): Promise<void> {
-    await this.request(
+    const payload = await this.request(
       "user/info",
       new URLSearchParams(),
       context.signal,
       context.timeoutMs,
       sessionManager.getStpartsCredentials() ?? undefined,
     );
+    validateStpartsUserInfo(payload);
   }
 
   async search(

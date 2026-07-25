@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
-import { getStateFilePath } from "../../config.ts";
+import { getStateFilePath, stpartsConfig } from "../../config.ts";
 import type { StpartsCredentials } from "../../types.ts";
 
 export interface StpartsAuthCheckResult {
@@ -8,15 +8,15 @@ export interface StpartsAuthCheckResult {
   details: string;
 }
 
-export const stpartsBaseUrl = process.env.STPARTS_BASE_URL?.trim() || "https://stparts.ru/";
+export const stpartsBaseUrl = stpartsConfig.baseUrl;
 
 const stpartsStorageStatePath = getStateFilePath("stparts-storage-state.json");
 const stpartsStateDir = dirname(stpartsStorageStatePath);
 // STParts frequently takes longer than six seconds to commit the authenticated landing page.
-const stpartsNavigationTimeoutMs = Number(process.env.STPARTS_NAVIGATION_TIMEOUT_MS ?? "15000");
-const stpartsSettledTimeoutMs = Number(process.env.STPARTS_SETTLED_TIMEOUT_MS ?? "4000");
-const stpartsPostCommitDelayMs = Number(process.env.STPARTS_POST_COMMIT_DELAY_MS ?? "300");
-const stpartsSessionProbeTimeoutMs = Number(process.env.STPARTS_SESSION_PROBE_TIMEOUT_MS ?? "5000");
+const stpartsNavigationTimeoutMs = stpartsConfig.navigationTimeoutMs;
+const stpartsSettledTimeoutMs = stpartsConfig.settledTimeoutMs;
+const stpartsPostCommitDelayMs = stpartsConfig.postCommitDelayMs;
+const stpartsSessionProbeTimeoutMs = stpartsConfig.sessionProbeTimeoutMs;
 const authErrorPattern = /невер|неправ|ошиб|парол|логин|email|почт|авторизац/i;
 let sharedStpartsBrowserPromise: Promise<any> | null = null;
 
@@ -26,10 +26,7 @@ function ensureStpartsStateDir() {
 
 function findBrowserExecutable(): string | undefined {
   const candidates = [
-    process.env.STPARTS_BROWSER_PATH,
-    process.env.PARTKOM_BROWSER_PATH,
-    process.env.ARMTEK_BROWSER_PATH,
-    process.env.ROSSKO_BROWSER_PATH,
+    stpartsConfig.browserPath,
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",

@@ -1,4 +1,4 @@
-import { SupplierAuthError, SupplierTimeoutError } from "./errors.ts";
+import { SupplierAuthError, SupplierIntegrationError, SupplierSessionInvalidatedError, SupplierTimeoutError } from "./errors.ts";
 import type { SupplierAdapter } from "./supplier-adapter.ts";
 import type { SupplierSessionManager } from "../session/session-manager.ts";
 import type {
@@ -36,13 +36,27 @@ function isValidResult(result: NormalizedSearchResult, supplier: SupplierAdapter
   if (result.supplier !== supplier) {
     return false;
   }
-  if (!result.brand.trim() || !result.article.trim() || !result.title.trim()) {
+  if (
+    typeof result.brand !== "string" ||
+    typeof result.article !== "string" ||
+    typeof result.title !== "string" ||
+    !result.brand.trim() ||
+    !result.article.trim() ||
+    !result.title.trim()
+  ) {
     return false;
   }
   if (!Number.isFinite(result.price) || result.price <= 0) {
     return false;
   }
   if (!isValidDate(result.deliveryDate) || !isValidDate(result.deliveryDateTo)) {
+    return false;
+  }
+  if (
+    typeof result.deliveryDateApproximate !== "boolean" ||
+    (result.warehouse !== null && typeof result.warehouse !== "string") ||
+    (result.warehouseFull !== undefined && result.warehouseFull !== null && typeof result.warehouseFull !== "string")
+  ) {
     return false;
   }
   try {
@@ -65,15 +79,23 @@ export async function runSupplierSearch({
     return;
   }
 
+  const operation = sessionManager.beginOperation(adapter.id, signal);
   emit(createStatusEvent(adapter.id, "searching"));
+  if (operation.signal.aborted) {
+    emit(createStatusEvent(adapter.id, "auth_error", "Supplier authorization is required"));
+    operation.dispose();
+    return;
+  }
 
   const controller = new AbortController();
-  const abortForwarder = () => controller.abort(signal.reason);
-  signal.addEventListener("abort", abortForwarder, { once: true });
+  const abortForwarder = () => controller.abort(operation.signal.reason);
+  operation.signal.addEventListener("abort", abortForwarder, { once: true });
 
   const timeoutId = setTimeout(() => {
     controller.abort(new SupplierTimeoutError(`Timeout after ${adapter.timeoutMs}ms`));
   }, adapter.timeoutMs);
+  let validResultCount = 0;
+  let invalidResultCount = 0;
 
   try {
     const session = await adapter.ensureSession(sessionManager);
@@ -89,18 +111,35 @@ export async function runSupplierSearch({
         timeoutMs: adapter.timeoutMs,
       },
       (result) => {
+        if (!operation.isCurrent()) {
+          return;
+        }
         if (isValidResult(result, adapter.id)) {
+          validResultCount += 1;
           emit({ type: "result", result });
+        } else {
+          invalidResultCount += 1;
         }
       },
       sessionManager,
     );
 
-    if (!signal.aborted) {
+    if (invalidResultCount > 0 && validResultCount === 0) {
+      throw new SupplierIntegrationError("Supplier returned only invalid search results");
+    }
+
+    if (operation.isCurrent()) {
       emit(createStatusEvent(adapter.id, "completed"));
+    } else if (!signal.aborted) {
+      emit(createStatusEvent(adapter.id, "auth_error", "Supplier authorization is required"));
     }
   } catch (error) {
     if (signal.aborted) {
+      return;
+    }
+
+    if (error instanceof SupplierSessionInvalidatedError || operation.signal.reason instanceof SupplierSessionInvalidatedError) {
+      emit(createStatusEvent(adapter.id, "auth_error", "Supplier authorization is required"));
       return;
     }
 
@@ -115,9 +154,13 @@ export async function runSupplierSearch({
       return;
     }
 
-    emit(createStatusEvent(adapter.id, "error", "Supplier search failed"));
+    const details = error instanceof SupplierIntegrationError && error.publicMessage
+      ? error.publicMessage
+      : "Supplier search failed";
+    emit(createStatusEvent(adapter.id, "error", details));
   } finally {
     clearTimeout(timeoutId);
-    signal.removeEventListener("abort", abortForwarder);
+    operation.signal.removeEventListener("abort", abortForwarder);
+    operation.dispose();
   }
 }

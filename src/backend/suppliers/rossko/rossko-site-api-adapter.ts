@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Agent, request as httpsRequest } from "node:https";
+import { rosskoConfig, supplierMaxResponseBytes } from "../../config.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type { NormalizedSearchResult, SearchQuery, SupplierSearchContext, SupplierSessionState } from "../../types.ts";
-import { SupplierAuthError } from "../errors.ts";
+import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../errors.ts";
+import { isJsonContentType } from "../fetch-json.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
 import { getRosskoAuthorizationSession, hasRosskoStorageState, rosskoBusinessUrl } from "./rossko-site-auth.ts";
 
@@ -44,11 +46,15 @@ interface RosskoCardResponse {
   mainPart?: RosskoCardPart;
 }
 
-const requestAttempts = Math.max(1, Number(process.env.ROSSKO_API_REQUEST_ATTEMPTS ?? "3"));
-const hedgeDelayMs = Math.max(100, Number(process.env.ROSSKO_API_HEDGE_DELAY_MS ?? "1200"));
-const requestTimeoutMs = Math.max(1000, Number(process.env.ROSSKO_API_REQUEST_TIMEOUT_MS ?? "6000"));
+const requestAttempts = rosskoConfig.apiRequestAttempts;
+const hedgeDelayMs = rosskoConfig.apiHedgeDelayMs;
+const requestTimeoutMs = rosskoConfig.apiRequestTimeoutMs;
 const cardRequestConcurrency = 12;
 const rosskoHttpsAgent = new Agent({ keepAlive: true, family: 4, maxSockets: 6 });
+
+export function closeRosskoHttpAgent(): void {
+  rosskoHttpsAgent.destroy();
+}
 
 let cachedDeliverySettings: {
   authorizationSession: string;
@@ -83,6 +89,7 @@ function serviceUrl(service: string, path: string): URL {
 }
 
 function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timer);
@@ -96,7 +103,15 @@ function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+function hasTimeoutCause(error: unknown): boolean {
+  if (error instanceof SupplierTimeoutError) {
+    return true;
+  }
+  return error instanceof Error && hasTimeoutCause(error.cause);
+}
+
 async function rosskoRequest<T>(url: URL, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
   const authorizationSession = getRosskoAuthorizationSession();
   if (!authorizationSession) {
     throw new SupplierAuthError("Rossko stored session is not available");
@@ -114,13 +129,13 @@ async function rosskoRequest<T>(url: URL, signal: AbortSignal): Promise<T> {
     const attemptController = new AbortController();
     const abortAttempt = () => attemptController.abort(groupController.signal.reason);
     const timeout = setTimeout(
-      () => attemptController.abort(new Error(`Rossko API request timed out after ${requestTimeoutMs}ms`)),
+      () => attemptController.abort(new SupplierTimeoutError(`Rossko API request timed out after ${requestTimeoutMs}ms`)),
       requestTimeoutMs,
     );
     groupController.signal.addEventListener("abort", abortAttempt, { once: true });
 
     try {
-      const response = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const response = await new Promise<{ status: number; body: string; contentType: string | null }>((resolve, reject) => {
         const request = httpsRequest(url, {
           method: "GET",
           family: 4,
@@ -134,10 +149,28 @@ async function rosskoRequest<T>(url: URL, signal: AbortSignal): Promise<T> {
             Source: "frontend",
           },
         }, (incoming) => {
-          let body = "";
-          incoming.setEncoding("utf-8");
-          incoming.on("data", (chunk) => { body += chunk; });
-          incoming.on("end", () => resolve({ status: incoming.statusCode || 0, body }));
+          const chunks: Buffer[] = [];
+          let bodyBytes = 0;
+          incoming.on("error", reject);
+          incoming.on("aborted", () => reject(new SupplierIntegrationError("Rossko API response was interrupted")));
+          const declaredLength = Number(incoming.headers["content-length"]);
+          if (Number.isFinite(declaredLength) && declaredLength > supplierMaxResponseBytes) {
+            incoming.destroy(new SupplierIntegrationError("Rossko API response is too large"));
+            return;
+          }
+          incoming.on("data", (chunk: Buffer) => {
+            bodyBytes += chunk.byteLength;
+            if (bodyBytes > supplierMaxResponseBytes) {
+              incoming.destroy(new SupplierIntegrationError("Rossko API response is too large"));
+              return;
+            }
+            chunks.push(chunk);
+          });
+          incoming.on("end", () => resolve({
+            status: incoming.statusCode || 0,
+            body: Buffer.concat(chunks).toString("utf-8"),
+            contentType: typeof incoming.headers["content-type"] === "string" ? incoming.headers["content-type"] : null,
+          }));
         });
         request.on("error", reject);
         request.end();
@@ -147,9 +180,16 @@ async function rosskoRequest<T>(url: URL, signal: AbortSignal): Promise<T> {
         throw new SupplierAuthError(`Rossko API returned HTTP ${response.status}`);
       }
       if (response.status < 200 || response.status >= 300) {
-        throw new Error(`Rossko API returned HTTP ${response.status}`);
+        throw new SupplierIntegrationError(`Rossko API returned HTTP ${response.status}`);
       }
-      return JSON.parse(response.body) as T;
+      if (!isJsonContentType(response.contentType)) {
+        throw new SupplierIntegrationError("Rossko API returned an unexpected content type");
+      }
+      try {
+        return JSON.parse(response.body) as T;
+      } catch (error) {
+        throw new SupplierIntegrationError("Rossko API returned invalid JSON", { cause: error });
+      }
     } finally {
       clearTimeout(timeout);
       groupController.signal.removeEventListener("abort", abortAttempt);
@@ -168,7 +208,19 @@ async function rosskoRequest<T>(url: URL, signal: AbortSignal): Promise<T> {
     }
     const errors = error instanceof AggregateError ? error.errors : [error];
     const authError = errors.find((candidate) => candidate instanceof SupplierAuthError);
-    throw authError || errors.at(-1) || new Error("Rossko API request failed");
+    if (authError) {
+      throw authError;
+    }
+    const timeoutError = errors.find(hasTimeoutCause);
+    if (timeoutError) {
+      throw timeoutError instanceof SupplierTimeoutError
+        ? timeoutError
+        : new SupplierTimeoutError("Rossko API request timed out", { cause: timeoutError });
+    }
+    const lastError = errors.at(-1);
+    throw lastError instanceof SupplierIntegrationError
+      ? lastError
+      : new SupplierIntegrationError("Rossko API request failed", { cause: lastError });
   } finally {
     groupController.abort();
     signal.removeEventListener("abort", abortGroup);
@@ -179,12 +231,13 @@ function selectedValue<T extends { selected?: boolean }>(items: T[] | undefined)
   return items?.find((item) => item.selected);
 }
 
-async function getDeliverySettings(signal: AbortSignal): Promise<{ addressGuid: string; deliveryType: string }> {
+async function getDeliverySettings(signal: AbortSignal, forceRefresh = false): Promise<{ addressGuid: string; deliveryType: string }> {
   const authorizationSession = getRosskoAuthorizationSession();
   if (!authorizationSession) {
     throw new SupplierAuthError("Rossko stored session is not available");
   }
-  if (cachedDeliverySettings?.authorizationSession === authorizationSession) {
+  if (!forceRefresh && cachedDeliverySettings?.authorizationSession === authorizationSession) {
+    signal.throwIfAborted();
     return cachedDeliverySettings;
   }
 
@@ -195,7 +248,7 @@ async function getDeliverySettings(signal: AbortSignal): Promise<{ addressGuid: 
   const deliveryType = selectedValue(delivery.types)?.value;
 
   if (!addressGuid || !deliveryType) {
-    throw new Error("Rossko API did not return delivery settings");
+    throw new SupplierIntegrationError("Rossko API did not return delivery settings");
   }
 
   cachedDeliverySettings = { authorizationSession, addressGuid, deliveryType };
@@ -214,7 +267,7 @@ function productLink(part: RosskoCardPart, article: string): string {
 export class RosskoSiteApiAdapter implements SupplierAdapter {
   readonly id = "rossko";
   readonly displayName = "Rossko";
-  readonly timeoutMs = Number(process.env.ROSSKO_SEARCH_TIMEOUT_MS ?? "30000");
+  readonly timeoutMs = rosskoConfig.searchTimeoutMs;
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
     if (hasRosskoStorageState() && getRosskoAuthorizationSession()) {
@@ -222,6 +275,10 @@ export class RosskoSiteApiAdapter implements SupplierAdapter {
     }
 
     return sessionManager.markUnauthorized(this.id, "Rossko login is required");
+  }
+
+  async validateSession(context: SupplierSearchContext, _sessionManager: SupplierSessionManager): Promise<void> {
+    await getDeliverySettings(context.signal, true);
   }
 
   async search(
@@ -245,10 +302,19 @@ export class RosskoSiteApiAdapter implements SupplierAdapter {
       oemCatalog: "true",
     }).toString();
     const search = await rosskoRequest<RosskoSearchResponse>(searchUrl, context.signal);
+    if (search.errorFlag) {
+      throw new SupplierIntegrationError("Rossko API reported a search failure");
+    }
+    if (!Array.isArray(search.results)) {
+      throw new SupplierIntegrationError("Rossko API returned an invalid search response");
+    }
+    if (search.results.some((group) => !group || typeof group !== "object" || !Array.isArray(group.searchResults))) {
+      throw new SupplierIntegrationError("Rossko API returned invalid search result groups");
+    }
     const target = normalizeArticle(article);
     const productIds = rosskoExactProductIds(search, article);
 
-    if (search.errorFlag || !productIds.length) {
+    if (!productIds.length) {
       return;
     }
 
@@ -268,17 +334,24 @@ export class RosskoSiteApiAdapter implements SupplierAdapter {
       }
 
       const part = card.mainPart;
-      if (!part || normalizeArticle(part.partNumber || "") !== target) {
+      if (!part) {
+        throw new SupplierIntegrationError("Rossko API returned a product card without product data");
+      }
+      if (normalizeArticle(part.partNumber || "") !== target) {
         return;
       }
       const brand = part.brandName?.trim();
       const partNumber = part.partNumber?.trim();
       const title = part.goodsName?.trim();
       if (!brand || !partNumber || !title) {
-        return;
+        throw new SupplierIntegrationError("Rossko API returned incomplete product data");
+      }
+      if (!Array.isArray(part.stocks)) {
+        throw new SupplierIntegrationError("Rossko API returned invalid product stocks");
       }
 
-      for (const stock of part.stocks || []) {
+      for (const stock of part.stocks) {
+        context.signal.throwIfAborted();
         if (!stock.basePrice || stock.basePrice <= 0 || !stock.inventory || stock.inventory <= 0) {
           continue;
         }
@@ -299,6 +372,7 @@ export class RosskoSiteApiAdapter implements SupplierAdapter {
     };
 
     for (let index = 0; index < productIds.length; index += cardRequestConcurrency) {
+      context.signal.throwIfAborted();
       await Promise.all(productIds.slice(index, index + cardRequestConcurrency).map(searchProductCard));
     }
 

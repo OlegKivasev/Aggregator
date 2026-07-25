@@ -4,16 +4,25 @@ import { SupplierIntegrationError, SupplierTimeoutError } from "./errors.ts";
 const siteAgent = new Agent({ keepAlive: true, family: 4, maxSockets: 12 });
 const defaultMaxResponseBytes = 2 * 1024 * 1024;
 
+export function closeSiteHttpAgent(): void {
+  siteAgent.destroy();
+}
+
 export interface SiteHttpResponse {
   status: number;
   body: string;
+  rawBody?: Buffer;
   setCookie: string[];
+  contentType: string | null;
 }
 
 export async function siteHttpRequest(
   url: URL,
-  options: { cookie?: string; headers?: Record<string, string>; signal: AbortSignal; timeoutMs?: number; method?: "GET" | "POST"; body?: string; maxResponseBytes?: number },
+  options: { cookie?: string; headers?: Record<string, string>; signal: AbortSignal; timeoutMs?: number; method?: "GET" | "POST"; body?: string; maxResponseBytes?: number; returnRawBody?: boolean },
 ): Promise<SiteHttpResponse> {
+  if (options.signal.aborted) {
+    throw options.signal.reason;
+  }
   const controller = new AbortController();
   const forwardAbort = () => controller.abort(options.signal.reason);
   const timeout = setTimeout(
@@ -37,29 +46,44 @@ export async function siteHttpRequest(
           ...options.headers,
         },
       }, (response) => {
-        let body = "";
+        const chunks: Buffer[] = [];
         let bodyBytes = 0;
-        response.setEncoding("utf-8");
-        response.on("data", (chunk: string) => {
-          bodyBytes += Buffer.byteLength(chunk);
+        response.on("error", reject);
+        response.on("aborted", () => reject(new SupplierIntegrationError("Supplier response was interrupted")));
+        const declaredLength = Number(response.headers["content-length"]);
+        if (Number.isFinite(declaredLength) && declaredLength > (options.maxResponseBytes ?? defaultMaxResponseBytes)) {
+          response.destroy(new SupplierIntegrationError("Supplier response is too large"));
+          return;
+        }
+        response.on("data", (chunk: Buffer) => {
+          bodyBytes += chunk.byteLength;
           if (bodyBytes > (options.maxResponseBytes ?? defaultMaxResponseBytes)) {
             response.destroy(new SupplierIntegrationError("Supplier response is too large"));
             return;
           }
-          body += chunk;
+          chunks.push(chunk);
         });
-        response.on("error", reject);
-        response.on("end", () => resolve({
-          status: response.statusCode || 0,
-          body,
-          setCookie: response.headers["set-cookie"] || [],
-        }));
+        response.on("end", () => {
+          const rawBody = Buffer.concat(chunks);
+          resolve({
+            status: response.statusCode || 0,
+            body: options.returnRawBody ? "" : rawBody.toString("utf-8"),
+            rawBody: options.returnRawBody ? rawBody : undefined,
+            setCookie: response.headers["set-cookie"] || [],
+            contentType: typeof response.headers["content-type"] === "string" ? response.headers["content-type"] : null,
+          });
+        });
       });
       request.on("error", reject);
       if (options.body) {
         request.write(options.body);
       }
       request.end();
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) {
+        throw controller.signal.reason;
+      }
+      throw error;
     });
   } finally {
     clearTimeout(timeout);

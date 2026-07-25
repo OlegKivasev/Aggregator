@@ -7,12 +7,24 @@ import type {
   SupplierId,
   SupplierSessionState,
 } from "../types.ts";
+import { SupplierSessionInvalidatedError } from "../errors.ts";
+
+export interface SupplierOperation {
+  readonly generation: number;
+  readonly signal: AbortSignal;
+  isCurrent(): boolean;
+  supersedeOthers(): void;
+  dispose(): void;
+}
 
 const nowIso = () => new Date().toISOString();
 const supplierIds = ["rossko", "armtek", "part-kom", "stparts", "motordetal", "mladov"] as const;
 
 export class SupplierSessionManager {
   private readonly sessions = new Map<SupplierId, SupplierSessionState>();
+  private readonly generations = new Map<SupplierId, number>();
+  private readonly activeOperations = new Map<SupplierId, Set<AbortController>>();
+  private readonly exclusiveOperations = new Map<SupplierId, AbortSignal>();
   private armtekCredentials: ArmtekCredentials | null = null;
   private motorDetalCredentials: MotorDetalCredentials | null = null;
   private mladovCredentials: MladovCredentials | null = null;
@@ -39,6 +51,86 @@ export class SupplierSessionManager {
 
   getAllSessions(): SupplierSessionState[] {
     return supplierIds.map((supplier) => this.getSession(supplier));
+  }
+
+  beginOperation(supplier: SupplierId, parentSignal: AbortSignal): SupplierOperation {
+    const operation = this.createOperation(supplier, parentSignal);
+    if (this.exclusiveOperations.has(supplier)) {
+      const controller = this.operationController(operation);
+      controller.abort(new SupplierSessionInvalidatedError("Supplier authorization is in progress"));
+    }
+    return operation;
+  }
+
+  beginExclusiveOperation(supplier: SupplierId, parentSignal: AbortSignal): SupplierOperation {
+    this.invalidateOperations(supplier);
+    const operation = this.createOperation(supplier, parentSignal);
+    const originalDispose = operation.dispose;
+    this.exclusiveOperations.set(supplier, operation.signal);
+    operation.dispose = () => {
+      originalDispose();
+      if (this.exclusiveOperations.get(supplier) === operation.signal) {
+        this.exclusiveOperations.delete(supplier);
+      }
+    };
+    return operation;
+  }
+
+  private createOperation(supplier: SupplierId, parentSignal: AbortSignal): SupplierOperation {
+    let generation = this.generations.get(supplier) ?? 0;
+    const controller = new AbortController();
+    const forwardAbort = () => controller.abort(parentSignal.reason);
+    if (parentSignal.aborted) {
+      controller.abort(parentSignal.reason);
+    } else {
+      parentSignal.addEventListener("abort", forwardAbort, { once: true });
+    }
+    const operations = this.activeOperations.get(supplier) ?? new Set<AbortController>();
+    operations.add(controller);
+    this.activeOperations.set(supplier, operations);
+
+    const operation: SupplierOperation & { controller?: AbortController } = {
+      get generation() {
+        return generation;
+      },
+      signal: controller.signal,
+      isCurrent: () => (this.generations.get(supplier) ?? 0) === generation && !controller.signal.aborted,
+      supersedeOthers: () => {
+        controller.signal.throwIfAborted();
+        generation = (this.generations.get(supplier) ?? 0) + 1;
+        this.generations.set(supplier, generation);
+        for (const activeController of operations) {
+          if (activeController !== controller) {
+            activeController.abort(new SupplierSessionInvalidatedError("A newer supplier session was established"));
+          }
+        }
+        operations.clear();
+        operations.add(controller);
+        this.activeOperations.set(supplier, operations);
+      },
+      dispose: () => {
+        parentSignal.removeEventListener("abort", forwardAbort);
+        operations.delete(controller);
+        if (!operations.size && this.activeOperations.get(supplier) === operations) {
+          this.activeOperations.delete(supplier);
+        }
+      },
+    };
+    Object.defineProperty(operation, "controller", { value: controller });
+    return operation;
+  }
+
+  private operationController(operation: SupplierOperation): AbortController {
+    return (operation as SupplierOperation & { controller: AbortController }).controller;
+  }
+
+  invalidateOperations(supplier: SupplierId): void {
+    this.generations.set(supplier, (this.generations.get(supplier) ?? 0) + 1);
+    for (const controller of this.activeOperations.get(supplier) ?? []) {
+      controller.abort(new SupplierSessionInvalidatedError());
+    }
+    this.activeOperations.delete(supplier);
+    this.exclusiveOperations.delete(supplier);
   }
 
   markChecked(supplier: SupplierId, details?: string): SupplierSessionState {

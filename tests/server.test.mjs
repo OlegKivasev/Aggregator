@@ -1,20 +1,22 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdtemp, rm } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import { armtekSearchItems, armtekVkorgItems, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
+import { armtekSearchItems, armtekVkorgItems, getArmtekWarehouse, getOptionalArmtekStoreNames, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
 import { createHash } from "node:crypto";
 import { parseArmtekApiAccountState } from "../src/backend/suppliers/armtek/armtek-api-account-state.ts";
-import { parsePartKomApiResults, PartKomApiAdapter, verifyPartKomApiCredentials } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
+import { parsePartKomApiResponse, parsePartKomApiResults, PartKomApiAdapter, verifyPartKomApiCredentials } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
 import { createStpartsBatchParams, parseStpartsApiResults, StpartsApiAdapter } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
 import { gotoStparts, isStpartsSessionPageAuthorized } from "../src/backend/suppliers/stparts/stparts-site-auth.ts";
 import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.ts";
-import { SupplierAuthError } from "../src/backend/suppliers/errors.ts";
+import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../src/backend/suppliers/errors.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
 import { buildIncompleteSearchWarnings, buildSupplierResultTooltip, formatDeliveryDate } from "../src/frontend/supplier-search-summary.js";
-import { SupplierTimeoutError } from "../src/backend/suppliers/errors.ts";
 
 const port = 31847;
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -43,6 +45,18 @@ test("Armtek accepts the direct VKORG array returned by WebService", () => {
 
 test("Armtek accepts the direct search array returned by WebService", () => {
   assert.deepEqual(armtekSearchItems([{ PIN: "90915YZZJ1", PRICE: "691.22" }]), [{ PIN: "90915YZZJ1", PRICE: "691.22" }]);
+});
+
+test("Armtek keeps search results when optional store-name lookup fails", async () => {
+  const stores = await getOptionalArmtekStoreNames(
+    async () => {
+      throw new SupplierIntegrationError("Store directory is unavailable");
+    },
+    new AbortController().signal,
+  );
+
+  assert.equal(stores.size, 0);
+  assert.equal(getArmtekWarehouse({ KEYZAK: "STORE-42" }, stores), "STORE-42");
 });
 
 test("Armtek account state is accepted only for the login that discovered it", () => {
@@ -262,6 +276,17 @@ test("STParts validates sessions without running a product search", async () => 
   assert.deepEqual(calls, ["user/info"]);
 });
 
+test("STParts session validation rejects malformed user information", async () => {
+  const adapter = new StpartsApiAdapter(async () => ({}));
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setStpartsCredentials({ login: "test", password: "secret" });
+
+  await assert.rejects(
+    adapter.validateSession({ signal: new AbortController().signal, timeoutMs: 1000 }, sessionManager),
+    /invalid user information/,
+  );
+});
+
 test("STParts allows fifteen seconds for the initial navigation by default", async () => {
   let gotoOptions;
   const page = {
@@ -317,7 +342,126 @@ test("PartKOM connection accepts a successful non-array brands payload", async (
 test("PartKOM connection reports an explicit API error payload", async () => {
   await assert.rejects(
     verifyPartKomApiCredentials({ login: "api-user", password: "secret" }, async () => ({ message: "Wrong IP address" })),
+    (error) => {
+      assert.match(error.message, /rejected the server IP address/);
+      assert.equal(error.publicMessage, "PartKOM API access is not allowed from this server IP address");
+      return true;
+    },
+  );
+});
+
+test("PartKOM connection recognizes an IP restriction in problem JSON", async () => {
+  await assert.rejects(
+    verifyPartKomApiCredentials({ login: "api-user", password: "secret" }, async () => ({
+      title: "Request rejected",
+      detail: "Wrong IP address",
+      status: 400,
+    })),
+    (error) => {
+      assert.equal(error.publicMessage, "PartKOM API access is not allowed from this server IP address");
+      return true;
+    },
+  );
+});
+
+test("PartKOM HTTP boundary recognizes an IP restriction before classifying status", () => {
+  assert.throws(
+    () => parsePartKomApiResponse({
+      status: 400,
+      body: JSON.stringify({ title: "Request rejected", detail: "Wrong IP address", status: 400 }),
+      setCookie: [],
+      contentType: "application/problem+json; charset=utf-8",
+    }),
+    (error) => {
+      assert.equal(error.publicMessage, "PartKOM API access is not allowed from this server IP address");
+      return true;
+    },
+  );
+});
+
+test("PartKOM HTTP boundary accepts documented JSON strings with a non-standard media type", () => {
+  const brands = [{ id: 1, name: "Brand", country: "RU" }];
+  assert.deepEqual(parsePartKomApiResponse({
+    status: 200,
+    body: JSON.stringify(brands),
+    setCookie: [],
+    contentType: "text/plain; charset=utf-8",
+  }), brands);
+});
+
+test("PartKOM HTTP boundary accepts a BOM-prefixed JSON string", () => {
+  const brands = [{ id: 1, name: "Brand", country: "RU" }];
+  assert.deepEqual(parsePartKomApiResponse({
+    status: 200,
+    body: `\uFEFF${JSON.stringify(brands)}`,
+    setCookie: [],
+    contentType: "text/plain; charset=utf-8",
+  }), brands);
+});
+
+test("PartKOM HTTP boundary unwraps the observed success/data envelope", () => {
+  const brands = [{ id: 1, name: "Brand", country: "RU" }];
+  assert.deepEqual(parsePartKomApiResponse({
+    status: 200,
+    body: JSON.stringify({ success: true, data: brands }),
+    setCookie: [],
+    contentType: "application/json",
+  }), brands);
+});
+
+test("PartKOM offer normalization accepts data from the observed response envelope", () => {
+  const payload = parsePartKomApiResponse({
+    status: 200,
+    body: JSON.stringify({
+      success: true,
+      data: [{
+        number: "ABC-123",
+        maker: "Brand",
+        makerId: 42,
+        description: "Part",
+        price: 100,
+        quantity: 1,
+      }],
+    }),
+    setCookie: [],
+    contentType: "application/json",
+  });
+
+  assert.equal(parsePartKomApiResults(payload, "ABC-123").length, 1);
+});
+
+test("PartKOM reports an unsupported successful brands payload without exposing it", async () => {
+  await assert.rejects(
+    verifyPartKomApiCredentials({ login: "api-user", password: "secret" }, async () => ({ unexpected: "private data" })),
+    (error) => {
+      assert.equal(error.publicMessage, "PartKOM API returned an unsupported brands response");
+      assert.doesNotMatch(error.publicMessage, /private data/);
+      assert.equal(error.diagnosticCode, "partkom_brands_object_unexpected-string");
+      assert.doesNotMatch(error.diagnosticCode, /private/);
+      return true;
+    },
+  );
+});
+
+test("PartKOM session validation reports an explicit API error payload", async () => {
+  const adapter = new PartKomApiAdapter(async () => ({ message: "Wrong IP address" }));
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setPartKomCredentials({ login: "api-user", password: "secret" });
+
+  await assert.rejects(
+    adapter.validateSession({ signal: new AbortController().signal, timeoutMs: 1000 }, sessionManager),
     /rejected the server IP address/,
+  );
+});
+
+test("PartKOM session validation rejects malformed brand data", async () => {
+  const adapter = new PartKomApiAdapter(async () => ({}));
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setPartKomCredentials({ login: "api-user", password: "secret" });
+
+  await assert.rejects(
+    adapter.validateSession({ signal: new AbortController().signal, timeoutMs: 1000 }, sessionManager),
+    /invalid brands response/,
   );
 });
 
@@ -402,6 +546,78 @@ test("supplier search discards invalid results without stopping valid supplier o
     ["searching", undefined],
     "result",
     ["completed", undefined],
+  ]);
+});
+
+test("supplier search reports an integration error when every result is invalid", async () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.markAuthorized("rossko");
+  const events = [];
+  const adapter = {
+    id: "rossko",
+    displayName: "Rossko",
+    timeoutMs: 1000,
+    async ensureSession() {
+      return sessionManager.getSession("rossko");
+    },
+    async search(_query, _context, onResult) {
+      onResult({
+        supplier: "rossko",
+        brand: "Brand",
+        article: "ABC-123",
+        title: "Part",
+        price: 100,
+        warehouse: null,
+        deliveryDate: null,
+        deliveryDateApproximate: false,
+        link: "javascript:bad",
+      });
+    },
+  };
+
+  await runSupplierSearch({
+    adapter,
+    sessionManager,
+    query: { article: "ABC-123" },
+    signal: new AbortController().signal,
+    emit: (event) => events.push(event),
+  });
+
+  assert.deepEqual(events, [
+    { type: "supplier_status", supplier: "rossko", status: "searching", details: undefined },
+    { type: "supplier_status", supplier: "rossko", status: "error", details: "Supplier search failed" },
+  ]);
+});
+
+test("supplier search exposes only an explicitly safe integration message", async () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.markAuthorized("armtek");
+  const events = [];
+  const adapter = {
+    id: "armtek",
+    displayName: "Armtek",
+    timeoutMs: 1000,
+    async ensureSession() {
+      return sessionManager.getSession("armtek");
+    },
+    async search() {
+      throw new SupplierIntegrationError("private upstream payload", {
+        publicMessage: "Armtek search request failed",
+      });
+    },
+  };
+
+  await runSupplierSearch({
+    adapter,
+    sessionManager,
+    query: { article: "2084001" },
+    signal: new AbortController().signal,
+    emit: (event) => events.push(event),
+  });
+
+  assert.deepEqual(events, [
+    { type: "supplier_status", supplier: "armtek", status: "searching", details: undefined },
+    { type: "supplier_status", supplier: "armtek", status: "error", details: "Armtek search request failed" },
   ]);
 });
 
@@ -526,10 +742,11 @@ function requestWithHost(host) {
   });
 }
 
-test("server production smoke test", async () => {
-  const server = spawn(process.execPath, ["--experimental-strip-types", "src/backend/server.ts"], {
+test("server entrypoint smoke test", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "autoservice-server-test-"));
+  const server = spawn(process.execPath, ["src/backend/server.ts"], {
     cwd: process.cwd(),
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, NODE_ENV: "test", PORT: String(port), STATE_DIR: stateDir },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -574,6 +791,7 @@ test("server production smoke test", async () => {
   } finally {
     server.kill("SIGTERM");
     await once(server, "exit");
+    await rm(stateDir, { recursive: true, force: true });
   }
 
   assert.equal(stderr, "");

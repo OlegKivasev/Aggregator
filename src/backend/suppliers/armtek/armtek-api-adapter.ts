@@ -1,4 +1,5 @@
-import { getArmtekApiConfig, type ArmtekApiConfig } from "../../config.ts";
+import { armtekApiBaseUrl, armtekRequestTimeoutMs, armtekSearchTimeoutMs, getArmtekApiConfig, supplierMaxResponseBytes, type ArmtekApiConfig } from "../../config.ts";
+import { createBoundedAbortSignal } from "../../abort.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type {
   ArmtekCredentials,
@@ -7,9 +8,10 @@ import type {
   SupplierSearchContext,
   SupplierSessionState,
 } from "../../types.ts";
-import { SupplierAuthError } from "../errors.ts";
+import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../errors.ts";
+import { readBoundedJsonResponse } from "../fetch-json.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
-import { getArmtekApiAccountState, saveArmtekApiAccountState } from "./armtek-api-account-state.ts";
+import { getArmtekApiAccountState, getArmtekApiAccountStateGeneration, invalidateArmtekApiAccountStateWrites, saveArmtekApiAccountState } from "./armtek-api-account-state.ts";
 
 interface ArmtekResponse<T> {
   STATUS?: number;
@@ -67,8 +69,7 @@ interface ArmtekResolvedConfig {
   queryType: string;
 }
 
-const armtekApiBaseUrl = process.env.ARMTEK_API_BASE_URL?.trim() || "https://ws.armtek.ru/api";
-const armtekStoreNamesByVkorg = new Map<string, Promise<Map<string, string>>>();
+const armtekStoreNamesByAccount = new Map<string, Map<string, string>>();
 function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
 }
@@ -224,33 +225,55 @@ async function requestArmtek<T>(
     }
   }
 
-  const response = await fetch(url, {
-    method: options.method,
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${credentials.login}:${credentials.password}`).toString("base64")}`,
-      ...(options.method === "POST" ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
-    },
-    body: options.method === "POST" ? options.params : undefined,
-    signal: options.signal,
-  });
+  const parentSignal = options.signal ?? new AbortController().signal;
+  const requestSignal = createBoundedAbortSignal(parentSignal, armtekRequestTimeoutMs, "Armtek API request timed out");
+  try {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: options.method,
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${credentials.login}:${credentials.password}`).toString("base64")}`,
+          ...(options.method === "POST" ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
+        },
+        body: options.method === "POST" ? options.params : undefined,
+        signal: requestSignal.signal,
+        redirect: "error",
+      });
+    } catch (error) {
+      if (requestSignal.signal.aborted) {
+        throw requestSignal.signal.reason;
+      }
+      throw new SupplierIntegrationError("Armtek API request failed", { cause: error });
+    }
 
-  if (response.status === 401 || response.status === 403) {
-    throw new SupplierAuthError("Armtek rejected login or password");
+    if (response.status === 401 || response.status === 403) {
+      throw new SupplierAuthError("Armtek rejected login or password");
+    }
+
+    const payload = await readBoundedJsonResponse(response, supplierMaxResponseBytes, "Armtek API") as ArmtekResponse<T>;
+
+    if (payload.STATUS === 401 || payload.STATUS === 403) {
+      throw new SupplierAuthError("Armtek rejected login or password");
+    }
+    if (!response.ok || (payload.STATUS && payload.STATUS >= 400)) {
+      throw new SupplierIntegrationError(getArmtekMessage(payload));
+    }
+    if (payload.RESP === undefined) {
+      throw new SupplierIntegrationError("Armtek API returned an empty response");
+    }
+
+    return payload.RESP;
+  } finally {
+    requestSignal.dispose();
   }
-
-  const payload = (await response.json()) as ArmtekResponse<T>;
-
-  if (!response.ok || (payload.STATUS && payload.STATUS >= 400)) {
-    throw new Error(getArmtekMessage(payload));
-  }
-
-  return payload.RESP as T;
 }
 
 async function resolveArmtekConfig(
   credentials: ArmtekCredentials,
   signal?: AbortSignal,
 ): Promise<ArmtekResolvedConfig> {
+  const accountStateGeneration = getArmtekApiAccountStateGeneration();
   const config = defaultedConfig(credentials);
   let vkorg = config.vkorg;
 
@@ -263,7 +286,7 @@ async function resolveArmtekConfig(
   }
 
   if (!vkorg) {
-    throw new Error("Armtek did not return available VKORG values");
+    throw new SupplierIntegrationError("Armtek did not return available VKORG values");
   }
 
   let kunnrRg = config.kunnrRg;
@@ -281,7 +304,7 @@ async function resolveArmtekConfig(
   }
 
   if (!kunnrRg) {
-    throw new Error("Armtek did not return available KUNNR_RG values");
+    throw new SupplierIntegrationError("Armtek did not return available KUNNR_RG values");
   }
 
   const resolved = {
@@ -293,7 +316,7 @@ async function resolveArmtekConfig(
     program: config.program,
     queryType: config.queryType,
   };
-  saveArmtekApiAccountState(credentials.login, resolved.vkorg, resolved.kunnrRg);
+  saveArmtekApiAccountState(credentials.login, resolved.vkorg, resolved.kunnrRg, accountStateGeneration);
   return resolved;
 }
 
@@ -309,21 +332,42 @@ async function getArmtekStoreNames(credentials: ArmtekCredentials, vkorg: string
 }
 
 function getCachedArmtekStoreNames(credentials: ArmtekCredentials, vkorg: string, signal: AbortSignal): Promise<Map<string, string>> {
-  const existing = armtekStoreNamesByVkorg.get(vkorg);
+  const cacheKey = `${credentials.login}\u0000${vkorg}`;
+  const existing = armtekStoreNamesByAccount.get(cacheKey);
   if (existing) {
-    return existing;
+    signal.throwIfAborted();
+    return Promise.resolve(existing);
   }
 
-  const request = getArmtekStoreNames(credentials, vkorg, signal).catch((error: unknown) => {
-    armtekStoreNamesByVkorg.delete(vkorg);
-    throw error;
+  return getArmtekStoreNames(credentials, vkorg, signal).then((stores) => {
+    armtekStoreNamesByAccount.set(cacheKey, stores);
+    return stores;
   });
-  armtekStoreNamesByVkorg.set(vkorg, request);
-  return request;
 }
 
 function hasArmtekWarehouseName(item: ArmtekSearchItem): boolean {
   return Boolean(item.STOCK_NAME || item.WHNAME || item.WAREHOUSE_NAME || item.STORE_NAME || item.SNAME || item.RNAME);
+}
+
+export function getArmtekWarehouse(item: ArmtekSearchItem, storeNames: Map<string, string>): string | null {
+  return item.STOCK_NAME || item.WHNAME || item.WAREHOUSE_NAME || item.STORE_NAME || item.SNAME || item.RNAME ||
+    (item.KEYZAK ? storeNames.get(item.KEYZAK) || item.KEYZAK : undefined) || item.STOCK || item.WH ||
+    item.WAREHOUSE || item.STORE || null;
+}
+
+export async function getOptionalArmtekStoreNames(
+  load: () => Promise<Map<string, string>>,
+  signal: AbortSignal,
+): Promise<Map<string, string>> {
+  try {
+    return await load();
+  } catch (error) {
+    signal.throwIfAborted();
+    if (error instanceof SupplierIntegrationError || error instanceof SupplierTimeoutError) {
+      return new Map();
+    }
+    throw error;
+  }
 }
 
 function buildArmtekResultLink(article: string): string {
@@ -332,15 +376,27 @@ function buildArmtekResultLink(article: string): string {
   return url.toString();
 }
 
-export async function verifyArmtekCredentials(credentials: ArmtekCredentials): Promise<string> {
-  await resolveArmtekConfig(credentials);
+function rethrowArmtekStageError(error: unknown, publicMessage: string, diagnosticCode: string): never {
+  if (error instanceof SupplierIntegrationError) {
+    throw new SupplierIntegrationError(publicMessage, {
+      cause: error,
+      publicMessage,
+      diagnosticCode,
+    });
+  }
+  throw error;
+}
+
+export async function verifyArmtekCredentials(credentials: ArmtekCredentials, signal?: AbortSignal): Promise<string> {
+  invalidateArmtekApiAccountStateWrites();
+  await resolveArmtekConfig(credentials, signal);
   return "Armtek account verified";
 }
 
 export class ArmtekApiAdapter implements SupplierAdapter {
   readonly id = "armtek";
   readonly displayName = "Armtek";
-  readonly timeoutMs = 60000;
+  readonly timeoutMs = armtekSearchTimeoutMs;
 
   async ensureSession(sessionManager: SupplierSessionManager): Promise<SupplierSessionState> {
     const credentials = getConfiguredCredentials(sessionManager);
@@ -350,6 +406,21 @@ export class ArmtekApiAdapter implements SupplierAdapter {
     }
 
     return sessionManager.markAuthorized("armtek", "Armtek API credentials are available");
+  }
+
+  async validateSession(context: SupplierSearchContext, sessionManager: SupplierSessionManager): Promise<void> {
+    const credentials = getConfiguredCredentials(sessionManager);
+    if (!credentials) {
+      throw new SupplierAuthError("Armtek credentials are missing");
+    }
+    const response = await requestArmtek<{ ARRAY?: ArmtekVkorgItem | ArmtekVkorgItem[] } | ArmtekVkorgItem[]>(
+      "ws_user/getUserVkorgList",
+      credentials,
+      { method: "GET", signal: context.signal },
+    );
+    if (!armtekVkorgItems(response).some((item) => item.VKORG?.trim())) {
+      throw new SupplierIntegrationError("Armtek did not return available VKORG values");
+    }
   }
 
   async search(
@@ -378,19 +449,28 @@ export class ArmtekApiAdapter implements SupplierAdapter {
     appendOptional(params, "VBELN", resolved.vbeln);
     appendOptional(params, "PROGRAM", resolved.program);
 
-    const searchResponse = await requestArmtek<{ ARRAY?: ArmtekSearchItem | ArmtekSearchItem[] } | ArmtekSearchItem[]>("ws_search/search", credentials, {
-      method: "POST",
-      params,
-      signal: searchContext.signal,
-    });
+    let searchResponse: { ARRAY?: ArmtekSearchItem | ArmtekSearchItem[] } | ArmtekSearchItem[];
+    try {
+      searchResponse = await requestArmtek("ws_search/search", credentials, {
+        method: "POST",
+        params,
+        signal: searchContext.signal,
+      });
+    } catch (error) {
+      rethrowArmtekStageError(error, "Armtek search request failed", "armtek_search_request");
+    }
     const normalizedTarget = normalizeArticle(article);
     const items = armtekSearchItems(searchResponse);
     const requiresStoreNames = items.some((item) =>
       normalizeArticle(item.PIN ?? "") === normalizedTarget && Boolean(item.KEYZAK) && !hasArmtekWarehouseName(item),
     );
-    const storeNames = requiresStoreNames
-      ? await getCachedArmtekStoreNames(credentials, resolved.vkorg, searchContext.signal)
-      : new Map<string, string>();
+    let storeNames = new Map<string, string>();
+    if (requiresStoreNames) {
+      storeNames = await getOptionalArmtekStoreNames(
+        () => getCachedArmtekStoreNames(credentials, resolved.vkorg, searchContext.signal),
+        searchContext.signal,
+      );
+    }
     for (const item of items) {
       if (normalizeArticle(item.PIN ?? "") !== normalizedTarget) {
         continue;
@@ -412,7 +492,7 @@ export class ArmtekApiAdapter implements SupplierAdapter {
         title,
         price,
         ...parseArmtekDeliveryDates(item.DLVDT, item.WRNTDT),
-        warehouse: item.STOCK_NAME || item.WHNAME || item.WAREHOUSE_NAME || item.STORE_NAME || item.SNAME || item.RNAME || (item.KEYZAK ? storeNames.get(item.KEYZAK) : undefined) || item.STOCK || item.WH || item.WAREHOUSE || item.STORE || null,
+        warehouse: getArmtekWarehouse(item, storeNames),
         deliveryDateApproximate: false,
         link: buildArmtekResultLink(article),
       });

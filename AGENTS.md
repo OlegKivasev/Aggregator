@@ -8,7 +8,7 @@ Autoservice Aggregator — production-приложение для паралле
 
 Технологический стек:
 
-- Node.js 24.
+- Node.js 26.
 - TypeScript в strict-режиме.
 - Native ESM и запуск TypeScript через Node type stripping.
 - Нативный HTTP-сервер Node.js.
@@ -276,6 +276,8 @@ frontend / HTTP transport
 - cookies/token files должны иметь permissions `0600`;
 - logout должен удалять соответствующее состояние;
 - поздняя async-операция не должна восстанавливать state после logout.
+
+Supplier credentials разрешено сохранять только в authenticated encrypted store в `STATE_DIR`. Master key должен поступать отдельно через environment/secret manager и не должен храниться рядом с ciphertext. Без настроенного master key runtime credentials остаются только в памяти процесса.
 
 Не удаляй существующие `.state` files без явного запроса: они могут содержать активные supplier sessions.
 

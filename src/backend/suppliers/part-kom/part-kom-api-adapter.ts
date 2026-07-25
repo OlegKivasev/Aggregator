@@ -1,3 +1,4 @@
+import { partKomSearchTimeoutMs } from "../../config.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type {
   NormalizedSearchResult,
@@ -7,7 +8,7 @@ import type {
   SupplierSessionState,
 } from "../../types.ts";
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
-import { siteHttpRequest } from "../site-http.ts";
+import { siteHttpRequest, type SiteHttpResponse } from "../site-http.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
 
 interface PartKomOffer {
@@ -37,14 +38,6 @@ export type PartKomApiRequester = (
 const partKomApiBaseUrl = new URL("https://ws.part-kom.ru/v4/");
 const partKomSiteBaseUrl = new URL("https://www.part-kom.ru/");
 const partKomMaxResponseBytes = 5 * 1024 * 1024;
-
-function readPartKomSearchTimeoutMs(): number {
-  const timeoutMs = Number(process.env.PARTKOM_SEARCH_TIMEOUT_MS ?? "15000");
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) {
-    throw new Error("PARTKOM_SEARCH_TIMEOUT_MS must be between 1 and 120000");
-  }
-  return timeoutMs;
-}
 
 function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
@@ -91,6 +84,86 @@ function dateFromDuration(hours: unknown, days: unknown): string | null {
 function apiItems(payload: unknown, responseName: string): unknown[] {
   if (!Array.isArray(payload)) {
     throw new SupplierIntegrationError(`PartKOM API returned an invalid ${responseName} response`);
+  }
+  return payload;
+}
+
+function partKomErrorText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const problem = payload as Record<string, unknown>;
+  for (const field of ["message", "detail", "error", "title"]) {
+    if (typeof problem[field] === "string" && problem[field].trim()) {
+      return problem[field].trim();
+    }
+  }
+  return null;
+}
+
+function isPartKomIpRestriction(payload: unknown): boolean {
+  const message = partKomErrorText(payload);
+  return Boolean(message && /wrong\s+ip|ip(?:\s+address|-адрес)/i.test(message));
+}
+
+function partKomIpRestrictionError(): SupplierIntegrationError {
+  return new SupplierIntegrationError("PartKOM API rejected the server IP address", {
+    publicMessage: "PartKOM API access is not allowed from this server IP address",
+  });
+}
+
+function partKomPayloadShape(payload: unknown): string {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return `partkom_brands_${payload === null ? "null" : Array.isArray(payload) ? "array" : typeof payload}`;
+  }
+  const fields = Object.entries(payload).slice(0, 8).map(([name, value]) => {
+    const safeName = name.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 24) || "field";
+    const type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+    return `${safeName}-${type}`;
+  });
+  return `partkom_brands_object_${fields.length ? fields.join("_") : "empty"}`;
+}
+
+export function parsePartKomApiResponse(response: SiteHttpResponse): unknown {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(response.body.replace(/^\uFEFF/, "")) as unknown;
+  } catch {
+    payload = undefined;
+  }
+  if (isPartKomIpRestriction(payload)) {
+    throw partKomIpRestrictionError();
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new SupplierAuthError("PartKOM API rejected the configured credentials");
+  }
+  if (response.status < 200 || response.status >= 300) {
+    throw new SupplierIntegrationError(`PartKOM API returned HTTP ${response.status}`, {
+      publicMessage: "PartKOM API is temporarily unavailable",
+    });
+  }
+  if (payload === undefined) {
+    throw new SupplierIntegrationError("PartKOM API returned invalid JSON", {
+      publicMessage: "PartKOM API returned invalid JSON",
+    });
+  }
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const envelope = payload as { success?: unknown; data?: unknown };
+    if (envelope.success === true) {
+      if (Array.isArray(envelope.data)) {
+        return envelope.data;
+      }
+      throw new SupplierIntegrationError("PartKOM API returned an invalid success envelope", {
+        publicMessage: "PartKOM API returned an unsupported response",
+        diagnosticCode: partKomPayloadShape(payload),
+      });
+    }
+    if (envelope.success === false) {
+      throw new SupplierIntegrationError("PartKOM API rejected the request", {
+        publicMessage: "PartKOM API rejected the request",
+        diagnosticCode: partKomPayloadShape(payload),
+      });
+    }
   }
   return payload;
 }
@@ -150,39 +223,45 @@ async function partKomApiRequest(
     timeoutMs,
     maxResponseBytes: partKomMaxResponseBytes,
   });
-  if (response.status === 401 || response.status === 403) {
-    throw new SupplierAuthError("PartKOM API rejected the configured credentials");
-  }
-  if (response.status < 200 || response.status >= 300) {
-    throw new SupplierIntegrationError(`PartKOM API returned HTTP ${response.status}`);
-  }
-  try {
-    return JSON.parse(response.body) as unknown;
-  } catch {
-    throw new SupplierIntegrationError("PartKOM API returned invalid JSON");
-  }
+  return parsePartKomApiResponse(response);
 }
 
 export async function verifyPartKomApiCredentials(
   credentials: PartKomCredentials,
   request: PartKomApiRequester = partKomApiRequest,
+  signal: AbortSignal = AbortSignal.timeout(10_000),
 ): Promise<void> {
-  const payload = await request("search/brands", new URLSearchParams(), AbortSignal.timeout(10_000), 10_000, credentials);
+  const payload = await request("search/brands", new URLSearchParams(), signal, 10_000, credentials);
+  validatePartKomConnectionPayload(payload);
+}
+
+function validatePartKomConnectionPayload(payload: unknown): void {
+  if (Array.isArray(payload)) {
+    return;
+  }
   if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    const message = (payload as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) {
-      const details = /wrong ip address/i.test(message)
-        ? "PartKOM API rejected the server IP address"
-        : "PartKOM API rejected the connection check";
-      throw new SupplierIntegrationError(details);
+    if (isPartKomIpRestriction(payload)) {
+      throw partKomIpRestrictionError();
+    }
+    if (partKomErrorText(payload)) {
+      throw new SupplierIntegrationError("PartKOM API rejected the connection check", {
+        publicMessage: "PartKOM API rejected the connection check",
+      });
+    }
+    if (Array.isArray((payload as { brands?: unknown }).brands)) {
+      return;
     }
   }
+  throw new SupplierIntegrationError("PartKOM API returned an invalid brands response", {
+    publicMessage: "PartKOM API returned an unsupported brands response",
+    diagnosticCode: partKomPayloadShape(payload),
+  });
 }
 
 export class PartKomApiAdapter implements SupplierAdapter {
   readonly id = "part-kom";
   readonly displayName = "PartKOM";
-  readonly timeoutMs = readPartKomSearchTimeoutMs();
+  readonly timeoutMs = partKomSearchTimeoutMs;
   private readonly request: PartKomApiRequester;
 
   constructor(request: PartKomApiRequester = partKomApiRequest) {
@@ -200,7 +279,8 @@ export class PartKomApiAdapter implements SupplierAdapter {
     if (!credentials) {
       throw new SupplierAuthError("PartKOM API credentials are not configured");
     }
-    await this.request("search/brands", new URLSearchParams(), context.signal, context.timeoutMs, credentials);
+    const payload = await this.request("search/brands", new URLSearchParams(), context.signal, context.timeoutMs, credentials);
+    validatePartKomConnectionPayload(payload);
   }
 
   async search(

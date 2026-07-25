@@ -1,8 +1,17 @@
-import { getArmtekApiConfig, getStpartsApiConfig } from "./config.ts";
+import { SearchApplicationService } from "./application/search-application-service.ts";
+import { SupplierSessionService } from "./application/supplier-session-service.ts";
+import { getArmtekApiConfig, getStateFilePath, getStpartsApiConfig, supplierCredentialsEncryptionKey } from "./config.ts";
+import { EncryptedSupplierCredentialStore } from "./session/encrypted-credential-store.ts";
 import { SupplierSessionManager } from "./session/session-manager.ts";
-import { ArmtekApiAdapter, verifyArmtekCredentials } from "./suppliers/armtek/armtek-api-adapter.ts";
 import { clearArmtekApiAccountState } from "./suppliers/armtek/armtek-api-account-state.ts";
-import { runSupplierSearch } from "./suppliers/run-supplier-search.ts";
+import { ArmtekApiAdapter, verifyArmtekCredentials } from "./suppliers/armtek/armtek-api-adapter.ts";
+import { MladovWebAdapter } from "./suppliers/mladov/mladov-web-adapter.ts";
+import {
+  clearMladovStorageState,
+  closeMladovBrowser,
+  hasMladovStorageState,
+  verifyMladovCredentials,
+} from "./suppliers/mladov/mladov-site-auth.ts";
 import { MotorDetalApiAdapter } from "./suppliers/motordetal/motordetal-api-adapter.ts";
 import {
   clearMotorDetalTokenState,
@@ -10,277 +19,122 @@ import {
   verifyMotorDetalCredentials,
 } from "./suppliers/motordetal/motordetal-auth.ts";
 import { PartKomApiAdapter, verifyPartKomApiCredentials } from "./suppliers/part-kom/part-kom-api-adapter.ts";
-import { RosskoSiteApiAdapter } from "./suppliers/rossko/rossko-site-api-adapter.ts";
-import {
-  clearRosskoStorageState,
-  hasRosskoStorageState,
-  verifyRosskoCredentials,
-} from "./suppliers/rossko/rossko-site-auth.ts";
+import { closeRosskoHttpAgent, RosskoSiteApiAdapter } from "./suppliers/rossko/rossko-site-api-adapter.ts";
+import { clearRosskoStorageState, hasRosskoStorageState, verifyRosskoCredentials } from "./suppliers/rossko/rossko-site-auth.ts";
+import { closeSiteHttpAgent } from "./suppliers/site-http.ts";
 import { StpartsApiAdapter, verifyStpartsApiCredentials } from "./suppliers/stparts/stparts-api-adapter.ts";
-import type { SupplierAdapter } from "./suppliers/supplier-adapter.ts";
-import { SupplierAuthError, SupplierTimeoutError } from "./suppliers/errors.ts";
-import { MladovWebAdapter } from "./suppliers/mladov/mladov-web-adapter.ts";
-import { clearMladovStorageState, closeMladovBrowser, hasMladovStorageState, verifyMladovCredentials } from "./suppliers/mladov/mladov-site-auth.ts";
-import type { ArmtekCredentials, MladovCredentials, MotorDetalCredentials, PartKomCredentials, RosskoSiteCredentials, SearchQuery, SearchStreamEvent, StpartsCredentials, SupplierId, SupplierSessionValidationResult } from "./types.ts";
+import type {
+  ArmtekCredentials,
+  MladovCredentials,
+  MotorDetalCredentials,
+  PartKomCredentials,
+  RosskoSiteCredentials,
+  SearchQuery,
+  SearchStreamEvent,
+  StpartsCredentials,
+  SupplierId,
+} from "./types.ts";
 
 const sessionManager = new SupplierSessionManager();
-const rosskoAdapter = new RosskoSiteApiAdapter();
-const armtekAdapter = new ArmtekApiAdapter();
-const partKomAdapter = new PartKomApiAdapter();
-const stpartsAdapter = new StpartsApiAdapter();
-const motorDetalAdapter = new MotorDetalApiAdapter();
-const mladovAdapter = new MladovWebAdapter();
+const credentialStore = new EncryptedSupplierCredentialStore(
+  getStateFilePath("supplier-credentials.enc.json"),
+  supplierCredentialsEncryptionKey,
+);
+const adapters = [
+  new RosskoSiteApiAdapter(),
+  new ArmtekApiAdapter(),
+  new PartKomApiAdapter(),
+  new StpartsApiAdapter(),
+  new MotorDetalApiAdapter(),
+  new MladovWebAdapter(),
+];
 
-function getSearchAdapters(query: SearchQuery): SupplierAdapter[] {
-  const adapters = [rosskoAdapter, armtekAdapter, partKomAdapter, stpartsAdapter, motorDetalAdapter, mladovAdapter];
+const sessionService = new SupplierSessionService(adapters, sessionManager, {
+  verifyRosskoCredentials,
+  verifyArmtekCredentials,
+  verifyPartKomApiCredentials: (credentials, signal) => verifyPartKomApiCredentials(credentials, undefined, signal),
+  verifyStpartsApiCredentials,
+  verifyMotorDetalCredentials,
+  verifyMladovCredentials,
+  clearRosskoStorageState,
+  clearArmtekApiAccountState,
+  clearMotorDetalTokenState,
+  clearMladovStorageState,
+}, credentialStore);
+const searchService = new SearchApplicationService(
+  adapters,
+  sessionManager,
+  (supplier) => sessionService.disconnectSupplier(supplier),
+);
 
-  if (!query.suppliers) {
-    return adapters;
+function bootstrapPersistedSessions(): void {
+  const rosskoCredentials = credentialStore.get("rossko");
+  const armtekCredentials = credentialStore.get("armtek") ?? getArmtekApiConfig();
+  const partKomCredentials = credentialStore.get("part-kom");
+  const stpartsCredentials = credentialStore.get("stparts") ?? getStpartsApiConfig();
+  const motorDetalCredentials = credentialStore.get("motordetal");
+  const mladovCredentials = credentialStore.get("mladov");
+  if (armtekCredentials) {
+    sessionManager.setArmtekCredentials(armtekCredentials);
   }
-
-  return adapters.filter((adapter) => query.suppliers?.includes(adapter.id));
-}
-
-function bootstrapPersistedSessions() {
-  if (hasRosskoStorageState()) {
+  if (partKomCredentials) {
+    sessionManager.setPartKomCredentials(partKomCredentials);
+  }
+  if (stpartsCredentials) {
+    sessionManager.setStpartsCredentials(stpartsCredentials);
+  }
+  if (motorDetalCredentials) {
+    sessionManager.setMotorDetalCredentials(motorDetalCredentials);
+  }
+  if (mladovCredentials) {
+    sessionManager.setMladovCredentials(mladovCredentials);
+  }
+  if (hasRosskoStorageState() || rosskoCredentials) {
     sessionManager.markAuthorized("rossko");
   }
-
-  if (getArmtekApiConfig()) {
-    sessionManager.markAuthorized("armtek", "Armtek API credentials are configured in environment");
+  if (armtekCredentials) {
+    sessionManager.markAuthorized("armtek", "Armtek API credentials are configured");
   }
-
-  if (getStpartsApiConfig()) {
+  if (partKomCredentials) {
+    sessionManager.markAuthorized("part-kom", "PartKOM API credentials are configured");
+  }
+  if (stpartsCredentials) {
     sessionManager.markAuthorized("stparts", "STParts API credentials are configured");
   }
-
-  if (hasMotorDetalTokenState()) {
+  if (hasMotorDetalTokenState() || motorDetalCredentials) {
     sessionManager.markAuthorized("motordetal", "MotorDetal stored session is available");
   }
-
-  if (hasMladovStorageState()) {
+  if (hasMladovStorageState() || mladovCredentials) {
     sessionManager.markAuthorized("mladov", "Сохраненная сессия Механик Ладов доступна");
   }
 }
 
 bootstrapPersistedSessions();
 
-export function listSupplierSessions() {
-  return sessionManager.getAllSessions();
+export const listSupplierSessions = () => sessionService.listSupplierSessions();
+export const authorizeRossko = (credentials: RosskoSiteCredentials, signal: AbortSignal) => sessionService.authorizeRossko(credentials, signal);
+export const authorizeArmtek = (credentials: ArmtekCredentials, signal: AbortSignal) => sessionService.authorizeArmtek(credentials, signal);
+export const authorizePartKom = (credentials: PartKomCredentials, signal: AbortSignal) => sessionService.authorizePartKom(credentials, signal);
+export const authorizeStparts = (credentials: StpartsCredentials, signal: AbortSignal) => sessionService.authorizeStparts(credentials, signal);
+export const authorizeMotorDetal = (credentials: MotorDetalCredentials, signal: AbortSignal) => sessionService.authorizeMotorDetal(credentials, signal);
+export const authorizeMladov = (credentials: MladovCredentials, signal: AbortSignal) => sessionService.authorizeMladov(credentials, signal);
+export const logoutRossko = () => sessionService.logoutRossko();
+export const logoutArmtek = () => sessionService.logoutArmtek();
+export const logoutPartKom = () => sessionService.logoutPartKom();
+export const logoutStparts = () => sessionService.logoutStparts();
+export const logoutMotorDetal = () => sessionService.logoutMotorDetal();
+export const logoutMladov = () => sessionService.logoutMladov();
+
+export function validateSupplierSessions(article: string, suppliers: SupplierId[], signal: AbortSignal) {
+  return sessionService.validateSupplierSessions(article, suppliers, signal);
+}
+
+export function streamSearch(query: SearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) {
+  return searchService.streamSearch(query, emit, signal);
 }
 
 export async function shutdownSearchService(): Promise<void> {
+  closeRosskoHttpAgent();
+  closeSiteHttpAgent();
   await closeMladovBrowser();
-}
-
-export async function authorizeRossko(credentials: RosskoSiteCredentials) {
-  const result = await verifyRosskoCredentials(credentials);
-
-  if (!result.authorized) {
-    clearRosskoStorageState();
-    return sessionManager.markUnauthorized("rossko", result.details);
-  }
-
-  return sessionManager.markAuthorized("rossko", result.details);
-}
-
-export function logoutRossko() {
-  clearRosskoStorageState();
-  return sessionManager.markUnauthorized("rossko");
-}
-
-export async function authorizeArmtek(credentials: ArmtekCredentials) {
-  const details = await verifyArmtekCredentials(credentials);
-
-  sessionManager.setArmtekCredentials(credentials);
-  return sessionManager.markAuthorized("armtek", details);
-}
-
-export function logoutArmtek() {
-  sessionManager.clearArmtekCredentials();
-  clearArmtekApiAccountState();
-  return sessionManager.markUnauthorized("armtek");
-}
-
-export async function authorizePartKom(credentials: PartKomCredentials) {
-  try {
-    await verifyPartKomApiCredentials(credentials);
-  } catch (error) {
-    sessionManager.clearPartKomCredentials();
-    if (error instanceof SupplierAuthError) {
-      return sessionManager.markUnauthorized("part-kom", "PartKOM API rejected the login or password");
-    }
-    sessionManager.markUnauthorized("part-kom", "PartKOM API connection check failed");
-    throw error;
-  }
-  sessionManager.setPartKomCredentials(credentials);
-  return sessionManager.markAuthorized("part-kom", "PartKOM API credentials were verified successfully");
-}
-
-export function logoutPartKom() {
-  sessionManager.clearPartKomCredentials();
-  return sessionManager.markUnauthorized("part-kom");
-}
-
-export async function authorizeStparts(credentials: StpartsCredentials) {
-  try {
-    await verifyStpartsApiCredentials(credentials);
-  } catch (error) {
-    sessionManager.clearStpartsCredentials();
-    if (error instanceof SupplierAuthError) {
-      return sessionManager.markUnauthorized("stparts", "STParts API rejected the login or password");
-    }
-    throw error;
-  }
-  sessionManager.setStpartsCredentials(credentials);
-  return sessionManager.markAuthorized("stparts", "STParts API credentials were verified successfully");
-}
-
-export function logoutStparts() {
-  sessionManager.clearStpartsCredentials();
-  return sessionManager.markUnauthorized("stparts");
-}
-
-export async function authorizeMotorDetal(credentials: MotorDetalCredentials) {
-  const result = await verifyMotorDetalCredentials(credentials);
-
-  if (!result.authorized) {
-    sessionManager.clearMotorDetalCredentials();
-    clearMotorDetalTokenState();
-    return sessionManager.markUnauthorized("motordetal", result.details);
-  }
-
-  sessionManager.setMotorDetalCredentials(credentials);
-  return sessionManager.markAuthorized("motordetal", result.details);
-}
-
-export function logoutMotorDetal() {
-  sessionManager.clearMotorDetalCredentials();
-  clearMotorDetalTokenState();
-  return sessionManager.markUnauthorized("motordetal");
-}
-
-export async function authorizeMladov(credentials: MladovCredentials) {
-  const result = await verifyMladovCredentials(credentials);
-  if (!result.authorized) {
-    sessionManager.clearMladovCredentials();
-    clearMladovStorageState();
-    return sessionManager.markUnauthorized("mladov", result.details);
-  }
-  sessionManager.setMladovCredentials(credentials);
-  return sessionManager.markAuthorized("mladov", result.details);
-}
-
-export function logoutMladov() {
-  sessionManager.clearMladovCredentials();
-  clearMladovStorageState();
-  return sessionManager.markUnauthorized("mladov");
-}
-
-const supplierLogout = new Map<SupplierId, () => unknown>([
-  ["rossko", logoutRossko],
-  ["armtek", logoutArmtek],
-  ["part-kom", logoutPartKom],
-  ["stparts", logoutStparts],
-  ["motordetal", logoutMotorDetal],
-  ["mladov", logoutMladov],
-]);
-
-function disconnectSupplier(supplier: SupplierId): void {
-  supplierLogout.get(supplier)?.();
-}
-
-async function validateSupplierSession(
-  adapter: SupplierAdapter,
-  article: string,
-  signal: AbortSignal,
-): Promise<SupplierSessionValidationResult> {
-  const controller = new AbortController();
-  const forwardAbort = () => controller.abort(signal.reason);
-  signal.addEventListener("abort", forwardAbort, { once: true });
-  const timeoutId = setTimeout(
-    () => controller.abort(new SupplierTimeoutError(`Validation timed out after ${adapter.timeoutMs}ms`)),
-    adapter.timeoutMs,
-  );
-
-  try {
-    const session = await adapter.ensureSession(sessionManager);
-    if (!session.authorized) {
-      throw new SupplierAuthError();
-    }
-
-    const context = { signal: controller.signal, timeoutMs: adapter.timeoutMs };
-    if (adapter.validateSession) {
-      await adapter.validateSession(context, sessionManager);
-    } else {
-      await adapter.search(
-        { article, suppliers: [adapter.id] },
-        context,
-        () => undefined,
-        sessionManager,
-      );
-    }
-    sessionManager.markChecked(adapter.id);
-    return { supplier: adapter.id, status: "connected" };
-  } catch (error) {
-    if (error instanceof SupplierAuthError) {
-      disconnectSupplier(adapter.id);
-      return { supplier: adapter.id, status: "expired" };
-    }
-
-    if (signal.aborted) {
-      throw signal.reason;
-    }
-
-    return { supplier: adapter.id, status: "error" };
-  } finally {
-    clearTimeout(timeoutId);
-    signal.removeEventListener("abort", forwardAbort);
-  }
-}
-
-export async function validateSupplierSessions(
-  article: string,
-  suppliers: SupplierId[],
-  signal: AbortSignal,
-): Promise<{ results: SupplierSessionValidationResult[]; sessions: ReturnType<typeof listSupplierSessions> }> {
-  const adapters = getSearchAdapters({ article, suppliers });
-  const results = await Promise.all(adapters.map((adapter) => validateSupplierSession(adapter, article, signal)));
-  return { results, sessions: listSupplierSessions() };
-}
-
-export async function streamSearch(
-  query: SearchQuery,
-  emit: (event: SearchStreamEvent) => void,
-  signal: AbortSignal,
-): Promise<void> {
-  const currentAdapters = getSearchAdapters(query);
-
-  emit({
-    type: "search_started",
-    article: query.article,
-    suppliers: currentAdapters.map((adapter) => adapter.id),
-  });
-
-  await Promise.all(
-    currentAdapters.map((adapter) =>
-      runSupplierSearch({
-        adapter,
-        sessionManager,
-        query,
-        signal,
-        emit,
-        onAuthError: () => disconnectSupplier(adapter.id),
-      }),
-    ),
-  );
-
-  if (signal.aborted) {
-    return;
-  }
-
-  emit({
-    type: "search_completed",
-    article: query.article,
-  });
 }
