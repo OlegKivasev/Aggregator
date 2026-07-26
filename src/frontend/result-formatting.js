@@ -62,6 +62,30 @@ export const formatPrice = (value) => {
   return `${truncated.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽`;
 };
 
+const getDeliveryTimestamp = (value) => {
+  const timestamp = value ? new Date(value).getTime() : Number.NaN;
+  return Number.isNaN(timestamp) ? null : timestamp;
+};
+
+export const compareDeliveryDates = (left, right) => {
+  const leftFrom = getDeliveryTimestamp(left.deliveryDate);
+  const rightFrom = getDeliveryTimestamp(right.deliveryDate);
+
+  if (leftFrom === null || rightFrom === null) {
+    return leftFrom === rightFrom ? 0 : leftFrom === null ? 1 : -1;
+  }
+
+  const leftTo = getDeliveryTimestamp(left.deliveryDateTo);
+  const rightTo = getDeliveryTimestamp(right.deliveryDateTo);
+  const intervalComparison = Number(leftTo !== null) - Number(rightTo !== null);
+
+  if (intervalComparison !== 0) {
+    return intervalComparison;
+  }
+
+  return leftFrom - rightFrom || (leftTo ?? leftFrom) - (rightTo ?? rightFrom);
+};
+
 export const splitAnalogResults = (results) => ({
   exact: results.filter((result) => result.isAnalog !== true),
   analogs: results.filter((result) => result.isAnalog === true),

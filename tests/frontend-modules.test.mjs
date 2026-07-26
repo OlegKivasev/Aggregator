@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  compareDeliveryDates,
   escapeHtml,
   formatPrice,
   formatWarehouse,
@@ -43,6 +44,22 @@ test("result formatting separates analogs from exact results", () => {
 
   assert.deepEqual(result.exact.map((item) => item.article), ["B", "C"]);
   assert.deepEqual(result.analogs.map((item) => item.article), ["A"]);
+});
+
+test("delivery date sorting places single dates before intervals", () => {
+  const results = [
+    { label: "interval tomorrow", deliveryDate: "2026-07-27T00:00:00.000Z", deliveryDateTo: "2026-07-28T00:00:00.000Z" },
+    { label: "single day after tomorrow", deliveryDate: "2026-07-28T00:00:00.000Z" },
+    { label: "later interval", deliveryDate: "2026-07-28T00:00:00.000Z", deliveryDateTo: "2026-07-30T00:00:00.000Z" },
+    { label: "single tomorrow", deliveryDate: "2026-07-27T00:00:00.000Z" },
+  ];
+
+  assert.deepEqual(results.sort(compareDeliveryDates).map((result) => result.label), [
+    "single tomorrow",
+    "single day after tomorrow",
+    "interval tomorrow",
+    "later interval",
+  ]);
 });
 
 test("frontend switches exact results and analogs in one table", async () => {

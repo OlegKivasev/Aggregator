@@ -1,5 +1,5 @@
 import { buildIncompleteSearchWarnings, buildSupplierResultTooltip, formatDeliveryDate } from "./supplier-search-summary.js";
-import { escapeHtml, formatPrice, formatWarehouse, getSafeResultLink, renderWarehouse, splitAnalogResults } from "./result-formatting.js";
+import { compareDeliveryDates, escapeHtml, formatPrice, formatWarehouse, getSafeResultLink, renderWarehouse, splitAnalogResults } from "./result-formatting.js";
 import { openSearchStream } from "./search-stream.js";
 
 const form = document.querySelector("#search-form");
@@ -514,16 +514,9 @@ const compareSortValues = (leftValue, rightValue) => {
 };
 
 const compareResults = (left, right, state = sortState, percent = markupPercent) => {
-  const leftValue = getSortValue(left, state.key, percent);
-  const rightValue = getSortValue(right, state.key, percent);
-  let comparison = compareSortValues(leftValue, rightValue);
-
-  if (comparison === 0 && state.key === "deliveryDate") {
-    comparison = compareSortValues(
-      getSortValue({ deliveryDate: left.deliveryDateTo ?? left.deliveryDate }, "deliveryDate"),
-      getSortValue({ deliveryDate: right.deliveryDateTo ?? right.deliveryDate }, "deliveryDate"),
-    );
-  }
+  const comparison = state.key === "deliveryDate"
+    ? compareDeliveryDates(left, right)
+    : compareSortValues(getSortValue(left, state.key, percent), getSortValue(right, state.key, percent));
 
   return state.direction === "ascending" ? comparison : -comparison;
 };
