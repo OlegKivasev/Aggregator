@@ -50,11 +50,14 @@ test("delivery date sorting places single dates before intervals", () => {
   ]);
 });
 
-test("delivery date sorting places known dates before approximate dates", () => {
+test("delivery date sorting groups nearby, dated and interval deliveries", () => {
   const today = new Date();
   const date = (offset) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset, 12).toISOString();
   const results = [
+    { label: "interval tomorrow", deliveryDate: date(1), deliveryDateTo: date(3), deliveryDateApproximate: false },
+    { label: "approximate dated", deliveryDate: date(4), deliveryDateApproximate: true },
     { label: "approximate today", deliveryDate: date(0), deliveryDateApproximate: true },
+    { label: "known dated", deliveryDate: date(5), deliveryDateApproximate: false },
     { label: "known day after tomorrow", deliveryDate: date(2), deliveryDateApproximate: false },
     { label: "approximate tomorrow", deliveryDate: date(1), deliveryDateApproximate: true },
     { label: "known tomorrow", deliveryDate: date(1), deliveryDateApproximate: false },
@@ -67,6 +70,9 @@ test("delivery date sorting places known dates before approximate dates", () => 
     "known day after tomorrow",
     "approximate today",
     "approximate tomorrow",
+    "known dated",
+    "approximate dated",
+    "interval tomorrow",
   ]);
 });
 

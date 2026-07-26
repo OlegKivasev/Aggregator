@@ -67,6 +67,27 @@ const getDeliveryTimestamp = (value) => {
   return Number.isNaN(timestamp) ? null : timestamp;
 };
 
+const getCalendarDayOffset = (value) => {
+  const date = new Date(value);
+  const today = new Date();
+  const dateDay = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  const todayDay = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  return (dateDay - todayDay) / 86_400_000;
+};
+
+const getDeliverySortGroup = (result, from, to) => {
+  if (to !== null) {
+    return 4;
+  }
+
+  const dayOffset = getCalendarDayOffset(from);
+  const isNearby = dayOffset >= 0 && dayOffset <= 2;
+  if (isNearby) {
+    return result.deliveryDateApproximate === true ? 1 : 0;
+  }
+  return result.deliveryDateApproximate === true ? 3 : 2;
+};
+
 export const compareDeliveryDates = (left, right) => {
   const leftFrom = getDeliveryTimestamp(left.deliveryDate);
   const rightFrom = getDeliveryTimestamp(right.deliveryDate);
@@ -75,19 +96,15 @@ export const compareDeliveryDates = (left, right) => {
     return leftFrom === rightFrom ? 0 : leftFrom === null ? 1 : -1;
   }
 
-  const approximationComparison = Number(left.deliveryDateApproximate === true)
-    - Number(right.deliveryDateApproximate === true);
-  if (approximationComparison !== 0) {
-    return approximationComparison;
-  }
-
   const leftTo = getDeliveryTimestamp(left.deliveryDateTo);
   const rightTo = getDeliveryTimestamp(right.deliveryDateTo);
-  const intervalComparison = Number(leftTo !== null) - Number(rightTo !== null);
-
-  if (intervalComparison !== 0) {
-    return intervalComparison;
+  const groupComparison = getDeliverySortGroup(left, leftFrom, leftTo)
+    - getDeliverySortGroup(right, rightFrom, rightTo);
+  if (groupComparison !== 0) {
+    return groupComparison;
   }
 
-  return leftFrom - rightFrom || (leftTo ?? leftFrom) - (rightTo ?? rightFrom);
+  return leftFrom - rightFrom
+    || Number(left.deliveryDateApproximate === true) - Number(right.deliveryDateApproximate === true)
+    || (leftTo ?? leftFrom) - (rightTo ?? rightFrom);
 };
