@@ -75,6 +75,23 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /const exactResults = results\.filter\(\(result\) => result\.isAnalog !== true\);/);
 });
 
+test("main results use the same comparison-oriented table controls as analogs", async () => {
+  const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
+
+  assert.match(html, /<h2>Предложения<\/h2>/);
+  assert.match(html, /class="table table-hover align-middle mb-0 results-data-table"/);
+  assert.match(html, /class="results-panel__footer"/);
+  assert.match(html, /id="warehouse-tooltip"/);
+  assert.match(app, /main-result-row\$\{isBestPrice \? " is-best-price" : ""\}/);
+  assert.match(app, /main-best-price/);
+  assert.match(app, /--results-table-min-width/);
+  assert.match(app, /showWarehouseTooltip/);
+  assert.match(styles, /\.results-data-table thead\s*\{[^}]*position: sticky;/s);
+  assert.match(styles, /\.results-table\s*\{[^}]*overflow: auto;/s);
+});
+
 test("search shows authorization progress before waiting for session validation", async () => {
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
   const submitHandler = app.slice(app.indexOf('form.addEventListener("submit"'));

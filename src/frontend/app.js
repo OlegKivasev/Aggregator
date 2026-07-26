@@ -89,6 +89,7 @@ const supplierNoticeSummary = document.querySelector("#supplier-notice-summary")
 const supplierNoticeList = document.querySelector("#supplier-notice-list");
 const passwordFields = [...document.querySelectorAll(".password-field")];
 const resultContextMenu = document.querySelector("#result-context-menu");
+const warehouseTooltip = document.querySelector("#warehouse-tooltip");
 const showAnalogsButton = document.querySelector("#show-analogs-button");
 const analogsModal = document.querySelector("#analogs-modal");
 const analogsSourceBrand = document.querySelector("#analogs-source-brand");
@@ -146,6 +147,16 @@ const supplierNames = {
 };
 const supplierIds = Object.keys(supplierNames);
 const tableColumnIds = tableColumnInputs.map((input) => input.value);
+const tableColumnWidths = {
+  supplier: 100,
+  brand: 115,
+  article: 125,
+  title: 350,
+  warehouse: 130,
+  price: 120,
+  markupPrice: 125,
+  deliveryDate: 145,
+};
 let visibleTableColumns = new Set(tableColumnIds);
 const filterColumnNames = Object.fromEntries(filterColumnButtons.map((button) => [
   button.dataset.filterColumn,
@@ -560,8 +571,9 @@ const updateResultCount = (items) => {
       .map(([supplier, count]) => `${supplierNames[supplier] ?? supplier}: ${count} позиций`)
       .join("\n");
 
-  resultCount.textContent = `${items.length} позиций`;
+  resultCount.textContent = String(items.length);
   resultCount.dataset.tooltip = breakdown;
+  resultCount.title = `Показано предложений: ${items.length}`;
   resultCount.setAttribute("aria-label", breakdown ? `По поставщикам:\n${breakdown}` : "Нет результатов");
 };
 
@@ -577,6 +589,8 @@ const saveTableColumns = () => {
 
 const applyTableColumns = () => {
   const visibleColumns = getVisibleTableColumns();
+  const minimumWidth = visibleColumns.reduce((width, column) => width + tableColumnWidths[column], 0);
+  resultsTable.style.setProperty("--results-table-min-width", `${minimumWidth}px`);
   tableColumnsReset.hidden = visibleColumns.length === tableColumnIds.length;
   document.querySelectorAll("[data-column]").forEach((element) => {
     element.hidden = !visibleTableColumns.has(element.dataset.column);
@@ -753,6 +767,9 @@ const renderResults = () => {
   const filteredResults = getFilteredResults(exactResults, tableSearchTerm, markupPercent);
   const sortedResults = [...filteredResults].sort((left, right) =>
     compareResults(left, right, sortState, markupPercent));
+  const bestPrice = filteredResults
+    .filter((result) => Number.isFinite(result.price) && result.price > 0)
+    .reduce((best, result) => !best || result.price < best.price ? result : best, null);
   const isSearching = Boolean(getActiveTab()?.source);
   updateSortHeaders(sortButtons, sortState);
   const renderResult = (result, percent) => {
@@ -761,15 +778,16 @@ const renderResults = () => {
     const deliveryDate = result.supplier === "mladov" && !result.deliveryDate
       ? "-"
       : formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo);
+    const isBestPrice = result === bestPrice;
 
     return `
-      <tr class="results-table__row" data-result-index="${results.indexOf(result)}" data-link="${escapeHtml(link)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Открыть ${escapeHtml(result.title)}">
+      <tr class="results-table__row main-result-row${isBestPrice ? " is-best-price" : ""}" data-result-index="${results.indexOf(result)}" data-link="${escapeHtml(link)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Открыть ${escapeHtml(result.title)}">
         <td data-column="supplier">${escapeHtml(supplierName)}</td>
         <td data-column="brand">${escapeHtml(result.brand)}</td>
         <td data-column="article">${escapeHtml(result.article)}</td>
-        <td data-column="title"><div class="result-title-cell"><span>${escapeHtml(result.title)}</span><button type="button" class="result-analogs-button" data-show-row-analogs="${results.indexOf(result)}" aria-label="Показать аналоги для ${escapeHtml(result.brand)} ${escapeHtml(result.article)}">Аналоги</button></div></td>
+        <td data-column="title"><div class="result-title-cell"><span title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</span><button type="button" class="result-analogs-button" data-show-row-analogs="${results.indexOf(result)}" aria-label="Показать аналоги для ${escapeHtml(result.brand)} ${escapeHtml(result.article)}">Аналоги</button></div></td>
         <td data-column="warehouse">${renderWarehouse(result)}</td>
-        <td data-column="price">${escapeHtml(formatPrice(result.price))}</td>
+        <td data-column="price"><span class="main-result-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         <td data-column="markupPrice">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</td>
         <td data-column="deliveryDate">${escapeHtml(deliveryDate)}</td>
       </tr>
@@ -780,6 +798,7 @@ const renderResults = () => {
   `;
 
   const emptyMessage = exactResults.length ? "Нет позиций с выбранными условиями." : "По вашему запросу ничего не найдено.";
+  hideWarehouseTooltip();
   resultsBody.innerHTML = sortedResults.length
     ? sortedResults.map((result) => renderResult(result, markupPercent)).join("")
     : renderEmptyRow(emptyMessage);
@@ -1140,6 +1159,54 @@ document.addEventListener("click", (event) => {
     hideResultContextMenu();
   }
 });
+
+const hideWarehouseTooltip = () => {
+  const owner = document.querySelector('[aria-describedby="warehouse-tooltip"]');
+  owner?.removeAttribute("aria-describedby");
+  warehouseTooltip.hidden = true;
+};
+
+const showWarehouseTooltip = (owner) => {
+  const text = owner.dataset.tooltip;
+  if (!text) {
+    return;
+  }
+  warehouseTooltip.textContent = text;
+  warehouseTooltip.hidden = false;
+  owner.setAttribute("aria-describedby", "warehouse-tooltip");
+  const ownerBounds = owner.getBoundingClientRect();
+  const tooltipBounds = warehouseTooltip.getBoundingClientRect();
+  const left = Math.max(8, Math.min(ownerBounds.left, window.innerWidth - tooltipBounds.width - 8));
+  const below = ownerBounds.bottom + 8;
+  const top = below + tooltipBounds.height <= window.innerHeight - 8
+    ? below
+    : Math.max(8, ownerBounds.top - tooltipBounds.height - 8);
+  warehouseTooltip.style.left = `${left}px`;
+  warehouseTooltip.style.top = `${top}px`;
+};
+
+document.addEventListener("mouseover", (event) => {
+  const owner = event.target.closest?.(".warehouse-code[data-tooltip]");
+  if (owner) {
+    showWarehouseTooltip(owner);
+  }
+});
+document.addEventListener("mouseout", (event) => {
+  if (event.target.closest?.(".warehouse-code[data-tooltip]")) {
+    hideWarehouseTooltip();
+  }
+});
+document.addEventListener("focusin", (event) => {
+  const owner = event.target.closest?.(".warehouse-code[data-tooltip]");
+  if (owner) {
+    showWarehouseTooltip(owner);
+  }
+});
+document.addEventListener("focusout", (event) => {
+  if (event.target.closest?.(".warehouse-code[data-tooltip]")) {
+    hideWarehouseTooltip();
+  }
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Tab" && !analogsModal.hidden) {
     const focusable = [...analogsModal.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex='0']")]
@@ -1415,6 +1482,7 @@ const updateAnalogSortHeaders = () => {
 };
 
 const renderAnalogRows = () => {
+  hideWarehouseTooltip();
   const focusedResultIndex = analogsResultsBody.contains(document.activeElement)
     ? document.activeElement.closest("[data-analog-result-index]")?.dataset.analogResultIndex
     : null;
@@ -1427,7 +1495,9 @@ const renderAnalogRows = () => {
     result.warehouse,
   ].some((value) => String(value ?? "").toLocaleLowerCase().includes(normalizedTerm)));
   const rows = [...filteredResults].sort((left, right) => compareResults(left, right, analogSortState));
-  const bestPrice = filteredResults.reduce((best, result) => !best || result.price < best.price ? result : best, null);
+  const bestPrice = filteredResults
+    .filter((result) => Number.isFinite(result.price) && result.price > 0)
+    .reduce((best, result) => !best || result.price < best.price ? result : best, null);
   analogsCount.textContent = normalizedTerm ? `${rows.length} из ${analogSearchResults.length}` : String(analogSearchResults.length);
   analogsCount.title = normalizedTerm ? "Показано с учетом поиска" : "Всего найдено";
   updateAnalogSortHeaders();
@@ -1605,6 +1675,8 @@ analogSortButtons.forEach((button) => {
 closeAnalogsModalButtons.forEach((button) => button.addEventListener("click", closeAnalogsModal));
 window.addEventListener("resize", () => hideResultContextMenu(true));
 window.addEventListener("scroll", () => hideResultContextMenu(true), true);
+window.addEventListener("resize", hideWarehouseTooltip);
+window.addEventListener("scroll", hideWarehouseTooltip, true);
 
 rosskoAuthForm.addEventListener("submit", async (event) => {
   event.preventDefault();
