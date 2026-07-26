@@ -85,6 +85,8 @@ test("main results use the same comparison-oriented table controls as analogs", 
 
   assert.match(html, /<h2>Предложения<\/h2>/);
   assert.match(html, /class="table table-hover align-middle mb-0 results-data-table"/);
+  assert.match(html, /class="results-panel__footer" aria-hidden="true"><\/footer>/);
+  assert.match(html, /class="analogs-modal__footer" aria-hidden="true"><\/footer>/);
   assert.doesNotMatch(html, /Нажмите на строку/);
   assert.match(html, /id="warehouse-tooltip"/);
   assert.match(app, /main-result-row\$\{isBestPrice \? " is-best-price" : ""\}/);
@@ -93,6 +95,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(app, /showWarehouseTooltip/);
   assert.match(styles, /\.results-data-table thead\s*\{[^}]*position: sticky;/s);
   assert.match(styles, /\.results-table\s*\{[^}]*overflow: auto;/s);
+  assert.match(styles, /height: max\(420px, calc\(100dvh - 300px\)\)/);
 });
 
 test("search shows authorization progress before waiting for session validation", async () => {
