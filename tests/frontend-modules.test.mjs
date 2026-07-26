@@ -55,6 +55,19 @@ test("frontend provides independent controls and a table for analogs", async () 
   assert.match(html, /class="table-sort analog-table-sort"/);
 });
 
+test("search shows authorization progress before waiting for session validation", async () => {
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
+  const submitHandler = app.slice(app.indexOf('form.addEventListener("submit"'));
+  const progressIndex = submitHandler.indexOf("showSupplierSessionCheckProgress(article);");
+  const validationIndex = submitHandler.indexOf("await checkSupplierSessions(article, enabledSuppliers);");
+
+  assert.notEqual(progressIndex, -1);
+  assert.notEqual(validationIndex, -1);
+  assert.ok(progressIndex < validationIndex);
+  assert.match(app, /searchLoadingTitle\.textContent = "Проверяем авторизацию поставщиков";/);
+  assert.match(app, /setSearchUiState\(false\);\s+return;\s+}\s+rememberSupplierSessionsChecked/);
+});
+
 test("search stream parses fragmented multiline SSE data", async () => {
   const originalFetch = globalThis.fetch;
   let requestHeaders;

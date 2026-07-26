@@ -1066,6 +1066,15 @@ const checkSupplierSessions = async (article, suppliers) => {
   }
 };
 
+const showSupplierSessionCheckProgress = (article) => {
+  globalStatus.textContent = "Проверяем авторизацию поставщиков";
+  searchLoadingTitle.textContent = "Проверяем авторизацию поставщиков";
+  searchLoadingDescription.textContent = "При необходимости выполняем повторную авторизацию перед поиском.";
+  searchLoadingNote.textContent = `Поиск по артикулу ${article} начнется автоматически.`;
+  searchLoadingCancel.hidden = true;
+  setSearchUiState(true);
+};
+
 const handleAuthorizeResult = (session, supplier, feedbackElement, rejectedMessage, updateSessionCard) => {
   updateSessionCard(session);
 
@@ -1630,9 +1639,11 @@ form.addEventListener("submit", async (event) => {
 
   if (shouldCheckSupplierSessions()) {
     supplierCheckInProgress = true;
+    showSupplierSessionCheckProgress(article);
     const canSearch = await checkSupplierSessions(article, enabledSuppliers);
     supplierCheckInProgress = false;
     if (!canSearch) {
+      setSearchUiState(false);
       return;
     }
     rememberSupplierSessionsChecked();

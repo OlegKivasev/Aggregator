@@ -391,7 +391,7 @@ Persisted supplier state is replaced atomically using restrictive directory and 
 
 Session validation uses a dedicated lightweight account/session check for every supplier. It does not execute a product search or emit and discard offers.
 
-Validation runs without a success/progress modal. If a supplier reports an expired session, the backend makes one bounded automatic authorization attempt with stored credentials. The UI interrupts the search only when recovery fails or validation is unavailable.
+Validation runs without a success/progress modal. When a search triggers validation, the search progress panel appears immediately and reports that authorization is being checked while the backend performs one bounded automatic authorization attempt with stored credentials if a supplier session has expired. The UI interrupts the search only when recovery fails or validation is unavailable.
 
 ## Empty Results
 
