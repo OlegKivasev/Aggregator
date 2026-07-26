@@ -58,6 +58,7 @@ test("delivery date sorting groups nearby, dated and interval deliveries", () =>
     { label: "approximate dated", deliveryDate: date(4), deliveryDateApproximate: true },
     { label: "approximate today", deliveryDate: date(0), deliveryDateApproximate: true },
     { label: "known dated", deliveryDate: date(5), deliveryDateApproximate: false },
+    { label: "approximate day after tomorrow", deliveryDate: date(2), deliveryDateApproximate: true },
     { label: "known day after tomorrow", deliveryDate: date(2), deliveryDateApproximate: false },
     { label: "approximate tomorrow", deliveryDate: date(1), deliveryDateApproximate: true },
     { label: "known tomorrow", deliveryDate: date(1), deliveryDateApproximate: false },
@@ -66,10 +67,11 @@ test("delivery date sorting groups nearby, dated and interval deliveries", () =>
 
   assert.deepEqual(results.sort(compareDeliveryDates).map((result) => result.label), [
     "known today",
-    "known tomorrow",
-    "known day after tomorrow",
     "approximate today",
+    "known tomorrow",
     "approximate tomorrow",
+    "known day after tomorrow",
+    "approximate day after tomorrow",
     "known dated",
     "approximate dated",
     "interval tomorrow",

@@ -77,15 +77,15 @@ const getCalendarDayOffset = (value) => {
 
 const getDeliverySortGroup = (result, from, to) => {
   if (to !== null) {
-    return 4;
+    return 8;
   }
 
   const dayOffset = getCalendarDayOffset(from);
   const isNearby = dayOffset >= 0 && dayOffset <= 2;
   if (isNearby) {
-    return result.deliveryDateApproximate === true ? 1 : 0;
+    return dayOffset * 2 + Number(result.deliveryDateApproximate === true);
   }
-  return result.deliveryDateApproximate === true ? 3 : 2;
+  return result.deliveryDateApproximate === true ? 7 : 6;
 };
 
 export const compareDeliveryDates = (left, right) => {
