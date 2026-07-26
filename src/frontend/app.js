@@ -91,10 +91,20 @@ const passwordFields = [...document.querySelectorAll(".password-field")];
 const resultContextMenu = document.querySelector("#result-context-menu");
 const showAnalogsButton = document.querySelector("#show-analogs-button");
 const analogsModal = document.querySelector("#analogs-modal");
-const analogsSourceRow = document.querySelector("#analogs-source-row");
+const analogsSourceBrand = document.querySelector("#analogs-source-brand");
+const analogsSourceArticle = document.querySelector("#analogs-source-article");
+const analogsSourceTitle = document.querySelector("#analogs-source-title");
+const analogsSourceSupplier = document.querySelector("#analogs-source-supplier");
+const analogsSourcePrice = document.querySelector("#analogs-source-price");
+const analogsSourceMarkupPrice = document.querySelector("#analogs-source-markup-price");
+const analogsSourceDelivery = document.querySelector("#analogs-source-delivery");
+const analogsSourceWarehouse = document.querySelector("#analogs-source-warehouse");
 const analogsSearchStatus = document.querySelector("#analogs-search-status");
-const analogsResults = document.querySelector("#analogs-results");
 const analogsResultsBody = document.querySelector("#analogs-results-body");
+const analogsCount = document.querySelector("#analogs-count");
+const analogsTableSearch = document.querySelector("#analogs-table-search");
+const analogsMarkupPercent = document.querySelector("#analogs-markup-percent");
+const analogSortButtons = [...document.querySelectorAll("[data-analog-sort-key]")];
 const closeAnalogsModalButtons = [...document.querySelectorAll("[data-close-analogs-modal]")];
 
 let searchTabs = [];
@@ -105,7 +115,15 @@ let sortState = { key: "price", direction: "ascending" };
 let markupPercent = 35;
 let tableSearchTerm = "";
 let contextMenuResult = null;
+let contextMenuAnchor = null;
 let analogSearchSource = null;
+let analogModalReturnFocus = null;
+let analogReturnResult = null;
+let analogReturnToAction = false;
+let analogSourceResult = null;
+let analogSearchResults = [];
+let analogSearchTerm = "";
+let analogSortState = { key: "price", direction: "ascending" };
 let supplierCheckInProgress = false;
 let searchProgressTimer = null;
 let activeFilterColumn = "";
@@ -749,7 +767,7 @@ const renderResults = () => {
         <td data-column="supplier">${escapeHtml(supplierName)}</td>
         <td data-column="brand">${escapeHtml(result.brand)}</td>
         <td data-column="article">${escapeHtml(result.article)}</td>
-        <td data-column="title">${escapeHtml(result.title)}</td>
+        <td data-column="title"><div class="result-title-cell"><span>${escapeHtml(result.title)}</span><button type="button" class="result-analogs-button" data-show-row-analogs="${results.indexOf(result)}" aria-label="Показать аналоги для ${escapeHtml(result.brand)} ${escapeHtml(result.article)}">Аналоги</button></div></td>
         <td data-column="warehouse">${renderWarehouse(result)}</td>
         <td data-column="price">${escapeHtml(formatPrice(result.price))}</td>
         <td data-column="markupPrice">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</td>
@@ -1123,11 +1141,30 @@ document.addEventListener("click", (event) => {
   }
 });
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Tab" && !analogsModal.hidden) {
+    const focusable = [...analogsModal.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex='0']")]
+      .filter((element) => element.offsetParent !== null);
+    if (!focusable.length) {
+      event.preventDefault();
+      analogsModal.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === analogsModal)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+    return;
+  }
   if (event.key !== "Escape") {
     return;
   }
   if (!resultContextMenu.hidden) {
-    hideResultContextMenu();
+    hideResultContextMenu(true);
   } else if (!analogsModal.hidden) {
     closeAnalogsModal();
   }
@@ -1267,6 +1304,16 @@ const registerResultRowEvents = (body) => {
     if (getActiveTab()?.source) {
       return;
     }
+    const analogButton = event.target.closest("[data-show-row-analogs]");
+    if (analogButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      const result = results[Number(analogButton.dataset.showRowAnalogs)];
+      if (result) {
+        startAnalogSearch(result, analogButton);
+      }
+      return;
+    }
     const row = event.target.closest(".results-table__row");
     if (row?.dataset.link) {
       window.open(row.dataset.link, "_blank", "noreferrer");
@@ -1274,7 +1321,7 @@ const registerResultRowEvents = (body) => {
   });
 
   body.addEventListener("keydown", (event) => {
-    if (getActiveTab()?.source || (event.key !== "Enter" && event.key !== " ")) {
+    if (event.target.closest("button") || getActiveTab()?.source || (event.key !== "Enter" && event.key !== " ")) {
       return;
     }
     const row = event.target.closest(".results-table__row");
@@ -1288,13 +1335,18 @@ const registerResultRowEvents = (body) => {
 registerResultRowEvents(resultsBody);
 registerResultRowEvents(analogsResultsBody);
 
-const hideResultContextMenu = () => {
+const hideResultContextMenu = (restoreFocus = false) => {
   resultContextMenu.hidden = true;
   contextMenuResult = null;
+  if (restoreFocus && contextMenuAnchor?.isConnected) {
+    contextMenuAnchor.focus();
+  }
+  contextMenuAnchor = null;
 };
 
-const showResultContextMenu = (result, clientX, clientY) => {
+const showResultContextMenu = (result, clientX, clientY, anchor) => {
   contextMenuResult = result;
+  contextMenuAnchor = anchor;
   resultContextMenu.hidden = false;
   const bounds = resultContextMenu.getBoundingClientRect();
   resultContextMenu.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - bounds.width - 8))}px`;
@@ -1302,7 +1354,7 @@ const showResultContextMenu = (result, clientX, clientY) => {
   showAnalogsButton.focus();
 };
 
-const setAnalogSearchStatus = (title, description, loading = false) => {
+const setAnalogSearchStatus = (title, description, state = "searching") => {
   const content = document.createElement("div");
   const heading = document.createElement("strong");
   const details = document.createElement("span");
@@ -1310,13 +1362,14 @@ const setAnalogSearchStatus = (title, description, loading = false) => {
   details.textContent = description;
   content.append(heading, details);
   const children = [content];
-  if (loading) {
+  if (state === "searching") {
     const spinner = document.createElement("span");
-    spinner.className = "search-loading__spinner";
+    spinner.className = "analogs-search-status__spinner";
     spinner.setAttribute("aria-hidden", "true");
     children.unshift(spinner);
   }
   analogsSearchStatus.replaceChildren(...children);
+  analogsSearchStatus.dataset.state = state;
   analogsSearchStatus.hidden = false;
 };
 
@@ -1324,56 +1377,108 @@ const closeAnalogsModal = () => {
   analogSearchSource?.close();
   analogSearchSource = null;
   analogsModal.hidden = true;
+  if (analogModalReturnFocus?.isConnected) {
+    analogModalReturnFocus.focus();
+  } else if (analogReturnResult) {
+    const resultIndex = results.indexOf(analogReturnResult);
+    const selector = analogReturnToAction
+      ? `[data-show-row-analogs="${resultIndex}"]`
+      : `[data-result-index="${resultIndex}"]`;
+    resultsBody.querySelector(selector)?.focus();
+  }
+  analogModalReturnFocus = null;
+  analogReturnResult = null;
+  analogReturnToAction = false;
 };
 
 const renderAnalogSource = (result) => {
-  const values = [
+  analogsSourceBrand.textContent = result.brand;
+  analogsSourceArticle.textContent = result.article;
+  analogsSourceTitle.textContent = result.title;
+  analogsSourceTitle.title = result.title;
+  analogsSourceSupplier.textContent = supplierNames[result.supplier] ?? result.supplier;
+  analogsSourcePrice.textContent = formatPrice(result.price);
+  analogsSourceMarkupPrice.textContent = formatPrice(getMarkupPrice(result));
+  analogsSourceDelivery.textContent = result.supplier === "mladov" && !result.deliveryDate
+    ? "-"
+    : formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo);
+  analogsSourceWarehouse.textContent = formatWarehouse(result.warehouse);
+  analogsSourceWarehouse.title = formatWarehouse(result.warehouse);
+};
+
+const updateAnalogSortHeaders = () => {
+  analogSortButtons.forEach((button) => {
+    const isActive = button.dataset.analogSortKey === analogSortState.key;
+    button.classList.toggle("is-active", isActive);
+    button.closest("th").setAttribute("aria-sort", isActive ? analogSortState.direction : "none");
+  });
+};
+
+const renderAnalogRows = () => {
+  const focusedResultIndex = analogsResultsBody.contains(document.activeElement)
+    ? document.activeElement.closest("[data-analog-result-index]")?.dataset.analogResultIndex
+    : null;
+  const normalizedTerm = analogSearchTerm.trim().toLocaleLowerCase();
+  const filteredResults = analogSearchResults.filter((result) => !normalizedTerm || [
+    supplierNames[result.supplier] ?? result.supplier,
     result.brand,
     result.article,
     result.title,
-    formatPrice(getMarkupPrice(result)),
-    result.supplier === "mladov" && !result.deliveryDate
-      ? "-"
-      : formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo),
-    formatWarehouse(result.warehouse),
-  ];
-  analogsSourceRow.replaceChildren(...values.map((value) => {
-    const cell = document.createElement("td");
-    cell.textContent = value;
-    return cell;
-  }));
-};
+    result.warehouse,
+  ].some((value) => String(value ?? "").toLocaleLowerCase().includes(normalizedTerm)));
+  const rows = [...filteredResults].sort((left, right) => compareResults(left, right, analogSortState));
+  const bestPrice = filteredResults.reduce((best, result) => !best || result.price < best.price ? result : best, null);
+  analogsCount.textContent = normalizedTerm ? `${rows.length} из ${analogSearchResults.length}` : String(analogSearchResults.length);
+  analogsCount.title = normalizedTerm ? "Показано с учетом поиска" : "Всего найдено";
+  updateAnalogSortHeaders();
 
-const renderAnalogRows = (analogResults) => {
-  const rows = [...analogResults].sort((left, right) => compareResults(left, right));
+  if (!rows.length) {
+    const message = normalizedTerm && analogSearchResults.length
+      ? "По вашему запросу ничего не найдено"
+      : analogSearchSource
+        ? "Предложения появятся здесь по мере получения"
+        : "Аналоги для выбранной позиции не найдены";
+    analogsResultsBody.innerHTML = `<tr class="analogs-results__empty"><td colspan="8">${message}</td></tr>`;
+    return;
+  }
+
   analogsResultsBody.innerHTML = rows.map((result) => {
     const link = getSafeResultLink(result.link);
     const deliveryDate = formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo);
+    const isBestPrice = result === bestPrice;
     return `
-      <tr class="results-table__row" data-link="${escapeHtml(link)}" tabindex="0" aria-label="Открыть ${escapeHtml(result.title)}">
+      <tr class="results-table__row analogs-result-row${isBestPrice ? " is-best-price" : ""}" data-analog-result-index="${analogSearchResults.indexOf(result)}" data-link="${escapeHtml(link)}" tabindex="0" aria-label="Открыть ${escapeHtml(result.title)}">
         <td>${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}</td>
         <td>${escapeHtml(result.brand)}</td>
         <td>${escapeHtml(result.article)}</td>
-        <td>${escapeHtml(result.title)}</td>
+        <td class="analogs-result-title" title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</td>
         <td>${renderWarehouse(result)}</td>
-        <td>${escapeHtml(formatPrice(result.price))}</td>
+        <td><span class="analogs-result-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
         <td>${escapeHtml(formatPrice(getMarkupPrice(result)))}</td>
         <td>${escapeHtml(deliveryDate)}</td>
       </tr>`;
   }).join("");
-  analogsResults.hidden = false;
+  if (focusedResultIndex !== null) {
+    analogsResultsBody.querySelector(`[data-analog-result-index="${focusedResultIndex}"]`)?.focus();
+  }
 };
 
-const startAnalogSearch = (result) => {
+const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   analogSearchSource?.close();
+  analogModalReturnFocus = returnFocus;
+  analogReturnResult = result;
+  analogReturnToAction = Boolean(returnFocus?.matches?.("[data-show-row-analogs]"));
+  analogSourceResult = result;
+  analogSearchResults = [];
+  analogSearchTerm = "";
+  analogSortState = { key: "price", direction: "ascending" };
+  analogsTableSearch.value = "";
+  analogsMarkupPercent.value = String(markupPercent);
   renderAnalogSource(result);
-  analogsResultsBody.replaceChildren();
-  analogsResults.hidden = true;
   analogsModal.hidden = false;
   analogsModal.focus();
-  setAnalogSearchStatus("Ищем аналоги", "Отправляем выбранные бренд и артикул в Armtek.", true);
+  setAnalogSearchStatus("Ищем подходящие предложения", "Результаты будут добавляться в таблицу сразу после ответа Armtek.");
 
-  const analogResults = [];
   let failureMessage = "";
   const searchParams = new URLSearchParams({
     stream: "once",
@@ -1384,6 +1489,7 @@ const startAnalogSearch = (result) => {
   });
   const source = openSearchStream(`/api/search?${searchParams.toString()}`);
   analogSearchSource = source;
+  renderAnalogRows();
 
   source.onmessage = (messageEvent) => {
     if (analogSearchSource !== source) {
@@ -1391,31 +1497,37 @@ const startAnalogSearch = (result) => {
     }
     const payload = JSON.parse(messageEvent.data);
     if (payload.type === "result") {
-      analogResults.push(payload.result);
-      renderAnalogRows(analogResults);
-      setAnalogSearchStatus(`Найдено аналогов: ${analogResults.length}`, "Поиск Armtek продолжается.", true);
+      analogSearchResults.push(payload.result);
+      renderAnalogRows();
+      setAnalogSearchStatus("Поиск продолжается", `Уже получено предложений: ${analogSearchResults.length}.`);
       return;
     }
     if (payload.type === "supplier_status" && ["timeout", "auth_error", "error"].includes(payload.status)) {
-      failureMessage = payload.details || "Не удалось получить аналоги";
+      failureMessage = payload.status === "auth_error"
+        ? "Подключите Armtek в настройках и повторите поиск."
+        : payload.status === "timeout"
+          ? "Armtek не ответил вовремя. Повторите поиск позже."
+          : "Armtek не удалось выполнить поиск аналогов.";
       return;
     }
     if (payload.type === "search_completed") {
       source.close();
       analogSearchSource = null;
+      renderAnalogRows();
       if (failureMessage) {
-        setAnalogSearchStatus("Поиск завершен с ошибкой", failureMessage);
-      } else if (analogResults.length) {
+        setAnalogSearchStatus("Поиск завершен не полностью", failureMessage, "warning");
+      } else if (analogSearchResults.length) {
         analogsSearchStatus.hidden = true;
       } else {
-        setAnalogSearchStatus("Аналоги не найдены", "Armtek не вернул аналогов для выбранной позиции.");
+        setAnalogSearchStatus("Аналоги не найдены", "Попробуйте выбрать предложение другого бренда или артикула.", "empty");
       }
       return;
     }
     if (payload.type === "fatal_error") {
       source.close();
       analogSearchSource = null;
-      setAnalogSearchStatus("Не удалось выполнить поиск", payload.message);
+      renderAnalogRows();
+      setAnalogSearchStatus("Не удалось выполнить поиск", payload.message, "error");
     }
   };
   source.onerror = () => {
@@ -1424,7 +1536,8 @@ const startAnalogSearch = (result) => {
     }
     source.close();
     analogSearchSource = null;
-    setAnalogSearchStatus("Соединение прервано", "Не удалось получить полный результат поиска аналогов.");
+    renderAnalogRows();
+    setAnalogSearchStatus("Соединение прервано", "Не удалось получить полный результат поиска аналогов.", "error");
   };
 };
 
@@ -1438,7 +1551,7 @@ resultsBody.addEventListener("contextmenu", (event) => {
     return;
   }
   event.preventDefault();
-  showResultContextMenu(result, event.clientX, event.clientY);
+  showResultContextMenu(result, event.clientX, event.clientY, row);
 });
 
 resultsBody.addEventListener("keydown", (event) => {
@@ -1452,20 +1565,46 @@ resultsBody.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
   const bounds = row.getBoundingClientRect();
-  showResultContextMenu(result, bounds.left + 16, bounds.top + 16);
+  showResultContextMenu(result, bounds.left + 16, bounds.top + 16, row);
 });
 
 showAnalogsButton.addEventListener("click", () => {
   const result = contextMenuResult;
+  const anchor = contextMenuAnchor;
   hideResultContextMenu();
   if (result) {
-    startAnalogSearch(result);
+    startAnalogSearch(result, anchor);
   }
 });
 
+analogsTableSearch.addEventListener("input", () => {
+  analogSearchTerm = analogsTableSearch.value;
+  renderAnalogRows();
+});
+
+analogsMarkupPercent.addEventListener("change", () => {
+  setMarkupPercent(analogsMarkupPercent.value);
+  analogsMarkupPercent.value = String(markupPercent);
+  if (analogSourceResult) {
+    renderAnalogSource(analogSourceResult);
+  }
+  renderAnalogRows();
+});
+
+analogSortButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const key = button.dataset.analogSortKey;
+    analogSortState = {
+      key,
+      direction: analogSortState.key === key && analogSortState.direction === "ascending" ? "descending" : "ascending",
+    };
+    renderAnalogRows();
+  });
+});
+
 closeAnalogsModalButtons.forEach((button) => button.addEventListener("click", closeAnalogsModal));
-window.addEventListener("resize", hideResultContextMenu);
-window.addEventListener("scroll", hideResultContextMenu, true);
+window.addEventListener("resize", () => hideResultContextMenu(true));
+window.addEventListener("scroll", () => hideResultContextMenu(true), true);
 
 rosskoAuthForm.addEventListener("submit", async (event) => {
   event.preventDefault();
