@@ -169,6 +169,8 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(styles, /\.results-data-table thead\s*\{[^}]*position: sticky;/s);
   assert.match(styles, /\.results-table\s*\{[^}]*overflow: auto;/s);
   assert.match(styles, /height: max\(420px, calc\(100dvh - 300px\)\)/);
+  assert.match(styles, /width: min\(1600px, calc\(100vw - 24px\)\)/);
+  assert.match(styles, /height: min\(960px, calc\(100dvh - 24px\)\)/);
 });
 
 test("search shows authorization progress before waiting for session validation", async () => {
