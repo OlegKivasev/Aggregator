@@ -3,6 +3,24 @@ const formatDuration = (durationMs) => `${(durationMs / 1000).toLocaleString("ru
   maximumFractionDigits: 1,
 })} с`;
 
+const formatCalendarDate = (date, today) => {
+  const deliveryDay = new Date(date);
+  deliveryDay.setHours(0, 0, 0, 0);
+
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (deliveryDay.getTime() === tomorrow.getTime()) {
+    return "Завтра";
+  }
+
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (deliveryDay.getTime() === tomorrow.getTime()) {
+    return "Послезавтра";
+  }
+
+  return date.toLocaleDateString("ru-RU");
+};
+
 export const formatDeliveryDate = (value, approximate = false, valueTo = null) => {
   if (!value) {
     return "Не указана";
@@ -13,10 +31,13 @@ export const formatDeliveryDate = (value, approximate = false, valueTo = null) =
     return `${approximate ? "~" : ""}${value}`;
   }
 
-  const formattedFrom = parsed.toLocaleDateString("ru-RU");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const formattedFrom = formatCalendarDate(parsed, today);
   const parsedTo = valueTo ? new Date(valueTo) : null;
-  const formattedTo = parsedTo && !Number.isNaN(parsedTo.getTime()) && parsedTo.toLocaleDateString("ru-RU") !== formattedFrom
-    ? ` - ${parsedTo.toLocaleDateString("ru-RU")}`
+  const formattedToDate = parsedTo && !Number.isNaN(parsedTo.getTime()) ? formatCalendarDate(parsedTo, today) : "";
+  const formattedTo = formattedToDate && formattedToDate !== formattedFrom
+    ? ` - ${formattedToDate}`
     : "";
 
   return `${approximate && !formattedTo ? "~" : ""}${formattedFrom}${formattedTo}`;
