@@ -255,11 +255,14 @@ test("delivery formatter omits an approximate marker for date ranges", () => {
   assert.equal(formatDeliveryDate("2000-07-26T00:00:00.000Z", true, "2000-07-27T00:00:00.000Z"), "26.07.2000 - 27.07.2000");
 });
 
-test("delivery formatter names tomorrow and the day after tomorrow", () => {
+test("delivery formatter names today, tomorrow and the day after tomorrow", () => {
   const today = new Date();
+  const todayAtNoon = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12);
   const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, 12);
   const dayAfterTomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2, 12);
 
+  assert.equal(formatDeliveryDate(todayAtNoon.toISOString()), "Сегодня");
+  assert.equal(formatDeliveryDate(todayAtNoon.toISOString(), true), "~Сегодня");
   assert.equal(formatDeliveryDate(tomorrow.toISOString()), "Завтра");
   assert.equal(formatDeliveryDate(dayAfterTomorrow.toISOString()), "Послезавтра");
   assert.equal(

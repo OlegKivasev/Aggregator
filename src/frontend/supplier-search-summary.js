@@ -7,6 +7,10 @@ const formatCalendarDate = (date, today) => {
   const deliveryDay = new Date(date);
   deliveryDay.setHours(0, 0, 0, 0);
 
+  if (deliveryDay.getTime() === today.getTime()) {
+    return "Сегодня";
+  }
+
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
   if (deliveryDay.getTime() === tomorrow.getTime()) {
