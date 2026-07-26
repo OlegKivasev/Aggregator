@@ -550,10 +550,6 @@ input {
   overflow: visible !important;
 }
 
-.analog-results-panel {
-  margin-top: 18px;
-}
-
 .results-panel.is-searching {
   overflow: visible !important;
   background: transparent;
@@ -567,7 +563,7 @@ input {
 .search-loading[hidden],
 .results-empty[hidden],
 .results-table[hidden],
-.analog-results-panel[hidden],
+.results-view-toggle[hidden],
 #result-count[hidden] {
   display: none;
 }
@@ -754,6 +750,48 @@ input {
 .results-panel__heading strong {
   color: var(--ink);
   font-size: 14px;
+}
+
+.results-view-toggle {
+  display: inline-flex;
+  align-self: flex-start;
+  margin-top: 5px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f4f6f8;
+}
+
+.results-view-toggle button {
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.results-view-toggle button:hover,
+.results-view-toggle button:focus-visible {
+  color: var(--ink);
+}
+
+.results-view-toggle button:focus-visible {
+  outline: 2px solid rgba(255, 75, 19, 0.35);
+  outline-offset: 1px;
+}
+
+.results-view-toggle button.is-active {
+  color: #fff;
+  background: var(--accent);
+  box-shadow: 0 1px 3px rgba(23, 32, 42, 0.15);
+}
+
+.results-view-toggle button span {
+  margin-left: 3px;
+  opacity: 0.75;
 }
 
 .results-panel__controls {

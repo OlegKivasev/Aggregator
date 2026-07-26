@@ -184,7 +184,7 @@ frontend / HTTP transport
 ### Frontend contract
 
 - Frontend остается vanilla JavaScript с native ESM и без bundler/framework.
-- Основные предложения и аналоги отображаются в отдельных таблицах. У каждой таблицы собственные поиск, наценка и сортировка; общие фильтры и выбранная видимость столбцов применяются к обеим.
+- Основные предложения и аналоги переключаются в одной таблице. У каждого режима сохраняются собственные поиск, наценка и сортировка; общие фильтры и выбранная видимость столбцов применяются к обоим.
 - `index.html` загружает `/app.js` через `type="module"`; новые модули импортируются относительными путями и должны обслуживаться static server.
 - `app.js` отвечает за DOM state и wiring. Изолированные transport/formatting функции размещаются в `search-stream.js`, `result-formatting.js` и `supplier-search-summary.js`, если не требуют общего mutable UI state.
 - Backend, supplier и `localStorage` data недоверенны. Предпочитайте `textContent`; при `innerHTML` экранируйте каждое значение и отдельно проверяйте URL.

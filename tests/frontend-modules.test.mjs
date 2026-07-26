@@ -45,14 +45,18 @@ test("result formatting separates analogs from exact results", () => {
   assert.deepEqual(result.analogs.map((item) => item.article), ["A"]);
 });
 
-test("frontend provides independent controls and a table for analogs", async () => {
+test("frontend switches exact results and analogs in one table", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
 
-  assert.match(html, /id="analog-results-panel"/);
-  assert.match(html, /id="analog-table-search"/);
-  assert.match(html, /id="analog-markup-percent"/);
-  assert.match(html, /id="analog-results-body"/);
-  assert.match(html, /class="table-sort analog-table-sort"/);
+  assert.match(html, /id="results-view-toggle"/);
+  assert.match(html, /data-results-view="exact"/);
+  assert.match(html, /data-results-view="analogs"/);
+  assert.equal((html.match(/id="results-body"/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /id="analog-results-panel"/);
+  assert.doesNotMatch(html, /id="analog-results-body"/);
+  assert.match(app, /const visibleResults = showingAnalogs \? analogs : exact;/);
+  assert.match(app, /tableSearchInput\.placeholder = showingAnalogs \? "Поиск по аналогам" : "Поиск по совпадениям";/);
 });
 
 test("search shows authorization progress before waiting for session validation", async () => {

@@ -10,10 +10,10 @@ const resultsBody = document.querySelector("#results-body");
 const resultCount = document.querySelector("#result-count");
 const resultsPanel = document.querySelector("#results-panel");
 const resultsTable = document.querySelector("#results-table");
-const analogResultsPanel = document.querySelector("#analog-results-panel");
-const analogResultsTable = document.querySelector("#analog-results-table");
-const analogResultsBody = document.querySelector("#analog-results-body");
-const analogResultCount = document.querySelector("#analog-result-count");
+const resultsViewToggle = document.querySelector("#results-view-toggle");
+const resultsViewButtons = [...resultsViewToggle.querySelectorAll("[data-results-view]")];
+const exactResultTotal = document.querySelector("#exact-result-total");
+const analogResultTotal = document.querySelector("#analog-result-total");
 const resultsEmpty = document.querySelector("#results-empty");
 const searchLoading = document.querySelector("#search-loading");
 const searchLoadingTitle = document.querySelector("#search-loading-title");
@@ -23,10 +23,7 @@ const searchLoadingCancel = document.querySelector("#search-loading-cancel");
 const cancelSearchButton = document.querySelector("#cancel-search-button");
 const markupPercentInput = document.querySelector("#markup-percent");
 const tableSearchInput = document.querySelector("#table-search");
-const analogMarkupPercentInput = document.querySelector("#analog-markup-percent");
-const analogTableSearchInput = document.querySelector("#analog-table-search");
 const sortButtons = [...resultsTable.querySelectorAll(".table-sort")];
-const analogSortButtons = [...analogResultsTable.querySelectorAll(".table-sort")];
 const tableColumnInputs = [...document.querySelectorAll(".table-column-input")];
 const tableColumnsReset = document.querySelector("#table-columns-reset");
 const searchTabsList = document.querySelector("#search-tabs-list");
@@ -106,6 +103,7 @@ let markupPercent = 35;
 let analogMarkupPercent = 35;
 let tableSearchTerm = "";
 let analogTableSearchTerm = "";
+let activeResultsView = "exact";
 let supplierCheckInProgress = false;
 let searchProgressTimer = null;
 let activeFilterColumn = "";
@@ -338,6 +336,7 @@ const createSearchTab = (data = {}) => ({
       : Boolean(data.results?.length) || Boolean(data.status && data.status !== "Ожидание поиска"),
   markupPercent: normalizeMarkupPercent(data.markupPercent),
   analogMarkupPercent: normalizeMarkupPercent(data.analogMarkupPercent ?? data.markupPercent),
+  resultsView: "exact",
   supplierStatuses: {},
   supplierSearchStartedAt: {},
   supplierSearchDurations: {},
@@ -433,9 +432,7 @@ const setSearchUiState = (isSearching) => {
   resultsEmpty.hidden = isSearching || hasSearched;
   resultsTable.hidden = isSearching || !hasSearched;
   resultCount.hidden = isSearching || !hasSearched;
-  if (isSearching || !hasSearched) {
-    analogResultsPanel.hidden = true;
-  }
+  resultsViewToggle.hidden = isSearching || !hasSearched;
 };
 
 const syncActiveTab = () => {
@@ -451,6 +448,7 @@ const syncActiveTab = () => {
   tab.results = results;
   tab.markupPercent = markupPercent;
   tab.analogMarkupPercent = analogMarkupPercent;
+  tab.resultsView = activeResultsView;
 };
 
 const sessionPillStatus = (authorized) => (authorized ? "completed" : "idle");
@@ -685,9 +683,9 @@ const activateTab = (tabId) => {
   results = tab.results;
   markupPercent = tab.markupPercent;
   analogMarkupPercent = tab.analogMarkupPercent;
+  activeResultsView = tab.resultsView;
   articleInput.value = tab.article;
-  markupPercentInput.value = String(markupPercent);
-  analogMarkupPercentInput.value = String(analogMarkupPercent);
+  syncResultsViewControls();
   globalStatus.textContent = tab.status;
   supplierEnabledInputs.forEach((input) => {
     input.checked = tab.enabledSuppliers.includes(input.value);
@@ -737,9 +735,6 @@ const closeTab = (tabId) => {
 };
 
 const renderResults = () => {
-  updateSortHeaders(sortButtons, sortState);
-  updateSortHeaders(analogSortButtons, analogSortState);
-
   if (activeFilterColumn && !visibleTableColumns.has(activeFilterColumn)) {
     activeFilterColumn = "";
   }
@@ -749,12 +744,16 @@ const renderResults = () => {
   });
 
   const { exact, analogs } = splitAnalogResults(results);
-  const filteredExact = getFilteredResults(exact, tableSearchTerm, markupPercent);
-  const filteredAnalogs = getFilteredResults(analogs, analogTableSearchTerm, analogMarkupPercent);
-  const sortedExact = [...filteredExact].sort((left, right) => compareResults(left, right, sortState, markupPercent));
-  const sortedAnalogs = [...filteredAnalogs].sort((left, right) =>
-    compareResults(left, right, analogSortState, analogMarkupPercent));
+  const showingAnalogs = activeResultsView === "analogs";
+  const visibleResults = showingAnalogs ? analogs : exact;
+  const searchTerm = showingAnalogs ? analogTableSearchTerm : tableSearchTerm;
+  const percent = showingAnalogs ? analogMarkupPercent : markupPercent;
+  const currentSortState = showingAnalogs ? analogSortState : sortState;
+  const filteredResults = getFilteredResults(visibleResults, searchTerm, percent);
+  const sortedResults = [...filteredResults].sort((left, right) =>
+    compareResults(left, right, currentSortState, percent));
   const isSearching = Boolean(getActiveTab()?.source);
+  updateSortHeaders(sortButtons, currentSortState);
   const renderResult = (result, percent) => {
     const supplierName = supplierNames[result.supplier] ?? result.supplier;
     const link = getSafeResultLink(result.link);
@@ -779,17 +778,43 @@ const renderResults = () => {
     <tr class="results-table__empty"><td colspan="${Math.max(getVisibleTableColumns().length, 1)}">${message}</td></tr>
   `;
 
-  resultsBody.innerHTML = sortedExact.length
-    ? sortedExact.map((result) => renderResult(result, markupPercent)).join("")
-    : renderEmptyRow(exact.length ? "Нет позиций с выбранными условиями." : "По вашему запросу ничего не найдено.");
-  analogResultsBody.innerHTML = sortedAnalogs.length
-    ? sortedAnalogs.map((result) => renderResult(result, analogMarkupPercent)).join("")
-    : renderEmptyRow("Нет аналогов с выбранными условиями.");
-  analogResultsPanel.hidden = isSearching || analogs.length === 0;
+  const emptyMessage = showingAnalogs
+    ? (analogs.length ? "Нет аналогов с выбранными условиями." : "Аналоги не найдены.")
+    : (exact.length ? "Нет позиций с выбранными условиями." : "По вашему запросу ничего не найдено.");
+  resultsBody.innerHTML = sortedResults.length
+    ? sortedResults.map((result) => renderResult(result, percent)).join("")
+    : renderEmptyRow(emptyMessage);
+  exactResultTotal.textContent = String(exact.length);
+  analogResultTotal.textContent = String(analogs.length);
+  resultsViewButtons.forEach((button) => {
+    const isActive = button.dataset.resultsView === activeResultsView;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+  resultsViewToggle.hidden = isSearching || !getActiveTab()?.hasSearched;
   applyTableColumns();
-  updateResultCount(sortedExact);
-  analogResultCount.textContent = `${sortedAnalogs.length} позиций`;
+  updateResultCount(sortedResults);
   renderFilterValues();
+};
+
+const syncResultsViewControls = () => {
+  const showingAnalogs = activeResultsView === "analogs";
+  markupPercentInput.value = String(showingAnalogs ? analogMarkupPercent : markupPercent);
+  tableSearchInput.value = showingAnalogs ? analogTableSearchTerm : tableSearchTerm;
+  tableSearchInput.placeholder = showingAnalogs ? "Поиск по аналогам" : "Поиск по совпадениям";
+};
+
+const setResultsView = (view) => {
+  if (view !== "exact" && view !== "analogs") {
+    return;
+  }
+  activeResultsView = view;
+  const tab = getActiveTab();
+  if (tab) {
+    tab.resultsView = view;
+  }
+  syncResultsViewControls();
+  renderResults();
 };
 
 const setMarkupPercent = (value) => {
@@ -805,7 +830,7 @@ const setMarkupPercent = (value) => {
 
 const setAnalogMarkupPercent = (value) => {
   analogMarkupPercent = normalizeMarkupPercent(value);
-  analogMarkupPercentInput.value = String(analogMarkupPercent);
+  markupPercentInput.value = String(analogMarkupPercent);
   const tab = getActiveTab();
   if (tab) {
     tab.analogMarkupPercent = analogMarkupPercent;
@@ -1274,23 +1299,26 @@ tableColumnsReset.addEventListener("click", () => {
 sortButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const key = button.dataset.sortKey;
-    sortState = {
-      key,
-      direction: sortState.key === key && sortState.direction === "ascending" ? "descending" : "ascending",
-    };
+    if (activeResultsView === "analogs") {
+      analogSortState = {
+        key,
+        direction: analogSortState.key === key && analogSortState.direction === "ascending" ? "descending" : "ascending",
+      };
+    } else {
+      sortState = {
+        key,
+        direction: sortState.key === key && sortState.direction === "ascending" ? "descending" : "ascending",
+      };
+    }
     renderResults();
   });
 });
 
-analogSortButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    const key = button.dataset.sortKey;
-    analogSortState = {
-      key,
-      direction: analogSortState.key === key && analogSortState.direction === "ascending" ? "descending" : "ascending",
-    };
-    renderResults();
-  });
+resultsViewToggle.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-results-view]");
+  if (button) {
+    setResultsView(button.dataset.resultsView);
+  }
 });
 
 const registerResultRowEvents = (body) => {
@@ -1317,7 +1345,6 @@ const registerResultRowEvents = (body) => {
 };
 
 registerResultRowEvents(resultsBody);
-registerResultRowEvents(analogResultsBody);
 
 rosskoAuthForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1487,11 +1514,14 @@ supplierCheckOk.addEventListener("click", () => {
 
 const startSearch = (article, enabledSuppliers) => {
   closeActiveSource();
+  activeResultsView = "exact";
   resetSearchState();
 
   const tab = getActiveTab();
   tab.article = article;
   tab.enabledSuppliers = enabledSuppliers;
+  tab.resultsView = "exact";
+  syncResultsViewControls();
   tab.hasSearched = true;
   tab.status = `Ищем по артикулу ${article}`;
   tab.supplierStatuses = {};
@@ -1667,23 +1697,28 @@ if (restoredTab) {
   results = restoredTab.results;
   markupPercent = restoredTab.markupPercent;
   analogMarkupPercent = restoredTab.analogMarkupPercent;
+  activeResultsView = restoredTab.resultsView;
   articleInput.value = restoredTab.article;
-  markupPercentInput.value = String(markupPercent);
-  analogMarkupPercentInput.value = String(analogMarkupPercent);
+  syncResultsViewControls();
   globalStatus.textContent = restoredTab.status;
   supplierEnabledInputs.forEach((input) => {
     input.checked = restoredTab.enabledSuppliers.includes(input.value);
   });
 }
-markupPercentInput.addEventListener("change", () => setMarkupPercent(markupPercentInput.value));
-analogMarkupPercentInput.addEventListener("change", () => setAnalogMarkupPercent(analogMarkupPercentInput.value));
+markupPercentInput.addEventListener("change", () => {
+  if (activeResultsView === "analogs") {
+    setAnalogMarkupPercent(markupPercentInput.value);
+  } else {
+    setMarkupPercent(markupPercentInput.value);
+  }
+});
 
 tableSearchInput.addEventListener("input", () => {
-  tableSearchTerm = tableSearchInput.value;
-  renderResults();
-});
-analogTableSearchInput.addEventListener("input", () => {
-  analogTableSearchTerm = analogTableSearchInput.value;
+  if (activeResultsView === "analogs") {
+    analogTableSearchTerm = tableSearchInput.value;
+  } else {
+    tableSearchTerm = tableSearchInput.value;
+  }
   renderResults();
 });
 setSearchUiState(false);
