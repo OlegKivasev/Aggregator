@@ -78,6 +78,21 @@ test("delivery date sorting groups nearby, dated and interval deliveries", () =>
   ]);
 });
 
+test("delivery date sorting treats same-day end as a single date", () => {
+  const today = new Date();
+  const dayAfterTomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2, 12).toISOString();
+  const later = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 3, 12).toISOString();
+  const results = [
+    { label: "later date", deliveryDate: later, deliveryDateApproximate: false },
+    { label: "same-day poslezavtra", deliveryDate: dayAfterTomorrow, deliveryDateTo: dayAfterTomorrow, deliveryDateApproximate: false },
+  ];
+
+  assert.deepEqual(results.sort(compareDeliveryDates).map((result) => result.label), [
+    "same-day poslezavtra",
+    "later date",
+  ]);
+});
+
 test("frontend opens on-demand analog search for a selected result", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");

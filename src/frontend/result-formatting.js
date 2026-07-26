@@ -75,6 +75,16 @@ const getCalendarDayOffset = (value) => {
   return (dateDay - todayDay) / 86_400_000;
 };
 
+const isSameCalendarDay = (leftValue, rightValue) => {
+  const left = new Date(leftValue);
+  const right = new Date(rightValue);
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate();
+};
+
+const getEffectiveDeliveryTo = (from, to) => (to !== null && !isSameCalendarDay(from, to) ? to : null);
+
 const getDeliverySortGroup = (result, from, to) => {
   if (to !== null) {
     return 8;
@@ -98,13 +108,15 @@ export const compareDeliveryDates = (left, right) => {
 
   const leftTo = getDeliveryTimestamp(left.deliveryDateTo);
   const rightTo = getDeliveryTimestamp(right.deliveryDateTo);
-  const groupComparison = getDeliverySortGroup(left, leftFrom, leftTo)
-    - getDeliverySortGroup(right, rightFrom, rightTo);
+  const effectiveLeftTo = getEffectiveDeliveryTo(leftFrom, leftTo);
+  const effectiveRightTo = getEffectiveDeliveryTo(rightFrom, rightTo);
+  const groupComparison = getDeliverySortGroup(left, leftFrom, effectiveLeftTo)
+    - getDeliverySortGroup(right, rightFrom, effectiveRightTo);
   if (groupComparison !== 0) {
     return groupComparison;
   }
 
   return leftFrom - rightFrom
     || Number(left.deliveryDateApproximate === true) - Number(right.deliveryDateApproximate === true)
-    || (leftTo ?? leftFrom) - (rightTo ?? rightFrom);
+    || (effectiveLeftTo ?? leftFrom) - (effectiveRightTo ?? rightFrom);
 };
