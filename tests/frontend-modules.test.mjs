@@ -50,6 +50,26 @@ test("delivery date sorting places single dates before intervals", () => {
   ]);
 });
 
+test("delivery date sorting places known dates before approximate dates", () => {
+  const today = new Date();
+  const date = (offset) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset, 12).toISOString();
+  const results = [
+    { label: "approximate today", deliveryDate: date(0), deliveryDateApproximate: true },
+    { label: "known day after tomorrow", deliveryDate: date(2), deliveryDateApproximate: false },
+    { label: "approximate tomorrow", deliveryDate: date(1), deliveryDateApproximate: true },
+    { label: "known tomorrow", deliveryDate: date(1), deliveryDateApproximate: false },
+    { label: "known today", deliveryDate: date(0), deliveryDateApproximate: false },
+  ];
+
+  assert.deepEqual(results.sort(compareDeliveryDates).map((result) => result.label), [
+    "known today",
+    "known tomorrow",
+    "known day after tomorrow",
+    "approximate today",
+    "approximate tomorrow",
+  ]);
+});
+
 test("frontend opens on-demand analog search for a selected result", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");

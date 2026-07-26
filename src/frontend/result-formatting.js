@@ -75,6 +75,12 @@ export const compareDeliveryDates = (left, right) => {
     return leftFrom === rightFrom ? 0 : leftFrom === null ? 1 : -1;
   }
 
+  const approximationComparison = Number(left.deliveryDateApproximate === true)
+    - Number(right.deliveryDateApproximate === true);
+  if (approximationComparison !== 0) {
+    return approximationComparison;
+  }
+
   const leftTo = getDeliveryTimestamp(left.deliveryDateTo);
   const rightTo = getDeliveryTimestamp(right.deliveryDateTo);
   const intervalComparison = Number(leftTo !== null) - Number(rightTo !== null);
