@@ -111,13 +111,13 @@ export const compareDeliveryDates = (left, right) => {
     return groupComparison;
   }
 
-  const leftCompletion = effectiveLeftTo ?? leftFrom;
-  const rightCompletion = effectiveRightTo ?? rightFrom;
+  // An interval can be fulfilled on its first day, so rank it by that earliest date.
+  const leftEarliest = leftFrom;
+  const rightEarliest = rightFrom;
   const resultTypeComparison = Number(effectiveLeftTo !== null) - Number(effectiveRightTo !== null);
 
-  return leftCompletion - rightCompletion
+  return leftEarliest - rightEarliest
     || resultTypeComparison
     || Number(left.deliveryDateApproximate === true) - Number(right.deliveryDateApproximate === true)
-    || leftFrom - rightFrom
     || (effectiveLeftTo ?? leftFrom) - (effectiveRightTo ?? rightFrom);
 };

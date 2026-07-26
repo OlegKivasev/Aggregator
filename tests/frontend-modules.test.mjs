@@ -93,19 +93,33 @@ test("delivery date sorting treats same-day end as a single date", () => {
   ]);
 });
 
-test("delivery date sorting uses the interval completion date after nearby deliveries", () => {
+test("delivery date sorting moves intervals above dates they can arrive before", () => {
   const today = new Date();
   const date = (offset) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset, 12).toISOString();
   const results = [
     { label: "single July 30", deliveryDate: date(5), deliveryDateApproximate: false },
-    { label: "interval ending July 28", deliveryDate: date(2), deliveryDateTo: date(3), deliveryDateApproximate: false },
+    { label: "interval starting July 28", deliveryDate: date(2), deliveryDateTo: date(3), deliveryDateApproximate: false },
     { label: "approximate July 30", deliveryDate: date(5), deliveryDateApproximate: true },
   ];
 
   assert.deepEqual(results.sort(compareDeliveryDates).map((result) => result.label), [
-    "interval ending July 28",
+    "interval starting July 28",
     "single July 30",
     "approximate July 30",
+  ]);
+});
+
+test("delivery date sorting places an interval starting on the 29th above the 30th", () => {
+  const today = new Date();
+  const date = (offset) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset, 12).toISOString();
+  const results = [
+    { label: "single 30th", deliveryDate: date(3), deliveryDateApproximate: false },
+    { label: "interval 29th to 30th", deliveryDate: date(2), deliveryDateTo: date(3), deliveryDateApproximate: false },
+  ];
+
+  assert.deepEqual(results.sort(compareDeliveryDates).map((result) => result.label), [
+    "interval 29th to 30th",
+    "single 30th",
   ]);
 });
 
