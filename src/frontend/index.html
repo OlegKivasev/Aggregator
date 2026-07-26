@@ -180,9 +180,6 @@
                 </tbody>
               </table>
             </div>
-            <footer class="results-panel__footer">
-              <span>Нажмите на строку, чтобы открыть предложение поставщика. Для подбора замены используйте кнопку «Аналоги» или правую кнопку мыши.</span>
-            </footer>
           </div>
         </section>
       </div>
@@ -376,6 +373,7 @@
     </div>
 
     <div class="result-context-menu card border-0 shadow" id="result-context-menu" role="menu" hidden>
+      <button type="button" id="open-result-button" role="menuitem">Открыть предложение</button>
       <button type="button" id="show-analogs-button" role="menuitem">Показать аналоги</button>
     </div>
     <div class="warehouse-tooltip" id="warehouse-tooltip" role="tooltip" hidden></div>
@@ -441,7 +439,6 @@
           </table>
         </div>
         <footer class="analogs-modal__footer">
-          <span>Нажмите на строку, чтобы открыть предложение поставщика</span>
           <button type="button" class="btn btn-light" data-close-analogs-modal>Закрыть</button>
         </footer>
       </section>

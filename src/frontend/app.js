@@ -89,6 +89,7 @@ const supplierNoticeSummary = document.querySelector("#supplier-notice-summary")
 const supplierNoticeList = document.querySelector("#supplier-notice-list");
 const passwordFields = [...document.querySelectorAll(".password-field")];
 const resultContextMenu = document.querySelector("#result-context-menu");
+const openResultButton = document.querySelector("#open-result-button");
 const warehouseTooltip = document.querySelector("#warehouse-tooltip");
 const showAnalogsButton = document.querySelector("#show-analogs-button");
 const analogsModal = document.querySelector("#analogs-modal");
@@ -120,7 +121,6 @@ let contextMenuAnchor = null;
 let analogSearchSource = null;
 let analogModalReturnFocus = null;
 let analogReturnResult = null;
-let analogReturnToAction = false;
 let analogSourceResult = null;
 let analogSearchResults = [];
 let analogSearchTerm = "";
@@ -774,18 +774,17 @@ const renderResults = () => {
   updateSortHeaders(sortButtons, sortState);
   const renderResult = (result, percent) => {
     const supplierName = supplierNames[result.supplier] ?? result.supplier;
-    const link = getSafeResultLink(result.link);
     const deliveryDate = result.supplier === "mladov" && !result.deliveryDate
       ? "-"
       : formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo);
     const isBestPrice = result === bestPrice;
 
     return `
-      <tr class="results-table__row main-result-row${isBestPrice ? " is-best-price" : ""}" data-result-index="${results.indexOf(result)}" data-link="${escapeHtml(link)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Открыть ${escapeHtml(result.title)}">
+      <tr class="results-table__row main-result-row${isBestPrice ? " is-best-price" : ""}" data-result-index="${results.indexOf(result)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Действия для ${escapeHtml(result.title)}">
         <td data-column="supplier">${escapeHtml(supplierName)}</td>
         <td data-column="brand">${escapeHtml(result.brand)}</td>
         <td data-column="article">${escapeHtml(result.article)}</td>
-        <td data-column="title"><div class="result-title-cell"><span title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</span><button type="button" class="result-analogs-button" data-show-row-analogs="${results.indexOf(result)}" aria-label="Показать аналоги для ${escapeHtml(result.brand)} ${escapeHtml(result.article)}">Аналоги</button></div></td>
+        <td data-column="title"><div class="result-title-cell"><span title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</span></div></td>
         <td data-column="warehouse">${renderWarehouse(result)}</td>
         <td data-column="price"><span class="main-result-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         <td data-column="markupPrice">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</td>
@@ -1366,42 +1365,6 @@ sortButtons.forEach((button) => {
   });
 });
 
-const registerResultRowEvents = (body) => {
-  body.addEventListener("click", (event) => {
-    if (getActiveTab()?.source) {
-      return;
-    }
-    const analogButton = event.target.closest("[data-show-row-analogs]");
-    if (analogButton) {
-      event.preventDefault();
-      event.stopPropagation();
-      const result = results[Number(analogButton.dataset.showRowAnalogs)];
-      if (result) {
-        startAnalogSearch(result, analogButton);
-      }
-      return;
-    }
-    const row = event.target.closest(".results-table__row");
-    if (row?.dataset.link) {
-      window.open(row.dataset.link, "_blank", "noreferrer");
-    }
-  });
-
-  body.addEventListener("keydown", (event) => {
-    if (event.target.closest("button") || getActiveTab()?.source || (event.key !== "Enter" && event.key !== " ")) {
-      return;
-    }
-    const row = event.target.closest(".results-table__row");
-    if (row?.dataset.link) {
-      event.preventDefault();
-      window.open(row.dataset.link, "_blank", "noreferrer");
-    }
-  });
-};
-
-registerResultRowEvents(resultsBody);
-registerResultRowEvents(analogsResultsBody);
-
 const hideResultContextMenu = (restoreFocus = false) => {
   resultContextMenu.hidden = true;
   contextMenuResult = null;
@@ -1411,14 +1374,15 @@ const hideResultContextMenu = (restoreFocus = false) => {
   contextMenuAnchor = null;
 };
 
-const showResultContextMenu = (result, clientX, clientY, anchor) => {
+const showResultContextMenu = (result, clientX, clientY, anchor, canShowAnalogs) => {
   contextMenuResult = result;
   contextMenuAnchor = anchor;
+  showAnalogsButton.hidden = !canShowAnalogs;
   resultContextMenu.hidden = false;
   const bounds = resultContextMenu.getBoundingClientRect();
   resultContextMenu.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - bounds.width - 8))}px`;
   resultContextMenu.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - bounds.height - 8))}px`;
-  showAnalogsButton.focus();
+  openResultButton.focus();
 };
 
 const setAnalogSearchStatus = (title, description, state = "searching") => {
@@ -1448,14 +1412,10 @@ const closeAnalogsModal = () => {
     analogModalReturnFocus.focus();
   } else if (analogReturnResult) {
     const resultIndex = results.indexOf(analogReturnResult);
-    const selector = analogReturnToAction
-      ? `[data-show-row-analogs="${resultIndex}"]`
-      : `[data-result-index="${resultIndex}"]`;
-    resultsBody.querySelector(selector)?.focus();
+    resultsBody.querySelector(`[data-result-index="${resultIndex}"]`)?.focus();
   }
   analogModalReturnFocus = null;
   analogReturnResult = null;
-  analogReturnToAction = false;
 };
 
 const renderAnalogSource = (result) => {
@@ -1513,11 +1473,10 @@ const renderAnalogRows = () => {
   }
 
   analogsResultsBody.innerHTML = rows.map((result) => {
-    const link = getSafeResultLink(result.link);
     const deliveryDate = formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo);
     const isBestPrice = result === bestPrice;
     return `
-      <tr class="results-table__row analogs-result-row${isBestPrice ? " is-best-price" : ""}" data-analog-result-index="${analogSearchResults.indexOf(result)}" data-link="${escapeHtml(link)}" tabindex="0" aria-label="Открыть ${escapeHtml(result.title)}">
+      <tr class="results-table__row analogs-result-row${isBestPrice ? " is-best-price" : ""}" data-analog-result-index="${analogSearchResults.indexOf(result)}" tabindex="0" aria-label="Действия для ${escapeHtml(result.title)}">
         <td>${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}</td>
         <td>${escapeHtml(result.brand)}</td>
         <td>${escapeHtml(result.article)}</td>
@@ -1537,7 +1496,6 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   analogSearchSource?.close();
   analogModalReturnFocus = returnFocus;
   analogReturnResult = result;
-  analogReturnToAction = Boolean(returnFocus?.matches?.("[data-show-row-analogs]"));
   analogSourceResult = result;
   analogSearchResults = [];
   analogSearchTerm = "";
@@ -1611,31 +1569,41 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   };
 };
 
-resultsBody.addEventListener("contextmenu", (event) => {
-  if (getActiveTab()?.source) {
-    return;
-  }
-  const row = event.target.closest(".results-table__row");
-  const result = row ? results[Number(row.dataset.resultIndex)] : null;
-  if (!result) {
-    return;
-  }
-  event.preventDefault();
-  showResultContextMenu(result, event.clientX, event.clientY, row);
-});
+const registerResultContextMenu = (body, resolveResult, canShowAnalogs) => {
+  body.addEventListener("contextmenu", (event) => {
+    const row = event.target.closest(".results-table__row");
+    const result = row ? resolveResult(row) : null;
+    if (!result) {
+      return;
+    }
+    event.preventDefault();
+    showResultContextMenu(result, event.clientX, event.clientY, row, canShowAnalogs);
+  });
 
-resultsBody.addEventListener("keydown", (event) => {
-  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
-    return;
+  body.addEventListener("keydown", (event) => {
+    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
+      return;
+    }
+    const row = event.target.closest(".results-table__row");
+    const result = row ? resolveResult(row) : null;
+    if (!result) {
+      return;
+    }
+    event.preventDefault();
+    const bounds = row.getBoundingClientRect();
+    showResultContextMenu(result, bounds.left + 16, bounds.top + 16, row, canShowAnalogs);
+  });
+};
+
+registerResultContextMenu(resultsBody, (row) => results[Number(row.dataset.resultIndex)], true);
+registerResultContextMenu(analogsResultsBody, (row) => analogSearchResults[Number(row.dataset.analogResultIndex)], false);
+
+openResultButton.addEventListener("click", () => {
+  const link = getSafeResultLink(contextMenuResult?.link);
+  hideResultContextMenu();
+  if (link) {
+    window.open(link, "_blank", "noreferrer");
   }
-  const row = event.target.closest(".results-table__row");
-  const result = row ? results[Number(row.dataset.resultIndex)] : null;
-  if (!result) {
-    return;
-  }
-  event.preventDefault();
-  const bounds = row.getBoundingClientRect();
-  showResultContextMenu(result, bounds.left + 16, bounds.top + 16, row);
 });
 
 showAnalogsButton.addEventListener("click", () => {

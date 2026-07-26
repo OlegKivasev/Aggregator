@@ -55,6 +55,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
 
   assert.match(html, /id="result-context-menu"/);
+  assert.match(html, /id="open-result-button"/);
   assert.match(html, /id="show-analogs-button"/);
   assert.match(html, /id="analogs-modal"/);
   assert.match(html, /id="analogs-source-title"/);
@@ -65,8 +66,10 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(html, /id="analogs-results-body"/);
   assert.equal((html.match(/id="results-body"/g) ?? []).length, 1);
   assert.doesNotMatch(html, /id="results-view-toggle"/);
-  assert.match(app, /resultsBody\.addEventListener\("contextmenu"/);
-  assert.match(app, /data-show-row-analogs/);
+  assert.match(app, /registerResultContextMenu\(resultsBody/);
+  assert.match(app, /registerResultContextMenu\(analogsResultsBody/);
+  assert.doesNotMatch(app, /data-show-row-analogs/);
+  assert.match(app, /openResultButton\.addEventListener/);
   assert.match(app, /analogsTableSearch\.addEventListener\("input"/);
   assert.match(app, /analogSortButtons\.forEach/);
   assert.match(app, /analogs-best-price/);
@@ -82,7 +85,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
 
   assert.match(html, /<h2>Предложения<\/h2>/);
   assert.match(html, /class="table table-hover align-middle mb-0 results-data-table"/);
-  assert.match(html, /class="results-panel__footer"/);
+  assert.doesNotMatch(html, /Нажмите на строку/);
   assert.match(html, /id="warehouse-tooltip"/);
   assert.match(app, /main-result-row\$\{isBestPrice \? " is-best-price" : ""\}/);
   assert.match(app, /main-best-price/);
