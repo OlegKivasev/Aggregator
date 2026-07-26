@@ -86,16 +86,11 @@ const isSameCalendarDay = (leftValue, rightValue) => {
 const getEffectiveDeliveryTo = (from, to) => (to !== null && !isSameCalendarDay(from, to) ? to : null);
 
 const getDeliverySortGroup = (result, from, to) => {
-  if (to !== null) {
-    return 8;
-  }
-
   const dayOffset = getCalendarDayOffset(from);
-  const isNearby = dayOffset >= 0 && dayOffset <= 2;
-  if (isNearby) {
+  if (to === null && dayOffset >= 0 && dayOffset <= 2) {
     return dayOffset * 2 + Number(result.deliveryDateApproximate === true);
   }
-  return result.deliveryDateApproximate === true ? 7 : 6;
+  return 6;
 };
 
 export const compareDeliveryDates = (left, right) => {
@@ -116,7 +111,13 @@ export const compareDeliveryDates = (left, right) => {
     return groupComparison;
   }
 
-  return leftFrom - rightFrom
+  const leftCompletion = effectiveLeftTo ?? leftFrom;
+  const rightCompletion = effectiveRightTo ?? rightFrom;
+  const resultTypeComparison = Number(effectiveLeftTo !== null) - Number(effectiveRightTo !== null);
+
+  return leftCompletion - rightCompletion
+    || resultTypeComparison
     || Number(left.deliveryDateApproximate === true) - Number(right.deliveryDateApproximate === true)
+    || leftFrom - rightFrom
     || (effectiveLeftTo ?? leftFrom) - (effectiveRightTo ?? rightFrom);
 };

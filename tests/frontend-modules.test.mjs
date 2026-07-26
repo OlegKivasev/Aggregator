@@ -34,7 +34,7 @@ test("warehouse rendering escapes tooltip and validates supplier metadata", () =
   assert.match(markup, /&lt;4\.5/);
 });
 
-test("delivery date sorting places single dates before intervals", () => {
+test("delivery date sorting moves intervals above dates they finish before", () => {
   const results = [
     { label: "interval tomorrow", deliveryDate: "2026-07-27T00:00:00.000Z", deliveryDateTo: "2026-07-28T00:00:00.000Z" },
     { label: "single day after tomorrow", deliveryDate: "2026-07-28T00:00:00.000Z" },
@@ -72,9 +72,9 @@ test("delivery date sorting groups nearby, dated and interval deliveries", () =>
     "approximate tomorrow",
     "known day after tomorrow",
     "approximate day after tomorrow",
-    "known dated",
-    "approximate dated",
     "interval tomorrow",
+    "approximate dated",
+    "known dated",
   ]);
 });
 
@@ -90,6 +90,22 @@ test("delivery date sorting treats same-day end as a single date", () => {
   assert.deepEqual(results.sort(compareDeliveryDates).map((result) => result.label), [
     "same-day poslezavtra",
     "later date",
+  ]);
+});
+
+test("delivery date sorting uses the interval completion date after nearby deliveries", () => {
+  const today = new Date();
+  const date = (offset) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset, 12).toISOString();
+  const results = [
+    { label: "single July 30", deliveryDate: date(5), deliveryDateApproximate: false },
+    { label: "interval ending July 28", deliveryDate: date(2), deliveryDateTo: date(3), deliveryDateApproximate: false },
+    { label: "approximate July 30", deliveryDate: date(5), deliveryDateApproximate: true },
+  ];
+
+  assert.deepEqual(results.sort(compareDeliveryDates).map((result) => result.label), [
+    "interval ending July 28",
+    "single July 30",
+    "approximate July 30",
   ]);
 });
 
