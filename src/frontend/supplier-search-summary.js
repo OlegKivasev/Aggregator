@@ -33,14 +33,15 @@ export const formatDeliveryDate = (value, approximate = false, valueTo = null) =
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const formattedFrom = formatCalendarDate(parsed, today);
+  const formattedFrom = parsed.toLocaleDateString("ru-RU");
   const parsedTo = valueTo ? new Date(valueTo) : null;
-  const formattedToDate = parsedTo && !Number.isNaN(parsedTo.getTime()) ? formatCalendarDate(parsedTo, today) : "";
+  const formattedToDate = parsedTo && !Number.isNaN(parsedTo.getTime()) ? parsedTo.toLocaleDateString("ru-RU") : "";
   const formattedTo = formattedToDate && formattedToDate !== formattedFrom
     ? ` - ${formattedToDate}`
     : "";
+  const formattedDate = formattedTo ? formattedFrom : formatCalendarDate(parsed, today);
 
-  return `${approximate && !formattedTo ? "~" : ""}${formattedFrom}${formattedTo}`;
+  return `${approximate && !formattedTo ? "~" : ""}${formattedDate}${formattedTo}`;
 };
 
 export const buildSupplierResultTooltip = (suppliers, results, durations, supplierNames) => {

@@ -233,7 +233,10 @@ test("delivery formatter names tomorrow and the day after tomorrow", () => {
 
   assert.equal(formatDeliveryDate(tomorrow.toISOString()), "Завтра");
   assert.equal(formatDeliveryDate(dayAfterTomorrow.toISOString()), "Послезавтра");
-  assert.equal(formatDeliveryDate(tomorrow.toISOString(), false, dayAfterTomorrow.toISOString()), "Завтра - Послезавтра");
+  assert.equal(
+    formatDeliveryDate(tomorrow.toISOString(), false, dayAfterTomorrow.toISOString()),
+    `${tomorrow.toLocaleDateString("ru-RU")} - ${dayAfterTomorrow.toLocaleDateString("ru-RU")}`,
+  );
 });
 
 test("STParts rejects malformed and non-exact API offers", () => {
