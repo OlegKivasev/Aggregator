@@ -937,43 +937,33 @@ table thead th {
 }
 
 .table-sort__icon {
-  position: relative;
-  width: 8px;
-  height: 12px;
-  flex: 0 0 8px;
-}
-
-.table-sort__icon::before,
-.table-sort__icon::after {
-  position: absolute;
-  left: 0;
-  width: 0;
-  height: 0;
-  border-right: 4px solid transparent;
-  border-left: 4px solid transparent;
-  content: "";
-  opacity: 0.38;
-}
-
-.table-sort__icon::before {
-  top: 0;
-  border-bottom: 5px solid currentColor;
+  display: inline-block;
+  width: 10px;
+  flex: 0 0 10px;
+  color: #a4adb7;
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
 }
 
 .table-sort__icon::after {
-  bottom: 0;
-  border-top: 5px solid currentColor;
+  content: "↕";
 }
 
-th[aria-sort="ascending"] .table-sort__icon::before,
-th[aria-sort="descending"] .table-sort__icon::after {
+th[aria-sort="ascending"] .table-sort__icon {
   color: var(--accent);
-  opacity: 1;
 }
 
-th[aria-sort="ascending"] .table-sort__icon::after,
-th[aria-sort="descending"] .table-sort__icon::before {
-  opacity: 0.16;
+th[aria-sort="ascending"] .table-sort__icon::after {
+  content: "↑";
+}
+
+th[aria-sort="descending"] .table-sort__icon {
+  color: var(--accent);
+}
+
+th[aria-sort="descending"] .table-sort__icon::after {
+  content: "↓";
 }
 
 table tbody td {
