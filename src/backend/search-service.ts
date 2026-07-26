@@ -29,7 +29,7 @@ import type {
   MotorDetalCredentials,
   PartKomCredentials,
   RosskoSiteCredentials,
-  SearchQuery,
+  SupplierSearchQuery,
   SearchStreamEvent,
   StpartsCredentials,
   SupplierId,
@@ -129,7 +129,7 @@ export function validateSupplierSessions(article: string, suppliers: SupplierId[
   return sessionService.validateSupplierSessions(article, suppliers, signal);
 }
 
-export function streamSearch(query: SearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) {
+export function streamSearch(query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) {
   return searchService.streamSearch(query, emit, signal);
 }
 

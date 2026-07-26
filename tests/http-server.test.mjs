@@ -133,6 +133,35 @@ test("HTTP server transports mixed supplier SSE events without changing them", a
   assert.deepEqual(parseSseEvents(await response.text()), expectedEvents);
 });
 
+test("HTTP server validates and transports an analog search query", async () => {
+  let receivedQuery;
+  const application = createApplication({
+    streamSearch: async (query, emit) => {
+      receivedQuery = query;
+      emit({ type: "search_started", article: query.article, suppliers: ["armtek"] });
+      emit({ type: "search_completed", article: query.article });
+    },
+  });
+  const { baseUrl } = await listen(application);
+
+  const missingBrand = await fetch(`${baseUrl}/api/search?stream=once&mode=analogs&article=ABC-123&supplier=armtek`);
+  assert.equal(missingBrand.status, 400);
+
+  const response = await fetch(`${baseUrl}/api/search?stream=once&mode=analogs&article=ABC-123&brand=Brand&supplier=armtek`);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(receivedQuery, {
+    mode: "analogs",
+    article: "ABC-123",
+    brand: "Brand",
+    suppliers: ["armtek"],
+  });
+  assert.deepEqual(parseSseEvents(await response.text()), [
+    { type: "search_started", article: "ABC-123", suppliers: ["armtek"] },
+    { type: "search_completed", article: "ABC-123" },
+  ]);
+});
+
 test("HTTP server aborts injected search work when the client disconnects", async () => {
   let resolveAbort;
   const abortObserved = new Promise((resolve) => {

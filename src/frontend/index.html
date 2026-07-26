@@ -128,10 +128,6 @@
             <div class="results-panel__header card-header bg-white border-0 d-flex justify-content-between align-items-center">
               <div class="results-panel__heading">
                 <span class="panel__meta text-secondary" id="global-status"></span>
-                <div class="results-view-toggle" id="results-view-toggle" role="group" aria-label="Тип результатов" hidden>
-                  <button type="button" class="is-active" data-results-view="exact" aria-pressed="true">Совпадения <span id="exact-result-total">0</span></button>
-                  <button type="button" data-results-view="analogs" aria-pressed="false">Аналоги <span id="analog-result-total">0</span></button>
-                </div>
               </div>
               <div class="results-panel__controls">
                 <label class="table-search-control" for="table-search">
@@ -373,6 +369,42 @@
           <button type="button" class="btn btn-primary supplier-check__ok" id="supplier-check-ok" hidden>OK</button>
         </div>
       </div>
+    </div>
+
+    <div class="result-context-menu card border-0 shadow" id="result-context-menu" role="menu" hidden>
+      <button type="button" id="show-analogs-button" role="menuitem">Показать аналоги</button>
+    </div>
+
+    <div class="analogs-modal" id="analogs-modal" role="dialog" aria-modal="true" aria-labelledby="analogs-modal-title" tabindex="-1" hidden>
+      <div class="analogs-modal__backdrop" data-close-analogs-modal></div>
+      <section class="analogs-modal__card card border-0 shadow-lg">
+        <header class="analogs-modal__header">
+          <div>
+            <span>Выбранная позиция</span>
+            <h2 id="analogs-modal-title">Поиск аналогов</h2>
+          </div>
+          <button type="button" class="analogs-modal__close btn btn-light" data-close-analogs-modal aria-label="Закрыть окно">×</button>
+        </header>
+
+        <div class="analogs-source table-responsive">
+          <table class="table align-middle mb-0">
+            <thead><tr><th>Бренд</th><th>Артикул</th><th>Наименование</th><th>С наценкой</th><th>Дата доставки</th><th>Склад</th></tr></thead>
+            <tbody><tr id="analogs-source-row"></tr></tbody>
+          </table>
+        </div>
+
+        <div class="analogs-modal__divider"><span>Аналоги</span></div>
+        <div class="analogs-search-status" id="analogs-search-status" role="status" aria-live="polite">
+          <span class="search-loading__spinner" aria-hidden="true"></span>
+          <div><strong>Подготавливаем поиск</strong><span>Запрашиваем аналоги выбранной позиции.</span></div>
+        </div>
+        <div class="analogs-results table-responsive" id="analogs-results" hidden>
+          <table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Поставщик</th><th>Бренд</th><th>Артикул</th><th>Наименование</th><th>Склад</th><th>Цена</th><th>С наценкой</th><th>Дата доставки</th></tr></thead>
+            <tbody id="analogs-results-body"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
 
     <script type="module" src="/app.js"></script>

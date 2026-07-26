@@ -1,7 +1,7 @@
 import type { SupplierSessionManager } from "../session/session-manager.ts";
 import { runSupplierSearch } from "../suppliers/run-supplier-search.ts";
 import type { SupplierAdapter } from "../suppliers/supplier-adapter.ts";
-import type { SearchQuery, SearchStreamEvent, SupplierId } from "../types.ts";
+import type { SearchStreamEvent, SupplierId, SupplierSearchQuery } from "../types.ts";
 
 export function selectSupplierAdapters(adapters: SupplierAdapter[], suppliers?: SupplierId[]): SupplierAdapter[] {
   return suppliers ? adapters.filter((adapter) => suppliers.includes(adapter.id)) : adapters;
@@ -23,11 +23,14 @@ export class SearchApplicationService {
   }
 
   async streamSearch(
-    query: SearchQuery,
+    query: SupplierSearchQuery,
     emit: (event: SearchStreamEvent) => void,
     signal: AbortSignal,
   ): Promise<void> {
-    const currentAdapters = selectSupplierAdapters(this.adapters, query.suppliers);
+    const selectedAdapters = selectSupplierAdapters(this.adapters, query.suppliers);
+    const currentAdapters = "mode" in query && query.mode === "analogs"
+      ? selectedAdapters.filter((adapter) => adapter.searchAnalogs)
+      : selectedAdapters;
 
     emit({
       type: "search_started",

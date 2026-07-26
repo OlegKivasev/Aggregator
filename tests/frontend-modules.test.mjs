@@ -8,7 +8,6 @@ import {
   formatWarehouse,
   getSafeResultLink,
   renderWarehouse,
-  splitAnalogResults,
 } from "../src/frontend/result-formatting.js";
 import { openSearchStream } from "../src/frontend/search-stream.js";
 
@@ -35,17 +34,6 @@ test("warehouse rendering escapes tooltip and validates supplier metadata", () =
   assert.match(markup, /&lt;4\.5/);
 });
 
-test("result formatting separates analogs from exact results", () => {
-  const result = splitAnalogResults([
-    { article: "A", isAnalog: true },
-    { article: "B" },
-    { article: "C", isAnalog: false },
-  ]);
-
-  assert.deepEqual(result.exact.map((item) => item.article), ["B", "C"]);
-  assert.deepEqual(result.analogs.map((item) => item.article), ["A"]);
-});
-
 test("delivery date sorting places single dates before intervals", () => {
   const results = [
     { label: "interval tomorrow", deliveryDate: "2026-07-27T00:00:00.000Z", deliveryDateTo: "2026-07-28T00:00:00.000Z" },
@@ -62,18 +50,21 @@ test("delivery date sorting places single dates before intervals", () => {
   ]);
 });
 
-test("frontend switches exact results and analogs in one table", async () => {
+test("frontend opens on-demand analog search for a selected result", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
 
-  assert.match(html, /id="results-view-toggle"/);
-  assert.match(html, /data-results-view="exact"/);
-  assert.match(html, /data-results-view="analogs"/);
+  assert.match(html, /id="result-context-menu"/);
+  assert.match(html, /id="show-analogs-button"/);
+  assert.match(html, /id="analogs-modal"/);
+  assert.match(html, /id="analogs-source-row"/);
+  assert.match(html, /id="analogs-results-body"/);
   assert.equal((html.match(/id="results-body"/g) ?? []).length, 1);
-  assert.doesNotMatch(html, /id="analog-results-panel"/);
-  assert.doesNotMatch(html, /id="analog-results-body"/);
-  assert.match(app, /const visibleResults = showingAnalogs \? analogs : exact;/);
-  assert.match(app, /tableSearchInput\.placeholder = showingAnalogs \? "Поиск по аналогам" : "Поиск по совпадениям";/);
+  assert.doesNotMatch(html, /id="results-view-toggle"/);
+  assert.match(app, /resultsBody\.addEventListener\("contextmenu"/);
+  assert.match(app, /mode: "analogs"/);
+  assert.match(app, /supplier: "armtek"/);
+  assert.match(app, /const exactResults = results\.filter\(\(result\) => result\.isAnalog !== true\);/);
 });
 
 test("search shows authorization progress before waiting for session validation", async () => {

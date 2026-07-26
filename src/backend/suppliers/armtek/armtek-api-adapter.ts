@@ -2,6 +2,7 @@ import { armtekApiBaseUrl, armtekRequestTimeoutMs, armtekSearchTimeoutMs, getArm
 import { createBoundedAbortSignal } from "../../abort.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type {
+  AnalogSearchQuery,
   ArmtekCredentials,
   NormalizedSearchResult,
   SearchQuery,
@@ -351,34 +352,6 @@ function isArmtekAnalog(item: ArmtekSearchItem): boolean {
   return Boolean(value && value !== "0");
 }
 
-export function getArmtekAnalogSearchTargets(items: ArmtekSearchItem[], requestedArticle: string): Array<{ article: string; brand: string }> {
-  const normalizedTarget = normalizeArticle(requestedArticle);
-  const targets = new Map<string, { article: string; brand: string }>();
-
-  for (const item of items) {
-    const article = item.PIN?.trim();
-    const brand = item.BRAND?.trim();
-    const title = item.NAME?.trim();
-    if (
-      isArmtekAnalog(item) ||
-      !article ||
-      normalizeArticle(article) !== normalizedTarget ||
-      !brand ||
-      !title ||
-      parsePrice(item.PRICE) === null
-    ) {
-      continue;
-    }
-
-    const key = `${normalizeArticle(article)}\u0000${brand.toUpperCase()}`;
-    if (!targets.has(key)) {
-      targets.set(key, { article, brand });
-    }
-  }
-
-  return [...targets.values()];
-}
-
 export function getArmtekWarehouse(item: ArmtekSearchItem, storeNames: Map<string, string>): string | null {
   return item.STOCK_NAME || item.WHNAME || item.WAREHOUSE_NAME || item.STORE_NAME || item.SNAME || item.RNAME ||
     (item.KEYZAK ? storeNames.get(item.KEYZAK) || item.KEYZAK : undefined) || item.STOCK || item.WH ||
@@ -552,45 +525,55 @@ export class ArmtekApiAdapter implements SupplierAdapter {
         searchContext.signal,
       );
     }
-    const emittedResults = new Set<string>();
     for (const item of exactItems) {
       const result = normalizeArmtekResult(item, storeNames);
       if (result) {
-        emittedResults.add(armtekResultKey(result));
         onResult(result);
       }
     }
+  }
 
-    for (const target of getArmtekAnalogSearchTargets(exactItems, article)) {
-      let analogResponse: { ARRAY?: ArmtekSearchItem | ArmtekSearchItem[] } | ArmtekSearchItem[];
-      try {
-        analogResponse = await requestArmtek("ws_search/search", credentials, {
-          method: "POST",
-          params: buildArmtekSearchParams(resolved, target.article, "2", target.brand),
-          signal: searchContext.signal,
-        });
-      } catch (error) {
-        rethrowArmtekStageError(error, "Armtek analog search request failed", "armtek_analog_search_request");
+  async searchAnalogs(
+    query: AnalogSearchQuery,
+    searchContext: SupplierSearchContext,
+    onResult: (result: NormalizedSearchResult) => void,
+    sessionManager: SupplierSessionManager,
+  ): Promise<void> {
+    const credentials = getConfiguredCredentials(sessionManager);
+    if (!credentials) {
+      throw new SupplierAuthError("Armtek credentials are missing");
+    }
+
+    const resolved = await resolveArmtekConfig(credentials, searchContext.signal);
+    let analogResponse: { ARRAY?: ArmtekSearchItem | ArmtekSearchItem[] } | ArmtekSearchItem[];
+    try {
+      analogResponse = await requestArmtek("ws_search/search", credentials, {
+        method: "POST",
+        params: buildArmtekSearchParams(resolved, query.article.trim(), "2", query.brand.trim()),
+        signal: searchContext.signal,
+      });
+    } catch (error) {
+      rethrowArmtekStageError(error, "Armtek analog search request failed", "armtek_analog_search_request");
+    }
+
+    const analogItems = armtekSearchItems(analogResponse).filter(isArmtekAnalog);
+    let storeNames = new Map<string, string>();
+    if (analogItems.some((item) => Boolean(item.KEYZAK) && !hasArmtekWarehouseName(item))) {
+      storeNames = await getOptionalArmtekStoreNames(
+        () => getCachedArmtekStoreNames(credentials, resolved.vkorg, searchContext.signal),
+        searchContext.signal,
+      );
+    }
+    const emittedResults = new Set<string>();
+    for (const item of analogItems) {
+      const result = normalizeArmtekResult(item, storeNames, true);
+      if (!result) {
+        continue;
       }
-
-      const analogItems = armtekSearchItems(analogResponse).filter(isArmtekAnalog);
-      if (!storeNames.size && analogItems.some((item) => Boolean(item.KEYZAK) && !hasArmtekWarehouseName(item))) {
-        storeNames = await getOptionalArmtekStoreNames(
-          () => getCachedArmtekStoreNames(credentials, resolved.vkorg, searchContext.signal),
-          searchContext.signal,
-        );
-      }
-
-      for (const item of analogItems) {
-        const result = normalizeArmtekResult(item, storeNames, true);
-        if (!result) {
-          continue;
-        }
-        const resultKey = armtekResultKey(result);
-        if (!emittedResults.has(resultKey)) {
-          emittedResults.add(resultKey);
-          onResult(result);
-        }
+      const resultKey = armtekResultKey(result);
+      if (!emittedResults.has(resultKey)) {
+        emittedResults.add(resultKey);
+        onResult(result);
       }
     }
   }

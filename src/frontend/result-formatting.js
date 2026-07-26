@@ -85,8 +85,3 @@ export const compareDeliveryDates = (left, right) => {
 
   return leftFrom - rightFrom || (leftTo ?? leftFrom) - (rightTo ?? rightFrom);
 };
-
-export const splitAnalogResults = (results) => ({
-  exact: results.filter((result) => result.isAnalog !== true),
-  analogs: results.filter((result) => result.isAnalog === true),
-});

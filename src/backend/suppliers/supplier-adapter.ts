@@ -1,4 +1,5 @@
 import type {
+  AnalogSearchQuery,
   NormalizedSearchResult,
   SearchQuery,
   SupplierId,
@@ -16,6 +17,12 @@ export interface SupplierAdapter {
   validateSession(context: SupplierSearchContext, sessionManager: SupplierSessionManager): Promise<void>;
   search(
     query: SearchQuery,
+    context: SupplierSearchContext,
+    onResult: (result: NormalizedSearchResult) => void,
+    sessionManager: SupplierSessionManager,
+  ): Promise<void>;
+  searchAnalogs?(
+    query: AnalogSearchQuery,
     context: SupplierSearchContext,
     onResult: (result: NormalizedSearchResult) => void,
     sessionManager: SupplierSessionManager,

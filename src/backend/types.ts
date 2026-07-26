@@ -12,6 +12,13 @@ export interface SearchQuery {
   suppliers?: SupplierId[];
 }
 
+export interface AnalogSearchQuery extends SearchQuery {
+  mode: "analogs";
+  brand: string;
+}
+
+export type SupplierSearchQuery = SearchQuery | AnalogSearchQuery;
+
 export interface NormalizedSearchResult {
   supplier: SupplierId;
   brand: string;

@@ -7,12 +7,12 @@ import type {
   MotorDetalCredentials,
   PartKomCredentials,
   RosskoSiteCredentials,
-  SearchQuery,
   SearchStreamEvent,
   StpartsCredentials,
   SupplierId,
   SupplierSessionState,
   SupplierSessionValidationResult,
+  SupplierSearchQuery,
 } from "../types.ts";
 import {
   articleLengthLimit,
@@ -44,7 +44,7 @@ export interface AggregatorApplication {
   logoutStparts(): SupplierSessionState;
   logoutMotorDetal(): SupplierSessionState;
   logoutMladov(): SupplierSessionState;
-  streamSearch(query: SearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal): Promise<void>;
+  streamSearch(query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal): Promise<void>;
 }
 
 interface CreateAggregatorServerOptions {
@@ -238,6 +238,8 @@ export function createAggregatorServer({
       }
 
       const article = url.searchParams.get("article")?.trim();
+      const mode = url.searchParams.get("mode");
+      const brand = url.searchParams.get("brand")?.trim();
       const supplierValues = url.searchParams.getAll("supplier");
       const suppliers = supplierValues.length ? parseSupplierIds(supplierValues) : undefined;
 
@@ -247,6 +249,18 @@ export function createAggregatorServer({
       }
       if (article.length > articleLengthLimit) {
         serveJson(response, 400, { message: `Query parameter article must not exceed ${articleLengthLimit} characters` });
+        return;
+      }
+      if (mode !== null && mode !== "analogs") {
+        serveJson(response, 400, { message: "Query parameter mode is invalid" });
+        return;
+      }
+      if (mode === "analogs" && !brand) {
+        serveJson(response, 400, { message: "Query parameter brand is required for analog search" });
+        return;
+      }
+      if (brand && brand.length > articleLengthLimit) {
+        serveJson(response, 400, { message: `Query parameter brand must not exceed ${articleLengthLimit} characters` });
         return;
       }
 
@@ -261,7 +275,10 @@ export function createAggregatorServer({
       request.on("close", () => controller.abort(new Error("Client disconnected")));
 
       try {
-        await application.streamSearch({ article, suppliers }, (event) => writeSseEvent(response, event), controller.signal);
+        const query: SupplierSearchQuery = mode === "analogs"
+          ? { mode, article, brand: brand!, suppliers }
+          : { article, suppliers };
+        await application.streamSearch(query, (event) => writeSseEvent(response, event), controller.signal);
       } catch (error) {
         if (!controller.signal.aborted && !response.destroyed) {
           reportError({ operation: "stream-search", category: classifyOperationalError(error) });

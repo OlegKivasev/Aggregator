@@ -6,7 +6,8 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { armtekSearchItems, armtekVkorgItems, getArmtekAnalogSearchTargets, getArmtekWarehouse, getOptionalArmtekStoreNames, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
+import { armtekSearchItems, armtekVkorgItems, getArmtekWarehouse, getOptionalArmtekStoreNames, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
+import { SearchApplicationService } from "../src/backend/application/search-application-service.ts";
 import { createHash } from "node:crypto";
 import { parseArmtekApiAccountState } from "../src/backend/suppliers/armtek/armtek-api-account-state.ts";
 import { parsePartKomApiResponse, parsePartKomApiResults, PartKomApiAdapter, verifyPartKomApiCredentials } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
@@ -47,19 +48,47 @@ test("Armtek accepts the direct search array returned by WebService", () => {
   assert.deepEqual(armtekSearchItems([{ PIN: "90915YZZJ1", PRICE: "691.22" }]), [{ PIN: "90915YZZJ1", PRICE: "691.22" }]);
 });
 
-test("Armtek requests analogs for every unique valid exact brand", () => {
-  assert.deepEqual(getArmtekAnalogSearchTargets([
-    { PIN: "90915-YZZJ1", BRAND: "TOYOTA", NAME: "Oil filter", PRICE: "505.07" },
-    { PIN: "90915YZZJ1", BRAND: "toyota", NAME: "Oil filter", PRICE: "519.78" },
-    { PIN: "90915YZZJ1", BRAND: "DENSO", NAME: "Oil filter", PRICE: "600" },
-    { PIN: "90915YZZJ1", BRAND: "BOSCH", NAME: "Oil filter", PRICE: "610", ANALOG: "0" },
-    { PIN: "90915YZZJ1", BRAND: "MANN", NAME: "Analog", PRICE: "450", ANALOG: "X" },
-    { PIN: "OTHER", BRAND: "OTHER", NAME: "Other part", PRICE: "100" },
-    { PIN: "90915YZZJ1", BRAND: "INVALID", NAME: "No price", PRICE: "0" },
-  ], "90915YZZJ1"), [
-    { article: "90915-YZZJ1", brand: "TOYOTA" },
-    { article: "90915YZZJ1", brand: "DENSO" },
-    { article: "90915YZZJ1", brand: "BOSCH" },
+test("analog search invokes only an adapter with explicit analog support", async () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.markAuthorized("armtek");
+  let receivedQuery;
+  const adapters = [
+    {
+      id: "armtek",
+      displayName: "Armtek",
+      timeoutMs: 1000,
+      async ensureSession() {
+        return sessionManager.getSession("armtek");
+      },
+      async search() {
+        assert.fail("ordinary search must not run for an analog request");
+      },
+      async searchAnalogs(query) {
+        receivedQuery = query;
+      },
+    },
+    {
+      id: "rossko",
+      displayName: "Rossko",
+      timeoutMs: 1000,
+      async ensureSession() {
+        assert.fail("adapter without analog support must not run");
+      },
+      async search() {},
+    },
+  ];
+  const service = new SearchApplicationService(adapters, sessionManager, () => undefined);
+  const events = [];
+  const query = { mode: "analogs", article: "90915YZZJ1", brand: "TOYOTA", suppliers: ["armtek", "rossko"] };
+
+  await service.streamSearch(query, (event) => events.push(event), new AbortController().signal);
+
+  assert.deepEqual(receivedQuery, query);
+  assert.deepEqual(events, [
+    { type: "search_started", article: "90915YZZJ1", suppliers: ["armtek"] },
+    { type: "supplier_status", supplier: "armtek", status: "searching", details: undefined },
+    { type: "supplier_status", supplier: "armtek", status: "completed", details: undefined },
+    { type: "search_completed", article: "90915YZZJ1" },
   ]);
 });
 

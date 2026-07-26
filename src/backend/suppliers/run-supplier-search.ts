@@ -4,14 +4,14 @@ import type { SupplierSessionManager } from "../session/session-manager.ts";
 import type {
   SearchStreamEvent,
   SearchSupplierStatusEvent,
-  SearchQuery,
+  SupplierSearchQuery,
   NormalizedSearchResult,
 } from "../types.ts";
 
 interface RunSupplierSearchOptions {
   adapter: SupplierAdapter;
   sessionManager: SupplierSessionManager;
-  query: SearchQuery;
+  query: SupplierSearchQuery;
   signal: AbortSignal;
   emit: (event: SearchStreamEvent) => void;
   onAuthError?: () => void;
@@ -105,25 +105,29 @@ export async function runSupplierSearch({
       throw new SupplierAuthError("Session is not authorized");
     }
 
-    await adapter.search(
-      query,
-      {
-        signal: controller.signal,
-        timeoutMs: adapter.timeoutMs,
-      },
-      (result) => {
-        if (!operation.isCurrent()) {
-          return;
-        }
-        if (isValidResult(result, adapter.id)) {
-          validResultCount += 1;
-          emit({ type: "result", result });
-        } else {
-          invalidResultCount += 1;
-        }
-      },
-      sessionManager,
-    );
+    const context = {
+      signal: controller.signal,
+      timeoutMs: adapter.timeoutMs,
+    };
+    const onResult = (result: NormalizedSearchResult) => {
+      if (!operation.isCurrent()) {
+        return;
+      }
+      if (isValidResult(result, adapter.id)) {
+        validResultCount += 1;
+        emit({ type: "result", result });
+      } else {
+        invalidResultCount += 1;
+      }
+    };
+    if ("mode" in query && query.mode === "analogs") {
+      if (!adapter.searchAnalogs) {
+        throw new SupplierIntegrationError("Supplier does not support analog search");
+      }
+      await adapter.searchAnalogs(query, context, onResult, sessionManager);
+    } else {
+      await adapter.search(query, context, onResult, sessionManager);
+    }
 
     if (invalidResultCount > 0 && validResultCount === 0) {
       throw new SupplierIntegrationError("Supplier returned only invalid search results");
