@@ -1505,16 +1505,17 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   renderAnalogSource(result);
   analogsModal.hidden = false;
   analogsModal.focus();
-  setAnalogSearchStatus("Ищем подходящие предложения", "Результаты будут добавляться в таблицу сразу после ответа Armtek.");
+  setAnalogSearchStatus("Ищем подходящие предложения", "Результаты будут добавляться в таблицу по мере ответа Armtek и Партком.");
 
-  let failureMessage = "";
+  const failureMessages = new Set();
   const searchParams = new URLSearchParams({
     stream: "once",
     mode: "analogs",
     article: result.article,
     brand: result.brand,
-    supplier: "armtek",
   });
+  searchParams.append("supplier", "armtek");
+  searchParams.append("supplier", "part-kom");
   const source = openSearchStream(`/api/search?${searchParams.toString()}`);
   analogSearchSource = source;
   renderAnalogRows();
@@ -1531,19 +1532,21 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
       return;
     }
     if (payload.type === "supplier_status" && ["timeout", "auth_error", "error"].includes(payload.status)) {
-      failureMessage = payload.status === "auth_error"
-        ? "Подключите Armtek в настройках и повторите поиск."
+      const supplierName = supplierNames[payload.supplier] ?? payload.supplier;
+      const failureMessage = payload.status === "auth_error"
+        ? `Подключите ${supplierName} в настройках и повторите поиск.`
         : payload.status === "timeout"
-          ? "Armtek не ответил вовремя. Повторите поиск позже."
-          : "Armtek не удалось выполнить поиск аналогов.";
+          ? `${supplierName} не ответил вовремя. Повторите поиск позже.`
+          : `${supplierName} не удалось выполнить поиск аналогов.`;
+      failureMessages.add(failureMessage);
       return;
     }
     if (payload.type === "search_completed") {
       source.close();
       analogSearchSource = null;
       renderAnalogRows();
-      if (failureMessage) {
-        setAnalogSearchStatus("Поиск завершен не полностью", failureMessage, "warning");
+      if (failureMessages.size) {
+        setAnalogSearchStatus("Поиск завершен не полностью", [...failureMessages].join(" "), "warning");
       } else if (analogSearchResults.length) {
         analogsSearchStatus.hidden = true;
       } else {

@@ -1,6 +1,7 @@
 import { partKomSearchTimeoutMs } from "../../config.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type {
+  AnalogSearchQuery,
   NormalizedSearchResult,
   PartKomCredentials,
   SearchQuery,
@@ -25,10 +26,16 @@ interface PartKomOffer {
   guaranteedHours?: unknown;
   expectedDays?: unknown;
   guaranteedDays?: unknown;
+  detailGroup?: unknown;
+}
+
+interface PartKomArticleBrand {
+  id?: unknown;
+  name?: unknown;
 }
 
 export type PartKomApiRequester = (
-  path: "search/brands" | "search/offers",
+  path: "search/brands" | "search/articule-brands" | "search/offers",
   params: URLSearchParams,
   signal: AbortSignal,
   timeoutMs: number,
@@ -41,6 +48,10 @@ const partKomMaxResponseBytes = 5 * 1024 * 1024;
 
 function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+}
+
+function normalizeBrand(value: string): string {
+  return value.normalize("NFKC").replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase();
 }
 
 function parsePositiveNumber(value: unknown): number | null {
@@ -168,6 +179,36 @@ export function parsePartKomApiResponse(response: SiteHttpResponse): unknown {
   return payload;
 }
 
+function normalizePartKomOffer(offer: PartKomOffer, isAnalog: boolean): NormalizedSearchResult | null {
+  const article = typeof offer.number === "string" ? offer.number.trim() : "";
+  const brand = typeof offer.maker === "string" ? offer.maker.trim() : "";
+  const title = typeof offer.description === "string" ? offer.description.trim() : "";
+  const price = parsePositiveNumber(offer.price);
+  const quantity = Number(offer.quantity);
+  if (!article || !brand || !title || price === null || !Number.isFinite(quantity) || quantity <= 0) {
+    return null;
+  }
+  const expectedDate = parseApiDate(offer.expectedDate) ?? dateFromDuration(offer.expectedHours, offer.expectedDays);
+  const guaranteedDate = parseApiDate(offer.guaranteedDate) ?? dateFromDuration(offer.guaranteedHours, offer.guaranteedDays);
+  const deliveryDateTo = expectedDate && guaranteedDate && Date.parse(guaranteedDate) > Date.parse(expectedDate)
+    ? guaranteedDate
+    : null;
+  const makerId = typeof offer.makerId === "string" || typeof offer.makerId === "number" ? String(offer.makerId) : "";
+  return {
+    supplier: "part-kom",
+    brand,
+    article,
+    title,
+    price,
+    warehouse: typeof offer.placement === "string" && offer.placement.trim() ? offer.placement.trim() : null,
+    deliveryDate: expectedDate,
+    deliveryDateTo,
+    deliveryDateApproximate: !parseApiDate(offer.expectedDate),
+    link: new URL(`/new/#/search/0/0/0/${encodeURIComponent(article.replace(/\//g, ""))}/${encodeURIComponent(makerId)}`, partKomSiteBaseUrl).toString(),
+    ...(isAnalog ? { isAnalog: true } : {}),
+  };
+}
+
 export function parsePartKomApiResults(payload: unknown, requestedArticle: string): NormalizedSearchResult[] {
   const target = normalizeArticle(requestedArticle);
   const results: NormalizedSearchResult[] = [];
@@ -178,37 +219,53 @@ export function parsePartKomApiResults(payload: unknown, requestedArticle: strin
     }
     const offer = value as PartKomOffer;
     const article = typeof offer.number === "string" ? offer.number.trim() : "";
-    const brand = typeof offer.maker === "string" ? offer.maker.trim() : "";
-    const title = typeof offer.description === "string" ? offer.description.trim() : "";
-    const price = parsePositiveNumber(offer.price);
-    const quantity = Number(offer.quantity);
-    if (!article || normalizeArticle(article) !== target || !brand || !title || price === null || !Number.isFinite(quantity) || quantity <= 0) {
+    if (!article || normalizeArticle(article) !== target) {
       continue;
     }
-    const expectedDate = parseApiDate(offer.expectedDate) ?? dateFromDuration(offer.expectedHours, offer.expectedDays);
-    const guaranteedDate = parseApiDate(offer.guaranteedDate) ?? dateFromDuration(offer.guaranteedHours, offer.guaranteedDays);
-    const deliveryDateTo = expectedDate && guaranteedDate && Date.parse(guaranteedDate) > Date.parse(expectedDate)
-      ? guaranteedDate
-      : null;
-    const makerId = typeof offer.makerId === "string" || typeof offer.makerId === "number" ? String(offer.makerId) : "";
-    results.push({
-      supplier: "part-kom",
-      brand,
-      article,
-      title,
-      price,
-      warehouse: typeof offer.placement === "string" && offer.placement.trim() ? offer.placement.trim() : null,
-      deliveryDate: expectedDate,
-      deliveryDateTo,
-      deliveryDateApproximate: !parseApiDate(offer.expectedDate),
-      link: new URL(`/new/#/search/0/0/0/${encodeURIComponent(article.replace(/\//g, ""))}/${encodeURIComponent(makerId)}`, partKomSiteBaseUrl).toString(),
-    });
+    const result = normalizePartKomOffer(offer, false);
+    if (result) {
+      results.push(result);
+    }
   }
   return results;
 }
 
+export function parsePartKomApiAnalogResults(payload: unknown): NormalizedSearchResult[] {
+  const results: NormalizedSearchResult[] = [];
+  for (const value of apiItems(payload, "analog offers")) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      continue;
+    }
+    const offer = value as PartKomOffer;
+    if (offer.detailGroup !== "ReplacementOriginal" && offer.detailGroup !== "ReplacementNonOriginal") {
+      continue;
+    }
+    const result = normalizePartKomOffer(offer, true);
+    if (result) {
+      results.push(result);
+    }
+  }
+  return results;
+}
+
+export function findPartKomMakerId(payload: unknown, requestedBrand: string): string | null {
+  const target = normalizeBrand(requestedBrand);
+  for (const value of apiItems(payload, "article brands")) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      continue;
+    }
+    const brand = value as PartKomArticleBrand;
+    const name = typeof brand.name === "string" ? brand.name.trim() : "";
+    const id = typeof brand.id === "string" || typeof brand.id === "number" ? String(brand.id).trim() : "";
+    if (name && id && normalizeBrand(name) === target) {
+      return id;
+    }
+  }
+  return null;
+}
+
 async function partKomApiRequest(
-  path: "search/brands" | "search/offers",
+  path: "search/brands" | "search/articule-brands" | "search/offers",
   params: URLSearchParams,
   signal: AbortSignal,
   timeoutMs: number,
@@ -302,5 +359,41 @@ export class PartKomApiAdapter implements SupplierAdapter {
       credentials,
     );
     parsePartKomApiResults(payload, article).forEach(onResult);
+  }
+
+  async searchAnalogs(
+    query: AnalogSearchQuery,
+    context: SupplierSearchContext,
+    onResult: (result: NormalizedSearchResult) => void,
+    sessionManager: SupplierSessionManager,
+  ): Promise<void> {
+    const credentials = sessionManager.getPartKomCredentials();
+    if (!credentials) {
+      throw new SupplierAuthError("PartKOM API credentials are not configured");
+    }
+    const article = query.article.trim();
+    const brandsPayload = await this.request(
+      "search/articule-brands",
+      new URLSearchParams({ number: article }),
+      context.signal,
+      context.timeoutMs,
+      credentials,
+    );
+    const makerId = findPartKomMakerId(brandsPayload, query.brand);
+    if (!makerId) {
+      return;
+    }
+    const offersPayload = await this.request(
+      "search/offers",
+      new URLSearchParams({
+        number: article,
+        maker_id: makerId,
+        find_substitutes: "1",
+      }),
+      context.signal,
+      context.timeoutMs,
+      credentials,
+    );
+    parsePartKomApiAnalogResults(offersPayload).forEach(onResult);
   }
 }

@@ -10,7 +10,14 @@ import { armtekSearchItems, armtekVkorgItems, getArmtekWarehouse, getOptionalArm
 import { SearchApplicationService } from "../src/backend/application/search-application-service.ts";
 import { createHash } from "node:crypto";
 import { parseArmtekApiAccountState } from "../src/backend/suppliers/armtek/armtek-api-account-state.ts";
-import { parsePartKomApiResponse, parsePartKomApiResults, PartKomApiAdapter, verifyPartKomApiCredentials } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
+import {
+  findPartKomMakerId,
+  parsePartKomApiAnalogResults,
+  parsePartKomApiResponse,
+  parsePartKomApiResults,
+  PartKomApiAdapter,
+  verifyPartKomApiCredentials,
+} from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
 import { createStpartsBatchParams, parseStpartsApiResults, StpartsApiAdapter } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
 import { gotoStparts, isStpartsSessionPageAuthorized } from "../src/backend/suppliers/stparts/stparts-site-auth.ts";
@@ -489,6 +496,99 @@ test("PartKOM offer normalization accepts data from the observed response envelo
   });
 
   assert.equal(parsePartKomApiResults(payload, "ABC-123").length, 1);
+});
+
+test("PartKOM resolves the selected article brand without mixing similarly formatted names", () => {
+  const brands = [
+    { id: 41, name: "Brand Other" },
+    { id: 42, name: "Brand-Name" },
+  ];
+
+  assert.equal(findPartKomMakerId(brands, " brand name "), "42");
+  assert.equal(findPartKomMakerId(brands, "Brand"), null);
+});
+
+test("PartKOM analog normalization excludes the requested original detail", () => {
+  const common = {
+    maker: "Brand",
+    makerId: 42,
+    description: "Part",
+    price: 100,
+    quantity: 1,
+  };
+  const results = parsePartKomApiAnalogResults([
+    { ...common, number: "SOURCE-1", detailGroup: "Original" },
+    { ...common, number: "REPLACEMENT-1", detailGroup: "ReplacementOriginal" },
+    { ...common, number: "ANALOG-1", detailGroup: "ReplacementNonOriginal" },
+    { ...common, number: "UNKNOWN-1", detailGroup: "Unknown" },
+  ]);
+
+  assert.deepEqual(results.map((result) => [result.article, result.isAnalog]), [
+    ["REPLACEMENT-1", true],
+    ["ANALOG-1", true],
+  ]);
+});
+
+test("PartKOM analog search binds substitutes to the selected article brand", async () => {
+  const calls = [];
+  const adapter = new PartKomApiAdapter(async (path, params) => {
+    calls.push({ path, params: new URLSearchParams(params) });
+    if (path === "search/articule-brands") {
+      return [
+        { id: 41, name: "Other Brand" },
+        { id: 42, name: "Selected Brand" },
+      ];
+    }
+    return [{
+      number: "ANALOG-1",
+      maker: "Analog Brand",
+      makerId: 77,
+      description: "Analog part",
+      price: 100,
+      quantity: 1,
+      detailGroup: "ReplacementNonOriginal",
+    }];
+  });
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setPartKomCredentials({ login: "api-user", password: "secret" });
+  const results = [];
+
+  await adapter.searchAnalogs(
+    { mode: "analogs", article: "SOURCE-1", brand: "Selected Brand" },
+    { signal: new AbortController().signal, timeoutMs: 1000 },
+    (result) => results.push(result),
+    sessionManager,
+  );
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].path, "search/articule-brands");
+  assert.equal(calls[0].params.get("number"), "SOURCE-1");
+  assert.equal(calls[1].path, "search/offers");
+  assert.equal(calls[1].params.get("number"), "SOURCE-1");
+  assert.equal(calls[1].params.get("maker_id"), "42");
+  assert.equal(calls[1].params.get("find_substitutes"), "1");
+  assert.deepEqual(results.map((result) => [result.supplier, result.article, result.isAnalog]), [
+    ["part-kom", "ANALOG-1", true],
+  ]);
+});
+
+test("PartKOM analog search does not request unscoped substitutes when the selected brand is absent", async () => {
+  const calls = [];
+  const adapter = new PartKomApiAdapter(async (path) => {
+    calls.push(path);
+    return [{ id: 41, name: "Other Brand" }];
+  });
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setPartKomCredentials({ login: "api-user", password: "secret" });
+
+  await adapter.searchAnalogs(
+    { mode: "analogs", article: "SOURCE-1", brand: "Selected Brand" },
+    { signal: new AbortController().signal, timeoutMs: 1000 },
+    () => assert.fail("no analog result should be emitted"),
+    sessionManager,
+  );
+
+  assert.deepEqual(calls, ["search/articule-brands"]);
 });
 
 test("PartKOM reports an unsupported successful brands payload without exposing it", async () => {

@@ -147,7 +147,10 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /analogSortButtons\.forEach/);
   assert.match(app, /analogs-best-price/);
   assert.match(app, /mode: "analogs"/);
-  assert.match(app, /supplier: "armtek"/);
+  assert.match(app, /article: result\.article/);
+  assert.match(app, /brand: result\.brand/);
+  assert.match(app, /searchParams\.append\("supplier", "armtek"\)/);
+  assert.match(app, /searchParams\.append\("supplier", "part-kom"\)/);
   assert.match(app, /const exactResults = results\.filter\(\(result\) => result\.isAnalog !== true\);/);
 });
 
