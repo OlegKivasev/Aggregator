@@ -35,11 +35,13 @@ test("warehouse rendering escapes tooltip and validates supplier metadata", () =
 });
 
 test("delivery date sorting moves intervals above dates they finish before", () => {
+  const today = new Date();
+  const date = (offset) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset, 12).toISOString();
   const results = [
-    { label: "interval tomorrow", deliveryDate: "2026-07-27T00:00:00.000Z", deliveryDateTo: "2026-07-28T00:00:00.000Z" },
-    { label: "single day after tomorrow", deliveryDate: "2026-07-28T00:00:00.000Z" },
-    { label: "later interval", deliveryDate: "2026-07-28T00:00:00.000Z", deliveryDateTo: "2026-07-30T00:00:00.000Z" },
-    { label: "single tomorrow", deliveryDate: "2026-07-27T00:00:00.000Z" },
+    { label: "interval tomorrow", deliveryDate: date(1), deliveryDateTo: date(2) },
+    { label: "single day after tomorrow", deliveryDate: date(2) },
+    { label: "later interval", deliveryDate: date(2), deliveryDateTo: date(4) },
+    { label: "single tomorrow", deliveryDate: date(1) },
   ];
 
   assert.deepEqual(results.sort(compareDeliveryDates).map((result) => result.label), [
