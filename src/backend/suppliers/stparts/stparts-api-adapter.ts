@@ -12,7 +12,7 @@ import type {
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../errors.ts";
 import { isJsonContentType } from "../fetch-json.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
-import { siteHttpRequest } from "../site-http.ts";
+import { siteHttpRequest, type SiteHttpResponse } from "../site-http.ts";
 import { stpartsBaseUrl } from "./stparts-site-auth.ts";
 
 interface AbcpBrand {
@@ -255,6 +255,10 @@ async function stpartsApiRequest(
     method,
     body: method === "POST" ? params.toString() : undefined,
   });
+  return parseStpartsApiResponse(path, response);
+}
+
+export function parseStpartsApiResponse(path: string, response: SiteHttpResponse): unknown {
   if (response.status === 401 || response.status === 403) {
     throw new SupplierAuthError("STParts API rejected the configured credentials");
   }
@@ -275,6 +279,13 @@ async function stpartsApiRequest(
     : null;
   if (errorCode === 102 || errorCode === 103 || errorCode === 104) {
     throw new SupplierAuthError("STParts API rejected the configured credentials");
+  }
+  if (
+    (response.status < 200 || response.status >= 300) &&
+    errorCode === 301 &&
+    (path === "search/articles/" || path === "search/batch")
+  ) {
+    return [];
   }
   if (errorCode !== null) {
     throw new SupplierIntegrationError(`STParts API returned error code ${errorCode}`);

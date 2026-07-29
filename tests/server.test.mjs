@@ -22,6 +22,7 @@ import { rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-si
 import {
   createStpartsBatchParams,
   parseStpartsApiAnalogResults,
+  parseStpartsApiResponse,
   parseStpartsApiResults,
   StpartsApiAdapter,
 } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
@@ -352,6 +353,22 @@ test("STParts analog search requests offers for the selected brand and article",
 
 test("STParts treats an empty API result map as no offers", () => {
   assert.deepEqual(parseStpartsApiResults({}, "1072"), []);
+});
+
+test("STParts treats ABCP not-found responses from offer searches as no offers", () => {
+  const response = {
+    status: 400,
+    body: JSON.stringify({ errorCode: 301, errorMessage: "Object not found" }),
+    setCookie: [],
+    contentType: "application/json",
+  };
+
+  assert.deepEqual(parseStpartsApiResponse("search/articles/", response), []);
+  assert.deepEqual(parseStpartsApiResponse("search/batch", response), []);
+  assert.throws(
+    () => parseStpartsApiResponse("user/info", response),
+    /error code 301/,
+  );
 });
 
 test("STParts splits batch searches at the ABCP limit", () => {
