@@ -12,6 +12,30 @@ pnpm start
 
 The application listens on `127.0.0.1:3000` by default. `PORT` can override the port.
 
+## Safe Git Workflow
+
+Changes prepared by AI agents are published only through task branches named
+`codex/<short-description>`. Agents must run the required project checks, stage only files
+belonging to the current task, create the commit in that branch, and push it with an
+upstream:
+
+```sh
+git switch -c codex/<short-description>
+git push -u origin codex/<short-description>
+```
+
+Direct commits or pushes to `main`, force-pushes, and automatic merges are prohibited.
+System approval prompts for `.git` writes or network access must be handled with the
+narrowest permission for the required Git command; the security policy must not be
+disabled or bypassed.
+
+To load a published task branch on another computer:
+
+```sh
+git fetch origin
+git switch --track origin/codex/<short-description>
+```
+
 ## Backend Architecture
 
 - `src/backend/server.ts` is the composition root and process lifecycle entrypoint.
