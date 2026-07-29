@@ -151,6 +151,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /brand: result\.brand/);
   assert.match(app, /searchParams\.append\("supplier", "armtek"\)/);
   assert.match(app, /searchParams\.append\("supplier", "part-kom"\)/);
+  assert.match(app, /searchParams\.append\("supplier", "stparts"\)/);
   assert.match(app, /const exactResults = results\.filter\(\(result\) => result\.isAnalog !== true\);/);
 });
 

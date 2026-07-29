@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import { getStpartsApiConfig, stpartsConfig } from "../../config.ts";
-import type { NormalizedSearchResult, SearchQuery, SupplierSearchContext, SupplierSessionState, StpartsCredentials } from "../../types.ts";
+import type {
+  AnalogSearchQuery,
+  NormalizedSearchResult,
+  SearchQuery,
+  SupplierSearchContext,
+  SupplierSessionState,
+  StpartsCredentials,
+} from "../../types.ts";
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../errors.ts";
 import { isJsonContentType } from "../fetch-json.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
@@ -56,6 +63,10 @@ const stpartsBatchSize = 100;
 
 function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+}
+
+function normalizeBrand(value: string): string {
+  return value.normalize("NFKC").replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase();
 }
 
 function dateFromHours(value: unknown): string | null {
@@ -145,28 +156,72 @@ export function parseStpartsApiResults(payload: unknown, requestedArticle: strin
       continue;
     }
     const item = value as AbcpArticle;
-    const brand = typeof item.brand === "string" ? item.brand.trim() : "";
     const article = typeof item.number === "string" ? item.number.trim() : "";
-    const title = typeof item.description === "string" ? item.description.trim() : "";
-    const price = Number(item.price);
-    if (!brand || !article || !title || normalizeArticle(article) !== target || !Number.isFinite(price) || price <= 0 || Number(item.availability) === 0) {
+    if (!article || normalizeArticle(article) !== target) {
       continue;
     }
-    const deliveryDate = dateFromHours(item.deliveryPeriod);
-    const deliveryDateTo = dateFromHours(item.deliveryPeriodMax);
-    results.push({
-      supplier: "stparts",
-      brand,
-      article,
-      title,
-      price,
-      warehouse: warehouse(item.supplierDescription) || warehouse(item.distributorCode),
-      warehouseColor: color(item.supplierColor) ?? supplierDescriptionColor(item.supplierDescription),
-      deliveryDate,
-      deliveryDateTo: deliveryDateTo === deliveryDate ? null : deliveryDateTo,
-      deliveryDateApproximate: true,
-      link: new URL(`/search/${encodeURIComponent(brand)}/${encodeURIComponent(article)}`, stpartsBaseUrl).toString(),
-    });
+    const result = normalizeStpartsResult(item);
+    if (result) {
+      results.push(result);
+    }
+  }
+  return results;
+}
+
+function normalizeStpartsResult(item: AbcpArticle, isAnalog = false): NormalizedSearchResult | null {
+  const brand = typeof item.brand === "string" ? item.brand.trim() : "";
+  const article = typeof item.number === "string" ? item.number.trim() : "";
+  const title = typeof item.description === "string" ? item.description.trim() : "";
+  const price = Number(item.price);
+  if (!brand || !article || !title || !Number.isFinite(price) || price <= 0 || Number(item.availability) === 0) {
+    return null;
+  }
+  const deliveryDate = dateFromHours(item.deliveryPeriod);
+  const deliveryDateTo = dateFromHours(item.deliveryPeriodMax);
+  return {
+    supplier: "stparts",
+    brand,
+    article,
+    title,
+    price,
+    warehouse: warehouse(item.supplierDescription) || warehouse(item.distributorCode),
+    warehouseColor: color(item.supplierColor) ?? supplierDescriptionColor(item.supplierDescription),
+    deliveryDate,
+    deliveryDateTo: deliveryDateTo === deliveryDate ? null : deliveryDateTo,
+    deliveryDateApproximate: true,
+    link: new URL(`/search/${encodeURIComponent(brand)}/${encodeURIComponent(article)}`, stpartsBaseUrl).toString(),
+    ...(isAnalog ? { isAnalog: true } : {}),
+  };
+}
+
+export function parseStpartsApiAnalogResults(
+  payload: unknown,
+  requestedArticle: string,
+  requestedBrand: string,
+): NormalizedSearchResult[] {
+  const targetArticle = normalizeArticle(requestedArticle);
+  const targetBrand = normalizeBrand(requestedBrand);
+  const results: NormalizedSearchResult[] = [];
+
+  for (const value of abcpItems(payload, "analog search")) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      continue;
+    }
+    const item = value as AbcpArticle;
+    const article = typeof item.number === "string" ? item.number.trim() : "";
+    const brand = typeof item.brand === "string" ? item.brand.trim() : "";
+    if (
+      article &&
+      brand &&
+      normalizeArticle(article) === targetArticle &&
+      normalizeBrand(brand) === targetBrand
+    ) {
+      continue;
+    }
+    const result = normalizeStpartsResult(item, true);
+    if (result) {
+      results.push(result);
+    }
   }
   return results;
 }
@@ -369,6 +424,33 @@ export class StpartsApiAdapter implements SupplierAdapter {
         search.controller.abort(context.signal.reason ?? new Error("STParts search has no active clients"));
       }
     }
+  }
+
+  async searchAnalogs(
+    query: AnalogSearchQuery,
+    context: SupplierSearchContext,
+    onResult: (result: NormalizedSearchResult) => void,
+    sessionManager: SupplierSessionManager,
+  ): Promise<void> {
+    const credentials = sessionManager.getStpartsCredentials() ?? undefined;
+    if (!getStpartsApiConfig(credentials)) {
+      throw new SupplierAuthError("STParts API credentials are not configured");
+    }
+    const article = query.article.trim();
+    const brand = query.brand.trim();
+    const payload = await this.request(
+      "search/articles/",
+      new URLSearchParams({
+        number: article,
+        brand,
+        useOnlineStocks: "0",
+        withOutAnalogs: "0",
+      }),
+      context.signal,
+      context.timeoutMs,
+      credentials,
+    );
+    parseStpartsApiAnalogResults(payload, article, brand).forEach(onResult);
   }
 
   private async waitForSearch(searchPromise: Promise<NormalizedSearchResult[]>, signal: AbortSignal): Promise<NormalizedSearchResult[]> {

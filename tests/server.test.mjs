@@ -19,7 +19,12 @@ import {
   verifyPartKomApiCredentials,
 } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
-import { createStpartsBatchParams, parseStpartsApiResults, StpartsApiAdapter } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
+import {
+  createStpartsBatchParams,
+  parseStpartsApiAnalogResults,
+  parseStpartsApiResults,
+  StpartsApiAdapter,
+} from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
 import { gotoStparts, isStpartsSessionPageAuthorized } from "../src/backend/suppliers/stparts/stparts-site-auth.ts";
 import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.ts";
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../src/backend/suppliers/errors.ts";
@@ -286,6 +291,63 @@ test("STParts rejects malformed and non-exact API offers", () => {
   ], "ABC-123");
 
   assert.deepEqual(results.map((result) => result.title), ["Part"]);
+});
+
+test("STParts analog normalization excludes only the requested brand and article pair", () => {
+  const common = {
+    availability: 1,
+    description: "Part",
+    price: 100,
+  };
+  const results = parseStpartsApiAnalogResults([
+    { ...common, brand: "Selected Brand", number: "SOURCE-1" },
+    { ...common, brand: "Selected Brand", number: "ANALOG-1" },
+    { ...common, brand: "Other Brand", number: "SOURCE-1" },
+    { ...common, brand: "Other Brand", number: "ANALOG-2", availability: 0 },
+  ], "SOURCE-1", "Selected Brand");
+
+  assert.deepEqual(results.map((result) => [result.brand, result.article, result.isAnalog]), [
+    ["Selected Brand", "ANALOG-1", true],
+    ["Other Brand", "SOURCE-1", true],
+  ]);
+});
+
+test("STParts analog search requests offers for the selected brand and article", async () => {
+  const calls = [];
+  const adapter = new StpartsApiAdapter(async (path, params, _signal, _timeoutMs, credentials, options) => {
+    calls.push({
+      path,
+      params: new URLSearchParams(params),
+      credentials,
+      method: options?.method ?? "GET",
+    });
+    return [
+      { availability: 1, brand: "Selected Brand", number: "SOURCE-1", description: "Original", price: 100 },
+      { availability: 1, brand: "Analog Brand", number: "ANALOG-1", description: "Analog", price: 90 },
+    ];
+  });
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setStpartsCredentials({ login: "test", password: "secret" });
+  const results = [];
+
+  await adapter.searchAnalogs(
+    { mode: "analogs", article: "SOURCE-1", brand: "Selected Brand" },
+    { signal: new AbortController().signal, timeoutMs: 1000 },
+    (result) => results.push(result),
+    sessionManager,
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, "search/articles/");
+  assert.equal(calls[0].params.get("number"), "SOURCE-1");
+  assert.equal(calls[0].params.get("brand"), "Selected Brand");
+  assert.equal(calls[0].params.get("useOnlineStocks"), "0");
+  assert.equal(calls[0].params.get("withOutAnalogs"), "0");
+  assert.equal(calls[0].method, "GET");
+  assert.deepEqual(calls[0].credentials, { login: "test", password: "secret" });
+  assert.deepEqual(results.map((result) => [result.supplier, result.article, result.isAnalog]), [
+    ["stparts", "ANALOG-1", true],
+  ]);
 });
 
 test("STParts treats an empty API result map as no offers", () => {

@@ -1505,7 +1505,7 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   renderAnalogSource(result);
   analogsModal.hidden = false;
   analogsModal.focus();
-  setAnalogSearchStatus("Ищем подходящие предложения", "Результаты будут добавляться в таблицу по мере ответа Armtek и Партком.");
+  setAnalogSearchStatus("Ищем подходящие предложения", "Результаты будут добавляться в таблицу по мере ответа Armtek, Партком и STParts.");
 
   const failureMessages = new Set();
   const searchParams = new URLSearchParams({
@@ -1516,6 +1516,7 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   });
   searchParams.append("supplier", "armtek");
   searchParams.append("supplier", "part-kom");
+  searchParams.append("supplier", "stparts");
   const source = openSearchStream(`/api/search?${searchParams.toString()}`);
   analogSearchSource = source;
   renderAnalogRows();
