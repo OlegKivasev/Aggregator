@@ -363,6 +363,7 @@ test("STParts treats ABCP not-found responses from offer searches as no offers",
     contentType: "application/json",
   };
 
+  assert.deepEqual(parseStpartsApiResponse("search/brands/", { ...response, status: 404 }), []);
   assert.deepEqual(parseStpartsApiResponse("search/articles/", response), []);
   assert.deepEqual(parseStpartsApiResponse("search/batch", response), []);
   assert.throws(

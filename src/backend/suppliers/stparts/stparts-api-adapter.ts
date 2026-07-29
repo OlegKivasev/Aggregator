@@ -283,7 +283,7 @@ export function parseStpartsApiResponse(path: string, response: SiteHttpResponse
   if (
     (response.status < 200 || response.status >= 300) &&
     errorCode === 301 &&
-    (path === "search/articles/" || path === "search/batch")
+    (path === "search/brands/" || path === "search/articles/" || path === "search/batch")
   ) {
     return [];
   }
