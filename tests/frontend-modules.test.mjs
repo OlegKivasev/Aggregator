@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   compareDeliveryDates,
   escapeHtml,
+  formatPartIdentity,
   formatPrice,
   formatWarehouse,
   getSafeResultLink,
@@ -18,6 +19,17 @@ test("result formatting escapes untrusted text and limits result links", () => {
   assert.equal(formatWarehouse("  Склад   12  "), "Склад 12");
   assert.equal(formatWarehouse("Упаковка поставщика"), "-");
   assert.equal(formatPrice(1234.569), "1 234,56 ₽");
+});
+
+test("brand and article formatting normalizes case consistently", () => {
+  assert.equal(formatPartIdentity("FORTLUFT"), "Fortluft");
+  assert.equal(formatPartIdentity("Fortluft"), "Fortluft");
+  assert.equal(formatPartIdentity("SHINE SYSTEMS"), "Shine systems");
+  assert.equal(formatPartIdentity("ss641"), "Ss641");
+  assert.equal(formatPartIdentity("SS641"), "Ss641");
+  assert.equal(formatPartIdentity("ШААЗ"), "Шааз");
+  assert.equal(formatPartIdentity(""), "-");
+  assert.equal(formatPartIdentity(null), "-");
 });
 
 test("warehouse rendering escapes tooltip and validates supplier metadata", () => {
@@ -151,6 +163,8 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /mode: "analogs"/);
   assert.match(app, /article: result\.article/);
   assert.match(app, /brand: result\.brand/);
+  assert.match(app, /formatPartIdentity\(result\.brand\)/);
+  assert.match(app, /formatPartIdentity\(result\.article\)/);
   assert.match(app, /searchParams\.append\("supplier", "armtek"\)/);
   assert.match(app, /searchParams\.append\("supplier", "part-kom"\)/);
   assert.match(app, /searchParams\.append\("supplier", "stparts"\)/);

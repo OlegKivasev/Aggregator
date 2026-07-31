@@ -8,6 +8,16 @@ export const formatWarehouse = (value) => {
   return normalized;
 };
 
+export const formatPartIdentity = (value) => {
+  const characters = Array.from(typeof value === "string" ? value : "");
+  if (!characters.length) {
+    return "-";
+  }
+
+  const [firstCharacter, ...remainingCharacters] = characters;
+  return `${firstCharacter.toUpperCase()}${remainingCharacters.join("").toLowerCase()}`;
+};
+
 const formatWarehouseFull = (value) => {
   const normalized = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
   return normalized && normalized.length <= 300 ? normalized : "-";
