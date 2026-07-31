@@ -2,7 +2,8 @@ import { buildIncompleteSearchWarnings, buildSupplierResultTooltip, formatDelive
 import {
   compareDeliveryDates,
   escapeHtml,
-  formatPartIdentity,
+  formatArticle,
+  formatBrand,
   formatPrice,
   formatWarehouse,
   getSafeResultLink,
@@ -183,8 +184,11 @@ const getFilterValue = (result, column) => {
   if (column === "supplier") {
     return supplierNames[result.supplier] ?? result.supplier;
   }
-  if (column === "brand" || column === "article") {
-    return formatPartIdentity(result[column]);
+  if (column === "brand") {
+    return formatBrand(result.brand);
+  }
+  if (column === "article") {
+    return formatArticle(result.article);
   }
   if (column === "warehouse") {
     return formatWarehouse(result.warehouse);
@@ -236,8 +240,8 @@ const getFilteredResults = (sourceResults, searchTerm, percent) => {
     if (normalizedSearchTerm) {
       const searchableValues = [
         supplierNames[result.supplier] ?? result.supplier,
-        formatPartIdentity(result.brand),
-        formatPartIdentity(result.article),
+        formatBrand(result.brand),
+        formatArticle(result.article),
         result.title,
         result.warehouse,
       ];
@@ -534,8 +538,12 @@ const getSortValue = (result, key, percent = markupPercent) => {
     return getMarkupPrice(result, percent);
   }
 
-  if (key === "brand" || key === "article") {
-    return formatPartIdentity(result[key]);
+  if (key === "brand") {
+    return formatBrand(result.brand);
+  }
+
+  if (key === "article") {
+    return formatArticle(result.article);
   }
 
   return result[key];
@@ -797,8 +805,8 @@ const renderResults = () => {
     return `
       <tr class="results-table__row main-result-row${isBestPrice ? " is-best-price" : ""}" data-result-index="${results.indexOf(result)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Действия для ${escapeHtml(result.title)}">
         <td data-column="supplier">${escapeHtml(supplierName)}</td>
-        <td data-column="brand">${escapeHtml(formatPartIdentity(result.brand))}</td>
-        <td data-column="article">${escapeHtml(formatPartIdentity(result.article))}</td>
+        <td data-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
+        <td data-column="article">${escapeHtml(formatArticle(result.article))}</td>
         <td data-column="title"><div class="result-title-cell"><span title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</span></div></td>
         <td data-column="warehouse">${renderWarehouse(result)}</td>
         <td data-column="price"><span class="main-result-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
@@ -1434,8 +1442,8 @@ const closeAnalogsModal = () => {
 };
 
 const renderAnalogSource = (result) => {
-  analogsSourceBrand.textContent = formatPartIdentity(result.brand);
-  analogsSourceArticle.textContent = formatPartIdentity(result.article);
+  analogsSourceBrand.textContent = formatBrand(result.brand);
+  analogsSourceArticle.textContent = formatArticle(result.article);
   analogsSourceTitle.textContent = result.title;
   analogsSourceTitle.title = result.title;
   analogsSourceSupplier.textContent = supplierNames[result.supplier] ?? result.supplier;
@@ -1464,8 +1472,8 @@ const renderAnalogRows = () => {
   const normalizedTerm = analogSearchTerm.trim().toLocaleLowerCase();
   const filteredResults = analogSearchResults.filter((result) => !normalizedTerm || [
     supplierNames[result.supplier] ?? result.supplier,
-    formatPartIdentity(result.brand),
-    formatPartIdentity(result.article),
+    formatBrand(result.brand),
+    formatArticle(result.article),
     result.title,
     result.warehouse,
   ].some((value) => String(value ?? "").toLocaleLowerCase().includes(normalizedTerm)));
@@ -1493,8 +1501,8 @@ const renderAnalogRows = () => {
     return `
       <tr class="results-table__row analogs-result-row${isBestPrice ? " is-best-price" : ""}" data-analog-result-index="${analogSearchResults.indexOf(result)}" tabindex="0" aria-label="Действия для ${escapeHtml(result.title)}">
         <td>${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}</td>
-        <td>${escapeHtml(formatPartIdentity(result.brand))}</td>
-        <td>${escapeHtml(formatPartIdentity(result.article))}</td>
+        <td>${escapeHtml(formatBrand(result.brand))}</td>
+        <td>${escapeHtml(formatArticle(result.article))}</td>
         <td class="analogs-result-title" title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</td>
         <td>${renderWarehouse(result)}</td>
         <td><span class="analogs-result-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>

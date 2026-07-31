@@ -8,7 +8,7 @@ export const formatWarehouse = (value) => {
   return normalized;
 };
 
-export const formatPartIdentity = (value) => {
+export const formatBrand = (value) => {
   const characters = Array.from(typeof value === "string" ? value : "");
   if (!characters.length) {
     return "-";
@@ -16,6 +16,11 @@ export const formatPartIdentity = (value) => {
 
   const [firstCharacter, ...remainingCharacters] = characters;
   return `${firstCharacter.toUpperCase()}${remainingCharacters.join("").toLowerCase()}`;
+};
+
+export const formatArticle = (value) => {
+  const article = typeof value === "string" ? value : "";
+  return article ? article.toUpperCase() : "-";
 };
 
 const formatWarehouseFull = (value) => {

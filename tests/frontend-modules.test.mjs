@@ -4,7 +4,8 @@ import test from "node:test";
 import {
   compareDeliveryDates,
   escapeHtml,
-  formatPartIdentity,
+  formatArticle,
+  formatBrand,
   formatPrice,
   formatWarehouse,
   getSafeResultLink,
@@ -22,14 +23,15 @@ test("result formatting escapes untrusted text and limits result links", () => {
 });
 
 test("brand and article formatting normalizes case consistently", () => {
-  assert.equal(formatPartIdentity("FORTLUFT"), "Fortluft");
-  assert.equal(formatPartIdentity("Fortluft"), "Fortluft");
-  assert.equal(formatPartIdentity("SHINE SYSTEMS"), "Shine systems");
-  assert.equal(formatPartIdentity("ss641"), "Ss641");
-  assert.equal(formatPartIdentity("SS641"), "Ss641");
-  assert.equal(formatPartIdentity("ШААЗ"), "Шааз");
-  assert.equal(formatPartIdentity(""), "-");
-  assert.equal(formatPartIdentity(null), "-");
+  assert.equal(formatBrand("FORTLUFT"), "Fortluft");
+  assert.equal(formatBrand("Fortluft"), "Fortluft");
+  assert.equal(formatBrand("SHINE SYSTEMS"), "Shine systems");
+  assert.equal(formatBrand("ШААЗ"), "Шааз");
+  assert.equal(formatArticle("ss641"), "SS641");
+  assert.equal(formatArticle("SS641"), "SS641");
+  assert.equal(formatArticle("а123б"), "А123Б");
+  assert.equal(formatBrand(""), "-");
+  assert.equal(formatArticle(null), "-");
 });
 
 test("warehouse rendering escapes tooltip and validates supplier metadata", () => {
@@ -163,8 +165,8 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /mode: "analogs"/);
   assert.match(app, /article: result\.article/);
   assert.match(app, /brand: result\.brand/);
-  assert.match(app, /formatPartIdentity\(result\.brand\)/);
-  assert.match(app, /formatPartIdentity\(result\.article\)/);
+  assert.match(app, /formatBrand\(result\.brand\)/);
+  assert.match(app, /formatArticle\(result\.article\)/);
   assert.match(app, /searchParams\.append\("supplier", "armtek"\)/);
   assert.match(app, /searchParams\.append\("supplier", "part-kom"\)/);
   assert.match(app, /searchParams\.append\("supplier", "stparts"\)/);
