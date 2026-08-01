@@ -354,7 +354,7 @@ function isArmtekAnalog(item: ArmtekSearchItem): boolean {
 
 export function getArmtekWarehouse(item: ArmtekSearchItem, storeNames: Map<string, string>): string | null {
   return item.STOCK_NAME || item.WHNAME || item.WAREHOUSE_NAME || item.STORE_NAME || item.SNAME || item.RNAME ||
-    (item.KEYZAK ? storeNames.get(item.KEYZAK) || item.KEYZAK : undefined) || item.STOCK || item.WH ||
+    (item.KEYZAK ? storeNames.get(item.KEYZAK) : undefined) || item.STOCK || item.WH ||
     item.WAREHOUSE || item.STORE || null;
 }
 

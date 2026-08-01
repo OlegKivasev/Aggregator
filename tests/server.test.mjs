@@ -105,7 +105,7 @@ test("analog search invokes only an adapter with explicit analog support", async
   ]);
 });
 
-test("Armtek keeps search results when optional store-name lookup fails", async () => {
+test("Armtek does not expose an internal warehouse code when optional store-name lookup fails", async () => {
   const stores = await getOptionalArmtekStoreNames(
     async () => {
       throw new SupplierIntegrationError("Store directory is unavailable");
@@ -114,7 +114,8 @@ test("Armtek keeps search results when optional store-name lookup fails", async 
   );
 
   assert.equal(stores.size, 0);
-  assert.equal(getArmtekWarehouse({ KEYZAK: "STORE-42" }, stores), "STORE-42");
+  assert.equal(getArmtekWarehouse({ KEYZAK: "0000041375" }, stores), null);
+  assert.equal(getArmtekWarehouse({ KEYZAK: "0000041375" }, new Map([["0000041375", "Основной склад"]])), "Основной склад");
 });
 
 test("Armtek account state is accepted only for the login that discovered it", () => {
