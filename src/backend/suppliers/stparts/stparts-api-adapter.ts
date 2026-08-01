@@ -78,6 +78,17 @@ function dateFromHours(value: unknown): string | null {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate() + Math.ceil(hours / 24)).toISOString();
 }
 
+function parseStpartsQuantity(value: unknown): number | null {
+  const normalized = typeof value === "number"
+    ? String(value)
+    : typeof value === "string" ? value.replace(/\s+/g, "").replace(",", ".") : "";
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= Number.MAX_SAFE_INTEGER ? parsed : null;
+}
+
 function color(value: unknown): "green" | "blue" | "red" | null {
   if (typeof value !== "string") {
     return null;
@@ -173,6 +184,7 @@ function normalizeStpartsResult(item: AbcpArticle, isAnalog = false): Normalized
   const article = typeof item.number === "string" ? item.number.trim() : "";
   const title = typeof item.description === "string" ? item.description.trim() : "";
   const price = Number(item.price);
+  const quantity = parseStpartsQuantity(item.availability);
   if (!brand || !article || !title || !Number.isFinite(price) || price <= 0 || Number(item.availability) === 0) {
     return null;
   }
@@ -184,6 +196,7 @@ function normalizeStpartsResult(item: AbcpArticle, isAnalog = false): Normalized
     article,
     title,
     price,
+    quantity,
     warehouse: warehouse(item.supplierDescription) || warehouse(item.distributorCode),
     warehouseColor: color(item.supplierColor) ?? supplierDescriptionColor(item.supplierDescription),
     deliveryDate,

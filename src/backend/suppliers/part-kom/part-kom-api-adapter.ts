@@ -59,6 +59,17 @@ function parsePositiveNumber(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function parsePartKomQuantity(value: unknown): number | null {
+  const normalized = typeof value === "number"
+    ? String(value)
+    : typeof value === "string" ? value.replace(/\s+/g, "").replace(",", ".") : "";
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= Number.MAX_SAFE_INTEGER ? parsed : null;
+}
+
 function parseApiDate(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -184,8 +195,8 @@ function normalizePartKomOffer(offer: PartKomOffer, isAnalog: boolean): Normaliz
   const brand = typeof offer.maker === "string" ? offer.maker.trim() : "";
   const title = typeof offer.description === "string" ? offer.description.trim() : "";
   const price = parsePositiveNumber(offer.price);
-  const quantity = Number(offer.quantity);
-  if (!article || !brand || !title || price === null || !Number.isFinite(quantity) || quantity <= 0) {
+  const quantity = parsePartKomQuantity(offer.quantity);
+  if (!article || !brand || !title || price === null || quantity === null) {
     return null;
   }
   const expectedDate = parseApiDate(offer.expectedDate) ?? dateFromDuration(offer.expectedHours, offer.expectedDays);
@@ -200,6 +211,7 @@ function normalizePartKomOffer(offer: PartKomOffer, isAnalog: boolean): Normaliz
     article,
     title,
     price,
+    quantity,
     warehouse: typeof offer.placement === "string" && offer.placement.trim() ? offer.placement.trim() : null,
     deliveryDate: expectedDate,
     deliveryDateTo,

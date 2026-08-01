@@ -173,6 +173,7 @@ test("PartKOM normalizes exact official API offers", () => {
 
   assert.equal(results.length, 1);
   assert.equal(results[0].price, 6900.27);
+  assert.equal(results[0].quantity, 3);
   assert.equal(results[0].warehouse, "Москва");
   assert.equal(results[0].deliveryDateApproximate, false);
   assert.ok(results[0].deliveryDate);
@@ -213,6 +214,23 @@ test("PartKOM does not treat null delivery duration as zero hours", () => {
   assert.equal(result.deliveryDateApproximate, true);
 });
 
+test("PartKOM rejects malformed quantities instead of inventing availability", () => {
+  const common = {
+    number: "ABC-123",
+    maker: "Brand",
+    description: "Part",
+    price: 100,
+  };
+  const results = parsePartKomApiResults([
+    { ...common, quantity: " 4 " },
+    { ...common, quantity: true },
+    { ...common, quantity: -1 },
+    { ...common },
+  ], "ABC-123");
+
+  assert.deepEqual(results.map((result) => result.quantity), [4]);
+});
+
 test("STParts normalizes exact API offers", () => {
   const results = parseStpartsApiResults({ "VAP0212375": {
     availability: "38",
@@ -227,6 +245,7 @@ test("STParts normalizes exact API offers", () => {
 
   assert.equal(results.length, 1);
   assert.equal(results[0].price, 6900.27);
+  assert.equal(results[0].quantity, 38);
   assert.equal(results[0].warehouse, "OD880");
   assert.equal(results[0].warehouseColor, "green");
 });
@@ -282,6 +301,23 @@ test("STParts omits a duplicate delivery interval end", () => {
   assert.equal(results[0].deliveryDateTo, null);
 });
 
+test("STParts exposes only exact positive availability as quantity", () => {
+  const common = {
+    brand: "Brand",
+    description: "Part",
+    number: "ABC-123",
+    price: 100,
+  };
+  const results = parseStpartsApiResults([
+    { ...common, availability: "7" },
+    { ...common, availability: -1 },
+    { ...common, availability: "unknown" },
+    { ...common, availability: 0 },
+  ], "ABC-123");
+
+  assert.deepEqual(results.map((result) => result.quantity), [7, null, null]);
+});
+
 test("delivery formatter omits an approximate marker for date ranges", () => {
   assert.equal(formatDeliveryDate("2000-07-26T00:00:00.000Z", true, "2000-07-26T12:00:00.000Z"), "~26.07.2000");
   assert.equal(formatDeliveryDate("2000-07-26T00:00:00.000Z", true, "2000-07-27T00:00:00.000Z"), "26.07.2000 - 27.07.2000");
@@ -326,9 +362,9 @@ test("STParts analog normalization excludes only the requested brand and article
     { ...common, brand: "Other Brand", number: "ANALOG-2", availability: 0 },
   ], "SOURCE-1", "Selected Brand");
 
-  assert.deepEqual(results.map((result) => [result.brand, result.article, result.isAnalog]), [
-    ["Selected Brand", "ANALOG-1", true],
-    ["Other Brand", "SOURCE-1", true],
+  assert.deepEqual(results.map((result) => [result.brand, result.article, result.quantity, result.isAnalog]), [
+    ["Selected Brand", "ANALOG-1", 1, true],
+    ["Other Brand", "SOURCE-1", 1, true],
   ]);
 });
 
@@ -622,9 +658,9 @@ test("PartKOM analog normalization excludes the requested original detail", () =
     { ...common, number: "UNKNOWN-1", detailGroup: "Unknown" },
   ]);
 
-  assert.deepEqual(results.map((result) => [result.article, result.isAnalog]), [
-    ["REPLACEMENT-1", true],
-    ["ANALOG-1", true],
+  assert.deepEqual(results.map((result) => [result.article, result.quantity, result.isAnalog]), [
+    ["REPLACEMENT-1", 1, true],
+    ["ANALOG-1", 1, true],
   ]);
 });
 
