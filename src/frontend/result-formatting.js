@@ -77,6 +77,10 @@ export const formatPrice = (value) => {
   return `${truncated.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽`;
 };
 
+export const formatQuantity = (value) => Number.isFinite(value) && value >= 0
+  ? value.toLocaleString("ru-RU", { maximumFractionDigits: 3 })
+  : "-";
+
 const getDeliveryTimestamp = (value) => {
   const timestamp = value ? new Date(value).getTime() : Number.NaN;
   return Number.isNaN(timestamp) ? null : timestamp;

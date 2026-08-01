@@ -5,6 +5,7 @@ import {
   formatArticle,
   formatBrand,
   formatPrice,
+  formatQuantity,
   formatWarehouse,
   getSafeResultLink,
   renderWarehouse,
@@ -167,6 +168,7 @@ const tableColumnWidths = {
   brand: 115,
   article: 125,
   title: 350,
+  quantity: 105,
   warehouse: 130,
   price: 120,
   markupPrice: 125,
@@ -178,7 +180,7 @@ const filterColumnNames = Object.fromEntries(filterColumnButtons.map((button) =>
   button.dataset.filterColumn,
   button.firstChild.textContent.trim(),
 ]));
-const rangeFilterColumns = new Set(["price", "markupPrice", "deliveryDate"]);
+const rangeFilterColumns = new Set(["quantity", "price", "markupPrice", "deliveryDate"]);
 
 const supplierSearchToggles = Object.fromEntries(
   supplierEnabledInputs.map((input) => [input.value, input.closest(".supplier-search-toggle")]),
@@ -200,6 +202,9 @@ const getFilterValue = (result, column) => {
   if (column === "warehouse") {
     return formatWarehouse(result.warehouse);
   }
+  if (column === "quantity") {
+    return formatQuantity(result.quantity);
+  }
   if (column === "price") {
     return formatPrice(result.price);
   }
@@ -215,6 +220,9 @@ const getFilterValue = (result, column) => {
 };
 
 const getRangeFilterValue = (result, column, percent = markupPercent) => {
+  if (column === "quantity") {
+    return Number.isFinite(result.quantity) ? result.quantity : null;
+  }
   if (column === "price") {
     return Number(result.price);
   }
@@ -846,6 +854,7 @@ const renderResults = () => {
         <td data-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-column="article">${escapeHtml(formatArticle(result.article))}</td>
         <td data-column="title"><div class="result-title-cell"><span title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</span></div></td>
+        <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-column="warehouse">${renderWarehouse(result)}</td>
         <td data-column="price"><span class="main-result-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         <td data-column="markupPrice">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</td>
@@ -1543,7 +1552,7 @@ const renderAnalogRows = () => {
       : analogSearchSource
         ? "Предложения появятся здесь по мере получения"
         : "Аналоги для выбранной позиции не найдены";
-    analogsResultsBody.innerHTML = `<tr class="analogs-results__empty"><td colspan="8">${message}</td></tr>`;
+    analogsResultsBody.innerHTML = `<tr class="analogs-results__empty"><td colspan="9">${message}</td></tr>`;
     return;
   }
 
@@ -1556,6 +1565,7 @@ const renderAnalogRows = () => {
         <td>${escapeHtml(formatBrand(result.brand))}</td>
         <td>${escapeHtml(formatArticle(result.article))}</td>
         <td class="analogs-result-title" title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</td>
+        <td>${escapeHtml(formatQuantity(result.quantity))}</td>
         <td>${renderWarehouse(result)}</td>
         <td><span class="analogs-result-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
         <td>${escapeHtml(formatPrice(getMarkupPrice(result)))}</td>

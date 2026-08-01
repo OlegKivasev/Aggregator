@@ -25,6 +25,7 @@ export interface NormalizedSearchResult {
   article: string;
   title: string;
   price: number;
+  quantity?: number | null;
   warehouse: string | null;
   warehouseFull?: string | null;
   warehouseColor?: "green" | "blue" | "red" | null;

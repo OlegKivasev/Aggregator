@@ -7,6 +7,7 @@ import {
   formatArticle,
   formatBrand,
   formatPrice,
+  formatQuantity,
   formatWarehouse,
   getSafeResultLink,
   renderWarehouse,
@@ -24,6 +25,14 @@ test("result formatting escapes untrusted text and limits result links", () => {
   assert.equal(formatWarehouse("  Склад   12  "), "Склад 12");
   assert.equal(formatWarehouse("Упаковка поставщика"), "-");
   assert.equal(formatPrice(1234.569), "1 234,56 ₽");
+});
+
+test("quantity formatting distinguishes real zero from missing data", () => {
+  assert.equal(formatQuantity(12), "12");
+  assert.equal(formatQuantity(1.5), "1,5");
+  assert.equal(formatQuantity(0), "0");
+  assert.equal(formatQuantity(null), "-");
+  assert.equal(formatQuantity(Number.NaN), "-");
 });
 
 test("brand and article formatting normalizes case consistently", () => {
@@ -202,6 +211,9 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(html, /class="analogs-modal__footer" aria-hidden="true"><\/footer>/);
   assert.doesNotMatch(html, /Нажмите на строку/);
   assert.match(html, /id="warehouse-tooltip"/);
+  assert.match(html, /data-column="quantity"[^>]*[\s\S]*?Количество[\s\S]*?data-column="warehouse"/);
+  assert.match(html, /data-analog-sort-key="quantity"[^>]*>Количество/);
+  assert.match(app, /formatQuantity\(result\.quantity\)/);
   assert.match(app, /main-result-row\$\{isBestPrice \? " is-best-price" : ""\}/);
   assert.match(app, /main-best-price/);
   assert.match(app, /--results-table-min-width/);

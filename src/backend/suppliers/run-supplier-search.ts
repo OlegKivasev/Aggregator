@@ -49,6 +49,10 @@ function isValidResult(result: NormalizedSearchResult, supplier: SupplierAdapter
   if (!Number.isFinite(result.price) || result.price <= 0) {
     return false;
   }
+  if (result.quantity !== undefined && result.quantity !== null &&
+    (!Number.isFinite(result.quantity) || result.quantity < 0)) {
+    return false;
+  }
   if (!isValidDate(result.deliveryDate) || !isValidDate(result.deliveryDateTo)) {
     return false;
   }

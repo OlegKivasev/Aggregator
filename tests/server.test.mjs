@@ -6,7 +6,7 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { armtekSearchItems, armtekVkorgItems, getArmtekResponseMaxBytes, getArmtekWarehouse, getOptionalArmtekStoreNames, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
+import { armtekSearchItems, armtekVkorgItems, getArmtekResponseMaxBytes, getArmtekWarehouse, getOptionalArmtekStoreNames, parseArmtekDeliveryDates, parseArmtekQuantity } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
 import { supplierMaxResponseBytes } from "../src/backend/config.ts";
 import { SearchApplicationService } from "../src/backend/application/search-application-service.ts";
 import { createHash } from "node:crypto";
@@ -60,6 +60,16 @@ test("Armtek accepts the direct VKORG array returned by WebService", () => {
 
 test("Armtek accepts the direct search array returned by WebService", () => {
   assert.deepEqual(armtekSearchItems([{ PIN: "90915YZZJ1", PRICE: "691.22" }]), [{ PIN: "90915YZZJ1", PRICE: "691.22" }]);
+});
+
+test("Armtek normalizes only valid available quantities", () => {
+  assert.equal(parseArmtekQuantity(" 12 "), 12);
+  assert.equal(parseArmtekQuantity("1,5"), 1.5);
+  assert.equal(parseArmtekQuantity("0"), 0);
+  assert.equal(parseArmtekQuantity("10+"), null);
+  assert.equal(parseArmtekQuantity("-1"), null);
+  assert.equal(parseArmtekQuantity(12), null);
+  assert.equal(parseArmtekQuantity(undefined), null);
 });
 
 test("Armtek allows the observed large store directory without relaxing other response limits", () => {

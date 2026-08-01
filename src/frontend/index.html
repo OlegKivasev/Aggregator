@@ -96,6 +96,7 @@
                     <button type="button" data-filter-column="brand">Бренд<span>›</span></button>
                     <button type="button" data-filter-column="article">Артикул<span>›</span></button>
                     <button type="button" data-filter-column="title">Наименование<span>›</span></button>
+                    <button type="button" data-filter-column="quantity">Количество<span>›</span></button>
                     <button type="button" data-filter-column="warehouse">Склад<span>›</span></button>
                     <button type="button" data-filter-column="price">Цена<span>›</span></button>
                     <button type="button" data-filter-column="markupPrice">С наценкой<span>›</span></button>
@@ -167,6 +168,7 @@
                     <th scope="col" data-column="brand" aria-sort="none"><button type="button" class="table-sort" data-sort-key="brand">Бренд<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" data-column="article" aria-sort="none"><button type="button" class="table-sort" data-sort-key="article">Артикул<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" data-column="title" aria-sort="none"><button type="button" class="table-sort" data-sort-key="title">Наименование<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" data-column="quantity" aria-sort="none"><button type="button" class="table-sort" data-sort-key="quantity">Количество<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" data-column="warehouse" aria-sort="none"><button type="button" class="table-sort" data-sort-key="warehouse">Склад<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" data-column="price" aria-sort="ascending"><button type="button" class="table-sort is-active" data-sort-key="price">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" data-column="markupPrice" aria-sort="none"><button type="button" class="table-sort" data-sort-key="markupPrice">С наценкой<span class="table-sort__icon" aria-hidden="true"></span></button></th>
@@ -175,7 +177,7 @@
                 </thead>
                 <tbody id="results-body">
                   <tr class="results-table__empty">
-                    <td colspan="8">По вашему запросу ничего не найдено.</td>
+                    <td colspan="9">По вашему запросу ничего не найдено.</td>
                   </tr>
                 </tbody>
               </table>
@@ -201,6 +203,7 @@
             <label><input class="table-column-input" type="checkbox" value="brand" checked><span>Бренд</span></label>
             <label><input class="table-column-input" type="checkbox" value="article" checked><span>Артикул</span></label>
             <label><input class="table-column-input" type="checkbox" value="title" checked><span>Наименование</span></label>
+            <label><input class="table-column-input" type="checkbox" value="quantity" checked><span>Количество</span></label>
             <label><input class="table-column-input" type="checkbox" value="warehouse" checked><span>Склад</span></label>
             <label><input class="table-column-input" type="checkbox" value="price" checked><span>Цена</span></label>
             <label><input class="table-column-input" type="checkbox" value="markupPrice" checked><span>С наценкой</span></label>
@@ -451,6 +454,7 @@
               <th><button type="button" class="analogs-sort" data-analog-sort-key="brand">Бренд<span aria-hidden="true"></span></button></th>
               <th><button type="button" class="analogs-sort" data-analog-sort-key="article">Артикул<span aria-hidden="true"></span></button></th>
               <th><button type="button" class="analogs-sort" data-analog-sort-key="title">Наименование<span aria-hidden="true"></span></button></th>
+              <th><button type="button" class="analogs-sort" data-analog-sort-key="quantity">Количество<span aria-hidden="true"></span></button></th>
               <th><button type="button" class="analogs-sort" data-analog-sort-key="warehouse">Склад<span aria-hidden="true"></span></button></th>
               <th><button type="button" class="analogs-sort is-active" data-analog-sort-key="price">Цена<span aria-hidden="true"></span></button></th>
               <th><button type="button" class="analogs-sort" data-analog-sort-key="markupPrice">С наценкой<span aria-hidden="true"></span></button></th>
