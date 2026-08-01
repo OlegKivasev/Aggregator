@@ -12,6 +12,10 @@ import {
   renderWarehouse,
 } from "../src/frontend/result-formatting.js";
 import { openSearchStream } from "../src/frontend/search-stream.js";
+import {
+  isStpartsWarehouseVisible,
+  normalizeStpartsWarehouseColors,
+} from "../src/frontend/stparts-warehouse-settings.js";
 
 test("result formatting escapes untrusted text and limits result links", () => {
   assert.equal(escapeHtml('<script data-value="x">'), "&lt;script data-value=&quot;x&quot;&gt;");
@@ -46,6 +50,20 @@ test("warehouse rendering escapes tooltip and validates supplier metadata", () =
   assert.match(markup, /data-tooltip="Основной &lt;склад&gt; &quot;A&quot;"/);
   assert.doesNotMatch(markup, /warehouse-code--purple/);
   assert.match(markup, /&lt;4\.5/);
+});
+
+test("STParts warehouse settings default to green and always keep one color", () => {
+  assert.deepEqual(normalizeStpartsWarehouseColors(null), ["green"]);
+  assert.deepEqual(normalizeStpartsWarehouseColors([]), ["green"]);
+  assert.deepEqual(normalizeStpartsWarehouseColors(["blue", "blue", "invalid"]), ["blue"]);
+});
+
+test("STParts warehouse visibility does not affect other suppliers", () => {
+  const enabledColors = new Set(["green"]);
+
+  assert.equal(isStpartsWarehouseVisible({ supplier: "stparts", warehouseColor: "green" }, enabledColors), true);
+  assert.equal(isStpartsWarehouseVisible({ supplier: "stparts", warehouseColor: "red" }, enabledColors), false);
+  assert.equal(isStpartsWarehouseVisible({ supplier: "armtek", warehouseColor: "red" }, enabledColors), true);
 });
 
 test("delivery date sorting moves intervals above dates they finish before", () => {

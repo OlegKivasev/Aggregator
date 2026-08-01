@@ -10,6 +10,10 @@ import {
   renderWarehouse,
 } from "./result-formatting.js";
 import { openSearchStream } from "./search-stream.js";
+import {
+  isStpartsWarehouseVisible,
+  normalizeStpartsWarehouseColors,
+} from "./stparts-warehouse-settings.js";
 
 const form = document.querySelector("#search-form");
 const articleInput = document.querySelector("#article-input");
@@ -74,6 +78,7 @@ const stpartsConnectButton = document.querySelector("#stparts-connect-button");
 const stpartsLogoutButton = document.querySelector("#stparts-logout-button");
 const stpartsSessionPill = document.querySelector("#stparts-session-pill");
 const stpartsAuthFeedback = document.querySelector("#stparts-auth-feedback");
+const stpartsWarehouseInputs = [...document.querySelectorAll(".stparts-warehouse-input")];
 const motorDetalAuthForm = document.querySelector("#motordetal-auth-form");
 const motorDetalLoginInput = document.querySelector("#motordetal-login");
 const motorDetalPasswordInput = document.querySelector("#motordetal-password");
@@ -143,6 +148,7 @@ const supplierSessionStates = new Map();
 
 const searchStateStorageKey = "autoservice.searchState";
 const tableColumnsStorageKey = "autoservice.tableColumns";
+const stpartsWarehousesStorageKey = "autoservice.stpartsWarehouses";
 const lastSearchStorageKey = "autoservice.lastSearchStartedAt";
 const supplierCheckIntervalMs = 2 * 60 * 60 * 1000;
 
@@ -167,6 +173,7 @@ const tableColumnWidths = {
   deliveryDate: 145,
 };
 let visibleTableColumns = new Set(tableColumnIds);
+let visibleStpartsWarehouses = new Set(["green"]);
 const filterColumnNames = Object.fromEntries(filterColumnButtons.map((button) => [
   button.dataset.filterColumn,
   button.firstChild.textContent.trim(),
@@ -645,6 +652,36 @@ const restoreTableColumns = () => {
   }
 };
 
+const saveStpartsWarehouses = () => {
+  try {
+    localStorage.setItem(stpartsWarehousesStorageKey, JSON.stringify([...visibleStpartsWarehouses]));
+  } catch {
+    // Warehouse preferences are optional; unavailable storage must not affect search.
+  }
+};
+
+const updateStpartsWarehouseInputs = () => {
+  const hasSingleWarehouse = visibleStpartsWarehouses.size === 1;
+  stpartsWarehouseInputs.forEach((input) => {
+    input.checked = visibleStpartsWarehouses.has(input.value);
+    input.disabled = hasSingleWarehouse && input.checked;
+  });
+};
+
+const restoreStpartsWarehouses = () => {
+  try {
+    const savedColors = JSON.parse(localStorage.getItem(stpartsWarehousesStorageKey));
+    visibleStpartsWarehouses = new Set(normalizeStpartsWarehouseColors(savedColors));
+  } catch {
+    localStorage.removeItem(stpartsWarehousesStorageKey);
+  }
+  updateStpartsWarehouseInputs();
+};
+
+const filterVisibleStpartsWarehouses = (items) => items.filter(
+  (result) => isStpartsWarehouseVisible(result, visibleStpartsWarehouses),
+);
+
 const saveSearchState = () => {
   try {
     syncActiveTab();
@@ -787,7 +824,8 @@ const renderResults = () => {
 
   // Older persisted tabs can still contain automatically fetched analogs.
   const exactResults = results.filter((result) => result.isAnalog !== true);
-  const filteredResults = getFilteredResults(exactResults, tableSearchTerm, markupPercent);
+  const visibleExactResults = filterVisibleStpartsWarehouses(exactResults);
+  const filteredResults = getFilteredResults(visibleExactResults, tableSearchTerm, markupPercent);
   const sortedResults = [...filteredResults].sort((left, right) =>
     compareResults(left, right, sortState, markupPercent));
   const bestPrice = filteredResults
@@ -1377,6 +1415,19 @@ tableColumnsReset.addEventListener("click", () => {
   renderResults();
 });
 
+stpartsWarehouseInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    const selectedColors = stpartsWarehouseInputs
+      .filter((candidate) => candidate.checked)
+      .map((candidate) => candidate.value);
+    visibleStpartsWarehouses = new Set(normalizeStpartsWarehouseColors(selectedColors));
+    updateStpartsWarehouseInputs();
+    saveStpartsWarehouses();
+    renderResults();
+    renderAnalogRows();
+  });
+});
+
 sortButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const key = button.dataset.sortKey;
@@ -1470,7 +1521,8 @@ const renderAnalogRows = () => {
     ? document.activeElement.closest("[data-analog-result-index]")?.dataset.analogResultIndex
     : null;
   const normalizedTerm = analogSearchTerm.trim().toLocaleLowerCase();
-  const filteredResults = analogSearchResults.filter((result) => !normalizedTerm || [
+  const visibleResults = filterVisibleStpartsWarehouses(analogSearchResults);
+  const filteredResults = visibleResults.filter((result) => !normalizedTerm || [
     supplierNames[result.supplier] ?? result.supplier,
     formatBrand(result.brand),
     formatArticle(result.article),
@@ -1481,7 +1533,7 @@ const renderAnalogRows = () => {
   const bestPrice = filteredResults
     .filter((result) => Number.isFinite(result.price) && result.price > 0)
     .reduce((best, result) => !best || result.price < best.price ? result : best, null);
-  analogsCount.textContent = normalizedTerm ? `${rows.length} из ${analogSearchResults.length}` : String(analogSearchResults.length);
+  analogsCount.textContent = normalizedTerm ? `${rows.length} из ${visibleResults.length}` : String(visibleResults.length);
   analogsCount.title = normalizedTerm ? "Показано с учетом поиска" : "Всего найдено";
   updateAnalogSortHeaders();
 
@@ -2008,6 +2060,7 @@ form.addEventListener("submit", async (event) => {
 
 restoreSearchState();
 restoreTableColumns();
+restoreStpartsWarehouses();
 tableColumnInputs.forEach((input) => {
   input.checked = visibleTableColumns.has(input.value);
 });
