@@ -629,6 +629,11 @@ const applyTableColumns = () => {
   const visibleColumns = getVisibleTableColumns();
   const minimumWidth = visibleColumns.reduce((width, column) => width + tableColumnWidths[column], 0);
   resultsTable.style.setProperty("--results-table-min-width", `${minimumWidth}px`);
+  resultsTable.querySelectorAll("th[data-column]").forEach((header) => {
+    header.style.width = visibleTableColumns.has(header.dataset.column)
+      ? `${tableColumnWidths[header.dataset.column] / minimumWidth * 100}%`
+      : "";
+  });
   tableColumnsReset.hidden = visibleColumns.length === tableColumnIds.length;
   document.querySelectorAll("[data-column]").forEach((element) => {
     element.hidden = !visibleTableColumns.has(element.dataset.column);
