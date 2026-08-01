@@ -6,7 +6,8 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { armtekSearchItems, armtekVkorgItems, getArmtekWarehouse, getOptionalArmtekStoreNames, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
+import { armtekSearchItems, armtekVkorgItems, getArmtekResponseMaxBytes, getArmtekWarehouse, getOptionalArmtekStoreNames, parseArmtekDeliveryDates } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
+import { supplierMaxResponseBytes } from "../src/backend/config.ts";
 import { SearchApplicationService } from "../src/backend/application/search-application-service.ts";
 import { createHash } from "node:crypto";
 import { parseArmtekApiAccountState } from "../src/backend/suppliers/armtek/armtek-api-account-state.ts";
@@ -59,6 +60,13 @@ test("Armtek accepts the direct VKORG array returned by WebService", () => {
 
 test("Armtek accepts the direct search array returned by WebService", () => {
   assert.deepEqual(armtekSearchItems([{ PIN: "90915YZZJ1", PRICE: "691.22" }]), [{ PIN: "90915YZZJ1", PRICE: "691.22" }]);
+});
+
+test("Armtek allows the observed large store directory without relaxing other response limits", () => {
+  const observedStoreDirectoryBytes = 10_327_764;
+
+  assert.ok(getArmtekResponseMaxBytes("ws_user/getStoreList") >= observedStoreDirectoryBytes);
+  assert.equal(getArmtekResponseMaxBytes("ws_search/search"), supplierMaxResponseBytes);
 });
 
 test("analog search invokes only an adapter with explicit analog support", async () => {

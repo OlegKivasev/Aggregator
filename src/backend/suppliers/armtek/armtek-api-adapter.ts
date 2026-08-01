@@ -70,6 +70,12 @@ interface ArmtekResolvedConfig {
 }
 
 const armtekStoreNamesByAccount = new Map<string, Map<string, string>>();
+const armtekStoreListMaxResponseBytes = 16 * 1024 * 1024;
+
+export function getArmtekResponseMaxBytes(path: string): number {
+  return path === "ws_user/getStoreList" ? armtekStoreListMaxResponseBytes : supplierMaxResponseBytes;
+}
+
 function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
 }
@@ -250,7 +256,7 @@ async function requestArmtek<T>(
       throw new SupplierAuthError("Armtek rejected login or password");
     }
 
-    const payload = await readBoundedJsonResponse(response, supplierMaxResponseBytes, "Armtek API") as ArmtekResponse<T>;
+    const payload = await readBoundedJsonResponse(response, getArmtekResponseMaxBytes(path), "Armtek API") as ArmtekResponse<T>;
 
     if (payload.STATUS === 401 || payload.STATUS === 403) {
       throw new SupplierAuthError("Armtek rejected login or password");
