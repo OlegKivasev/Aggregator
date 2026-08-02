@@ -23,7 +23,7 @@ interface MotorDetalInitData {
 
 interface MotorDetalPrice {
   price?: number | string;
-  quantity?: number;
+  quantity?: unknown;
   warehouseGroupId?: string | number;
   warehouseGroupHeader?: string;
   warehouseGroupShortHeader?: string;
@@ -78,6 +78,12 @@ function dateFromSupplyTerm(value: string | number | undefined): string | null {
 
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate() + Math.ceil(days)).toISOString();
+}
+
+export function parseMotorDetalQuantity(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= Number.MAX_SAFE_INTEGER
+    ? value
+    : null;
 }
 
 function getSetting(settings: Record<string, unknown> | undefined, names: string[]): string | undefined {
@@ -183,6 +189,8 @@ export class MotorDetalApiAdapter implements SupplierAdapter {
           continue;
         }
 
+        const quantity = parseMotorDetalQuantity(offer.quantity);
+
         const deliveryDate = offer.deliveryDate || deliveryDates.get(`${product.syncUid}|${offer.warehouseGroupId}`) || dateFromSupplyTerm(product.supplyTerm);
         onResult({
           supplier: this.id,
@@ -190,6 +198,7 @@ export class MotorDetalApiAdapter implements SupplierAdapter {
           article,
           title,
           price,
+          quantity,
           warehouse: offer.warehouseGroupShortHeader || offer.warehouseGroupHeader || null,
           warehouseFull: offer.warehouseGroupAddress || offer.warehouseGroupHeader || null,
           deliveryDate,

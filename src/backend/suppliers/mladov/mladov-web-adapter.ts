@@ -21,6 +21,7 @@ interface MladovResultItem {
   title: string;
   price: number;
   warehouse: string | null;
+  quantityText: string | null;
   deliveryText: string | null;
 }
 
@@ -54,6 +55,20 @@ function encodeWindows1251(value: string): string {
       [0x2d, 0x2e, 0x5f, 0x7e, 0x2a].includes(byte);
     return isUnescaped ? String.fromCharCode(byte) : `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
   }).join("");
+}
+
+export function parseMladovQuantity(value: unknown): number | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.replace(/\s+/g, "").replace(",", ".");
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) {
+    return null;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed <= Number.MAX_SAFE_INTEGER ? parsed : null;
 }
 
 function parseDeliveryDate(value: string | null): { date: string | null; approximate: boolean } {
@@ -134,6 +149,7 @@ async function fetchMladovResults(
         title: text('[itemprop="name"], .col-md-3.col-xs-8'),
         price,
         warehouse: detail(0),
+        quantityText: detail(1),
         deliveryText: detail(2),
       };
     }),
@@ -235,6 +251,7 @@ export class MladovWebAdapter implements SupplierAdapter {
           article: item.article,
           title: item.title,
           price: item.price,
+          quantity: parseMladovQuantity(item.quantityText),
           warehouse: item.warehouse,
           deliveryDate: delivery.date,
           deliveryDateApproximate: delivery.approximate,

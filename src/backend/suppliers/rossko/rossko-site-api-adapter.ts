@@ -27,7 +27,7 @@ interface RosskoSearchResponse {
 interface RosskoCardStock {
   name?: string;
   basePrice?: number;
-  inventory?: number;
+  inventory?: unknown;
   isApproximateDeliveryInterval?: boolean;
   tariffDeliveryTimingWithTimezone?: { start?: string; end?: string };
   cartItemDto?: { stock_name?: string };
@@ -80,6 +80,12 @@ export function rosskoExactProductIds(search: RosskoSearchResponse, article: str
         : [];
     }),
   ) || [])];
+}
+
+export function parseRosskoQuantity(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= Number.MAX_SAFE_INTEGER
+    ? value
+    : null;
 }
 
 function serviceUrl(service: string, path: string): URL {
@@ -352,7 +358,8 @@ export class RosskoSiteApiAdapter implements SupplierAdapter {
 
       for (const stock of part.stocks) {
         context.signal.throwIfAborted();
-        if (!stock.basePrice || stock.basePrice <= 0 || !stock.inventory || stock.inventory <= 0) {
+        const quantity = parseRosskoQuantity(stock.inventory);
+        if (!stock.basePrice || stock.basePrice <= 0 || quantity === null) {
           continue;
         }
 
@@ -362,6 +369,7 @@ export class RosskoSiteApiAdapter implements SupplierAdapter {
           article: partNumber,
           title,
           price: stock.basePrice,
+          quantity,
           warehouse: stock.name || stock.cartItemDto?.stock_name || null,
           warehouseFull: stock.name || stock.cartItemDto?.stock_name || null,
           deliveryDate: stock.tariffDeliveryTimingWithTimezone?.start || stock.tariffDeliveryTimingWithTimezone?.end || null,

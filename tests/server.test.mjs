@@ -19,7 +19,9 @@ import {
   PartKomApiAdapter,
   verifyPartKomApiCredentials,
 } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
-import { rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
+import { parseRosskoQuantity, rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
+import { parseMotorDetalQuantity } from "../src/backend/suppliers/motordetal/motordetal-api-adapter.ts";
+import { parseMladovQuantity } from "../src/backend/suppliers/mladov/mladov-web-adapter.ts";
 import {
   createStpartsBatchParams,
   parseStpartsApiAnalogResults,
@@ -70,6 +72,39 @@ test("Armtek normalizes only valid available quantities", () => {
   assert.equal(parseArmtekQuantity("-1"), null);
   assert.equal(parseArmtekQuantity(12), null);
   assert.equal(parseArmtekQuantity(undefined), null);
+});
+
+test("Rossko exposes only valid positive inventory as quantity", () => {
+  assert.equal(parseRosskoQuantity(12), 12);
+  assert.equal(parseRosskoQuantity(1.5), 1.5);
+  assert.equal(parseRosskoQuantity(0), null);
+  assert.equal(parseRosskoQuantity(-1), null);
+  assert.equal(parseRosskoQuantity("12"), null);
+  assert.equal(parseRosskoQuantity(Number.POSITIVE_INFINITY), null);
+  assert.equal(parseRosskoQuantity(Number.MAX_SAFE_INTEGER + 1), null);
+  assert.equal(parseRosskoQuantity(undefined), null);
+});
+
+test("MotorDetal exposes only valid positive offer quantity", () => {
+  assert.equal(parseMotorDetalQuantity(8), 8);
+  assert.equal(parseMotorDetalQuantity(0.5), 0.5);
+  assert.equal(parseMotorDetalQuantity(0), null);
+  assert.equal(parseMotorDetalQuantity(-1), null);
+  assert.equal(parseMotorDetalQuantity("8"), null);
+  assert.equal(parseMotorDetalQuantity(Number.NaN), null);
+  assert.equal(parseMotorDetalQuantity(Number.MAX_SAFE_INTEGER + 1), null);
+  assert.equal(parseMotorDetalQuantity(null), null);
+});
+
+test("Mladov parses exact stock text without inventing availability", () => {
+  assert.equal(parseMladovQuantity(" 12 "), 12);
+  assert.equal(parseMladovQuantity("1,5"), 1.5);
+  assert.equal(parseMladovQuantity("0"), 0);
+  assert.equal(parseMladovQuantity("12 шт."), null);
+  assert.equal(parseMladovQuantity("> 10"), null);
+  assert.equal(parseMladovQuantity("-1"), null);
+  assert.equal(parseMladovQuantity(Number.MAX_SAFE_INTEGER + 1), null);
+  assert.equal(parseMladovQuantity(undefined), null);
 });
 
 test("Armtek allows the observed large store directory without relaxing other response limits", () => {
