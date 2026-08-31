@@ -219,7 +219,21 @@
         <details class="suppliers-panel">
           <summary class="suppliers-panel__summary">Поставщики</summary>
 
-          <article class="auth-card">
+          <details class="supplier-visibility-settings">
+            <summary class="supplier-visibility-settings__summary">Показывать поставщиков в приложении</summary>
+            <p>Отключенный поставщик не участвует в новом поиске и поиске аналогов, а его предложения и карточка авторизации скрываются.</p>
+            <div class="supplier-options__list" aria-label="Отображаемые поставщики">
+              <label><input class="supplier-visibility-input" type="checkbox" value="rossko" checked><span>Rossko</span></label>
+              <label><input class="supplier-visibility-input" type="checkbox" value="armtek" checked><span>Armtek</span></label>
+              <label><input class="supplier-visibility-input" type="checkbox" value="part-kom" checked><span>PartKOM</span></label>
+              <label><input class="supplier-visibility-input" type="checkbox" value="stparts" checked><span>STParts</span></label>
+              <label><input class="supplier-visibility-input" type="checkbox" value="forum-auto" checked><span>Forum-Auto</span></label>
+              <label><input class="supplier-visibility-input" type="checkbox" value="motordetal" checked><span>MotorDetal</span></label>
+              <label><input class="supplier-visibility-input" type="checkbox" value="mladov" checked><span>Механик Ладов</span></label>
+            </div>
+          </details>
+
+          <article class="auth-card" data-supplier="mladov">
             <div class="auth-card__header">
               <div><h3>Механик Ладов</h3></div>
               <span class="status-pill badge rounded-pill text-bg-secondary" id="mladov-session-pill" data-status="idle">Не подключен</span>
@@ -235,7 +249,7 @@
             <p class="auth-feedback" id="mladov-auth-feedback"></p>
           </article>
 
-          <article class="auth-card">
+          <article class="auth-card" data-supplier="rossko">
             <div class="auth-card__header">
               <div>
                 <h3>Rossko</h3>
@@ -261,7 +275,7 @@
             <p class="auth-feedback" id="rossko-auth-feedback"></p>
           </article>
 
-          <article class="auth-card">
+          <article class="auth-card" data-supplier="armtek">
             <div class="auth-card__header">
               <div>
                 <h3>Armtek</h3>
@@ -287,7 +301,7 @@
             <p class="auth-feedback" id="armtek-auth-feedback"></p>
           </article>
 
-          <article class="auth-card">
+          <article class="auth-card" data-supplier="part-kom">
             <div class="auth-card__header">
               <div>
                 <h3>PartKOM</h3>
@@ -323,7 +337,7 @@
             </details>
           </article>
 
-          <article class="auth-card">
+          <article class="auth-card" data-supplier="forum-auto">
             <div class="auth-card__header">
               <div>
                 <h3>Forum-Auto</h3>
@@ -349,7 +363,7 @@
             <p class="auth-feedback" id="forum-auto-auth-feedback"></p>
           </article>
 
-          <article class="auth-card">
+          <article class="auth-card" data-supplier="stparts">
             <div class="auth-card__header">
               <div>
                 <h3>STParts</h3>
@@ -396,7 +410,7 @@
             </details>
           </article>
 
-          <article class="auth-card">
+          <article class="auth-card" data-supplier="motordetal">
             <div class="auth-card__header">
               <div>
                 <h3>MotorDetal</h3>
@@ -503,7 +517,9 @@
             <tbody id="analogs-results-body"></tbody>
           </table>
         </div>
-        <footer class="analogs-modal__footer" aria-hidden="true"></footer>
+        <footer class="analogs-modal__footer">
+          <button type="button" class="analogs-show-more btn btn-light" id="analogs-show-more" hidden></button>
+        </footer>
       </section>
     </div>
 

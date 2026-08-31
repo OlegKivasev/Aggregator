@@ -41,6 +41,10 @@ const searchTabsList = document.querySelector("#search-tabs-list");
 const newTabButton = document.querySelector("#new-tab-button");
 const settingsToggle = document.querySelector("#settings-toggle");
 const supplierEnabledInputs = [...document.querySelectorAll(".supplier-enabled-input")];
+const supplierVisibilityInputs = [...document.querySelectorAll(".supplier-visibility-input")];
+const supplierSettingsCards = Object.fromEntries(
+  [...document.querySelectorAll(".auth-card[data-supplier]")].map((card) => [card.dataset.supplier, card]),
+);
 const suppliersDropdown = document.querySelector(".suppliers-dropdown");
 const filtersDropdown = document.querySelector("#filters-dropdown");
 const filterColumns = document.querySelector("#filter-columns");
@@ -130,6 +134,7 @@ const analogsResultsBody = document.querySelector("#analogs-results-body");
 const analogsCount = document.querySelector("#analogs-count");
 const analogsTableSearch = document.querySelector("#analogs-table-search");
 const analogsMarkupPercent = document.querySelector("#analogs-markup-percent");
+const analogsShowMore = document.querySelector("#analogs-show-more");
 const analogSortButtons = [...document.querySelectorAll("[data-analog-sort-key]")];
 const closeAnalogsModalButtons = [...document.querySelectorAll("[data-close-analogs-modal]")];
 
@@ -149,6 +154,11 @@ let analogSourceResult = null;
 let analogSearchResults = [];
 let analogSearchTerm = "";
 let analogSortState = { key: "price", direction: "ascending" };
+let analogSearchSuppliers = [];
+let analogSupplierStatuses = {};
+let analogResultCounts = {};
+let analogVisibleLimit = 200;
+let analogRenderFrame = null;
 let supplierCheckInProgress = false;
 let searchProgressTimer = null;
 let activeFilterColumn = "";
@@ -160,6 +170,7 @@ const searchStateStorageKey = "autoservice.searchState";
 const tableColumnsStorageKey = "autoservice.tableColumns";
 const stpartsWarehousesStorageKey = "autoservice.stpartsWarehouses";
 const partKomNonReturnableStorageKey = "autoservice.partKomNonReturnable";
+const supplierVisibilityStorageKey = "autoservice.supplierVisibility";
 const lastSearchStorageKey = "autoservice.lastSearchStartedAt";
 const supplierCheckIntervalMs = 2 * 60 * 60 * 1000;
 
@@ -173,6 +184,8 @@ const supplierNames = {
   mladov: "Механик Ладов",
 };
 const supplierIds = Object.keys(supplierNames);
+const analogSupplierIds = ["armtek", "part-kom", "stparts", "forum-auto"];
+const visibleSuppliers = new Set(supplierIds);
 const tableColumnIds = tableColumnInputs.map((input) => input.value);
 const tableColumnWidths = {
   supplier: 100,
@@ -199,7 +212,10 @@ const supplierSearchToggles = Object.fromEntries(
 );
 const supplierEnabledInputsById = Object.fromEntries(supplierEnabledInputs.map((input) => [input.value, input]));
 
-const getEnabledSuppliers = () => supplierEnabledInputs.filter((input) => input.checked).map((input) => input.value);
+const isSupplierVisible = (supplier) => visibleSuppliers.has(supplier);
+const getEnabledSuppliers = () => supplierEnabledInputs
+  .filter((input) => input.checked && isSupplierVisible(input.value))
+  .map((input) => input.value);
 
 const getFilterValue = (result, column) => {
   if (column === "supplier") {
@@ -369,9 +385,9 @@ const updateSupplierSearchToggle = (supplier, authorized) => {
     return;
   }
 
-  toggle.hidden = !authorized;
+  toggle.hidden = !authorized || !isSupplierVisible(supplier);
 
-  if (!authorized && input.checked) {
+  if ((!authorized || !isSupplierVisible(supplier)) && input.checked) {
     input.checked = false;
     syncActiveTab();
     saveSearchState();
@@ -383,13 +399,52 @@ const updateSupplierSearchToggle = (supplier, authorized) => {
 const setSupplierEnabled = (supplier, enabled) => {
   const input = supplierEnabledInputsById[supplier];
 
-  if (!input) {
+  if (!input || !isSupplierVisible(supplier)) {
     return;
   }
 
   input.checked = enabled;
   syncActiveTab();
   saveSearchState();
+};
+
+const saveSupplierVisibility = () => {
+  try {
+    localStorage.setItem(supplierVisibilityStorageKey, JSON.stringify([...visibleSuppliers]));
+  } catch {
+    // Supplier visibility is a local preference; searches remain safe without storage.
+  }
+};
+
+const updateSupplierVisibility = (supplier) => {
+  const visible = isSupplierVisible(supplier);
+  const card = supplierSettingsCards[supplier];
+  const searchInput = supplierEnabledInputsById[supplier];
+
+  if (card) {
+    card.hidden = !visible;
+  }
+  if (!visible && searchInput) {
+    searchInput.checked = false;
+  }
+  updateSupplierSearchToggle(supplier, Boolean(supplierSessionStates.get(supplier)));
+};
+
+const restoreSupplierVisibility = () => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(supplierVisibilityStorageKey));
+    if (Array.isArray(stored) && stored.every((supplier) => supplierIds.includes(supplier))) {
+      visibleSuppliers.clear();
+      stored.forEach((supplier) => visibleSuppliers.add(supplier));
+    }
+  } catch {
+    // Invalid local data falls back to showing all supported suppliers.
+  }
+
+  supplierVisibilityInputs.forEach((input) => {
+    input.checked = isSupplierVisible(input.value);
+  });
+  supplierIds.forEach(updateSupplierVisibility);
 };
 
 const normalizeMarkupPercent = (value) => {
@@ -435,7 +490,9 @@ const updateSearchProgress = (tab) => {
     return;
   }
 
-  const pendingSuppliers = tab.enabledSuppliers.filter((supplier) => !searchTerminalStatuses.has(tab.supplierStatuses[supplier]));
+  const pendingSuppliers = tab.enabledSuppliers
+    .filter(isSupplierVisible)
+    .filter((supplier) => !searchTerminalStatuses.has(tab.supplierStatuses[supplier]));
   const searchingSuppliers = pendingSuppliers.filter((supplier) => tab.supplierStatuses[supplier] === "searching");
   const foundCount = tab.results.length;
   const elapsedMs = Date.now() - tab.searchStartedAt;
@@ -528,7 +585,7 @@ const updateSupplierNotice = (session) => {
     return;
   }
 
-  const disconnected = supplierIds.filter((supplier) => !supplierSessionStates.get(supplier));
+  const disconnected = supplierIds.filter((supplier) => isSupplierVisible(supplier) && !supplierSessionStates.get(supplier));
   supplierNotice.hidden = disconnected.length === 0;
   supplierNoticeSummary.textContent = disconnected.length === 1
     ? "Не подключен 1 поставщик"
@@ -813,7 +870,7 @@ const activateTab = (tabId) => {
   articleInput.value = tab.article;
   globalStatus.textContent = tab.status;
   supplierEnabledInputs.forEach((input) => {
-    input.checked = tab.enabledSuppliers.includes(input.value);
+    input.checked = isSupplierVisible(input.value) && tab.enabledSuppliers.includes(input.value);
   });
   setSearchUiState(Boolean(tab.source));
   updateSearchProgress(tab);
@@ -870,7 +927,9 @@ const renderResults = () => {
 
   // Older persisted tabs can still contain automatically fetched analogs.
   const exactResults = results.filter((result) => result.isAnalog !== true);
-  const visibleExactResults = filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(exactResults));
+  const visibleExactResults = filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
+    exactResults.filter((result) => isSupplierVisible(result.supplier)),
+  ));
   const filteredResults = getFilteredResults(visibleExactResults, tableSearchTerm, markupPercent);
   const sortedResults = [...filteredResults].sort((left, right) =>
     compareResults(left, right, sortState, markupPercent));
@@ -1156,7 +1215,7 @@ const showSupplierCheckError = (expired, unavailable) => {
 };
 
 const showIncompleteSearchWarning = (tab) => {
-  const warnings = buildIncompleteSearchWarnings(tab.enabledSuppliers, tab.supplierStatuses, supplierNames);
+  const warnings = buildIncompleteSearchWarnings(tab.enabledSuppliers.filter(isSupplierVisible), tab.supplierStatuses, supplierNames);
   if (!warnings.length) {
     return;
   }
@@ -1463,6 +1522,32 @@ newTabButton.addEventListener("click", () => {
 
 articleInput.addEventListener("input", saveSearchState);
 supplierEnabledInputs.forEach((input) => input.addEventListener("change", saveSearchState));
+supplierVisibilityInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (input.checked) {
+      visibleSuppliers.add(input.value);
+    } else {
+      visibleSuppliers.delete(input.value);
+      analogSearchSuppliers = analogSearchSuppliers.filter(isSupplierVisible);
+    }
+    updateSupplierVisibility(input.value);
+    updateSupplierNotice({ supplier: input.value, authorized: Boolean(supplierSessionStates.get(input.value)) });
+    saveSupplierVisibility();
+    syncActiveTab();
+    saveSearchState();
+    renderResults();
+    if (!analogsModal.hidden) {
+      renderAnalogRowsNow();
+      if (!analogSearchSuppliers.length && analogSearchSource) {
+        analogSearchSource.close();
+        analogSearchSource = null;
+        setAnalogSearchStatus("Поиск аналогов остановлен", "Включите хотя бы одного поставщика, поддерживающего поиск аналогов, в настройках.", "empty");
+      } else {
+        updateAnalogSearchProgress();
+      }
+    }
+  });
+});
 tableColumnInputs.forEach((input) => {
   input.addEventListener("change", () => {
     visibleTableColumns = new Set(tableColumnInputs.filter((candidate) => candidate.checked).map((candidate) => candidate.value));
@@ -1533,10 +1618,13 @@ const showResultContextMenu = (result, clientX, clientY, anchor, canShowAnalogs)
 const setAnalogSearchStatus = (title, description, state = "searching") => {
   const content = document.createElement("div");
   const heading = document.createElement("strong");
-  const details = document.createElement("span");
   heading.textContent = title;
-  details.textContent = description;
-  content.append(heading, details);
+  content.append(heading);
+  (Array.isArray(description) ? description : [description]).filter(Boolean).forEach((line) => {
+    const details = document.createElement("span");
+    details.textContent = line;
+    content.append(details);
+  });
   const children = [content];
   if (state === "searching") {
     const spinner = document.createElement("span");
@@ -1549,9 +1637,48 @@ const setAnalogSearchStatus = (title, description, state = "searching") => {
   analogsSearchStatus.hidden = false;
 };
 
+const formatAnalogResultSuppliers = () => analogSearchSuppliers
+  .filter((supplier) => analogResultCounts[supplier])
+  .map((supplier) => `${supplierNames[supplier] ?? supplier}: ${analogResultCounts[supplier]}`)
+  .join(", ");
+
+const updateAnalogSearchProgress = () => {
+  const pendingSuppliers = analogSearchSuppliers.filter((supplier) => !searchTerminalStatuses.has(analogSupplierStatuses[supplier]));
+  const receivedFrom = formatAnalogResultSuppliers();
+  const awaiting = pendingSuppliers.length
+    ? `Получаем аналоги: ${pendingSuppliers.map((supplier) => supplierNames[supplier] ?? supplier).join(", ")}.`
+    : "Все поставщики ответили. Завершаем обработку результатов.";
+  const received = receivedFrom
+    ? `Выдали аналоги: ${receivedFrom}.`
+    : "Пока ни один поставщик не выдал аналогов.";
+  setAnalogSearchStatus(awaiting, received);
+};
+
+const scheduleAnalogRowsRender = () => {
+  if (analogRenderFrame !== null) {
+    return;
+  }
+  analogRenderFrame = requestAnimationFrame(() => {
+    analogRenderFrame = null;
+    renderAnalogRows();
+  });
+};
+
+const renderAnalogRowsNow = () => {
+  if (analogRenderFrame !== null) {
+    cancelAnimationFrame(analogRenderFrame);
+    analogRenderFrame = null;
+  }
+  renderAnalogRows();
+};
+
 const closeAnalogsModal = () => {
   analogSearchSource?.close();
   analogSearchSource = null;
+  if (analogRenderFrame !== null) {
+    cancelAnimationFrame(analogRenderFrame);
+    analogRenderFrame = null;
+  }
   analogsModal.hidden = true;
   if (analogModalReturnFocus?.isConnected) {
     analogModalReturnFocus.focus();
@@ -1592,7 +1719,9 @@ const renderAnalogRows = () => {
     ? document.activeElement.closest("[data-analog-result-index]")?.dataset.analogResultIndex
     : null;
   const normalizedTerm = analogSearchTerm.trim().toLocaleLowerCase();
-  const visibleResults = filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(analogSearchResults));
+  const visibleResults = filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
+    analogSearchResults.filter((result) => isSupplierVisible(result.supplier)),
+  ));
   const filteredResults = visibleResults.filter((result) => !normalizedTerm || [
     supplierNames[result.supplier] ?? result.supplier,
     formatBrand(result.brand),
@@ -1613,12 +1742,16 @@ const renderAnalogRows = () => {
       ? "По вашему запросу ничего не найдено"
       : analogSearchSource
         ? "Предложения появятся здесь по мере получения"
-        : "Аналоги для выбранной позиции не найдены";
+      : "Аналоги для выбранной позиции не найдены";
     analogsResultsBody.innerHTML = `<tr class="analogs-results__empty"><td colspan="9">${message}</td></tr>`;
+    analogsShowMore.hidden = true;
     return;
   }
 
-  analogsResultsBody.innerHTML = rows.map((result) => {
+  const displayedRows = rows.slice(0, analogVisibleLimit);
+  analogsShowMore.hidden = displayedRows.length >= rows.length;
+  analogsShowMore.textContent = `Показать ещё ${Math.min(200, rows.length - displayedRows.length)} (показано ${displayedRows.length} из ${rows.length})`;
+  analogsResultsBody.innerHTML = displayedRows.map((result) => {
     const deliveryDate = formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo);
     const isBestPrice = result === bestPrice;
     return `
@@ -1647,12 +1780,25 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   analogSearchResults = [];
   analogSearchTerm = "";
   analogSortState = { key: "price", direction: "ascending" };
+  analogSearchSuppliers = analogSupplierIds.filter(isSupplierVisible);
+  analogSupplierStatuses = {};
+  analogResultCounts = {};
+  analogVisibleLimit = 200;
   analogsTableSearch.value = "";
   analogsMarkupPercent.value = String(markupPercent);
   renderAnalogSource(result);
   analogsModal.hidden = false;
   analogsModal.focus();
-  setAnalogSearchStatus("Ищем подходящие предложения", "Результаты будут добавляться в таблицу по мере ответа Armtek, Партком, STParts и Forum-Auto.");
+  if (!analogSearchSuppliers.length) {
+    renderAnalogRowsNow();
+    setAnalogSearchStatus("Поиск аналогов недоступен", "Включите хотя бы одного поставщика, поддерживающего поиск аналогов, в настройках.", "empty");
+    return;
+  }
+
+  setAnalogSearchStatus(
+    "Подготавливаем поиск аналогов",
+    `Запрашиваем: ${analogSearchSuppliers.map((supplier) => supplierNames[supplier] ?? supplier).join(", ")}.`,
+  );
 
   const failureMessages = new Set();
   const searchParams = new URLSearchParams({
@@ -1661,10 +1807,7 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
     article: result.article,
     brand: result.brand,
   });
-  searchParams.append("supplier", "armtek");
-  searchParams.append("supplier", "part-kom");
-  searchParams.append("supplier", "stparts");
-  searchParams.append("supplier", "forum-auto");
+  analogSearchSuppliers.forEach((supplier) => searchParams.append("supplier", supplier));
   const source = openSearchStream(`/api/search?${searchParams.toString()}`);
   analogSearchSource = source;
   renderAnalogRows();
@@ -1675,29 +1818,42 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
     }
     const payload = JSON.parse(messageEvent.data);
     if (payload.type === "result") {
+      if (!isSupplierVisible(payload.result.supplier)) {
+        return;
+      }
       analogSearchResults.push(payload.result);
-      renderAnalogRows();
-      setAnalogSearchStatus("Поиск продолжается", `Уже получено предложений: ${analogSearchResults.length}.`);
+      analogResultCounts[payload.result.supplier] = (analogResultCounts[payload.result.supplier] ?? 0) + 1;
+      scheduleAnalogRowsRender();
+      updateAnalogSearchProgress();
       return;
     }
-    if (payload.type === "supplier_status" && ["timeout", "auth_error", "error"].includes(payload.status)) {
-      const supplierName = supplierNames[payload.supplier] ?? payload.supplier;
-      const failureMessage = payload.status === "auth_error"
-        ? `Подключите ${supplierName} в настройках и повторите поиск.`
-        : payload.status === "timeout"
-          ? `${supplierName} не ответил вовремя. Повторите поиск позже.`
-          : `${supplierName} не удалось выполнить поиск аналогов.`;
-      failureMessages.add(failureMessage);
+    if (payload.type === "supplier_status") {
+      if (!isSupplierVisible(payload.supplier)) {
+        return;
+      }
+      analogSupplierStatuses[payload.supplier] = payload.status;
+      if (["timeout", "auth_error", "error"].includes(payload.status)) {
+        const supplierName = supplierNames[payload.supplier] ?? payload.supplier;
+        const failureMessage = payload.status === "auth_error"
+          ? `Подключите ${supplierName} в настройках и повторите поиск.`
+          : payload.status === "timeout"
+            ? `${supplierName} не ответил вовремя. Повторите поиск позже.`
+            : `${supplierName} не удалось выполнить поиск аналогов.`;
+        failureMessages.add(failureMessage);
+      }
+      updateAnalogSearchProgress();
       return;
     }
     if (payload.type === "search_completed") {
       source.close();
       analogSearchSource = null;
-      renderAnalogRows();
+      renderAnalogRowsNow();
+      const receivedFrom = formatAnalogResultSuppliers();
+      const received = receivedFrom ? `Выдали аналоги: ${receivedFrom}.` : "Поставщики не выдали аналогов.";
       if (failureMessages.size) {
-        setAnalogSearchStatus("Поиск завершен не полностью", [...failureMessages].join(" "), "warning");
+        setAnalogSearchStatus("Поиск завершен не полностью", [received, ...failureMessages], "warning");
       } else if (analogSearchResults.length) {
-        analogsSearchStatus.hidden = true;
+        setAnalogSearchStatus("Поиск аналогов завершен", received, "completed");
       } else {
         setAnalogSearchStatus("Аналоги не найдены", "Попробуйте выбрать предложение другого бренда или артикула.", "empty");
       }
@@ -1706,7 +1862,7 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
     if (payload.type === "fatal_error") {
       source.close();
       analogSearchSource = null;
-      renderAnalogRows();
+      renderAnalogRowsNow();
       setAnalogSearchStatus("Не удалось выполнить поиск", payload.message, "error");
     }
   };
@@ -1716,7 +1872,7 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
     }
     source.close();
     analogSearchSource = null;
-    renderAnalogRows();
+    renderAnalogRowsNow();
     setAnalogSearchStatus("Соединение прервано", "Не удалось получить полный результат поиска аналогов.", "error");
   };
 };
@@ -1769,7 +1925,8 @@ showAnalogsButton.addEventListener("click", () => {
 
 analogsTableSearch.addEventListener("input", () => {
   analogSearchTerm = analogsTableSearch.value;
-  renderAnalogRows();
+  analogVisibleLimit = 200;
+  renderAnalogRowsNow();
 });
 
 analogsMarkupPercent.addEventListener("change", () => {
@@ -1778,7 +1935,7 @@ analogsMarkupPercent.addEventListener("change", () => {
   if (analogSourceResult) {
     renderAnalogSource(analogSourceResult);
   }
-  renderAnalogRows();
+  renderAnalogRowsNow();
 });
 
 analogSortButtons.forEach((button) => {
@@ -1788,8 +1945,14 @@ analogSortButtons.forEach((button) => {
       key,
       direction: analogSortState.key === key && analogSortState.direction === "ascending" ? "descending" : "ascending",
     };
-    renderAnalogRows();
+    analogVisibleLimit = 200;
+    renderAnalogRowsNow();
   });
+});
+
+analogsShowMore.addEventListener("click", () => {
+  analogVisibleLimit += 200;
+  renderAnalogRowsNow();
 });
 
 closeAnalogsModalButtons.forEach((button) => button.addEventListener("click", closeAnalogsModal));
@@ -2162,6 +2325,7 @@ restoreSearchState();
 restoreTableColumns();
 restoreStpartsWarehouses();
 restorePartKomNonReturnable();
+restoreSupplierVisibility();
 tableColumnInputs.forEach((input) => {
   input.checked = visibleTableColumns.has(input.value);
 });
@@ -2178,7 +2342,7 @@ if (restoredTab) {
   articleInput.value = restoredTab.article;
   globalStatus.textContent = restoredTab.status;
   supplierEnabledInputs.forEach((input) => {
-    input.checked = restoredTab.enabledSuppliers.includes(input.value);
+    input.checked = isSupplierVisible(input.value) && restoredTab.enabledSuppliers.includes(input.value);
   });
 }
 markupPercentInput.addEventListener("change", () => {

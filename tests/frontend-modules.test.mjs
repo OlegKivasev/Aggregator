@@ -89,8 +89,8 @@ test("PartKOM return preference is rendered and applied to regular and analog re
 
   assert.match(html, /id="part-kom-non-returnable"/);
   assert.match(app, /autoservice\.partKomNonReturnable/);
-  assert.match(app, /filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\(exactResults\)\)/);
-  assert.match(app, /filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\(analogSearchResults\)\)/);
+  assert.match(app, /filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
+  assert.match(app, /filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?analogSearchResults\.filter/);
 });
 
 test("delivery date sorting moves intervals above dates they finish before", () => {
@@ -198,6 +198,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(html, /id="analogs-markup-percent"/);
   assert.match(html, /data-analog-sort-key="price"/);
   assert.match(html, /id="analogs-results-body"/);
+  assert.match(html, /id="analogs-show-more"/);
   assert.equal((html.match(/id="results-body"/g) ?? []).length, 1);
   assert.doesNotMatch(html, /id="results-view-toggle"/);
   assert.match(app, /registerResultContextMenu\(resultsBody/);
@@ -212,10 +213,23 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /brand: result\.brand/);
   assert.match(app, /formatBrand\(result\.brand\)/);
   assert.match(app, /formatArticle\(result\.article\)/);
-  assert.match(app, /searchParams\.append\("supplier", "armtek"\)/);
-  assert.match(app, /searchParams\.append\("supplier", "part-kom"\)/);
-  assert.match(app, /searchParams\.append\("supplier", "stparts"\)/);
+  assert.match(app, /const analogSupplierIds = \["armtek", "part-kom", "stparts", "forum-auto"\]/);
+  assert.match(app, /analogSupplierIds\.filter\(isSupplierVisible\)/);
+  assert.match(app, /Выдали аналоги:/);
+  assert.match(app, /scheduleAnalogRowsRender/);
   assert.match(app, /const exactResults = results\.filter\(\(result\) => result\.isAnalog !== true\);/);
+});
+
+test("frontend can hide a supplier from searches, results, and authorization settings", async () => {
+  const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
+
+  assert.match(html, /class="supplier-visibility-input" type="checkbox" value="armtek"/);
+  assert.match(html, /class="auth-card" data-supplier="armtek"/);
+  assert.match(app, /const supplierVisibilityStorageKey = "autoservice\.supplierVisibility"/);
+  assert.match(app, /const updateSupplierVisibility = \(supplier\)/);
+  assert.match(app, /result\.isAnalog !== true\)[\s\S]*?isSupplierVisible\(result\.supplier\)/);
+  assert.match(app, /analogSearchResults\.filter\(\(result\) => isSupplierVisible\(result\.supplier\)\)/);
 });
 
 test("main results use the same comparison-oriented table controls as analogs", async () => {
@@ -226,7 +240,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(html, /<h2>Предложения<\/h2>/);
   assert.match(html, /class="table table-hover align-middle mb-0 results-data-table"/);
   assert.match(html, /class="results-panel__footer" aria-hidden="true"><\/footer>/);
-  assert.match(html, /class="analogs-modal__footer" aria-hidden="true"><\/footer>/);
+  assert.match(html, /class="analogs-modal__footer">\s*<button[^>]*id="analogs-show-more"/s);
   assert.doesNotMatch(html, /Нажмите на строку/);
   assert.match(html, /id="warehouse-tooltip"/);
   assert.match(html, /data-column="quantity"[^>]*[\s\S]*?Количество[\s\S]*?data-column="warehouse"/);
