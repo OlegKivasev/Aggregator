@@ -572,12 +572,14 @@ input {
   display: none;
 }
 
-#result-count {
+#result-count,
+#analogs-count {
   position: relative;
   cursor: help;
 }
 
-#result-count::after {
+#result-count::after,
+#analogs-count::after {
   position: absolute;
   z-index: 10;
   top: calc(100% + 8px);
@@ -601,7 +603,9 @@ input {
 }
 
 #result-count:hover::after,
-#result-count:focus-visible::after {
+#result-count:focus-visible::after,
+#analogs-count:hover::after,
+#analogs-count:focus-visible::after {
   opacity: 1;
   transform: translateY(0);
 }

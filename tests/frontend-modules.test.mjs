@@ -199,6 +199,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(html, /data-analog-sort-key="price"/);
   assert.match(html, /id="analogs-results-body"/);
   assert.match(html, /id="analogs-show-more"/);
+  assert.match(html, /id="analogs-count" tabindex="0"/);
   assert.equal((html.match(/id="results-body"/g) ?? []).length, 1);
   assert.doesNotMatch(html, /id="results-view-toggle"/);
   assert.match(app, /registerResultContextMenu\(resultsBody/);
@@ -216,6 +217,10 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /const analogSupplierIds = \["armtek", "part-kom", "stparts", "forum-auto"\]/);
   assert.match(app, /analogSupplierIds\.filter\(isSupplierVisible\)/);
   assert.match(app, /Выдали аналоги:/);
+  assert.match(app, /hideSuccessfulAnalogStatus/);
+  assert.match(app, /Показать всё/);
+  assert.match(app, /analogSearchCompleted \? Number\.POSITIVE_INFINITY/);
+  assert.match(app, /analogsCount\.dataset\.tooltip = supplierBreakdown/);
   assert.match(app, /scheduleAnalogRowsRender/);
   assert.match(app, /const exactResults = results\.filter\(\(result\) => result\.isAnalog !== true\);/);
 });

@@ -159,6 +159,8 @@ let analogSupplierStatuses = {};
 let analogResultCounts = {};
 let analogVisibleLimit = 200;
 let analogRenderFrame = null;
+let analogSearchCompleted = false;
+let analogStatusHideTimer = null;
 let supplierCheckInProgress = false;
 let searchProgressTimer = null;
 let activeFilterColumn = "";
@@ -1615,7 +1617,15 @@ const showResultContextMenu = (result, clientX, clientY, anchor, canShowAnalogs)
   openResultButton.focus();
 };
 
+const clearAnalogStatusHideTimer = () => {
+  if (analogStatusHideTimer !== null) {
+    clearTimeout(analogStatusHideTimer);
+    analogStatusHideTimer = null;
+  }
+};
+
 const setAnalogSearchStatus = (title, description, state = "searching") => {
+  clearAnalogStatusHideTimer();
   const content = document.createElement("div");
   const heading = document.createElement("strong");
   heading.textContent = title;
@@ -1635,6 +1645,13 @@ const setAnalogSearchStatus = (title, description, state = "searching") => {
   analogsSearchStatus.replaceChildren(...children);
   analogsSearchStatus.dataset.state = state;
   analogsSearchStatus.hidden = false;
+};
+
+const hideSuccessfulAnalogStatus = () => {
+  analogStatusHideTimer = setTimeout(() => {
+    analogStatusHideTimer = null;
+    analogsSearchStatus.hidden = true;
+  }, 5_000);
 };
 
 const formatAnalogResultSuppliers = () => analogSearchSuppliers
@@ -1675,6 +1692,7 @@ const renderAnalogRowsNow = () => {
 const closeAnalogsModal = () => {
   analogSearchSource?.close();
   analogSearchSource = null;
+  clearAnalogStatusHideTimer();
   if (analogRenderFrame !== null) {
     cancelAnimationFrame(analogRenderFrame);
     analogRenderFrame = null;
@@ -1735,6 +1753,11 @@ const renderAnalogRows = () => {
     .reduce((best, result) => !best || result.price < best.price ? result : best, null);
   analogsCount.textContent = normalizedTerm ? `${rows.length} из ${visibleResults.length}` : String(visibleResults.length);
   analogsCount.title = normalizedTerm ? "Показано с учетом поиска" : "Всего найдено";
+  const supplierBreakdown = analogSearchSuppliers
+    .map((supplier) => `${supplierNames[supplier] ?? supplier}: ${rows.filter((result) => result.supplier === supplier).length} позиций`)
+    .join("\n");
+  analogsCount.dataset.tooltip = supplierBreakdown;
+  analogsCount.setAttribute("aria-label", supplierBreakdown ? `По поставщикам:\n${supplierBreakdown}` : "Нет аналогов");
   updateAnalogSortHeaders();
 
   if (!rows.length) {
@@ -1750,7 +1773,9 @@ const renderAnalogRows = () => {
 
   const displayedRows = rows.slice(0, analogVisibleLimit);
   analogsShowMore.hidden = displayedRows.length >= rows.length;
-  analogsShowMore.textContent = `Показать ещё ${Math.min(200, rows.length - displayedRows.length)} (показано ${displayedRows.length} из ${rows.length})`;
+  analogsShowMore.textContent = analogSearchCompleted
+    ? `Показать всё (показано ${displayedRows.length} из ${rows.length})`
+    : `Показать ещё ${Math.min(200, rows.length - displayedRows.length)} (показано ${displayedRows.length} из ${rows.length})`;
   analogsResultsBody.innerHTML = displayedRows.map((result) => {
     const deliveryDate = formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo);
     const isBestPrice = result === bestPrice;
@@ -1784,6 +1809,8 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   analogSupplierStatuses = {};
   analogResultCounts = {};
   analogVisibleLimit = 200;
+  analogSearchCompleted = false;
+  clearAnalogStatusHideTimer();
   analogsTableSearch.value = "";
   analogsMarkupPercent.value = String(markupPercent);
   renderAnalogSource(result);
@@ -1847,6 +1874,7 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
     if (payload.type === "search_completed") {
       source.close();
       analogSearchSource = null;
+      analogSearchCompleted = true;
       renderAnalogRowsNow();
       const receivedFrom = formatAnalogResultSuppliers();
       const received = receivedFrom ? `Выдали аналоги: ${receivedFrom}.` : "Поставщики не выдали аналогов.";
@@ -1854,6 +1882,7 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
         setAnalogSearchStatus("Поиск завершен не полностью", [received, ...failureMessages], "warning");
       } else if (analogSearchResults.length) {
         setAnalogSearchStatus("Поиск аналогов завершен", received, "completed");
+        hideSuccessfulAnalogStatus();
       } else {
         setAnalogSearchStatus("Аналоги не найдены", "Попробуйте выбрать предложение другого бренда или артикула.", "empty");
       }
@@ -1862,6 +1891,7 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
     if (payload.type === "fatal_error") {
       source.close();
       analogSearchSource = null;
+      analogSearchCompleted = true;
       renderAnalogRowsNow();
       setAnalogSearchStatus("Не удалось выполнить поиск", payload.message, "error");
     }
@@ -1872,6 +1902,7 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
     }
     source.close();
     analogSearchSource = null;
+    analogSearchCompleted = true;
     renderAnalogRowsNow();
     setAnalogSearchStatus("Соединение прервано", "Не удалось получить полный результат поиска аналогов.", "error");
   };
@@ -1951,7 +1982,7 @@ analogSortButtons.forEach((button) => {
 });
 
 analogsShowMore.addEventListener("click", () => {
-  analogVisibleLimit += 200;
+  analogVisibleLimit = analogSearchCompleted ? Number.POSITIVE_INFINITY : analogVisibleLimit + 200;
   renderAnalogRowsNow();
 });
 
