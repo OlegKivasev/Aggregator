@@ -5,6 +5,7 @@ import { EncryptedSupplierCredentialStore } from "./session/encrypted-credential
 import { SupplierSessionManager } from "./session/session-manager.ts";
 import { clearArmtekApiAccountState } from "./suppliers/armtek/armtek-api-account-state.ts";
 import { ArmtekApiAdapter, verifyArmtekCredentials } from "./suppliers/armtek/armtek-api-adapter.ts";
+import { ForumAutoApiAdapter, verifyForumAutoCredentials } from "./suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { MladovWebAdapter } from "./suppliers/mladov/mladov-web-adapter.ts";
 import {
   clearMladovStorageState,
@@ -25,6 +26,7 @@ import { closeSiteHttpAgent } from "./suppliers/site-http.ts";
 import { StpartsApiAdapter, verifyStpartsApiCredentials } from "./suppliers/stparts/stparts-api-adapter.ts";
 import type {
   ArmtekCredentials,
+  ForumAutoCredentials,
   MladovCredentials,
   MotorDetalCredentials,
   PartKomCredentials,
@@ -45,6 +47,7 @@ const adapters = [
   new ArmtekApiAdapter(),
   new PartKomApiAdapter(),
   new StpartsApiAdapter(),
+  new ForumAutoApiAdapter(),
   new MotorDetalApiAdapter(),
   new MladovWebAdapter(),
 ];
@@ -54,6 +57,7 @@ const sessionService = new SupplierSessionService(adapters, sessionManager, {
   verifyArmtekCredentials,
   verifyPartKomApiCredentials: (credentials, signal) => verifyPartKomApiCredentials(credentials, undefined, signal),
   verifyStpartsApiCredentials,
+  verifyForumAutoCredentials: (credentials, signal) => verifyForumAutoCredentials(credentials, undefined, signal),
   verifyMotorDetalCredentials,
   verifyMladovCredentials,
   clearRosskoStorageState,
@@ -72,6 +76,7 @@ function bootstrapPersistedSessions(): void {
   const armtekCredentials = credentialStore.get("armtek") ?? getArmtekApiConfig();
   const partKomCredentials = credentialStore.get("part-kom");
   const stpartsCredentials = credentialStore.get("stparts") ?? getStpartsApiConfig();
+  const forumAutoCredentials = credentialStore.get("forum-auto");
   const motorDetalCredentials = credentialStore.get("motordetal");
   const mladovCredentials = credentialStore.get("mladov");
   if (armtekCredentials) {
@@ -82,6 +87,9 @@ function bootstrapPersistedSessions(): void {
   }
   if (stpartsCredentials) {
     sessionManager.setStpartsCredentials(stpartsCredentials);
+  }
+  if (forumAutoCredentials) {
+    sessionManager.setForumAutoCredentials(forumAutoCredentials);
   }
   if (motorDetalCredentials) {
     sessionManager.setMotorDetalCredentials(motorDetalCredentials);
@@ -101,6 +109,9 @@ function bootstrapPersistedSessions(): void {
   if (stpartsCredentials) {
     sessionManager.markAuthorized("stparts", "STParts API credentials are configured");
   }
+  if (forumAutoCredentials) {
+    sessionManager.markAuthorized("forum-auto", "Forum-Auto API credentials are configured");
+  }
   if (hasMotorDetalTokenState() || motorDetalCredentials) {
     sessionManager.markAuthorized("motordetal", "MotorDetal stored session is available");
   }
@@ -116,12 +127,14 @@ export const authorizeRossko = (credentials: RosskoSiteCredentials, signal: Abor
 export const authorizeArmtek = (credentials: ArmtekCredentials, signal: AbortSignal) => sessionService.authorizeArmtek(credentials, signal);
 export const authorizePartKom = (credentials: PartKomCredentials, signal: AbortSignal) => sessionService.authorizePartKom(credentials, signal);
 export const authorizeStparts = (credentials: StpartsCredentials, signal: AbortSignal) => sessionService.authorizeStparts(credentials, signal);
+export const authorizeForumAuto = (credentials: ForumAutoCredentials, signal: AbortSignal) => sessionService.authorizeForumAuto(credentials, signal);
 export const authorizeMotorDetal = (credentials: MotorDetalCredentials, signal: AbortSignal) => sessionService.authorizeMotorDetal(credentials, signal);
 export const authorizeMladov = (credentials: MladovCredentials, signal: AbortSignal) => sessionService.authorizeMladov(credentials, signal);
 export const logoutRossko = () => sessionService.logoutRossko();
 export const logoutArmtek = () => sessionService.logoutArmtek();
 export const logoutPartKom = () => sessionService.logoutPartKom();
 export const logoutStparts = () => sessionService.logoutStparts();
+export const logoutForumAuto = () => sessionService.logoutForumAuto();
 export const logoutMotorDetal = () => sessionService.logoutMotorDetal();
 export const logoutMladov = () => sessionService.logoutMladov();
 

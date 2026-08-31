@@ -74,6 +74,10 @@
                     <span class="form-check-label">STParts</span>
                   </label>
                   <label class="supplier-search-toggle form-check form-switch" hidden>
+                    <input class="supplier-enabled-input form-check-input" type="checkbox" value="forum-auto" checked />
+                    <span class="form-check-label">Forum-Auto</span>
+                  </label>
+                  <label class="supplier-search-toggle form-check form-switch" hidden>
                     <input class="supplier-enabled-input form-check-input" type="checkbox" value="motordetal" checked />
                     <span class="form-check-label">MotorDetal</span>
                   </label>
@@ -307,6 +311,32 @@
             </form>
 
             <p class="auth-feedback" id="part-kom-auth-feedback"></p>
+          </article>
+
+          <article class="auth-card">
+            <div class="auth-card__header">
+              <div>
+                <h3>Forum-Auto</h3>
+              </div>
+              <span class="status-pill badge rounded-pill text-bg-secondary" id="forum-auto-session-pill" data-status="idle">Не подключен</span>
+            </div>
+
+            <form id="forum-auto-auth-form" class="auth-form" data-authorized="false">
+              <label class="field">
+                <span>API-логин</span>
+                <input id="forum-auto-login" name="login" type="text" autocomplete="username" />
+              </label>
+              <label class="field">
+                <span>API-пароль</span>
+                <span class="password-field"><input id="forum-auto-password" name="password" type="password" autocomplete="current-password" /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="forum-auto-password"><span aria-hidden="true">&#128065;</span></button></span>
+              </label>
+              <div class="auth-actions">
+                <button type="submit" id="forum-auto-connect-button" class="btn btn-primary">Подключить</button>
+                <button type="button" class="button-secondary btn btn-light" id="forum-auto-logout-button" hidden>Отключить</button>
+              </div>
+            </form>
+
+            <p class="auth-feedback" id="forum-auto-auth-feedback"></p>
           </article>
 
           <article class="auth-card">

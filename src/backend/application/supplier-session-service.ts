@@ -11,6 +11,7 @@ import {
 } from "../suppliers/errors.ts";
 import type {
   ArmtekCredentials,
+  ForumAutoCredentials,
   MladovCredentials,
   MotorDetalCredentials,
   PartKomCredentials,
@@ -31,6 +32,7 @@ export interface SupplierSessionOperations {
   verifyArmtekCredentials(credentials: ArmtekCredentials, signal: AbortSignal): Promise<string>;
   verifyPartKomApiCredentials(credentials: PartKomCredentials, signal: AbortSignal): Promise<void>;
   verifyStpartsApiCredentials(credentials: StpartsCredentials, signal: AbortSignal): Promise<void>;
+  verifyForumAutoCredentials(credentials: ForumAutoCredentials, signal: AbortSignal): Promise<void>;
   verifyMotorDetalCredentials(credentials: MotorDetalCredentials, signal: AbortSignal): Promise<CredentialCheckResult>;
   verifyMladovCredentials(credentials: MladovCredentials, signal: AbortSignal): Promise<CredentialCheckResult>;
   clearRosskoStorageState(): void;
@@ -203,6 +205,32 @@ export class SupplierSessionService {
     return this.sessionManager.markUnauthorized("stparts");
   }
 
+  async authorizeForumAuto(credentials: ForumAutoCredentials, signal: AbortSignal) {
+    return this.runAuthorization(signal, "forum-auto", "Forum-Auto", async (authorizationSignal, establishSession) => {
+      try {
+        await this.operations.verifyForumAutoCredentials(credentials, authorizationSignal);
+      } catch (error) {
+        authorizationSignal.throwIfAborted();
+        if (error instanceof SupplierAuthError) {
+          return this.rejectAuthorization("forum-auto", "Forum-Auto API отклонил логин или пароль");
+        }
+        throw error;
+      }
+      authorizationSignal.throwIfAborted();
+      establishSession();
+      this.rememberCredentials("forum-auto", credentials);
+      this.sessionManager.setForumAutoCredentials(credentials);
+      return this.sessionManager.markAuthorized("forum-auto", "Forum-Auto API credentials were verified successfully");
+    });
+  }
+
+  logoutForumAuto() {
+    this.sessionManager.invalidateOperations("forum-auto");
+    this.sessionManager.clearForumAutoCredentials();
+    this.forgetCredentials("forum-auto");
+    return this.sessionManager.markUnauthorized("forum-auto");
+  }
+
   async authorizeMotorDetal(credentials: MotorDetalCredentials, signal: AbortSignal) {
     return this.runAuthorization(signal, "motordetal", "MotorDetal", async (authorizationSignal, establishSession) => {
       const result = await this.operations.verifyMotorDetalCredentials(credentials, authorizationSignal);
@@ -253,6 +281,7 @@ export class SupplierSessionService {
       armtek: () => this.logoutArmtek(),
       "part-kom": () => this.logoutPartKom(),
       stparts: () => this.logoutStparts(),
+      "forum-auto": () => this.logoutForumAuto(),
       motordetal: () => this.logoutMotorDetal(),
       mladov: () => this.logoutMladov(),
     };
@@ -314,6 +343,7 @@ export class SupplierSessionService {
       case "armtek": return this.sessionManager.getArmtekCredentials();
       case "part-kom": return this.sessionManager.getPartKomCredentials();
       case "stparts": return this.sessionManager.getStpartsCredentials();
+      case "forum-auto": return this.sessionManager.getForumAutoCredentials();
       case "motordetal": return this.sessionManager.getMotorDetalCredentials();
       case "mladov": return this.sessionManager.getMladovCredentials();
       case "rossko": return null;
@@ -326,6 +356,7 @@ export class SupplierSessionService {
       case "armtek": return this.authorizeArmtek(credentials, signal);
       case "part-kom": return this.authorizePartKom(credentials, signal);
       case "stparts": return this.authorizeStparts(credentials, signal);
+      case "forum-auto": return this.authorizeForumAuto(credentials, signal);
       case "motordetal": return this.authorizeMotorDetal(credentials, signal);
       case "mladov": return this.authorizeMladov(credentials, signal);
     }

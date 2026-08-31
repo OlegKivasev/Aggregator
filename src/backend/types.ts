@@ -1,4 +1,4 @@
-export type SupplierId = "rossko" | "armtek" | "part-kom" | "stparts" | "motordetal" | "mladov";
+export type SupplierId = "rossko" | "armtek" | "part-kom" | "stparts" | "forum-auto" | "motordetal" | "mladov";
 
 export type SupplierSearchStatus =
   | "searching"
@@ -66,6 +66,11 @@ export interface PartKomCredentials {
 }
 
 export interface StpartsCredentials {
+  login: string;
+  password: string;
+}
+
+export interface ForumAutoCredentials {
   login: string;
   password: string;
 }

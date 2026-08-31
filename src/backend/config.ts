@@ -184,6 +184,7 @@ export const motorDetalConfig = {
 };
 
 export const partKomSearchTimeoutMs = readBoundedInteger("PARTKOM_SEARCH_TIMEOUT_MS", 15_000, 1, 120_000);
+export const forumAutoSearchTimeoutMs = readBoundedInteger("FORUM_AUTO_SEARCH_TIMEOUT_MS", 15_000, 1_000, 120_000);
 
 export const stpartsConfig = {
   apiUrl: readSupplierUrl("STPARTS_API_URL", "https://stpartsru.public.api.abcp.ru/", "stpartsru.public.api.abcp.ru"),
