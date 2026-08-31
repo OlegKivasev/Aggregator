@@ -209,6 +209,7 @@ test("PartKOM normalizes exact official API offers", () => {
       placement: "Москва",
       expectedDate: "2026-07-28 10:30:00",
       guaranteedDate: "2026-07-29 18:00:00",
+      flagReturnImpossible: 1,
     },
     { number: "VAP-021-2375A", maker: "Brand", description: "Other", price: 100, quantity: 1 },
   ], "VAP0212375");
@@ -220,6 +221,7 @@ test("PartKOM normalizes exact official API offers", () => {
   assert.equal(results[0].deliveryDateApproximate, false);
   assert.ok(results[0].deliveryDate);
   assert.ok(results[0].deliveryDateTo);
+  assert.equal(results[0].isReturnable, false);
 });
 
 test("Forum-Auto normalizes documented listGoods offers", () => {

@@ -26,6 +26,7 @@ interface PartKomOffer {
   guaranteedHours?: unknown;
   expectedDays?: unknown;
   guaranteedDays?: unknown;
+  flagReturnImpossible?: unknown;
   detailGroup?: unknown;
 }
 
@@ -68,6 +69,10 @@ function parsePartKomQuantity(value: unknown): number | null {
   }
   const parsed = Number(normalized);
   return Number.isFinite(parsed) && parsed > 0 && parsed <= Number.MAX_SAFE_INTEGER ? parsed : null;
+}
+
+function isPartKomReturnImpossible(value: unknown): boolean {
+  return value === true || value === 1 || value === "1";
 }
 
 function parseApiDate(value: unknown): string | null {
@@ -216,6 +221,7 @@ function normalizePartKomOffer(offer: PartKomOffer, isAnalog: boolean): Normaliz
     deliveryDate: expectedDate,
     deliveryDateTo,
     deliveryDateApproximate: !parseApiDate(offer.expectedDate),
+    ...(isPartKomReturnImpossible(offer.flagReturnImpossible) ? { isReturnable: false } : {}),
     link: new URL(`/new/#/search/0/0/0/${encodeURIComponent(article.replace(/\//g, ""))}/${encodeURIComponent(makerId)}`, partKomSiteBaseUrl).toString(),
     ...(isAnalog ? { isAnalog: true } : {}),
   };

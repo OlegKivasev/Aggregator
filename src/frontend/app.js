@@ -15,6 +15,7 @@ import {
   isStpartsWarehouseVisible,
   normalizeStpartsWarehouseColors,
 } from "./stparts-warehouse-settings.js";
+import { isPartKomReturnableVisible } from "./partkom-return-settings.js";
 
 const form = document.querySelector("#search-form");
 const articleInput = document.querySelector("#article-input");
@@ -72,6 +73,7 @@ const partKomConnectButton = document.querySelector("#part-kom-connect-button");
 const partKomLogoutButton = document.querySelector("#part-kom-logout-button");
 const partKomSessionPill = document.querySelector("#part-kom-session-pill");
 const partKomAuthFeedback = document.querySelector("#part-kom-auth-feedback");
+const partKomNonReturnableInput = document.querySelector("#part-kom-non-returnable");
 const stpartsAuthForm = document.querySelector("#stparts-auth-form");
 const stpartsLoginInput = document.querySelector("#stparts-login");
 const stpartsPasswordInput = document.querySelector("#stparts-password");
@@ -157,6 +159,7 @@ const supplierSessionStates = new Map();
 const searchStateStorageKey = "autoservice.searchState";
 const tableColumnsStorageKey = "autoservice.tableColumns";
 const stpartsWarehousesStorageKey = "autoservice.stpartsWarehouses";
+const partKomNonReturnableStorageKey = "autoservice.partKomNonReturnable";
 const lastSearchStorageKey = "autoservice.lastSearchStartedAt";
 const supplierCheckIntervalMs = 2 * 60 * 60 * 1000;
 
@@ -184,6 +187,7 @@ const tableColumnWidths = {
 };
 let visibleTableColumns = new Set(tableColumnIds);
 let visibleStpartsWarehouses = new Set(["green"]);
+let showPartKomNonReturnable = false;
 const filterColumnNames = Object.fromEntries(filterColumnButtons.map((button) => [
   button.dataset.filterColumn,
   button.firstChild.textContent.trim(),
@@ -703,6 +707,27 @@ const filterVisibleStpartsWarehouses = (items) => items.filter(
   (result) => isStpartsWarehouseVisible(result, visibleStpartsWarehouses),
 );
 
+const savePartKomNonReturnable = () => {
+  try {
+    localStorage.setItem(partKomNonReturnableStorageKey, String(showPartKomNonReturnable));
+  } catch {
+    // Return preferences are optional; unavailable storage must not affect search.
+  }
+};
+
+const restorePartKomNonReturnable = () => {
+  try {
+    showPartKomNonReturnable = localStorage.getItem(partKomNonReturnableStorageKey) === "true";
+  } catch {
+    // Return preferences are optional; unavailable storage must not affect search.
+  }
+  partKomNonReturnableInput.checked = showPartKomNonReturnable;
+};
+
+const filterVisiblePartKomReturnable = (items) => items.filter(
+  (result) => isPartKomReturnableVisible(result, showPartKomNonReturnable),
+);
+
 const saveSearchState = () => {
   try {
     syncActiveTab();
@@ -845,7 +870,7 @@ const renderResults = () => {
 
   // Older persisted tabs can still contain automatically fetched analogs.
   const exactResults = results.filter((result) => result.isAnalog !== true);
-  const visibleExactResults = filterVisibleStpartsWarehouses(exactResults);
+  const visibleExactResults = filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(exactResults));
   const filteredResults = getFilteredResults(visibleExactResults, tableSearchTerm, markupPercent);
   const sortedResults = [...filteredResults].sort((left, right) =>
     compareResults(left, right, sortState, markupPercent));
@@ -1467,6 +1492,13 @@ stpartsWarehouseInputs.forEach((input) => {
   });
 });
 
+partKomNonReturnableInput.addEventListener("change", () => {
+  showPartKomNonReturnable = partKomNonReturnableInput.checked;
+  savePartKomNonReturnable();
+  renderResults();
+  renderAnalogRows();
+});
+
 sortButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const key = button.dataset.sortKey;
@@ -1560,7 +1592,7 @@ const renderAnalogRows = () => {
     ? document.activeElement.closest("[data-analog-result-index]")?.dataset.analogResultIndex
     : null;
   const normalizedTerm = analogSearchTerm.trim().toLocaleLowerCase();
-  const visibleResults = filterVisibleStpartsWarehouses(analogSearchResults);
+  const visibleResults = filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(analogSearchResults));
   const filteredResults = visibleResults.filter((result) => !normalizedTerm || [
     supplierNames[result.supplier] ?? result.supplier,
     formatBrand(result.brand),
@@ -2129,6 +2161,7 @@ form.addEventListener("submit", async (event) => {
 restoreSearchState();
 restoreTableColumns();
 restoreStpartsWarehouses();
+restorePartKomNonReturnable();
 tableColumnInputs.forEach((input) => {
   input.checked = visibleTableColumns.has(input.value);
 });

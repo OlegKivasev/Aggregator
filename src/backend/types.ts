@@ -33,6 +33,7 @@ export interface NormalizedSearchResult {
   deliveryDate: string | null;
   deliveryDateTo?: string | null;
   deliveryDateApproximate: boolean;
+  isReturnable?: boolean;
   link: string;
   isAnalog?: boolean;
 }

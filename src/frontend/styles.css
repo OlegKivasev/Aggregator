@@ -2152,6 +2152,10 @@ th[aria-sort="descending"] .analogs-sort span::after {
   margin-top: 10px;
 }
 
+.supplier-options__list--single {
+  grid-template-columns: 1fr;
+}
+
 .supplier-options__list label {
   display: flex;
   min-width: 0;
