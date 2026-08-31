@@ -29,6 +29,13 @@ import {
   parseStpartsApiResults,
   StpartsApiAdapter,
 } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
+import {
+  ForumAutoApiAdapter,
+  parseForumAutoApiAnalogResults,
+  parseForumAutoApiResponse,
+  parseForumAutoApiResults,
+  verifyForumAutoCredentials,
+} from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { gotoStparts, isStpartsSessionPageAuthorized } from "../src/backend/suppliers/stparts/stparts-site-auth.ts";
 import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.ts";
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../src/backend/suppliers/errors.ts";
@@ -213,6 +220,72 @@ test("PartKOM normalizes exact official API offers", () => {
   assert.equal(results[0].deliveryDateApproximate, false);
   assert.ok(results[0].deliveryDate);
   assert.ok(results[0].deliveryDateTo);
+});
+
+test("Forum-Auto normalizes documented listGoods offers", () => {
+  const results = parseForumAutoApiResults([
+    {
+      brand: "KNECHT",
+      art: "OC 47",
+      name: "Фильтр масляный",
+      d_deliv: 1,
+      num: 30,
+      price: "194.04",
+      whse: "MSK",
+    },
+    { brand: "KNECHT", art: "OC 470", name: "Другой товар", num: 1, price: "200" },
+    { brand: "KNECHT", art: "OC 47", name: "Без подтверждённого остатка", num: null, price: "195" },
+  ], "OC47");
+
+  assert.equal(results.length, 2);
+  assert.equal(results[0].supplier, "forum-auto");
+  assert.equal(results[0].quantity, 30);
+  assert.equal(results[0].warehouse, "MSK");
+  assert.equal(results[0].price, 194.04);
+  assert.equal(results[0].deliveryDateApproximate, true);
+  assert.ok(results[0].deliveryDate);
+  assert.equal(results[0].link, "https://forum-auto.ru/");
+  assert.equal(results[1].quantity, null);
+});
+
+test("Forum-Auto analog search excludes the selected original position", () => {
+  const results = parseForumAutoApiAnalogResults([
+    { brand: "TOYOTA", art: "90915-YZZJ1", name: "Original", num: 1, price: 100 },
+    { brand: "MANN", art: "W 68/3", name: "Analog", num: 2, price: 90 },
+  ], "90915YZZJ1", "Toyota");
+
+  assert.deepEqual(results.map((result) => [result.brand, result.article, result.isAnalog]), [["MANN", "W 68/3", true]]);
+});
+
+test("Forum-Auto treats documented no-goods fault as an empty listGoods response", () => {
+  assert.deepEqual(parseForumAutoApiResponse({
+    status: 200,
+    body: JSON.stringify({ FaultCode: 27 }),
+    setCookie: [],
+    contentType: "application/json; charset=utf-8",
+  }, "listgoods"), []);
+});
+
+test("Forum-Auto validates credentials through clientInfo and uses documented search parameters", async () => {
+  const credentials = { login: "api-user", password: " secret " };
+  const calls = [];
+  const request = async (method, params, _signal, _timeoutMs, receivedCredentials) => {
+    calls.push({ method, params: params.toString(), credentials: receivedCredentials });
+    return method === "clientinfo" ? [{ name: "client", value: "name" }] : [];
+  };
+
+  await verifyForumAutoCredentials(credentials, request);
+  const adapter = new ForumAutoApiAdapter(request);
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setForumAutoCredentials(credentials);
+  await adapter.search({ article: "OC 47" }, { signal: new AbortController().signal, timeoutMs: 1000 }, () => {}, sessionManager);
+  await adapter.searchAnalogs({ mode: "analogs", article: "OC 47", brand: "KNECHT" }, { signal: new AbortController().signal, timeoutMs: 1000 }, () => {}, sessionManager);
+
+  assert.deepEqual(calls, [
+    { method: "clientinfo", params: "", credentials },
+    { method: "listgoods", params: "art=OC+47&cross=0", credentials },
+    { method: "listgoods", params: "art=OC+47&cross=1&br=KNECHT", credentials },
+  ]);
 });
 
 test("PartKOM discards a reversed delivery interval returned by the API", () => {
@@ -1018,9 +1091,18 @@ test("session manager keeps PartKOM API credentials only in runtime memory", () 
   assert.equal(sessionManager.getPartKomCredentials(), null);
 });
 
+test("session manager keeps Forum-Auto API credentials only in runtime memory", () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.setForumAutoCredentials({ login: " api-user ", password: " password " });
+
+  assert.deepEqual(sessionManager.getForumAutoCredentials(), { login: "api-user", password: " password " });
+  sessionManager.clearForumAutoCredentials();
+  assert.equal(sessionManager.getForumAutoCredentials(), null);
+});
+
 test("incomplete search warnings list only failed suppliers", () => {
   assert.deepEqual(buildIncompleteSearchWarnings(
-    ["rossko", "armtek", "part-kom", "stparts", "motordetal", "mladov"],
+    ["rossko", "armtek", "part-kom", "stparts", "forum-auto", "motordetal", "mladov"],
     {
       rossko: "completed",
       armtek: "completed",
@@ -1028,10 +1110,11 @@ test("incomplete search warnings list only failed suppliers", () => {
       stparts: "auth_error",
       motordetal: "error",
     },
-    { rossko: "Rossko", armtek: "Armtek", "part-kom": "PartKOM", stparts: "STParts", motordetal: "MotorDetal", mladov: "Механик Ладов" },
+    { rossko: "Rossko", armtek: "Armtek", "part-kom": "PartKOM", stparts: "STParts", "forum-auto": "Forum-Auto", motordetal: "MotorDetal", mladov: "Механик Ладов" },
   ), [
     "PartKOM: время ожидания истекло",
     "STParts: требуется авторизация",
+    "Forum-Auto: нет итогового ответа",
     "MotorDetal: поиск не выполнен",
     "Механик Ладов: нет итогового ответа",
   ]);

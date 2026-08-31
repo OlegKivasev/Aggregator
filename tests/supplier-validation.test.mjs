@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ArmtekApiAdapter } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
+import { ForumAutoApiAdapter } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { MladovWebAdapter } from "../src/backend/suppliers/mladov/mladov-web-adapter.ts";
 import { MotorDetalApiAdapter } from "../src/backend/suppliers/motordetal/motordetal-api-adapter.ts";
 import { PartKomApiAdapter } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
@@ -13,6 +14,7 @@ test("every supplier adapter provides dedicated session validation", () => {
     new ArmtekApiAdapter(),
     new PartKomApiAdapter(),
     new StpartsApiAdapter(),
+    new ForumAutoApiAdapter(),
     new MotorDetalApiAdapter(),
     new MladovWebAdapter(),
   ];
@@ -22,6 +24,7 @@ test("every supplier adapter provides dedicated session validation", () => {
     "armtek",
     "part-kom",
     "stparts",
+    "forum-auto",
     "motordetal",
     "mladov",
   ]);

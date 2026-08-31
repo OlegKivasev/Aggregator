@@ -23,7 +23,7 @@ interface EncryptedCredentialEnvelope {
 }
 
 const authenticatedContext = Buffer.from("autoservice-aggregator:supplier-credentials:v1", "utf8");
-const supplierIds = new Set<SupplierId>(["rossko", "armtek", "part-kom", "stparts", "motordetal", "mladov"]);
+const supplierIds = new Set<SupplierId>(["rossko", "armtek", "part-kom", "stparts", "forum-auto", "motordetal", "mladov"]);
 
 function decodeBase64Field(value: unknown, name: string): Buffer {
   if (typeof value !== "string" || !/^[A-Za-z0-9+/]*={0,2}$/.test(value) || value.length % 4 !== 0) {

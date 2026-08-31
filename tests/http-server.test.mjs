@@ -26,12 +26,14 @@ function createApplication(overrides = {}) {
     authorizeArmtek: async () => session("armtek", true),
     authorizePartKom: async () => session("part-kom", true),
     authorizeStparts: async () => session("stparts", true),
+    authorizeForumAuto: async () => session("forum-auto", true),
     authorizeMotorDetal: async () => session("motordetal", true),
     authorizeMladov: async () => session("mladov", true),
     logoutRossko: () => session("rossko"),
     logoutArmtek: () => session("armtek"),
     logoutPartKom: () => session("part-kom"),
     logoutStparts: () => session("stparts"),
+    logoutForumAuto: () => session("forum-auto"),
     logoutMotorDetal: () => session("motordetal"),
     logoutMladov: () => session("mladov"),
     streamSearch: async () => {},
@@ -92,6 +94,27 @@ test("HTTP server delegates authorization to the injected application", async ()
   assert.equal(response.status, 200);
   assert.deepEqual(receivedCredentials, { login: "api-user", password: " secret " });
   assert.deepEqual(await response.json(), { session: session("armtek", true) });
+});
+
+test("HTTP server delegates Forum-Auto authorization without exposing credentials", async () => {
+  let receivedCredentials;
+  const application = createApplication({
+    authorizeForumAuto: async (credentials) => {
+      receivedCredentials = credentials;
+      return session("forum-auto", true);
+    },
+  });
+  const { baseUrl } = await listen(application);
+
+  const response = await fetch(`${baseUrl}/api/suppliers/forum-auto/authorize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ login: "api-user", password: " secret " }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(receivedCredentials, { login: "api-user", password: " secret " });
+  assert.deepEqual(await response.json(), { session: session("forum-auto", true) });
 });
 
 test("HTTP server transports mixed supplier SSE events without changing them", async () => {

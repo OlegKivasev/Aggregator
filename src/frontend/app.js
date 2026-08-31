@@ -80,6 +80,13 @@ const stpartsLogoutButton = document.querySelector("#stparts-logout-button");
 const stpartsSessionPill = document.querySelector("#stparts-session-pill");
 const stpartsAuthFeedback = document.querySelector("#stparts-auth-feedback");
 const stpartsWarehouseInputs = [...document.querySelectorAll(".stparts-warehouse-input")];
+const forumAutoAuthForm = document.querySelector("#forum-auto-auth-form");
+const forumAutoLoginInput = document.querySelector("#forum-auto-login");
+const forumAutoPasswordInput = document.querySelector("#forum-auto-password");
+const forumAutoConnectButton = document.querySelector("#forum-auto-connect-button");
+const forumAutoLogoutButton = document.querySelector("#forum-auto-logout-button");
+const forumAutoSessionPill = document.querySelector("#forum-auto-session-pill");
+const forumAutoAuthFeedback = document.querySelector("#forum-auto-auth-feedback");
 const motorDetalAuthForm = document.querySelector("#motordetal-auth-form");
 const motorDetalLoginInput = document.querySelector("#motordetal-login");
 const motorDetalPasswordInput = document.querySelector("#motordetal-password");
@@ -158,6 +165,7 @@ const supplierNames = {
   armtek: "Armtek",
   "part-kom": "PartKOM",
   stparts: "STParts",
+  "forum-auto": "Forum-Auto",
   motordetal: "MotorDetal",
   mladov: "Механик Ладов",
 };
@@ -979,6 +987,17 @@ const updateStpartsSessionCard = (session) => {
   stpartsAuthFeedback.textContent = "";
 };
 
+const updateForumAutoSessionCard = (session) => {
+  updateSupplierNotice(session);
+  updateSupplierSearchToggle("forum-auto", session.authorized);
+  forumAutoSessionPill.dataset.status = sessionPillStatus(session.authorized);
+  forumAutoSessionPill.textContent = sessionPillText(session.authorized);
+  forumAutoAuthForm.dataset.authorized = String(session.authorized);
+  forumAutoConnectButton.hidden = session.authorized;
+  forumAutoLogoutButton.hidden = !session.authorized;
+  forumAutoAuthFeedback.textContent = "";
+};
+
 const updateMotorDetalSessionCard = (session) => {
   updateSupplierNotice(session);
   updateSupplierSearchToggle("motordetal", session.authorized);
@@ -1006,6 +1025,7 @@ const sessionCardUpdaters = {
   armtek: updateArmtekSessionCard,
   "part-kom": updatePartKomSessionCard,
   stparts: updateStpartsSessionCard,
+  "forum-auto": updateForumAutoSessionCard,
   motordetal: updateMotorDetalSessionCard,
   mladov: updateMladovSessionCard,
 };
@@ -1023,6 +1043,7 @@ const loadSessions = async () => {
   const armtekSession = payload.sessions.find((session) => session.supplier === "armtek");
   const partKomSession = payload.sessions.find((session) => session.supplier === "part-kom");
   const stpartsSession = payload.sessions.find((session) => session.supplier === "stparts");
+  const forumAutoSession = payload.sessions.find((session) => session.supplier === "forum-auto");
   const motorDetalSession = payload.sessions.find((session) => session.supplier === "motordetal");
   const mladovSession = payload.sessions.find((session) => session.supplier === "mladov");
 
@@ -1040,6 +1061,10 @@ const loadSessions = async () => {
 
   if (stpartsSession) {
     updateStpartsSessionCard(stpartsSession);
+  }
+
+  if (forumAutoSession) {
+    updateForumAutoSessionCard(forumAutoSession);
   }
 
   if (motorDetalSession) {
@@ -1595,7 +1620,7 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   renderAnalogSource(result);
   analogsModal.hidden = false;
   analogsModal.focus();
-  setAnalogSearchStatus("Ищем подходящие предложения", "Результаты будут добавляться в таблицу по мере ответа Armtek, Партком и STParts.");
+  setAnalogSearchStatus("Ищем подходящие предложения", "Результаты будут добавляться в таблицу по мере ответа Armtek, Партком, STParts и Forum-Auto.");
 
   const failureMessages = new Set();
   const searchParams = new URLSearchParams({
@@ -1607,6 +1632,7 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   searchParams.append("supplier", "armtek");
   searchParams.append("supplier", "part-kom");
   searchParams.append("supplier", "stparts");
+  searchParams.append("supplier", "forum-auto");
   const source = openSearchStream(`/api/search?${searchParams.toString()}`);
   analogSearchSource = source;
   renderAnalogRows();
@@ -1818,6 +1844,33 @@ partKomLogoutButton.addEventListener("click", async () => {
     clearAuthInputs(partKomLoginInput, partKomPasswordInput);
   } catch (error) {
     showAuthFeedback(partKomAuthFeedback, error.message);
+  }
+});
+
+forumAutoAuthForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setAuthCardLoading(forumAutoAuthForm, true);
+
+  try {
+    const payload = await postJson("/api/suppliers/forum-auto/authorize", {
+      login: forumAutoLoginInput.value.trim(),
+      password: forumAutoPasswordInput.value,
+    });
+    handleAuthorizeResult(payload.session, "forum-auto", forumAutoAuthFeedback, "Forum-Auto API отклонил авторизацию", updateForumAutoSessionCard);
+  } catch (error) {
+    showAuthorizeError(forumAutoAuthFeedback, error);
+  } finally {
+    setAuthCardLoading(forumAutoAuthForm, false);
+  }
+});
+
+forumAutoLogoutButton.addEventListener("click", async () => {
+  try {
+    const payload = await postJson("/api/suppliers/forum-auto/logout");
+    updateForumAutoSessionCard(payload.session);
+    clearAuthInputs(forumAutoLoginInput, forumAutoPasswordInput);
+  } catch (error) {
+    showAuthFeedback(forumAutoAuthFeedback, error.message);
   }
 });
 

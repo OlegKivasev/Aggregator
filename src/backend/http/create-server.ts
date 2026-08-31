@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { classifyOperationalError, SupplierIntegrationError, type OperationalErrorCategory } from "../errors.ts";
 import type {
   ArmtekCredentials,
+  ForumAutoCredentials,
   MladovCredentials,
   MotorDetalCredentials,
   PartKomCredentials,
@@ -36,12 +37,14 @@ export interface AggregatorApplication {
   authorizeArmtek(credentials: ArmtekCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizePartKom(credentials: PartKomCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeStparts(credentials: StpartsCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
+  authorizeForumAuto(credentials: ForumAutoCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeMotorDetal(credentials: MotorDetalCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeMladov(credentials: MladovCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   logoutRossko(): SupplierSessionState;
   logoutArmtek(): SupplierSessionState;
   logoutPartKom(): SupplierSessionState;
   logoutStparts(): SupplierSessionState;
+  logoutForumAuto(): SupplierSessionState;
   logoutMotorDetal(): SupplierSessionState;
   logoutMladov(): SupplierSessionState;
   streamSearch(query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal): Promise<void>;
@@ -207,6 +210,16 @@ export function createAggregatorServer({
 
     if (request.method === "POST" && url.pathname === "/api/suppliers/stparts/logout") {
       serveJson(response, 200, { session: application.logoutStparts() });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/suppliers/forum-auto/authorize") {
+      await serveAuthorization(request, response, application.authorizeForumAuto.bind(application), "authorize-forum-auto", reportError);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/suppliers/forum-auto/logout") {
+      serveJson(response, 200, { session: application.logoutForumAuto() });
       return;
     }
 

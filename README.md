@@ -190,6 +190,12 @@ frontend / HTTP transport
 - `user/info` должен содержать распознаваемое identity field; `{}` не является валидной session.
 - Warehouse HTML/color/rating считаются недоверенными и нормализуются до ограниченного набора значений.
 
+#### Forum-Auto
+
+- Используется официальный REST API: `GET /v2/clientinfo` проверяет учётные данные, `GET /v2/listgoods` выполняет точную проценку с `cross=0`, а поиск аналогов — с `cross=1` и выбранным брендом.
+- API-пароль передаётся поставщику только по HTTPS и хранится через общий encrypted credential store после успешной проверки. В URL результатов возвращается только публичная страница поставщика: API не предоставляет ссылку на отдельное предложение.
+- Ответы ограничены по размеру, должны иметь JSON media type и проверяются структурно. Документированный код 27 («товары не найдены») означает валидный пустой результат; ошибки авторизации и лимитов не маскируются пустым ответом.
+
 #### MotorDetal
 
 - Token state имеет generation guard; поздняя авторизация не может восстановить token после logout.
@@ -329,6 +335,7 @@ limit, and returns at most 80 product cards and 80 crosses per product.
 - Armtek stores API-discovered `VKORG` and `KUNNR_RG` in `STATE_DIR/armtek-api-account-state.json`, bound to a hash of the active login and protected with mode `0600`. Explicit `ARMTEK_VKORG` and `ARMTEK_KUNNR_RG` take precedence.
 - Armtek uses only its WebService API for authorization and search. API failures are reported as Armtek errors; the service does not query ETP or use a browser-session fallback.
 - PartKOM uses only the official Web Services v4 API with Basic authentication. Credentials entered in supplier settings use the common encrypted credential store when its key is configured; there is no browser-session fallback.
+- Forum-Auto uses its official REST API with credentials entered in supplier settings. Its password is never included in result links or logs.
 - PartKOM Web Services access must allow the server's public IP address. An API `Wrong IP address` response is shown as a safe configuration error without exposing credentials or the upstream payload.
 - PartKOM documents successful responses as JSON strings without guaranteeing an HTTP media type. Responses remain size-bounded and must parse as JSON, but a valid JSON body is accepted even when its `Content-Type` is non-standard.
 - Current PartKOM responses may wrap the documented collection in `{ success: true, data: [...] }`; the integration validates and unwraps this envelope before normalizing brands or offers.
@@ -385,7 +392,7 @@ Expected ownership is the service account and expected mode is `600`. Verify all
 curl -fsS \
   -X POST \
   -H 'Content-Type: application/json' \
-  --data '{"article":"90915YZZJ1","suppliers":["rossko","armtek","part-kom","stparts","motordetal","mladov"]}' \
+  --data '{"article":"90915YZZJ1","suppliers":["rossko","armtek","part-kom","stparts","forum-auto","motordetal","mladov"]}' \
   http://127.0.0.1:3000/api/suppliers/sessions/validate
 ```
 

@@ -1,5 +1,6 @@
 import type {
   ArmtekCredentials,
+  ForumAutoCredentials,
   MotorDetalCredentials,
   MladovCredentials,
   PartKomCredentials,
@@ -18,7 +19,7 @@ export interface SupplierOperation {
 }
 
 const nowIso = () => new Date().toISOString();
-const supplierIds = ["rossko", "armtek", "part-kom", "stparts", "motordetal", "mladov"] as const;
+const supplierIds = ["rossko", "armtek", "part-kom", "stparts", "forum-auto", "motordetal", "mladov"] as const;
 
 export class SupplierSessionManager {
   private readonly sessions = new Map<SupplierId, SupplierSessionState>();
@@ -30,6 +31,7 @@ export class SupplierSessionManager {
   private mladovCredentials: MladovCredentials | null = null;
   private partKomCredentials: PartKomCredentials | null = null;
   private stpartsCredentials: StpartsCredentials | null = null;
+  private forumAutoCredentials: ForumAutoCredentials | null = null;
 
   getSession(supplier: SupplierId): SupplierSessionState {
     const current = this.sessions.get(supplier);
@@ -233,5 +235,17 @@ export class SupplierSessionManager {
 
   clearStpartsCredentials(): void {
     this.stpartsCredentials = null;
+  }
+
+  setForumAutoCredentials(credentials: ForumAutoCredentials): void {
+    this.forumAutoCredentials = { login: credentials.login.trim(), password: credentials.password };
+  }
+
+  getForumAutoCredentials(): ForumAutoCredentials | null {
+    return this.forumAutoCredentials;
+  }
+
+  clearForumAutoCredentials(): void {
+    this.forumAutoCredentials = null;
   }
 }
