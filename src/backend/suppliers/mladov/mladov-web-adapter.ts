@@ -71,10 +71,6 @@ export function parseMladovQuantity(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed <= Number.MAX_SAFE_INTEGER ? parsed : null;
 }
 
-export function isMladovNoResultsPageText(value: string): boolean {
-  return /ничего не найдено|не найдено соответствий|товар(?:ы)? не найден(?:о|ы)?|нет (?:предложений|товар(?:а|ов)|результатов)|товар отсутствует|по вашему запросу не найдено|(?:некорректн|недопустим)\S*.*артикул|артикул.*(?:некорректн|недопустим)/i.test(value);
-}
-
 export function isMladovRejectedSearchStatus(status: number): boolean {
   return status === 400 || status === 422;
 }
@@ -173,13 +169,7 @@ async function fetchMladovResults(
   )) as MladovResultItem[];
 
   if (!items.length) {
-    const bodyText = (await page.locator("body").innerText()).replace(/\s+/g, " ").trim();
-    if (isMladovNoResultsPageText(bodyText)) {
-      return [];
-    }
-    throw new SupplierIntegrationError("Механик Ладов вернул нераспознанный пустой результат", {
-      publicMessage: "Механик Ладов вернул неподдерживаемый ответ поиска",
-    });
+    return [];
   }
 
   const target = normalizeArticle(article);

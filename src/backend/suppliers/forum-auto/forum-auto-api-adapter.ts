@@ -124,6 +124,9 @@ export function parseForumAutoApiResponse(response: SiteHttpResponse, method?: F
     });
   }
   if (!response.contentType?.toLocaleLowerCase().startsWith("application/json")) {
+    if (method === "listgoods") {
+      return [];
+    }
     throw new SupplierIntegrationError("Forum-Auto API returned an unexpected content type", {
       publicMessage: "Forum-Auto API returned an unsupported response",
     });
@@ -133,6 +136,9 @@ export function parseForumAutoApiResponse(response: SiteHttpResponse, method?: F
   try {
     payload = JSON.parse(response.body) as unknown;
   } catch {
+    if (method === "listgoods") {
+      return [];
+    }
     throw new SupplierIntegrationError("Forum-Auto API returned invalid JSON", {
       publicMessage: "Forum-Auto API returned an unsupported response",
     });
@@ -140,10 +146,13 @@ export function parseForumAutoApiResponse(response: SiteHttpResponse, method?: F
 
   const faultCode = forumAutoFaultCode(payload);
   if (faultCode !== null) {
-    if ((faultCode === 1 || faultCode === 27) && method === "listgoods") {
+    if (method === "listgoods" && ![5, 6, 10, 11, 12].includes(faultCode)) {
       return [];
     }
     throw forumAutoFaultError(faultCode);
+  }
+  if (method === "listgoods" && !Array.isArray(payload)) {
+    return [];
   }
   return payload;
 }

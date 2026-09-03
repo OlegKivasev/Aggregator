@@ -21,7 +21,7 @@ import {
 } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { parseRosskoQuantity, rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
 import { parseMotorDetalQuantity } from "../src/backend/suppliers/motordetal/motordetal-api-adapter.ts";
-import { isMladovNoResultsPageText, isMladovRejectedSearchStatus, parseMladovQuantity } from "../src/backend/suppliers/mladov/mladov-web-adapter.ts";
+import { isMladovRejectedSearchStatus, parseMladovQuantity } from "../src/backend/suppliers/mladov/mladov-web-adapter.ts";
 import {
   createStpartsBatchParams,
   parseStpartsApiAnalogResults,
@@ -121,12 +121,6 @@ test("Mladov parses exact stock text without inventing availability", () => {
   assert.equal(parseMladovQuantity("-1"), null);
   assert.equal(parseMladovQuantity(Number.MAX_SAFE_INTEGER + 1), null);
   assert.equal(parseMladovQuantity(undefined), null);
-});
-
-test("Mladov recognizes supplier no-results and rejected-article pages", () => {
-  assert.equal(isMladovNoResultsPageText("Товар не найден"), true);
-  assert.equal(isMladovNoResultsPageText("Артикул содержит недопустимые символы"), true);
-  assert.equal(isMladovNoResultsPageText("Сервис временно недоступен"), false);
 });
 
 test("Mladov treats only client validation statuses as rejected searches", () => {
@@ -285,6 +279,18 @@ test("Forum-Auto analog search excludes the selected original position", () => {
 });
 
 test("Forum-Auto treats documented no-goods and rejected-search faults as empty listGoods responses", () => {
+  assert.deepEqual(parseForumAutoApiResponse({
+    status: 200,
+    body: "<html><body>Invalid article</body></html>",
+    setCookie: [],
+    contentType: "text/html; charset=utf-8",
+  }, "listgoods"), []);
+  assert.deepEqual(parseForumAutoApiResponse({
+    status: 200,
+    body: JSON.stringify({ error: "Invalid article" }),
+    setCookie: [],
+    contentType: "application/json; charset=utf-8",
+  }, "listgoods"), []);
   assert.deepEqual(parseForumAutoApiResponse({
     status: 400,
     body: "",
