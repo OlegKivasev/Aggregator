@@ -2472,6 +2472,11 @@ form.addEventListener("submit", async (event) => {
   if (!article) {
     return;
   }
+  if (!/\d/.test(article)) {
+    globalStatus.textContent = "Укажите артикул, содержащий хотя бы одну цифру";
+    articleInput.focus();
+    return;
+  }
 
   const enabledSuppliers = getEnabledSuppliers();
   if (!enabledSuppliers.length) {

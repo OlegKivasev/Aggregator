@@ -156,6 +156,22 @@ test("HTTP server transports mixed supplier SSE events without changing them", a
   assert.deepEqual(parseSseEvents(await response.text()), expectedEvents);
 });
 
+test("HTTP server rejects a numeric-free article before starting supplier searches", async () => {
+  let searchStarted = false;
+  const application = createApplication({
+    streamSearch: async () => {
+      searchStarted = true;
+    },
+  });
+  const { baseUrl } = await listen(application);
+
+  const response = await fetch(`${baseUrl}/api/search?stream=once&article=неразбериха&supplier=forum-auto&supplier=mladov`);
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { message: "Query parameter article must contain at least one digit" });
+  assert.equal(searchStarted, false);
+});
+
 test("HTTP server validates and transports an analog search query", async () => {
   let receivedQuery;
   const application = createApplication({

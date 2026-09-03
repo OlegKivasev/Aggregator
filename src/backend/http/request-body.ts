@@ -5,6 +5,10 @@ const requestBodyLimitBytes = 16 * 1024;
 export const articleLengthLimit = 128;
 export const supplierIds = new Set<SupplierId>(["rossko", "armtek", "part-kom", "stparts", "forum-auto", "motordetal", "mladov"]);
 
+export function hasArticleDigit(article: string): boolean {
+  return /\d/.test(article);
+}
+
 export class RequestBodyError extends Error {
   readonly statusCode: number;
 
@@ -24,7 +28,12 @@ export function parseSessionValidationPayload(payload: unknown): { article: stri
   }
 
   const { article, suppliers } = payload as { article?: unknown; suppliers?: unknown };
-  if (typeof article !== "string" || !article.trim() || article.trim().length > articleLengthLimit) {
+  if (
+    typeof article !== "string" ||
+    !article.trim() ||
+    article.trim().length > articleLengthLimit ||
+    !hasArticleDigit(article.trim())
+  ) {
     throw new RequestBodyError(400, "article must be a non-empty string within the allowed length");
   }
   if (!Array.isArray(suppliers) || !suppliers.length || suppliers.some((value) => typeof value !== "string" || !supplierIds.has(value as SupplierId))) {

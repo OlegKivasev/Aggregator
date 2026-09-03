@@ -17,6 +17,7 @@ import type {
 } from "../types.ts";
 import {
   articleLengthLimit,
+  hasArticleDigit,
   parseCredentials,
   parseSessionValidationPayload,
   parseSupplierIds,
@@ -262,6 +263,10 @@ export function createAggregatorServer({
       }
       if (article.length > articleLengthLimit) {
         serveJson(response, 400, { message: `Query parameter article must not exceed ${articleLengthLimit} characters` });
+        return;
+      }
+      if (!hasArticleDigit(article)) {
+        serveJson(response, 400, { message: "Query parameter article must contain at least one digit" });
         return;
       }
       if (mode !== null && mode !== "analogs") {
