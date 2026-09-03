@@ -273,6 +273,16 @@ test("frontend can hide a supplier from searches, results, and authorization set
   assert.match(app, /analogSearchResults\.filter\(\(result\) => isSupplierVisible\(result\.supplier\)\)/);
 });
 
+test("frontend preserves selected search suppliers when sessions load after restart", async () => {
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
+
+  assert.match(app, /let supplierSearchSelectionsRestored = false;/);
+  assert.match(app, /if \(supplierSearchSelectionsRestored\) \{\s+syncActiveTab\(\);\s+saveSearchState\(\);\s+\}/);
+  assert.match(app, /supplierSearchSelectionsRestored = true;/);
+  assert.doesNotMatch(app, /updateRosskoSessionCard\(rosskoSession, true\)/);
+  assert.doesNotMatch(app, /updateArmtekSessionCard\(armtekSession, true\)/);
+});
+
 test("main results use the same comparison-oriented table controls as analogs", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
