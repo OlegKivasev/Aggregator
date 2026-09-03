@@ -1,7 +1,7 @@
 import { mladovConfig, supplierMaxResponseBytes } from "../../config.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type { NormalizedSearchResult, SearchQuery, SupplierSearchContext, SupplierSessionState } from "../../types.ts";
-import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
+import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../errors.ts";
 import { siteHttpRequest } from "../site-http.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
 import {
@@ -69,6 +69,33 @@ export function parseMladovQuantity(value: unknown): number | null {
 
   const parsed = Number(normalized);
   return Number.isFinite(parsed) && parsed <= Number.MAX_SAFE_INTEGER ? parsed : null;
+}
+
+export type MladovSearchStage =
+  | "browser"
+  | "browser-context"
+  | "search-page"
+  | "session-check"
+  | "authorization"
+  | "catalog-search"
+  | "session-save";
+
+const mladovSearchStageLabels: Record<MladovSearchStage, string> = {
+  browser: "запуск браузера",
+  "browser-context": "подготовка сессии",
+  "search-page": "открытие страницы поиска",
+  "session-check": "проверка авторизации",
+  authorization: "авторизация",
+  "catalog-search": "получение результатов",
+  "session-save": "сохранение сессии",
+};
+
+export function createMladovSearchFailure(stage: MladovSearchStage, cause: unknown): SupplierIntegrationError {
+  return new SupplierIntegrationError(`Mladov search failed during ${stage}`, {
+    cause,
+    publicMessage: `сбой на этапе «${mladovSearchStageLabels[stage]}»`,
+    diagnosticCode: `mladov-${stage}`,
+  });
 }
 
 export function isMladovRejectedSearchStatus(status: number): boolean {
@@ -222,16 +249,24 @@ export class MladovWebAdapter implements SupplierAdapter {
     sessionManager: SupplierSessionManager,
   ): Promise<void> {
     const expectedStateGeneration = getMladovStorageStateGeneration();
-    searchContext.signal.throwIfAborted();
-    const browser = await getMladovSharedBrowser(searchContext.signal);
-    const context = await createMladovContext(browser, true, searchContext.signal);
-    const closeOnAbort = () => context.close().catch(() => undefined);
-    searchContext.signal.addEventListener("abort", closeOnAbort, { once: true });
+    let stage: MladovSearchStage = "browser";
+    let context: any | null = null;
+    let closeOnAbort: (() => void) | null = null;
 
     try {
+      searchContext.signal.throwIfAborted();
+      const browser = await getMladovSharedBrowser(searchContext.signal);
+      stage = "browser-context";
+      context = await createMladovContext(browser, true, searchContext.signal);
+      closeOnAbort = () => context?.close().catch(() => undefined);
+      searchContext.signal.addEventListener("abort", closeOnAbort, { once: true });
+
+      stage = "search-page";
       const page = await context.newPage();
+      stage = "session-check";
       let authorized = await isMladovAuthenticated(page, searchContext.signal);
       if (!authorized) {
+        stage = "authorization";
         const credentials = sessionManager.getMladovCredentials();
         if (!credentials) {
           throw new SupplierAuthError("Сессия Механик Ладов истекла, учетные данные отсутствуют");
@@ -249,6 +284,7 @@ export class MladovWebAdapter implements SupplierAdapter {
 
       const article = query.article.trim();
       searchContext.signal.throwIfAborted();
+      stage = "catalog-search";
       const items = await fetchMladovResults(context, page, article, searchContext.signal);
       const link = new URL(`/shop.php?artikul=${encodeWindows1251(article)}`, mladovBaseUrl).toString();
 
@@ -269,10 +305,23 @@ export class MladovWebAdapter implements SupplierAdapter {
       }
 
       searchContext.signal.throwIfAborted();
+      stage = "session-save";
       await saveMladovStorageState(context, expectedStateGeneration, searchContext.signal);
+    } catch (error) {
+      if (
+        searchContext.signal.aborted ||
+        error instanceof SupplierAuthError ||
+        error instanceof SupplierIntegrationError ||
+        error instanceof SupplierTimeoutError
+      ) {
+        throw error;
+      }
+      throw createMladovSearchFailure(stage, error);
     } finally {
-      searchContext.signal.removeEventListener("abort", closeOnAbort);
-      await context.close().catch(() => undefined);
+      if (closeOnAbort) {
+        searchContext.signal.removeEventListener("abort", closeOnAbort);
+      }
+      await context?.close().catch(() => undefined);
     }
   }
 }

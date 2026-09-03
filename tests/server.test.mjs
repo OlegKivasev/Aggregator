@@ -21,7 +21,12 @@ import {
 } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { parseRosskoQuantity, rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
 import { parseMotorDetalQuantity } from "../src/backend/suppliers/motordetal/motordetal-api-adapter.ts";
-import { encodeWindows1251, isMladovRejectedSearchStatus, parseMladovQuantity } from "../src/backend/suppliers/mladov/mladov-web-adapter.ts";
+import {
+  createMladovSearchFailure,
+  encodeWindows1251,
+  isMladovRejectedSearchStatus,
+  parseMladovQuantity,
+} from "../src/backend/suppliers/mladov/mladov-web-adapter.ts";
 import {
   createStpartsBatchParams,
   parseStpartsApiAnalogResults,
@@ -132,6 +137,15 @@ test("Mladov treats only client validation statuses as rejected searches", () =>
   assert.equal(isMladovRejectedSearchStatus(422), true);
   assert.equal(isMladovRejectedSearchStatus(401), false);
   assert.equal(isMladovRejectedSearchStatus(500), false);
+});
+
+test("Mladov reports the failed search stage without exposing the upstream error", () => {
+  const failure = createMladovSearchFailure("catalog-search", new Error("socket hang up"));
+
+  assert.ok(failure instanceof SupplierIntegrationError);
+  assert.equal(failure.publicMessage, "сбой на этапе «получение результатов»");
+  assert.equal(failure.diagnosticCode, "mladov-catalog-search");
+  assert.doesNotMatch(failure.publicMessage, /socket hang up/i);
 });
 
 test("Armtek allows the observed large store directory without relaxing other response limits", () => {
