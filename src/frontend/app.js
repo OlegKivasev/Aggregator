@@ -2472,8 +2472,8 @@ form.addEventListener("submit", async (event) => {
   if (!article) {
     return;
   }
-  if (!/\d/.test(article)) {
-    globalStatus.textContent = "Укажите артикул, содержащий хотя бы одну цифру";
+  if (!/^(?=.*\d)[A-Za-z0-9 ./_-]+$/.test(article)) {
+    globalStatus.textContent = "Артикул может содержать только латинские буквы, цифры и разделители";
     articleInput.focus();
     return;
   }

@@ -156,7 +156,7 @@ test("HTTP server transports mixed supplier SSE events without changing them", a
   assert.deepEqual(parseSseEvents(await response.text()), expectedEvents);
 });
 
-test("HTTP server rejects a numeric-free article before starting supplier searches", async () => {
+test("HTTP server rejects an article outside the shared supplier format before starting searches", async () => {
   let searchStarted = false;
   const application = createApplication({
     streamSearch: async () => {
@@ -165,10 +165,10 @@ test("HTTP server rejects a numeric-free article before starting supplier search
   });
   const { baseUrl } = await listen(application);
 
-  const response = await fetch(`${baseUrl}/api/search?stream=once&article=неразбериха&supplier=forum-auto&supplier=mladov`);
+  const response = await fetch(`${baseUrl}/api/search?stream=once&article=ЙАЦЭВЙЦ124&supplier=forum-auto&supplier=mladov`);
 
   assert.equal(response.status, 400);
-  assert.deepEqual(await response.json(), { message: "Query parameter article must contain at least one digit" });
+  assert.deepEqual(await response.json(), { message: "Query parameter article must contain a digit and use only Latin letters, digits, spaces, dots, slashes, underscores, or hyphens" });
   assert.equal(searchStarted, false);
 });
 
