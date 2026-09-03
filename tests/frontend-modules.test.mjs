@@ -283,6 +283,21 @@ test("frontend preserves selected search suppliers when sessions load after rest
   assert.doesNotMatch(app, /updateArmtekSessionCard\(armtekSession, true\)/);
 });
 
+test("search tabs can be renamed through a context menu and keep their full name in a tooltip", async () => {
+  const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
+
+  assert.match(html, /id="tab-context-menu"/);
+  assert.match(html, /id="rename-tab-button"/);
+  assert.match(app, /name: normalizeTabName\(data\.name\)/);
+  assert.match(app, /name: tab\.name/);
+  assert.match(app, /searchTabsList\.addEventListener\("contextmenu"/);
+  assert.match(app, /window\.prompt\("Введите название вкладки"/);
+  assert.match(app, /title="\$\{escapeHtml\(title\)\}"/);
+  assert.match(styles, /\.search-tab__title\s*\{[^}]*text-overflow: ellipsis;/s);
+});
+
 test("main results use the same comparison-oriented table controls as analogs", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
