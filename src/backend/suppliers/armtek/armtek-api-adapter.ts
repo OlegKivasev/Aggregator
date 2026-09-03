@@ -39,6 +39,7 @@ interface ArmtekSearchItem {
   NAME?: string;
   PRICE?: string;
   RVALUE?: unknown;
+  RETDAYS?: unknown;
   DLVDT?: string;
   WRNTDT?: string;
   ANALOG?: string;
@@ -102,6 +103,13 @@ export function parseArmtekQuantity(value: unknown): number | null {
 
   const parsed = Number(normalized);
   return Number.isFinite(parsed) && parsed <= Number.MAX_SAFE_INTEGER ? parsed : null;
+}
+
+export function isArmtekReturnImpossible(value: unknown): boolean {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value === 0;
+  }
+  return typeof value === "string" && /^0+$/.test(value.trim());
 }
 
 function parseArmtekDate(value: string | undefined): string | null {
@@ -445,6 +453,7 @@ function normalizeArmtekResult(
     ...parseArmtekDeliveryDates(item.DLVDT, item.WRNTDT),
     warehouse: getArmtekWarehouse(item, storeNames),
     deliveryDateApproximate: false,
+    ...(isArmtekReturnImpossible(item.RETDAYS) ? { isReturnable: false } : {}),
     link: buildArmtekResultLink(article),
     ...(isAnalog ? { isAnalog: true } : {}),
   };

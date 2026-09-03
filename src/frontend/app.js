@@ -17,6 +17,7 @@ import {
 } from "./stparts-warehouse-settings.js";
 import { isPartKomReturnableVisible } from "./partkom-return-settings.js";
 import { isForumAutoReturnableVisible } from "./forum-auto-return-settings.js";
+import { isArmtekReturnableVisible } from "./armtek-return-settings.js";
 
 const form = document.querySelector("#search-form");
 const articleInput = document.querySelector("#article-input");
@@ -71,6 +72,7 @@ const armtekConnectButton = document.querySelector("#armtek-connect-button");
 const armtekLogoutButton = document.querySelector("#armtek-logout-button");
 const armtekSessionPill = document.querySelector("#armtek-session-pill");
 const armtekAuthFeedback = document.querySelector("#armtek-auth-feedback");
+const armtekNonReturnableInput = document.querySelector("#armtek-non-returnable");
 const partKomAuthForm = document.querySelector("#part-kom-auth-form");
 const partKomLoginInput = document.querySelector("#part-kom-login");
 const partKomPasswordInput = document.querySelector("#part-kom-password");
@@ -173,6 +175,7 @@ const supplierSessionStates = new Map();
 const searchStateStorageKey = "autoservice.searchState";
 const tableColumnsStorageKey = "autoservice.tableColumns";
 const stpartsWarehousesStorageKey = "autoservice.stpartsWarehouses";
+const armtekNonReturnableStorageKey = "autoservice.armtekNonReturnable";
 const partKomNonReturnableStorageKey = "autoservice.partKomNonReturnable";
 const forumAutoNonReturnableStorageKey = "autoservice.forumAutoNonReturnable";
 const supplierVisibilityStorageKey = "autoservice.supplierVisibility";
@@ -205,6 +208,7 @@ const tableColumnWidths = {
 };
 let visibleTableColumns = new Set(tableColumnIds);
 let visibleStpartsWarehouses = new Set(["green"]);
+let showArmtekNonReturnable = false;
 let showPartKomNonReturnable = false;
 let showForumAutoNonReturnable = false;
 const filterColumnNames = Object.fromEntries(filterColumnButtons.map((button) => [
@@ -770,6 +774,27 @@ const filterVisibleStpartsWarehouses = (items) => items.filter(
   (result) => isStpartsWarehouseVisible(result, visibleStpartsWarehouses),
 );
 
+const saveArmtekNonReturnable = () => {
+  try {
+    localStorage.setItem(armtekNonReturnableStorageKey, String(showArmtekNonReturnable));
+  } catch {
+    // Return preferences are optional; unavailable storage must not affect search.
+  }
+};
+
+const restoreArmtekNonReturnable = () => {
+  try {
+    showArmtekNonReturnable = localStorage.getItem(armtekNonReturnableStorageKey) === "true";
+  } catch {
+    // Return preferences are optional; unavailable storage must not affect search.
+  }
+  armtekNonReturnableInput.checked = showArmtekNonReturnable;
+};
+
+const filterVisibleArmtekReturnable = (items) => items.filter(
+  (result) => isArmtekReturnableVisible(result, showArmtekNonReturnable),
+);
+
 const savePartKomNonReturnable = () => {
   try {
     localStorage.setItem(partKomNonReturnableStorageKey, String(showPartKomNonReturnable));
@@ -954,9 +979,9 @@ const renderResults = () => {
 
   // Older persisted tabs can still contain automatically fetched analogs.
   const exactResults = results.filter((result) => result.isAnalog !== true);
-  const visibleExactResults = filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
+  const visibleExactResults = filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
     exactResults.filter((result) => isSupplierVisible(result.supplier)),
-  )));
+  ))));
   const filteredResults = getFilteredResults(visibleExactResults, tableSearchTerm, markupPercent);
   const sortedResults = [...filteredResults].sort((left, right) =>
     compareResults(left, right, sortState, markupPercent));
@@ -1604,6 +1629,13 @@ stpartsWarehouseInputs.forEach((input) => {
   });
 });
 
+armtekNonReturnableInput.addEventListener("change", () => {
+  showArmtekNonReturnable = armtekNonReturnableInput.checked;
+  saveArmtekNonReturnable();
+  renderResults();
+  renderAnalogRows();
+});
+
 partKomNonReturnableInput.addEventListener("change", () => {
   showPartKomNonReturnable = partKomNonReturnableInput.checked;
   savePartKomNonReturnable();
@@ -1769,9 +1801,9 @@ const renderAnalogRows = () => {
     ? document.activeElement.closest("[data-analog-result-index]")?.dataset.analogResultIndex
     : null;
   const normalizedTerm = analogSearchTerm.trim().toLocaleLowerCase();
-  const visibleResults = filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
+  const visibleResults = filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
     analogSearchResults.filter((result) => isSupplierVisible(result.supplier)),
-  )));
+  ))));
   const filteredResults = visibleResults.filter((result) => !normalizedTerm || [
     supplierNames[result.supplier] ?? result.supplier,
     formatBrand(result.brand),
@@ -2387,6 +2419,7 @@ form.addEventListener("submit", async (event) => {
 restoreSearchState();
 restoreTableColumns();
 restoreStpartsWarehouses();
+restoreArmtekNonReturnable();
 restorePartKomNonReturnable();
 restoreForumAutoNonReturnable();
 restoreSupplierVisibility();

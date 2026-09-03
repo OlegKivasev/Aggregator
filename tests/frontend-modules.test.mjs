@@ -19,6 +19,7 @@ import {
 } from "../src/frontend/stparts-warehouse-settings.js";
 import { isPartKomReturnableVisible } from "../src/frontend/partkom-return-settings.js";
 import { isForumAutoReturnableVisible } from "../src/frontend/forum-auto-return-settings.js";
+import { isArmtekReturnableVisible } from "../src/frontend/armtek-return-settings.js";
 
 test("result formatting escapes untrusted text and limits result links", () => {
   assert.equal(escapeHtml('<script data-value="x">'), "&lt;script data-value=&quot;x&quot;&gt;");
@@ -91,6 +92,13 @@ test("Forum-Auto return setting hides only confirmed non-returnable offers", () 
   assert.equal(isForumAutoReturnableVisible({ supplier: "stparts", isReturnable: false }, false), true);
 });
 
+test("Armtek return setting hides only confirmed non-returnable offers", () => {
+  assert.equal(isArmtekReturnableVisible({ supplier: "armtek", isReturnable: false }, false), false);
+  assert.equal(isArmtekReturnableVisible({ supplier: "armtek", isReturnable: false }, true), true);
+  assert.equal(isArmtekReturnableVisible({ supplier: "armtek" }, false), true);
+  assert.equal(isArmtekReturnableVisible({ supplier: "stparts", isReturnable: false }, false), true);
+});
+
 test("PartKOM return preference is rendered and applied to regular and analog results", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
@@ -109,6 +117,16 @@ test("Forum-Auto return preference is rendered and applied to regular and analog
   assert.match(app, /autoservice\.forumAutoNonReturnable/);
   assert.match(app, /filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
   assert.match(app, /filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?analogSearchResults\.filter/);
+});
+
+test("Armtek return preference is rendered and applied to regular and analog results", async () => {
+  const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
+
+  assert.match(html, /id="armtek-non-returnable"/);
+  assert.match(app, /autoservice\.armtekNonReturnable/);
+  assert.match(app, /filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
+  assert.match(app, /filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?analogSearchResults\.filter/);
 });
 
 test("delivery date sorting moves intervals above dates they finish before", () => {

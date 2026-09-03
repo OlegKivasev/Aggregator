@@ -6,7 +6,7 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { armtekSearchItems, armtekVkorgItems, getArmtekResponseMaxBytes, getArmtekWarehouse, getOptionalArmtekStoreNames, parseArmtekDeliveryDates, parseArmtekQuantity } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
+import { armtekSearchItems, armtekVkorgItems, getArmtekResponseMaxBytes, getArmtekWarehouse, getOptionalArmtekStoreNames, isArmtekReturnImpossible, parseArmtekDeliveryDates, parseArmtekQuantity } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
 import { supplierMaxResponseBytes } from "../src/backend/config.ts";
 import { SearchApplicationService } from "../src/backend/application/search-application-service.ts";
 import { createHash } from "node:crypto";
@@ -79,6 +79,15 @@ test("Armtek normalizes only valid available quantities", () => {
   assert.equal(parseArmtekQuantity("-1"), null);
   assert.equal(parseArmtekQuantity(12), null);
   assert.equal(parseArmtekQuantity(undefined), null);
+});
+
+test("Armtek identifies only confirmed zero return days as non-returnable", () => {
+  assert.equal(isArmtekReturnImpossible(0), true);
+  assert.equal(isArmtekReturnImpossible(" 0 "), true);
+  assert.equal(isArmtekReturnImpossible("00"), true);
+  assert.equal(isArmtekReturnImpossible(1), false);
+  assert.equal(isArmtekReturnImpossible("1"), false);
+  assert.equal(isArmtekReturnImpossible(undefined), false);
 });
 
 test("Rossko exposes only valid positive inventory as quantity", () => {
