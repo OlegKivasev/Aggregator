@@ -68,10 +68,19 @@ input {
   align-items: center;
   justify-content: center;
   min-width: 150px;
+  max-width: 220px;
   padding: 0 36px 0 22px;
   color: var(--muted);
   background: transparent;
   font-weight: 700;
+}
+
+.search-tab__title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .search-tab::after {
@@ -120,6 +129,7 @@ input {
 
 .search-tab__status {
   display: inline-block;
+  flex: 0 0 7px;
   width: 7px;
   height: 7px;
   margin-right: 8px;
@@ -1139,12 +1149,14 @@ table tbody tr:hover td {
 }
 
 .result-context-menu[hidden],
+.tab-context-menu[hidden],
 .analogs-modal[hidden],
 .analogs-search-status[hidden] {
   display: none;
 }
 
-.result-context-menu {
+.result-context-menu,
+.tab-context-menu {
   position: fixed;
   z-index: 1200;
   min-width: 190px;
@@ -1152,7 +1164,8 @@ table tbody tr:hover td {
   border-radius: 10px;
 }
 
-.result-context-menu button {
+.result-context-menu button,
+.tab-context-menu button {
   width: 100%;
   padding: 9px 12px;
   border: 0;
@@ -1164,7 +1177,9 @@ table tbody tr:hover td {
 }
 
 .result-context-menu button:hover,
-.result-context-menu button:focus-visible {
+.result-context-menu button:focus-visible,
+.tab-context-menu button:hover,
+.tab-context-menu button:focus-visible {
   color: var(--accent-dark);
   background: #fff3ed;
   outline: 0;

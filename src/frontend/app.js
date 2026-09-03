@@ -122,6 +122,8 @@ const supplierNoticeList = document.querySelector("#supplier-notice-list");
 const passwordFields = [...document.querySelectorAll(".password-field")];
 const resultContextMenu = document.querySelector("#result-context-menu");
 const openResultButton = document.querySelector("#open-result-button");
+const tabContextMenu = document.querySelector("#tab-context-menu");
+const renameTabButton = document.querySelector("#rename-tab-button");
 const warehouseTooltip = document.querySelector("#warehouse-tooltip");
 const showAnalogsButton = document.querySelector("#show-analogs-button");
 const analogsModal = document.querySelector("#analogs-modal");
@@ -151,6 +153,8 @@ let markupPercent = 35;
 let tableSearchTerm = "";
 let contextMenuResult = null;
 let contextMenuAnchor = null;
+let contextMenuTabId = null;
+let contextMenuTabAnchor = null;
 let analogSearchSource = null;
 let analogModalReturnFocus = null;
 let analogReturnResult = null;
@@ -465,9 +469,12 @@ const normalizeMarkupPercent = (value) => {
   return Number.isFinite(parsed) ? Math.min(1000, Math.max(0, parsed)) : 35;
 };
 
+const normalizeTabName = (value) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 100) : "");
+
 const createSearchTab = (data = {}) => ({
   id: data.id ?? `tab-${Date.now()}-${tabSequence++}`,
   article: typeof data.article === "string" ? data.article : "",
+  name: normalizeTabName(data.name),
   enabledSuppliers: Array.isArray(data.enabledSuppliers) ? data.enabledSuppliers : getEnabledSuppliers(),
   status: typeof data.status === "string" && data.status !== "Ожидание поиска" ? data.status : "",
   results: Array.isArray(data.results) ? data.results.filter((result) => result?.isAnalog !== true) : [],
@@ -850,6 +857,7 @@ const saveSearchState = () => {
         tabs: searchTabs.map((tab) => ({
           id: tab.id,
           article: tab.article,
+          name: tab.name,
           enabledSuppliers: tab.enabledSuppliers,
           status: tab.status,
           results: tab.results,
@@ -898,11 +906,11 @@ const renderTabs = () => {
   searchTabsList.innerHTML = searchTabs
     .map((tab, index) => {
       const statusClass = tab.source ? "is-searching" : tab.results.length ? "is-completed" : "";
-      const title = tab.article || `Новый поиск ${index + 1}`;
+      const title = tab.name || tab.article || `Новый поиск ${index + 1}`;
 
       return `
-       <button type="button" class="search-tab ${tab.id === activeTabId ? "active" : ""}" data-tab-id="${escapeHtml(tab.id)}" role="tab" aria-selected="${tab.id === activeTabId}">
-          <span class="search-tab__status ${statusClass}"></span>${escapeHtml(title)}
+       <button type="button" class="search-tab ${tab.id === activeTabId ? "active" : ""}" data-tab-id="${escapeHtml(tab.id)}" role="tab" aria-selected="${tab.id === activeTabId}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">
+          <span class="search-tab__status ${statusClass}"></span><span class="search-tab__title">${escapeHtml(title)}</span>
            <span class="search-tab__close" data-close-tab-id="${escapeHtml(tab.id)}" aria-label="Закрыть вкладку">×</span>
         </button>
       `;
@@ -1388,6 +1396,9 @@ document.addEventListener("click", (event) => {
   if (!resultContextMenu.hidden && !resultContextMenu.contains(event.target)) {
     hideResultContextMenu();
   }
+  if (!tabContextMenu.hidden && !tabContextMenu.contains(event.target)) {
+    hideTabContextMenu();
+  }
 });
 
 const hideWarehouseTooltip = () => {
@@ -1460,7 +1471,9 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") {
     return;
   }
-  if (!resultContextMenu.hidden) {
+  if (!tabContextMenu.hidden) {
+    hideTabContextMenu(true);
+  } else if (!resultContextMenu.hidden) {
     hideResultContextMenu(true);
   } else if (!analogsModal.hidden) {
     closeAnalogsModal();
@@ -1543,6 +1556,71 @@ searchTabsList.addEventListener("click", (event) => {
 
   if (tab) {
     activateTab(tab.dataset.tabId);
+  }
+});
+
+const hideTabContextMenu = (restoreFocus = false) => {
+  tabContextMenu.hidden = true;
+  contextMenuTabId = null;
+  if (restoreFocus && contextMenuTabAnchor?.isConnected) {
+    contextMenuTabAnchor.focus();
+  }
+  contextMenuTabAnchor = null;
+};
+
+const showTabContextMenu = (tabId, clientX, clientY, anchor) => {
+  contextMenuTabId = tabId;
+  contextMenuTabAnchor = anchor;
+  tabContextMenu.hidden = false;
+  const bounds = tabContextMenu.getBoundingClientRect();
+  tabContextMenu.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - bounds.width - 8))}px`;
+  tabContextMenu.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - bounds.height - 8))}px`;
+  renameTabButton.focus();
+};
+
+const renameTab = (tabId) => {
+  const tab = searchTabs.find((item) => item.id === tabId);
+  if (!tab) {
+    return;
+  }
+  const index = searchTabs.indexOf(tab);
+  const defaultName = tab.article || `Новый поиск ${index + 1}`;
+  const name = window.prompt("Введите название вкладки", tab.name || defaultName);
+  if (name === null) {
+    return;
+  }
+  tab.name = normalizeTabName(name);
+  renderTabs();
+  saveSearchState();
+};
+
+searchTabsList.addEventListener("contextmenu", (event) => {
+  const tab = event.target.closest("[data-tab-id]");
+  if (!tab) {
+    return;
+  }
+  event.preventDefault();
+  showTabContextMenu(tab.dataset.tabId, event.clientX, event.clientY, tab);
+});
+
+searchTabsList.addEventListener("keydown", (event) => {
+  if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
+    return;
+  }
+  const tab = event.target.closest("[data-tab-id]");
+  if (!tab) {
+    return;
+  }
+  event.preventDefault();
+  const bounds = tab.getBoundingClientRect();
+  showTabContextMenu(tab.dataset.tabId, bounds.left + 16, bounds.top + 16, tab);
+});
+
+renameTabButton.addEventListener("click", () => {
+  const tabId = contextMenuTabId;
+  hideTabContextMenu();
+  if (tabId) {
+    renameTab(tabId);
   }
 });
 
@@ -2046,8 +2124,14 @@ analogsShowMore.addEventListener("click", () => {
 });
 
 closeAnalogsModalButtons.forEach((button) => button.addEventListener("click", closeAnalogsModal));
-window.addEventListener("resize", () => hideResultContextMenu(true));
-window.addEventListener("scroll", () => hideResultContextMenu(true), true);
+window.addEventListener("resize", () => {
+  hideResultContextMenu(true);
+  hideTabContextMenu(true);
+});
+window.addEventListener("scroll", () => {
+  hideResultContextMenu(true);
+  hideTabContextMenu(true);
+}, true);
 window.addEventListener("resize", hideWarehouseTooltip);
 window.addEventListener("scroll", hideWarehouseTooltip, true);
 
