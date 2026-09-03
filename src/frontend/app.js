@@ -191,6 +191,7 @@ const supplierNames = {
 const supplierIds = Object.keys(supplierNames);
 const analogSupplierIds = ["armtek", "part-kom", "stparts", "forum-auto"];
 const visibleSuppliers = new Set(supplierIds);
+let supplierSearchSelectionsRestored = false;
 const tableColumnIds = tableColumnInputs.map((input) => input.value);
 const tableColumnWidths = {
   supplier: 100,
@@ -395,8 +396,10 @@ const updateSupplierSearchToggle = (supplier, authorized) => {
 
   if ((!authorized || !isSupplierVisible(supplier)) && input.checked) {
     input.checked = false;
-    syncActiveTab();
-    saveSearchState();
+    if (supplierSearchSelectionsRestored) {
+      syncActiveTab();
+      saveSearchState();
+    }
   }
 
   suppliersDropdown.hidden = !supplierEnabledInputs.some((candidate) => !supplierSearchToggles[candidate.value]?.hidden);
@@ -1046,7 +1049,7 @@ const closeSettings = () => {
   settingsDrawer.hidden = true;
 };
 
-const updateRosskoSessionCard = (session, enableSearch = false) => {
+const updateRosskoSessionCard = (session) => {
   updateSupplierNotice(session);
   updateSupplierSearchToggle("rossko", session.authorized);
   rosskoSessionPill.dataset.status = sessionPillStatus(session.authorized);
@@ -1055,13 +1058,9 @@ const updateRosskoSessionCard = (session, enableSearch = false) => {
   rosskoConnectButton.hidden = session.authorized;
   rosskoLogoutButton.hidden = !session.authorized;
   rosskoAuthFeedback.textContent = "";
-
-  if (enableSearch && session.authorized) {
-    setSupplierEnabled("rossko", true);
-  }
 };
 
-const updateArmtekSessionCard = (session, enableSearch = false) => {
+const updateArmtekSessionCard = (session) => {
   updateSupplierNotice(session);
   updateSupplierSearchToggle("armtek", session.authorized);
   armtekSessionPill.dataset.status = sessionPillStatus(session.authorized);
@@ -1070,10 +1069,6 @@ const updateArmtekSessionCard = (session, enableSearch = false) => {
   armtekConnectButton.hidden = session.authorized;
   armtekLogoutButton.hidden = !session.authorized;
   armtekAuthFeedback.textContent = "";
-
-  if (enableSearch && session.authorized) {
-    setSupplierEnabled("armtek", true);
-  }
 };
 
 const updatePartKomSessionCard = (session) => {
@@ -1159,11 +1154,11 @@ const loadSessions = async () => {
   const mladovSession = payload.sessions.find((session) => session.supplier === "mladov");
 
   if (rosskoSession) {
-    updateRosskoSessionCard(rosskoSession, true);
+    updateRosskoSessionCard(rosskoSession);
   }
 
   if (armtekSession) {
-    updateArmtekSessionCard(armtekSession, true);
+    updateArmtekSessionCard(armtekSession);
   }
 
   if (partKomSession) {
@@ -2409,6 +2404,7 @@ if (restoredTab) {
     input.checked = isSupplierVisible(input.value) && restoredTab.enabledSuppliers.includes(input.value);
   });
 }
+supplierSearchSelectionsRestored = true;
 markupPercentInput.addEventListener("change", () => {
   setMarkupPercent(markupPercentInput.value);
 });
