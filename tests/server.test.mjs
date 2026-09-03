@@ -1157,6 +1157,16 @@ test("incomplete search warnings list only failed suppliers", () => {
     "MotorDetal: поиск не выполнен",
     "Механик Ладов: нет итогового ответа",
   ]);
+
+  assert.deepEqual(buildIncompleteSearchWarnings(
+    ["forum-auto", "mladov"],
+    { "forum-auto": "error", mladov: "error" },
+    { "forum-auto": "Forum-Auto", mladov: "Механик Ладов" },
+    { "forum-auto": "Forum-Auto API returned unsupported response" },
+  ), [
+    "Forum-Auto: Forum-Auto API returned unsupported response",
+    "Механик Ладов: поиск не выполнен",
+  ]);
 });
 
 test("supplier result tooltip includes duration for every selected supplier", () => {

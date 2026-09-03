@@ -126,13 +126,19 @@ async function fetchMladovResults(
     return [];
   }
   if (response.status < 200 || response.status >= 300) {
-    throw new SupplierIntegrationError(`Поиск Механик Ладов вернул HTTP ${response.status}`);
+    throw new SupplierIntegrationError(`Поиск Механик Ладов вернул HTTP ${response.status}`, {
+      publicMessage: `Механик Ладов вернул HTTP ${response.status}`,
+    });
   }
   if (!response.contentType?.toLowerCase().includes("text/html")) {
-    throw new SupplierIntegrationError("Поиск Механик Ладов вернул неожиданный тип ответа");
+    throw new SupplierIntegrationError("Поиск Механик Ладов вернул неожиданный тип ответа", {
+      publicMessage: "Механик Ладов вернул неподдерживаемый ответ",
+    });
   }
   if (!response.rawBody) {
-    throw new SupplierIntegrationError("Поиск Механик Ладов вернул пустой ответ");
+    throw new SupplierIntegrationError("Поиск Механик Ладов вернул пустой ответ", {
+      publicMessage: "Механик Ладов вернул пустой ответ",
+    });
   }
   const html = new TextDecoder("windows-1251").decode(response.rawBody);
   await page.setContent(html);
@@ -171,7 +177,9 @@ async function fetchMladovResults(
     if (isMladovNoResultsPageText(bodyText)) {
       return [];
     }
-    throw new SupplierIntegrationError("Механик Ладов вернул нераспознанный пустой результат");
+    throw new SupplierIntegrationError("Механик Ладов вернул нераспознанный пустой результат", {
+      publicMessage: "Механик Ладов вернул неподдерживаемый ответ поиска",
+    });
   }
 
   const target = normalizeArticle(article);

@@ -64,7 +64,7 @@ export const buildSupplierResultTooltip = (suppliers, results, durations, suppli
   }).join("\n");
 };
 
-export const buildIncompleteSearchWarnings = (suppliers, statuses, supplierNames) => suppliers.flatMap((supplier) => {
+export const buildIncompleteSearchWarnings = (suppliers, statuses, supplierNames, details = {}) => suppliers.flatMap((supplier) => {
   const name = supplierNames[supplier] ?? supplier;
   const status = statuses[supplier];
 
@@ -75,7 +75,10 @@ export const buildIncompleteSearchWarnings = (suppliers, statuses, supplierNames
     return [`${name}: требуется авторизация`];
   }
   if (status === "error") {
-    return [`${name}: поиск не выполнен`];
+    const detail = typeof details[supplier] === "string" && details[supplier].trim()
+      ? details[supplier].trim()
+      : "поиск не выполнен";
+    return [`${name}: ${detail}`];
   }
   if (status !== "completed") {
     return [`${name}: нет итогового ответа`];

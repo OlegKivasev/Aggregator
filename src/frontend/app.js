@@ -484,6 +484,7 @@ const createSearchTab = (data = {}) => ({
       : Boolean(data.results?.length) || Boolean(data.status && data.status !== "Ожидание поиска"),
   markupPercent: normalizeMarkupPercent(data.markupPercent),
   supplierStatuses: {},
+  supplierStatusDetails: {},
   supplierSearchStartedAt: {},
   supplierSearchDurations: {},
   source: null,
@@ -1270,7 +1271,12 @@ const showSupplierCheckError = (expired, unavailable) => {
 };
 
 const showIncompleteSearchWarning = (tab) => {
-  const warnings = buildIncompleteSearchWarnings(tab.enabledSuppliers.filter(isSupplierVisible), tab.supplierStatuses, supplierNames);
+  const warnings = buildIncompleteSearchWarnings(
+    tab.enabledSuppliers.filter(isSupplierVisible),
+    tab.supplierStatuses,
+    supplierNames,
+    tab.supplierStatusDetails,
+  );
   if (!warnings.length) {
     return;
   }
@@ -2338,6 +2344,7 @@ const startSearch = (article, enabledSuppliers) => {
   tab.hasSearched = true;
   tab.status = `Ищем по артикулу ${article}`;
   tab.supplierStatuses = {};
+  tab.supplierStatusDetails = {};
   tab.supplierSearchStartedAt = {};
   tab.supplierSearchDurations = {};
   tab.searchStartedAt = Date.now();
@@ -2366,6 +2373,9 @@ const startSearch = (article, enabledSuppliers) => {
 
     if (payload.type === "supplier_status") {
       tab.supplierStatuses[payload.supplier] = payload.status;
+      if (typeof payload.details === "string" && payload.details.trim()) {
+        tab.supplierStatusDetails[payload.supplier] = payload.details;
+      }
       if (payload.status === "searching") {
         tab.supplierSearchStartedAt[payload.supplier] = Date.now();
       } else if (["completed", "timeout", "auth_error", "error"].includes(payload.status)) {
