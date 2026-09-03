@@ -2472,6 +2472,7 @@ form.addEventListener("submit", async (event) => {
   if (!article) {
     return;
   }
+
   const enabledSuppliers = getEnabledSuppliers();
   if (!enabledSuppliers.length) {
     globalStatus.textContent = "Выберите хотя бы одного поставщика";
