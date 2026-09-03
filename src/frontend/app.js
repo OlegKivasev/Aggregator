@@ -16,6 +16,7 @@ import {
   normalizeStpartsWarehouseColors,
 } from "./stparts-warehouse-settings.js";
 import { isPartKomReturnableVisible } from "./partkom-return-settings.js";
+import { isForumAutoReturnableVisible } from "./forum-auto-return-settings.js";
 
 const form = document.querySelector("#search-form");
 const articleInput = document.querySelector("#article-input");
@@ -93,6 +94,7 @@ const forumAutoConnectButton = document.querySelector("#forum-auto-connect-butto
 const forumAutoLogoutButton = document.querySelector("#forum-auto-logout-button");
 const forumAutoSessionPill = document.querySelector("#forum-auto-session-pill");
 const forumAutoAuthFeedback = document.querySelector("#forum-auto-auth-feedback");
+const forumAutoNonReturnableInput = document.querySelector("#forum-auto-non-returnable");
 const motorDetalAuthForm = document.querySelector("#motordetal-auth-form");
 const motorDetalLoginInput = document.querySelector("#motordetal-login");
 const motorDetalPasswordInput = document.querySelector("#motordetal-password");
@@ -172,6 +174,7 @@ const searchStateStorageKey = "autoservice.searchState";
 const tableColumnsStorageKey = "autoservice.tableColumns";
 const stpartsWarehousesStorageKey = "autoservice.stpartsWarehouses";
 const partKomNonReturnableStorageKey = "autoservice.partKomNonReturnable";
+const forumAutoNonReturnableStorageKey = "autoservice.forumAutoNonReturnable";
 const supplierVisibilityStorageKey = "autoservice.supplierVisibility";
 const lastSearchStorageKey = "autoservice.lastSearchStartedAt";
 const supplierCheckIntervalMs = 2 * 60 * 60 * 1000;
@@ -203,6 +206,7 @@ const tableColumnWidths = {
 let visibleTableColumns = new Set(tableColumnIds);
 let visibleStpartsWarehouses = new Set(["green"]);
 let showPartKomNonReturnable = false;
+let showForumAutoNonReturnable = false;
 const filterColumnNames = Object.fromEntries(filterColumnButtons.map((button) => [
   button.dataset.filterColumn,
   button.firstChild.textContent.trim(),
@@ -787,6 +791,27 @@ const filterVisiblePartKomReturnable = (items) => items.filter(
   (result) => isPartKomReturnableVisible(result, showPartKomNonReturnable),
 );
 
+const saveForumAutoNonReturnable = () => {
+  try {
+    localStorage.setItem(forumAutoNonReturnableStorageKey, String(showForumAutoNonReturnable));
+  } catch {
+    // Return preferences are optional; unavailable storage must not affect search.
+  }
+};
+
+const restoreForumAutoNonReturnable = () => {
+  try {
+    showForumAutoNonReturnable = localStorage.getItem(forumAutoNonReturnableStorageKey) === "true";
+  } catch {
+    // Return preferences are optional; unavailable storage must not affect search.
+  }
+  forumAutoNonReturnableInput.checked = showForumAutoNonReturnable;
+};
+
+const filterVisibleForumAutoReturnable = (items) => items.filter(
+  (result) => isForumAutoReturnableVisible(result, showForumAutoNonReturnable),
+);
+
 const saveSearchState = () => {
   try {
     syncActiveTab();
@@ -929,9 +954,9 @@ const renderResults = () => {
 
   // Older persisted tabs can still contain automatically fetched analogs.
   const exactResults = results.filter((result) => result.isAnalog !== true);
-  const visibleExactResults = filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
+  const visibleExactResults = filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
     exactResults.filter((result) => isSupplierVisible(result.supplier)),
-  ));
+  )));
   const filteredResults = getFilteredResults(visibleExactResults, tableSearchTerm, markupPercent);
   const sortedResults = [...filteredResults].sort((left, right) =>
     compareResults(left, right, sortState, markupPercent));
@@ -1586,6 +1611,13 @@ partKomNonReturnableInput.addEventListener("change", () => {
   renderAnalogRows();
 });
 
+forumAutoNonReturnableInput.addEventListener("change", () => {
+  showForumAutoNonReturnable = forumAutoNonReturnableInput.checked;
+  saveForumAutoNonReturnable();
+  renderResults();
+  renderAnalogRows();
+});
+
 sortButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const key = button.dataset.sortKey;
@@ -1737,9 +1769,9 @@ const renderAnalogRows = () => {
     ? document.activeElement.closest("[data-analog-result-index]")?.dataset.analogResultIndex
     : null;
   const normalizedTerm = analogSearchTerm.trim().toLocaleLowerCase();
-  const visibleResults = filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
+  const visibleResults = filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
     analogSearchResults.filter((result) => isSupplierVisible(result.supplier)),
-  ));
+  )));
   const filteredResults = visibleResults.filter((result) => !normalizedTerm || [
     supplierNames[result.supplier] ?? result.supplier,
     formatBrand(result.brand),
@@ -2356,6 +2388,7 @@ restoreSearchState();
 restoreTableColumns();
 restoreStpartsWarehouses();
 restorePartKomNonReturnable();
+restoreForumAutoNonReturnable();
 restoreSupplierVisibility();
 tableColumnInputs.forEach((input) => {
   input.checked = visibleTableColumns.has(input.value);

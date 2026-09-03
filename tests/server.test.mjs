@@ -234,6 +234,7 @@ test("Forum-Auto normalizes documented listGoods offers", () => {
       num: 30,
       price: "194.04",
       whse: "MSK",
+      is_returnable: 0,
     },
     { brand: "KNECHT", art: "OC 470", name: "Другой товар", num: 1, price: "200" },
     { brand: "KNECHT", art: "OC 47", name: "Без подтверждённого остатка", num: null, price: "195" },
@@ -247,7 +248,9 @@ test("Forum-Auto normalizes documented listGoods offers", () => {
   assert.equal(results[0].deliveryDateApproximate, true);
   assert.ok(results[0].deliveryDate);
   assert.equal(results[0].link, "https://forum-auto.ru/");
+  assert.equal(results[0].isReturnable, false);
   assert.equal(results[1].quantity, null);
+  assert.equal(results[1].isReturnable, undefined);
 });
 
 test("Forum-Auto analog search excludes the selected original position", () => {

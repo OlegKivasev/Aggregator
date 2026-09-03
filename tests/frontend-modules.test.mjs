@@ -18,6 +18,7 @@ import {
   normalizeStpartsWarehouseColors,
 } from "../src/frontend/stparts-warehouse-settings.js";
 import { isPartKomReturnableVisible } from "../src/frontend/partkom-return-settings.js";
+import { isForumAutoReturnableVisible } from "../src/frontend/forum-auto-return-settings.js";
 
 test("result formatting escapes untrusted text and limits result links", () => {
   assert.equal(escapeHtml('<script data-value="x">'), "&lt;script data-value=&quot;x&quot;&gt;");
@@ -83,6 +84,13 @@ test("PartKOM return setting hides only confirmed non-returnable offers", () => 
   assert.equal(isPartKomReturnableVisible({ supplier: "stparts", isReturnable: false }, false), true);
 });
 
+test("Forum-Auto return setting hides only confirmed non-returnable offers", () => {
+  assert.equal(isForumAutoReturnableVisible({ supplier: "forum-auto", isReturnable: false }, false), false);
+  assert.equal(isForumAutoReturnableVisible({ supplier: "forum-auto", isReturnable: false }, true), true);
+  assert.equal(isForumAutoReturnableVisible({ supplier: "forum-auto" }, false), true);
+  assert.equal(isForumAutoReturnableVisible({ supplier: "stparts", isReturnable: false }, false), true);
+});
+
 test("PartKOM return preference is rendered and applied to regular and analog results", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
@@ -91,6 +99,16 @@ test("PartKOM return preference is rendered and applied to regular and analog re
   assert.match(app, /autoservice\.partKomNonReturnable/);
   assert.match(app, /filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
   assert.match(app, /filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?analogSearchResults\.filter/);
+});
+
+test("Forum-Auto return preference is rendered and applied to regular and analog results", async () => {
+  const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
+
+  assert.match(html, /id="forum-auto-non-returnable"/);
+  assert.match(app, /autoservice\.forumAutoNonReturnable/);
+  assert.match(app, /filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
+  assert.match(app, /filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?analogSearchResults\.filter/);
 });
 
 test("delivery date sorting moves intervals above dates they finish before", () => {

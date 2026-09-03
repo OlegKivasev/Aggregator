@@ -21,6 +21,7 @@ interface ForumAutoOffer {
   num?: unknown;
   price?: unknown;
   whse?: unknown;
+  is_returnable?: unknown;
 }
 
 interface ForumAutoFault {
@@ -61,6 +62,16 @@ function parseQuantity(value: unknown): number | null {
     ? Number(value.trim())
     : typeof value === "number" ? value : Number.NaN;
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function isForumAutoReturnable(value: unknown): boolean | null {
+  if (value === 1 || value === "1") {
+    return true;
+  }
+  if (value === 0 || value === "0") {
+    return false;
+  }
+  return null;
 }
 
 function deliveryDateFromDuration(days: unknown, hours: unknown): string | null {
@@ -152,6 +163,7 @@ function normalizeForumAutoOffer(offer: ForumAutoOffer, isAnalog: boolean): Norm
     return null;
   }
   const quantity = parseQuantity(offer.num);
+  const isReturnable = isForumAutoReturnable(offer.is_returnable);
   return {
     supplier: "forum-auto",
     brand,
@@ -162,6 +174,7 @@ function normalizeForumAutoOffer(offer: ForumAutoOffer, isAnalog: boolean): Norm
     warehouse: typeof offer.whse === "string" && offer.whse.trim() ? offer.whse.trim() : null,
     deliveryDate: deliveryDateFromDuration(offer.d_deliv, offer.h_deliv),
     deliveryDateApproximate: true,
+    ...(isReturnable === null ? {} : { isReturnable }),
     link: forumAutoSiteUrl,
     ...(isAnalog ? { isAnalog: true } : {}),
   };
