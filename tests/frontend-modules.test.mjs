@@ -296,6 +296,7 @@ test("search tabs can be renamed through a context menu and keep their full name
   assert.match(app, /window\.prompt\("Введите название вкладки"/);
   assert.match(app, /title="\$\{escapeHtml\(title\)\}"/);
   assert.match(styles, /\.search-tab__title\s*\{[^}]*text-overflow: ellipsis;/s);
+  assert.match(styles, /\.search-tab__status\s*\{[^}]*flex: 0 0 7px;/s);
 });
 
 test("main results use the same comparison-oriented table controls as analogs", async () => {

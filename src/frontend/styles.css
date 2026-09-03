@@ -129,6 +129,7 @@ input {
 
 .search-tab__status {
   display: inline-block;
+  flex: 0 0 7px;
   width: 7px;
   height: 7px;
   margin-right: 8px;
