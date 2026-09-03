@@ -21,7 +21,7 @@ import {
 } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { parseRosskoQuantity, rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
 import { parseMotorDetalQuantity } from "../src/backend/suppliers/motordetal/motordetal-api-adapter.ts";
-import { isMladovRejectedSearchStatus, parseMladovQuantity } from "../src/backend/suppliers/mladov/mladov-web-adapter.ts";
+import { encodeWindows1251, isMladovRejectedSearchStatus, parseMladovQuantity } from "../src/backend/suppliers/mladov/mladov-web-adapter.ts";
 import {
   createStpartsBatchParams,
   parseStpartsApiAnalogResults,
@@ -121,6 +121,10 @@ test("Mladov parses exact stock text without inventing availability", () => {
   assert.equal(parseMladovQuantity("-1"), null);
   assert.equal(parseMladovQuantity(Number.MAX_SAFE_INTEGER + 1), null);
   assert.equal(parseMladovQuantity(undefined), null);
+});
+
+test("Mladov encodes Cyrillic search articles as Windows-1251 form data", () => {
+  assert.equal(encodeWindows1251("ауцацуацу"), "%E0%F3%F6%E0%F6%F3%E0%F6%F3");
 });
 
 test("Mladov treats only client validation statuses as rejected searches", () => {

@@ -29,7 +29,7 @@ function normalizeArticle(value: string): string {
   return value.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase("ru-RU");
 }
 
-function encodeWindows1251(value: string): string {
+export function encodeWindows1251(value: string): string {
   return Array.from(value, (character) => {
     const code = character.codePointAt(0) ?? 0;
     let byte: number | null = null;
@@ -112,7 +112,7 @@ async function fetchMladovResults(
       Referer: mladovBaseUrl,
     },
     cookie,
-    body: new URLSearchParams({ artikul: article }).toString(),
+    body: `artikul=${encodeWindows1251(article)}`,
     signal,
     timeoutMs: mladovConfig.requestTimeoutMs,
     maxResponseBytes: supplierMaxResponseBytes,
