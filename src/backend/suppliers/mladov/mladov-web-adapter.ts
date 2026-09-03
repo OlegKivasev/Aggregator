@@ -75,6 +75,10 @@ export function isMladovNoResultsPageText(value: string): boolean {
   return /ничего не найдено|не найдено соответствий|товар(?:ы)? не найден(?:о|ы)?|нет (?:предложений|товар(?:а|ов)|результатов)|товар отсутствует|по вашему запросу не найдено|(?:некорректн|недопустим)\S*.*артикул|артикул.*(?:некорректн|недопустим)/i.test(value);
 }
 
+export function isMladovRejectedSearchStatus(status: number): boolean {
+  return status === 400 || status === 422;
+}
+
 function parseDeliveryDate(value: string | null): { date: string | null; approximate: boolean } {
   if (!value) {
     return { date: null, approximate: false };
@@ -118,6 +122,9 @@ async function fetchMladovResults(
     maxResponseBytes: supplierMaxResponseBytes,
     returnRawBody: true,
   });
+  if (isMladovRejectedSearchStatus(response.status)) {
+    return [];
+  }
   if (response.status < 200 || response.status >= 300) {
     throw new SupplierIntegrationError(`Поиск Механик Ладов вернул HTTP ${response.status}`);
   }

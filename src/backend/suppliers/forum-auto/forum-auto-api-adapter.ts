@@ -115,6 +115,9 @@ export function parseForumAutoApiResponse(response: SiteHttpResponse, method?: F
   if (response.status === 401 || response.status === 403) {
     throw new SupplierAuthError("Forum-Auto rejected the configured credentials");
   }
+  if (method === "listgoods" && (response.status === 400 || response.status === 422)) {
+    return [];
+  }
   if (response.status < 200 || response.status >= 300) {
     throw new SupplierIntegrationError("Forum-Auto API returned an unsuccessful HTTP status", {
       publicMessage: "Forum-Auto API is temporarily unavailable",
