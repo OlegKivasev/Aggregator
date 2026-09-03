@@ -2472,12 +2472,6 @@ form.addEventListener("submit", async (event) => {
   if (!article) {
     return;
   }
-  if (!/^(?=.*\d)[A-Za-z0-9 ./_-]+$/.test(article)) {
-    globalStatus.textContent = "Артикул может содержать только латинские буквы, цифры и разделители";
-    articleInput.focus();
-    return;
-  }
-
   const enabledSuppliers = getEnabledSuppliers();
   if (!enabledSuppliers.length) {
     globalStatus.textContent = "Выберите хотя бы одного поставщика";

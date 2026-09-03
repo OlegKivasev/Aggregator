@@ -21,7 +21,7 @@ import {
 } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { parseRosskoQuantity, rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
 import { parseMotorDetalQuantity } from "../src/backend/suppliers/motordetal/motordetal-api-adapter.ts";
-import { parseMladovQuantity } from "../src/backend/suppliers/mladov/mladov-web-adapter.ts";
+import { isMladovNoResultsPageText, parseMladovQuantity } from "../src/backend/suppliers/mladov/mladov-web-adapter.ts";
 import {
   createStpartsBatchParams,
   parseStpartsApiAnalogResults,
@@ -121,6 +121,12 @@ test("Mladov parses exact stock text without inventing availability", () => {
   assert.equal(parseMladovQuantity("-1"), null);
   assert.equal(parseMladovQuantity(Number.MAX_SAFE_INTEGER + 1), null);
   assert.equal(parseMladovQuantity(undefined), null);
+});
+
+test("Mladov recognizes supplier no-results and rejected-article pages", () => {
+  assert.equal(isMladovNoResultsPageText("Товар не найден"), true);
+  assert.equal(isMladovNoResultsPageText("Артикул содержит недопустимые символы"), true);
+  assert.equal(isMladovNoResultsPageText("Сервис временно недоступен"), false);
 });
 
 test("Armtek allows the observed large store directory without relaxing other response limits", () => {
@@ -271,7 +277,13 @@ test("Forum-Auto analog search excludes the selected original position", () => {
   assert.deepEqual(results.map((result) => [result.brand, result.article, result.isAnalog]), [["MANN", "W 68/3", true]]);
 });
 
-test("Forum-Auto treats documented no-goods fault as an empty listGoods response", () => {
+test("Forum-Auto treats documented no-goods and rejected-search faults as empty listGoods responses", () => {
+  assert.deepEqual(parseForumAutoApiResponse({
+    status: 200,
+    body: JSON.stringify({ FaultCode: 1 }),
+    setCookie: [],
+    contentType: "application/json; charset=utf-8",
+  }, "listgoods"), []);
   assert.deepEqual(parseForumAutoApiResponse({
     status: 200,
     body: JSON.stringify({ FaultCode: 27 }),

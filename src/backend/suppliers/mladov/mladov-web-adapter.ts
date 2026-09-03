@@ -71,6 +71,10 @@ export function parseMladovQuantity(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed <= Number.MAX_SAFE_INTEGER ? parsed : null;
 }
 
+export function isMladovNoResultsPageText(value: string): boolean {
+  return /ничего не найдено|не найдено соответствий|товар(?:ы)? не найден(?:о|ы)?|нет (?:предложений|товар(?:а|ов)|результатов)|товар отсутствует|по вашему запросу не найдено|(?:некорректн|недопустим)\S*.*артикул|артикул.*(?:некорректн|недопустим)/i.test(value);
+}
+
 function parseDeliveryDate(value: string | null): { date: string | null; approximate: boolean } {
   if (!value) {
     return { date: null, approximate: false };
@@ -157,7 +161,7 @@ async function fetchMladovResults(
 
   if (!items.length) {
     const bodyText = (await page.locator("body").innerText()).replace(/\s+/g, " ").trim();
-    if (/ничего не найден|не найдено|нет предложений|товар отсутствует|по вашему запросу/i.test(bodyText)) {
+    if (isMladovNoResultsPageText(bodyText)) {
       return [];
     }
     throw new SupplierIntegrationError("Механик Ладов вернул нераспознанный пустой результат");

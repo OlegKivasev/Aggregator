@@ -17,7 +17,6 @@ import type {
 } from "../types.ts";
 import {
   articleLengthLimit,
-  isSupportedArticle,
   parseCredentials,
   parseSessionValidationPayload,
   parseSupplierIds,
@@ -263,10 +262,6 @@ export function createAggregatorServer({
       }
       if (article.length > articleLengthLimit) {
         serveJson(response, 400, { message: `Query parameter article must not exceed ${articleLengthLimit} characters` });
-        return;
-      }
-      if (!isSupportedArticle(article)) {
-        serveJson(response, 400, { message: "Query parameter article must contain a digit and use only Latin letters, digits, spaces, dots, slashes, underscores, or hyphens" });
         return;
       }
       if (mode !== null && mode !== "analogs") {

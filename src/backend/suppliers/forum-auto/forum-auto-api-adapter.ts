@@ -137,7 +137,7 @@ export function parseForumAutoApiResponse(response: SiteHttpResponse, method?: F
 
   const faultCode = forumAutoFaultCode(payload);
   if (faultCode !== null) {
-    if (faultCode === 27 && method === "listgoods") {
+    if ((faultCode === 1 || faultCode === 27) && method === "listgoods") {
       return [];
     }
     throw forumAutoFaultError(faultCode);
