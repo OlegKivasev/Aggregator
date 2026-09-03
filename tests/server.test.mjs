@@ -25,6 +25,7 @@ import {
   createMladovSearchFailure,
   encodeWindows1251,
   isMladovRejectedSearchStatus,
+  isMladovSearchResultItem,
   parseMladovQuantity,
 } from "../src/backend/suppliers/mladov/mladov-web-adapter.ts";
 import {
@@ -137,6 +138,11 @@ test("Mladov treats only client validation statuses as rejected searches", () =>
   assert.equal(isMladovRejectedSearchStatus(422), true);
   assert.equal(isMladovRejectedSearchStatus(401), false);
   assert.equal(isMladovRejectedSearchStatus(500), false);
+});
+
+test("Mladov treats rows without product data as no-result rows", () => {
+  assert.equal(isMladovSearchResultItem({ article: "", brand: "", title: "Ничего не найдено", price: Number.NaN }), false);
+  assert.equal(isMladovSearchResultItem({ article: "АУЦАЦУ", brand: "LADA", title: "Деталь", price: 100 }), true);
 });
 
 test("Mladov reports the failed search stage without exposing the upstream error", () => {

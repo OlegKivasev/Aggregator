@@ -25,6 +25,12 @@ interface MladovResultItem {
   deliveryText: string | null;
 }
 
+export function isMladovSearchResultItem(
+  item: Pick<MladovResultItem, "article" | "brand" | "title" | "price">,
+): boolean {
+  return Boolean(item.article && item.brand && item.title && Number.isFinite(item.price) && item.price > 0);
+}
+
 function normalizeArticle(value: string): string {
   return value.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase("ru-RU");
 }
@@ -200,11 +206,9 @@ async function fetchMladovResults(
   }
 
   const target = normalizeArticle(article);
-  const validItems = items.filter((item) =>
-    item.article && item.brand && item.title && Number.isFinite(item.price) && item.price > 0,
-  );
+  const validItems = items.filter(isMladovSearchResultItem);
   if (!validItems.length) {
-    throw new SupplierIntegrationError("Механик Ладов вернул только некорректные строки результатов");
+    return [];
   }
   const exactItems = validItems.filter((item) => normalizeArticle(item.article) === target);
   return exactItems;
