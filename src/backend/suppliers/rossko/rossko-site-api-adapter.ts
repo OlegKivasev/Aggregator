@@ -355,8 +355,15 @@ async function rosskoRequest<T>(url: URL, signal: AbortSignal, stage: RosskoRequ
   }
 }
 
-function selectedValue<T extends { selected?: boolean }>(items: T[] | undefined): T | undefined {
-  return items?.find((item) => item.selected);
+export function selectRosskoDeliveryValue(
+  items: Array<{ selected?: boolean; pointGuid?: string; value?: string }> | undefined,
+  field: "pointGuid" | "value",
+): string | undefined {
+  const candidates = items?.flatMap((item) => {
+    const value = item[field]?.trim();
+    return value ? [{ selected: item.selected === true, value }] : [];
+  }) || [];
+  return candidates.find((candidate) => candidate.selected)?.value || candidates[0]?.value;
 }
 
 async function getDeliverySettings(signal: AbortSignal, forceRefresh = false): Promise<{ addressGuid: string; deliveryType: string }> {
@@ -412,23 +419,23 @@ async function getDeliverySettings(signal: AbortSignal, forceRefresh = false): P
       "Rossko API returned invalid delivery type entries",
     );
   }
-  const addressGuid = selectedValue(delivery.addresses)?.pointGuid;
-  const deliveryType = selectedValue(delivery.types)?.value;
+  const addressGuid = selectRosskoDeliveryValue(delivery.addresses, "pointGuid");
+  const deliveryType = selectRosskoDeliveryValue(delivery.types, "value");
 
   if (!addressGuid) {
     throw rosskoIntegrationError(
       "delivery-settings",
-      "selected-address-missing",
-      "API не вернул выбранный адрес доставки",
-      "Rossko API did not return a selected delivery address",
+      "address-missing",
+      "API не вернул ни одного пригодного адреса доставки",
+      "Rossko API did not return a usable delivery address",
     );
   }
   if (!deliveryType) {
     throw rosskoIntegrationError(
       "delivery-settings",
-      "selected-type-missing",
-      "API не вернул выбранный тип доставки",
-      "Rossko API did not return a selected delivery type",
+      "type-missing",
+      "API не вернул ни одного пригодного типа доставки",
+      "Rossko API did not return a usable delivery type",
     );
   }
 

@@ -19,7 +19,7 @@ import {
   PartKomApiAdapter,
   verifyPartKomApiCredentials,
 } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
-import { parseRosskoQuantity, rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
+import { parseRosskoQuantity, rosskoExactProductIds, selectRosskoDeliveryValue } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
 import { parseMotorDetalQuantity } from "../src/backend/suppliers/motordetal/motordetal-api-adapter.ts";
 import {
   createMladovSearchFailure,
@@ -1093,6 +1093,22 @@ test("supplier search exposes only an explicitly safe integration message", asyn
     { type: "supplier_status", supplier: "armtek", status: "searching", details: undefined },
     { type: "supplier_status", supplier: "armtek", status: "error", details: "Armtek search request failed" },
   ]);
+});
+
+test("Rossko uses the selected delivery setting and falls back to the first usable value", () => {
+  assert.equal(selectRosskoDeliveryValue([
+    { pointGuid: "first-address" },
+    { pointGuid: "selected-address", selected: true },
+  ], "pointGuid"), "selected-address");
+  assert.equal(selectRosskoDeliveryValue([
+    { pointGuid: "first-address" },
+    { pointGuid: "second-address" },
+  ], "pointGuid"), "first-address");
+  assert.equal(selectRosskoDeliveryValue([
+    { value: "" },
+    { value: " delivery-type " },
+  ], "value"), "delivery-type");
+  assert.equal(selectRosskoDeliveryValue([], "pointGuid"), undefined);
 });
 
 test("supplier search exposes safe Rossko diagnostics and reports only the diagnostic code", async () => {
