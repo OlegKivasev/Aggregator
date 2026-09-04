@@ -366,6 +366,24 @@ export function selectRosskoDeliveryValue(
   return candidates.find((candidate) => candidate.selected)?.value || candidates[0]?.value;
 }
 
+export function describeRosskoDeliveryCollection(
+  items: Array<{ selected?: boolean; pointGuid?: string; value?: string }>,
+  field: "pointGuid" | "value",
+): string {
+  const safeKeys = [...new Set(items.flatMap((item) => Object.keys(item)))]
+    .filter((key) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key))
+    .sort()
+    .slice(0, 16);
+  const selectedCount = items.filter((item) => item.selected === true).length;
+  const usableFieldCount = items.filter((item) => typeof item[field] === "string" && Boolean(item[field]?.trim())).length;
+  return [
+    `элементов=${items.length}`,
+    `selected=true:${selectedCount}`,
+    `непустой ${field}:${usableFieldCount}`,
+    `поля=[${safeKeys.length ? safeKeys.join(",") : "нет"}]`,
+  ].join("; ");
+}
+
 async function getDeliverySettings(signal: AbortSignal, forceRefresh = false): Promise<{ addressGuid: string; deliveryType: string }> {
   const authorizationSession = getRosskoAuthorizationSession();
   if (!authorizationSession) {
@@ -426,7 +444,7 @@ async function getDeliverySettings(signal: AbortSignal, forceRefresh = false): P
     throw rosskoIntegrationError(
       "delivery-settings",
       "address-missing",
-      "API не вернул ни одного пригодного адреса доставки",
+      `API не вернул ни одного пригодного адреса доставки; структура addresses: ${describeRosskoDeliveryCollection(delivery.addresses, "pointGuid")}`,
       "Rossko API did not return a usable delivery address",
     );
   }
@@ -434,7 +452,7 @@ async function getDeliverySettings(signal: AbortSignal, forceRefresh = false): P
     throw rosskoIntegrationError(
       "delivery-settings",
       "type-missing",
-      "API не вернул ни одного пригодного типа доставки",
+      `API не вернул ни одного пригодного типа доставки; структура types: ${describeRosskoDeliveryCollection(delivery.types, "value")}`,
       "Rossko API did not return a usable delivery type",
     );
   }

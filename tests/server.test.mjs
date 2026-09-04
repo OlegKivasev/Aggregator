@@ -19,7 +19,7 @@ import {
   PartKomApiAdapter,
   verifyPartKomApiCredentials,
 } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
-import { parseRosskoQuantity, rosskoExactProductIds, selectRosskoDeliveryValue } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
+import { describeRosskoDeliveryCollection, parseRosskoQuantity, rosskoExactProductIds, selectRosskoDeliveryValue } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
 import { parseMotorDetalQuantity } from "../src/backend/suppliers/motordetal/motordetal-api-adapter.ts";
 import {
   createMladovSearchFailure,
@@ -1109,6 +1109,17 @@ test("Rossko uses the selected delivery setting and falls back to the first usab
     { value: " delivery-type " },
   ], "value"), "delivery-type");
   assert.equal(selectRosskoDeliveryValue([], "pointGuid"), undefined);
+});
+
+test("Rossko delivery diagnostics expose only bounded field structure without values", () => {
+  const diagnostic = describeRosskoDeliveryCollection([
+    { selected: false },
+    { selected: true, pointGuid: "private-guid" },
+    Object.assign({}, { unsafe: "private-address" }, { "bad key": "private-value" }),
+  ], "pointGuid");
+
+  assert.equal(diagnostic, "элементов=3; selected=true:1; непустой pointGuid:1; поля=[pointGuid,selected,unsafe]");
+  assert.doesNotMatch(diagnostic, /private|bad key/);
 });
 
 test("supplier search exposes safe Rossko diagnostics and reports only the diagnostic code", async () => {
