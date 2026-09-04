@@ -1095,6 +1095,83 @@ test("supplier search exposes only an explicitly safe integration message", asyn
   ]);
 });
 
+test("supplier search exposes safe Rossko diagnostics and reports only the diagnostic code", async () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.markAuthorized("rossko");
+  const events = [];
+  const operationalErrors = [];
+  const adapter = {
+    id: "rossko",
+    displayName: "Rossko",
+    timeoutMs: 1000,
+    async ensureSession() {
+      return sessionManager.getSession("rossko");
+    },
+    async search() {
+      throw new SupplierIntegrationError("private response body with token=secret", {
+        publicMessage: "этап «поиск артикула»: API Rossko вернул HTTP 502 (код: rossko-search-http-502)",
+        diagnosticCode: "rossko-search-http-502",
+      });
+    },
+  };
+
+  await runSupplierSearch({
+    adapter,
+    sessionManager,
+    query: { article: "ABC-123" },
+    signal: new AbortController().signal,
+    emit: (event) => events.push(event),
+    reportError: (event) => operationalErrors.push(event),
+  });
+
+  assert.deepEqual(events.at(-1), {
+    type: "supplier_status",
+    supplier: "rossko",
+    status: "error",
+    details: "этап «поиск артикула»: API Rossko вернул HTTP 502 (код: rossko-search-http-502)",
+  });
+  assert.deepEqual(operationalErrors, [{
+    supplier: "rossko",
+    category: "integration",
+    diagnosticCode: "rossko-search-http-502",
+  }]);
+  assert.doesNotMatch(JSON.stringify({ events, operationalErrors }), /token=secret/);
+});
+
+test("supplier search can expose safe typed authorization and timeout diagnostics", async () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.markAuthorized("rossko");
+  const events = [];
+  const adapter = {
+    id: "rossko",
+    displayName: "Rossko",
+    timeoutMs: 1000,
+    async ensureSession() {
+      return sessionManager.getSession("rossko");
+    },
+    async search() {
+      throw new SupplierAuthError("private session value", {
+        publicMessage: "этап «карточка товара»: API отклонил сохранённую сессию (код: rossko-product-card-session-rejected)",
+        diagnosticCode: "rossko-product-card-session-rejected",
+      });
+    },
+  };
+
+  await runSupplierSearch({ adapter, sessionManager, query: { article: "ABC-123" }, signal: new AbortController().signal, emit: (event) => events.push(event) });
+  assert.equal(events.at(-1).details, "этап «карточка товара»: API отклонил сохранённую сессию (код: rossko-product-card-session-rejected)");
+
+  sessionManager.markAuthorized("rossko");
+  adapter.search = async () => {
+    throw new SupplierTimeoutError("private timeout details", {
+      publicMessage: "этап «параметры доставки»: API не ответил вовремя (код: rossko-delivery-settings-request-timeout)",
+      diagnosticCode: "rossko-delivery-settings-request-timeout",
+    });
+  };
+  events.length = 0;
+  await runSupplierSearch({ adapter, sessionManager, query: { article: "ABC-123" }, signal: new AbortController().signal, emit: (event) => events.push(event) });
+  assert.equal(events.at(-1).details, "этап «параметры доставки»: API не ответил вовремя (код: rossko-delivery-settings-request-timeout)");
+});
+
 test("supplier search only recognizes typed timeout errors", async () => {
   const sessionManager = new SupplierSessionManager();
   sessionManager.markAuthorized("rossko");
@@ -1196,6 +1273,15 @@ test("incomplete search warnings list only failed suppliers", () => {
   ), [
     "Forum-Auto: Forum-Auto API returned unsupported response",
     "Механик Ладов: поиск не выполнен",
+  ]);
+
+  assert.deepEqual(buildIncompleteSearchWarnings(
+    ["rossko"],
+    { rossko: "timeout" },
+    { rossko: "Rossko" },
+    { rossko: "этап «поиск артикула»: API не ответил вовремя (код: rossko-search-request-timeout)" },
+  ), [
+    "Rossko: этап «поиск артикула»: API не ответил вовремя (код: rossko-search-request-timeout)",
   ]);
 });
 

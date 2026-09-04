@@ -7,6 +7,13 @@ import type {
   SupplierSearchQuery,
   NormalizedSearchResult,
 } from "../types.ts";
+import { classifyOperationalError, type OperationalErrorCategory } from "../errors.ts";
+
+export interface SupplierSearchOperationalError {
+  supplier: SupplierAdapter["id"];
+  category: OperationalErrorCategory;
+  diagnosticCode?: string;
+}
 
 interface RunSupplierSearchOptions {
   adapter: SupplierAdapter;
@@ -15,6 +22,7 @@ interface RunSupplierSearchOptions {
   signal: AbortSignal;
   emit: (event: SearchStreamEvent) => void;
   onAuthError?: () => void;
+  reportError?: (event: SupplierSearchOperationalError) => void;
 }
 
 const createStatusEvent = (
@@ -79,6 +87,7 @@ export async function runSupplierSearch({
   signal,
   emit,
   onAuthError,
+  reportError,
 }: RunSupplierSearchOptions): Promise<void> {
   if (signal.aborted) {
     return;
@@ -154,18 +163,35 @@ export async function runSupplierSearch({
 
     if (error instanceof SupplierAuthError) {
       onAuthError?.();
-      emit(createStatusEvent(adapter.id, "auth_error", "Supplier authorization is required"));
+      reportError?.({
+        supplier: adapter.id,
+        category: "authorization",
+        ...(error.diagnosticCode ? { diagnosticCode: error.diagnosticCode } : {}),
+      });
+      emit(createStatusEvent(adapter.id, "auth_error", error.publicMessage || "Supplier authorization is required"));
       return;
     }
 
     if (error instanceof SupplierTimeoutError || controller.signal.reason instanceof SupplierTimeoutError) {
-      emit(createStatusEvent(adapter.id, "timeout", "Supplier search timed out"));
+      const timeoutError = error instanceof SupplierTimeoutError ? error : controller.signal.reason;
+      reportError?.({
+        supplier: adapter.id,
+        category: "timeout",
+        ...(timeoutError.diagnosticCode ? { diagnosticCode: timeoutError.diagnosticCode } : {}),
+      });
+      emit(createStatusEvent(adapter.id, "timeout", timeoutError.publicMessage || "Supplier search timed out"));
       return;
     }
 
     const details = error instanceof SupplierIntegrationError && error.publicMessage
       ? error.publicMessage
       : "Supplier search failed";
+    const diagnosticCode = error instanceof SupplierIntegrationError ? error.diagnosticCode : null;
+    reportError?.({
+      supplier: adapter.id,
+      category: classifyOperationalError(error),
+      ...(diagnosticCode ? { diagnosticCode } : {}),
+    });
     emit(createStatusEvent(adapter.id, "error", details));
   } finally {
     clearTimeout(timeoutId);

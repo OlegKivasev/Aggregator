@@ -1,14 +1,24 @@
 export class SupplierAuthError extends Error {
-  constructor(message = "Supplier authorization error", options?: ErrorOptions) {
+  readonly publicMessage: string | null;
+  readonly diagnosticCode: string | null;
+
+  constructor(message = "Supplier authorization error", options?: ErrorOptions & { publicMessage?: string; diagnosticCode?: string }) {
     super(message, options);
     this.name = "SupplierAuthError";
+    this.publicMessage = options?.publicMessage ?? null;
+    this.diagnosticCode = options?.diagnosticCode ?? null;
   }
 }
 
 export class SupplierTimeoutError extends Error {
-  constructor(message = "Supplier search timed out", options?: ErrorOptions) {
+  readonly publicMessage: string | null;
+  readonly diagnosticCode: string | null;
+
+  constructor(message = "Supplier search timed out", options?: ErrorOptions & { publicMessage?: string; diagnosticCode?: string }) {
     super(message, options);
     this.name = "SupplierTimeoutError";
+    this.publicMessage = options?.publicMessage ?? null;
+    this.diagnosticCode = options?.diagnosticCode ?? null;
   }
 }
 

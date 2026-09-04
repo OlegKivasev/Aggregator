@@ -1,5 +1,5 @@
 import type { SupplierSessionManager } from "../session/session-manager.ts";
-import { runSupplierSearch } from "../suppliers/run-supplier-search.ts";
+import { runSupplierSearch, type SupplierSearchOperationalError } from "../suppliers/run-supplier-search.ts";
 import type { SupplierAdapter } from "../suppliers/supplier-adapter.ts";
 import type { SearchStreamEvent, SupplierId, SupplierSearchQuery } from "../types.ts";
 
@@ -11,15 +11,22 @@ export class SearchApplicationService {
   private readonly adapters: SupplierAdapter[];
   private readonly sessionManager: SupplierSessionManager;
   private readonly disconnectSupplier: (supplier: SupplierId) => void;
+  private readonly reportError: (event: SupplierSearchOperationalError) => void;
 
   constructor(
     adapters: SupplierAdapter[],
     sessionManager: SupplierSessionManager,
     disconnectSupplier: (supplier: SupplierId) => void,
+    reportError: (event: SupplierSearchOperationalError) => void = ({ supplier, category, diagnosticCode }) => {
+      if (diagnosticCode) {
+        console.error(`[aggregator] search-${supplier} failed (${category}) [${diagnosticCode}]`);
+      }
+    },
   ) {
     this.adapters = adapters;
     this.sessionManager = sessionManager;
     this.disconnectSupplier = disconnectSupplier;
+    this.reportError = reportError;
   }
 
   async streamSearch(
@@ -47,6 +54,7 @@ export class SearchApplicationService {
           signal,
           emit,
           onAuthError: () => this.disconnectSupplier(adapter.id),
+          reportError: this.reportError,
         }),
       ),
     );

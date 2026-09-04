@@ -67,18 +67,18 @@ export const buildSupplierResultTooltip = (suppliers, results, durations, suppli
 export const buildIncompleteSearchWarnings = (suppliers, statuses, supplierNames, details = {}) => suppliers.flatMap((supplier) => {
   const name = supplierNames[supplier] ?? supplier;
   const status = statuses[supplier];
+  const detail = typeof details[supplier] === "string" && details[supplier].trim()
+    ? details[supplier].trim()
+    : "";
 
   if (status === "timeout") {
-    return [`${name}: время ожидания истекло`];
+    return [`${name}: ${detail && detail !== "Supplier search timed out" ? detail : "время ожидания истекло"}`];
   }
   if (status === "auth_error") {
-    return [`${name}: требуется авторизация`];
+    return [`${name}: ${detail && detail !== "Supplier authorization is required" ? detail : "требуется авторизация"}`];
   }
   if (status === "error") {
-    const detail = typeof details[supplier] === "string" && details[supplier].trim()
-      ? details[supplier].trim()
-      : "поиск не выполнен";
-    return [`${name}: ${detail}`];
+    return [`${name}: ${detail || "поиск не выполнен"}`];
   }
   if (status !== "completed") {
     return [`${name}: нет итогового ответа`];
