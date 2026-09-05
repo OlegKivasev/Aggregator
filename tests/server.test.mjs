@@ -20,6 +20,7 @@ import {
   verifyPartKomApiCredentials,
 } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { describeRosskoDeliveryCollection, parseRosskoQuantity, rosskoExactProductIds, selectRosskoDeliveryValue } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
+import { initializeRosskoAuthenticatedSession, inspectRosskoDeliverySession } from "../src/backend/suppliers/rossko/rossko-site-auth.ts";
 import { parseMotorDetalQuantity } from "../src/backend/suppliers/motordetal/motordetal-api-adapter.ts";
 import {
   createMladovSearchFailure,
@@ -235,6 +236,105 @@ test("Rossko keeps every exact article product returned by web search", () => {
       { searchResults: [{ id: "smilga", article: "1072", part: { price: 35.175 } }, { id: "without-price", article: "1072" }, { id: "bardahl", article: "1072", part: { price: 1613 } }] },
     ],
   }, "1072"), ["bardahl", "smilga"]);
+});
+
+test("Rossko accepts an authenticated browser session only with usable delivery settings", () => {
+  assert.deepEqual(inspectRosskoDeliverySession({ addresses: [], types: [{ value: "pickup" }] }), {
+    ready: false,
+    addressesCount: 0,
+    typesCount: 1,
+  });
+  assert.deepEqual(inspectRosskoDeliverySession({
+    addresses: [{ pointGuid: " address-guid " }],
+    types: [{ value: " delivery " }],
+  }), {
+    ready: true,
+    addressesCount: 1,
+    typesCount: 1,
+  });
+  assert.deepEqual(inspectRosskoDeliverySession({ addresses: null, types: "invalid" }), {
+    ready: false,
+    addressesCount: null,
+    typesCount: null,
+  });
+});
+
+test("Rossko reloads the account and waits for delivery settings before accepting login", async () => {
+  const payloads = [
+    { addresses: [], types: [{ value: "pickup" }] },
+    { addresses: [{ pointGuid: "address-guid" }], types: [{ value: "delivery" }] },
+  ];
+  const requests = [];
+  let disposedResponses = 0;
+  const context = {
+    async cookies() {
+      return [{ name: "auth", value: "test-session" }];
+    },
+    request: {
+      async get(url, options) {
+        requests.push({ url, options });
+        const payload = payloads.shift();
+        return {
+          status: () => 200,
+          headers: () => ({ "content-type": "application/json; charset=utf-8" }),
+          body: async () => Buffer.from(JSON.stringify(payload)),
+          async dispose() {
+            disposedResponses += 1;
+          },
+        };
+      },
+    },
+  };
+  const navigations = [];
+  const page = {
+    context: () => context,
+    async goto(url) {
+      navigations.push(url);
+    },
+    async waitForLoadState() {},
+    async waitForTimeout() {},
+  };
+
+  const result = await initializeRosskoAuthenticatedSession(page);
+
+  assert.equal(result.authorized, true);
+  assert.equal(navigations.length, 1);
+  assert.equal(requests.length, 2);
+  assert.equal(new URL(requests[0].url).hostname, "samara-productcard.rossko.ru");
+  assert.equal(requests[0].options.headers["Authorization-Session"], "test-session");
+  assert.equal(disposedResponses, 2);
+});
+
+test("Rossko rejects a login whose session never receives a delivery address", async () => {
+  const context = {
+    async cookies() {
+      return [{ name: "auth", value: "test-session" }];
+    },
+    request: {
+      async get() {
+        return {
+          status: () => 200,
+          headers: () => ({ "content-type": "application/json" }),
+          body: async () => Buffer.from(JSON.stringify({ addresses: [], types: [{ value: "pickup" }] })),
+          async dispose() {},
+        };
+      },
+    },
+  };
+  const page = {
+    context: () => context,
+    async goto() {},
+    async waitForLoadState() {},
+    async waitForTimeout() {},
+  };
+
+  const result = await initializeRosskoAuthenticatedSession(page);
+
+  assert.deepEqual(result, {
+    authorized: false,
+    details: "Rossko accepted the login but did not initialize a delivery address (addresses=0, types=1)",
+    failure: "integration",
+  });
 });
 
 test("PartKOM normalizes exact official API offers", () => {

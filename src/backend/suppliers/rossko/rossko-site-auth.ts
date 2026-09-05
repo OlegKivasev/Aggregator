@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { getStateFilePath, rosskoConfig } from "../../config.ts";
+import { getStateFilePath, rosskoConfig, supplierMaxResponseBytes } from "../../config.ts";
 import { writeJsonStateFileAtomic } from "../../session/state-file.ts";
 import type { RosskoSiteCredentials } from "../../types.ts";
 import { SupplierIntegrationError } from "../errors.ts";
@@ -143,6 +143,159 @@ async function waitForVisibleRosskoField(field: any): Promise<boolean> {
 async function hasRosskoAuthCookie(context: any): Promise<boolean> {
   const cookies = await context.cookies(rosskoBusinessUrl);
   return cookies.some((cookie: { name?: string; value?: string }) => cookie.name === "auth" && Boolean(cookie.value));
+}
+
+async function getRosskoAuthCookie(context: any): Promise<string | null> {
+  const cookies = await context.cookies(rosskoBusinessUrl);
+  return cookies.find((cookie: { name?: string; value?: string }) => cookie.name === "auth")?.value || null;
+}
+
+function rosskoDeliverySchemaUrl(): URL {
+  const businessUrl = new URL(rosskoBusinessUrl);
+  const city = businessUrl.hostname.split(".")[0];
+  const url = new URL("/api/Delivery/GetDeliverySchema", `${businessUrl.protocol}//${city}-productcard.rossko.ru/`);
+  url.searchParams.set("newCart", "true");
+  return url;
+}
+
+interface RosskoDeliverySessionInspection {
+  ready: boolean;
+  addressesCount: number | null;
+  typesCount: number | null;
+}
+
+export function inspectRosskoDeliverySession(payload: unknown): RosskoDeliverySessionInspection {
+  if (!payload || typeof payload !== "object") {
+    return { ready: false, addressesCount: null, typesCount: null };
+  }
+
+  const delivery = payload as {
+    addresses?: unknown;
+    types?: unknown;
+  };
+  const addressesCount = Array.isArray(delivery.addresses) ? delivery.addresses.length : null;
+  const typesCount = Array.isArray(delivery.types) ? delivery.types.length : null;
+  const hasAddress = Array.isArray(delivery.addresses) && delivery.addresses.some((item) => (
+    item !== null &&
+    typeof item === "object" &&
+    typeof (item as { pointGuid?: unknown }).pointGuid === "string" &&
+    Boolean((item as { pointGuid: string }).pointGuid.trim())
+  ));
+  const hasDeliveryType = Array.isArray(delivery.types) && delivery.types.some((item) => (
+    item !== null &&
+    typeof item === "object" &&
+    typeof (item as { value?: unknown }).value === "string" &&
+    Boolean((item as { value: string }).value.trim())
+  ));
+
+  return {
+    ready: hasAddress && hasDeliveryType,
+    addressesCount,
+    typesCount,
+  };
+}
+
+export async function initializeRosskoAuthenticatedSession(page: any): Promise<RosskoAuthCheckResult> {
+  await gotoRossko(page, rosskoBusinessUrl, "главную страницу после входа");
+  await waitForRosskoSettled(page);
+
+  const context = page.context();
+  const authorizationSession = await getRosskoAuthCookie(context);
+  if (!authorizationSession) {
+    return {
+      authorized: false,
+      details: "Rossko auth cookie disappeared before delivery settings initialization",
+      failure: "authorization",
+    };
+  }
+
+  const deliveryUrl = rosskoDeliverySchemaUrl();
+  let lastInspection: RosskoDeliverySessionInspection = {
+    ready: false,
+    addressesCount: null,
+    typesCount: null,
+  };
+
+  for (let attempt = 1; attempt <= rosskoConfig.apiRequestAttempts; attempt += 1) {
+    const response = await context.request.get(deliveryUrl.toString(), {
+      failOnStatusCode: false,
+      timeout: rosskoConfig.apiRequestTimeoutMs,
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        "Authorization-Domain": new URL(rosskoBusinessUrl).origin,
+        "Authorization-Session": authorizationSession,
+        Referer: rosskoBusinessUrl,
+        Source: "frontend",
+      },
+    });
+
+    try {
+      const status = response.status();
+      if (status === 401 || status === 403) {
+        return {
+          authorized: false,
+          details: `Rossko rejected the initialized browser session with HTTP ${status}`,
+          failure: "authorization",
+        };
+      }
+      if (status < 200 || status >= 300) {
+        return {
+          authorized: false,
+          details: `Rossko delivery settings initialization returned HTTP ${status}`,
+          failure: "integration",
+        };
+      }
+
+      const contentType = response.headers()["content-type"] || "";
+      if (!/^application\/(?:[a-z0-9!#$&^_.+-]+\+)?json(?:\s*;|$)/i.test(contentType)) {
+        return {
+          authorized: false,
+          details: "Rossko delivery settings initialization returned a non-JSON response",
+          failure: "integration",
+        };
+      }
+
+      const body = await response.body();
+      if (body.byteLength > supplierMaxResponseBytes) {
+        return {
+          authorized: false,
+          details: "Rossko delivery settings initialization response was too large",
+          failure: "integration",
+        };
+      }
+
+      let payload: unknown;
+      try {
+        payload = JSON.parse(body.toString("utf-8"));
+      } catch {
+        return {
+          authorized: false,
+          details: "Rossko delivery settings initialization returned invalid JSON",
+          failure: "integration",
+        };
+      }
+
+      lastInspection = inspectRosskoDeliverySession(payload);
+      if (lastInspection.ready) {
+        return {
+          authorized: true,
+          details: "Rossko business account login and delivery settings were verified successfully",
+        };
+      }
+    } finally {
+      await response.dispose();
+    }
+
+    if (attempt < rosskoConfig.apiRequestAttempts) {
+      await page.waitForTimeout(rosskoConfig.retryDelayMs * attempt);
+    }
+  }
+
+  return {
+    authorized: false,
+    details: `Rossko accepted the login but did not initialize a delivery address (addresses=${lastInspection.addressesCount ?? "invalid"}, types=${lastInspection.typesCount ?? "invalid"})`,
+    failure: "integration",
+  };
 }
 
 async function waitForRosskoAuthCookie(page: any): Promise<boolean> {
@@ -342,10 +495,7 @@ export async function performRosskoLogin(page: any, credentials: RosskoSiteCrede
   }
 
   if (await waitForRosskoAuthCookie(page)) {
-    return {
-      authorized: true,
-      details: authResponse?.details || "Rossko business account login was verified successfully",
-    };
+    return initializeRosskoAuthenticatedSession(page);
   }
 
   const authFormStillVisible = (await page.locator('input[name="auth[email]"]:visible').count()) > 0;
