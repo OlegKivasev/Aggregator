@@ -51,9 +51,9 @@ export interface SupplierSessionValidationResult {
   status: "connected" | "expired" | "error";
 }
 
-export interface RosskoSiteCredentials {
-  login: string;
-  password: string;
+export interface RosskoApiCredentials {
+  key1: string;
+  key2: string;
 }
 
 export interface ArmtekCredentials {

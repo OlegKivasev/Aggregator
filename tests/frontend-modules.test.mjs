@@ -283,6 +283,17 @@ test("frontend preserves selected search suppliers when sessions load after rest
   assert.doesNotMatch(app, /updateArmtekSessionCard\(armtekSession, true\)/);
 });
 
+test("Rossko authorization form accepts only API keys", async () => {
+  const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
+
+  assert.match(html, /id="rossko-key1" name="key1" type="password"/);
+  assert.match(html, /id="rossko-key2" name="key2" type="password"/);
+  assert.doesNotMatch(html, /id="rossko-(?:login|password)"/);
+  assert.match(app, /key1: rosskoKey1Input\.value\.trim\(\)/);
+  assert.match(app, /key2: rosskoKey2Input\.value\.trim\(\)/);
+});
+
 test("search tabs can be renamed through a context menu and keep their full name in a tooltip", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");

@@ -151,21 +151,7 @@ export const supplierAuthorizationTimeoutMs = readBoundedInteger("SUPPLIER_AUTHO
 export const supplierCredentialsEncryptionKey = readEncryptionKey("SUPPLIER_CREDENTIALS_ENCRYPTION_KEY");
 
 export const rosskoConfig = {
-  businessUrl: readSupplierUrl("ROSSKO_BASE_URL", "https://samara.rossko.ru/", /^[a-z0-9-]+\.rossko\.ru$/).toString(),
-  browserPath: optionalEnvironmentValue("ROSSKO_BROWSER_PATH"),
-  navigationTimeoutMs: readBoundedInteger("ROSSKO_NAVIGATION_TIMEOUT_MS", 7_000, 1_000, 120_000),
-  navigationAttempts: readBoundedInteger("ROSSKO_NAVIGATION_ATTEMPTS", 2, 1, 5),
-  postCommitDelayMs: readBoundedInteger("ROSSKO_POST_COMMIT_DELAY_MS", 200, 0, 10_000),
-  retryDelayMs: readBoundedInteger("ROSSKO_RETRY_DELAY_MS", 250, 0, 30_000),
-  settledTimeoutMs: readBoundedInteger("ROSSKO_SETTLED_TIMEOUT_MS", 3_000, 100, 120_000),
-  settledFallbackDelayMs: readBoundedInteger("ROSSKO_SETTLED_FALLBACK_DELAY_MS", 800, 0, 30_000),
-  loginFieldVisibleTimeoutMs: readBoundedInteger("ROSSKO_LOGIN_FIELD_VISIBLE_TIMEOUT_MS", 1_200, 100, 30_000),
-  authCookieWaitTimeoutMs: readBoundedInteger("ROSSKO_AUTH_COOKIE_WAIT_TIMEOUT_MS", 8_000, 100, 120_000),
-  authCookiePollIntervalMs: readBoundedInteger("ROSSKO_AUTH_COOKIE_POLL_INTERVAL_MS", 250, 50, 10_000),
-  authResponseTimeoutMs: readBoundedInteger("ROSSKO_AUTH_RESPONSE_TIMEOUT_MS", 8_000, 100, 120_000),
-  apiRequestAttempts: readBoundedInteger("ROSSKO_API_REQUEST_ATTEMPTS", 3, 1, 5),
-  apiHedgeDelayMs: readBoundedInteger("ROSSKO_API_HEDGE_DELAY_MS", 1_200, 100, 30_000),
-  apiRequestTimeoutMs: readBoundedInteger("ROSSKO_API_REQUEST_TIMEOUT_MS", 6_000, 1_000, 120_000),
+  requestTimeoutMs: readBoundedInteger("ROSSKO_API_REQUEST_TIMEOUT_MS", 15_000, 1_000, 120_000),
   searchTimeoutMs: readBoundedInteger("ROSSKO_SEARCH_TIMEOUT_MS", 30_000, 1_000, 120_000),
 };
 

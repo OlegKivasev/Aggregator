@@ -4,6 +4,7 @@ import type {
   MotorDetalCredentials,
   MladovCredentials,
   PartKomCredentials,
+  RosskoApiCredentials,
   StpartsCredentials,
   SupplierId,
   SupplierSessionState,
@@ -32,6 +33,7 @@ export class SupplierSessionManager {
   private partKomCredentials: PartKomCredentials | null = null;
   private stpartsCredentials: StpartsCredentials | null = null;
   private forumAutoCredentials: ForumAutoCredentials | null = null;
+  private rosskoApiCredentials: RosskoApiCredentials | null = null;
 
   getSession(supplier: SupplierId): SupplierSessionState {
     const current = this.sessions.get(supplier);
@@ -169,6 +171,21 @@ export class SupplierSessionManager {
 
     this.sessions.set(supplier, next);
     return next;
+  }
+
+  setRosskoApiCredentials(credentials: RosskoApiCredentials): void {
+    this.rosskoApiCredentials = {
+      key1: credentials.key1.trim(),
+      key2: credentials.key2.trim(),
+    };
+  }
+
+  getRosskoApiCredentials(): RosskoApiCredentials | null {
+    return this.rosskoApiCredentials ? { ...this.rosskoApiCredentials } : null;
+  }
+
+  clearRosskoApiCredentials(): void {
+    this.rosskoApiCredentials = null;
   }
 
   setArmtekCredentials(credentials: ArmtekCredentials): void {

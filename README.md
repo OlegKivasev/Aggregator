@@ -151,11 +151,12 @@ frontend / HTTP transport
 
 #### Rossko
 
-- Production search использует существующую business-site/API session integration; standalone SOAP script не является fallback production adapter.
-- `ROSSKO_USE_STUB` допустим только как явный development opt-in. Отсутствие конфигурации не включает mock автоматически.
-- Проверяйте supplier `errorFlag`, структуру groups/cards/stocks и обязательные product fields. Malformed collections являются integration error.
-- Сохраняйте все точные совпадения article, а не только первый product ID.
-- Authenticated cookies нельзя отправлять на другой origin; URL проверяется до request.
+- Production использует только официальный SOAP API `https://api.rossko.ru/service/v2.1/`.
+- Пользователь вводит K1 и K2 в настройках поставщика. Ключи проверяются запросом `GetCheckoutDetails` и при наличии master key сохраняются в общем зашифрованном credential store.
+- Для `GetSearch` приложение автоматически выбирает первый адрес и совместимый с ним способ доставки, полученные из `GetCheckoutDetails`; если адресов нет, используется доступный способ «Самовывоз».
+- Обычный поиск возвращает только точные совпадения артикула. Аналоги извлекаются из `crosses` отдельным действием пользователя.
+- Ответы SOAP ограничиваются по размеру, валидируются как XML и не превращаются в успешный пустой список при ошибке API.
+- Документированные ограничения Rossko — не более 80 карточек в `PartsList` и не более 80 кроссов на карточку; приложение не может получить скрытые API позиции обходным способом.
 
 #### Armtek
 
@@ -298,7 +299,7 @@ exit with code `2`; command/configuration failures use code `1`.
 ## Rossko SOAP Diagnostic
 
 `rossko:search` is a standalone diagnostic utility for the official Rossko SOAP API.
-It does not use the browser session integration, normalize results, or persist credentials.
+It calls the same official API as the production adapter, but does not normalize results or persist credentials.
 It prints the complete SOAP XML response, including all product, stock, and cross fields
 returned by Rossko.
 
@@ -328,7 +329,7 @@ limit, and returns at most 80 product cards and 80 crosses per product.
 - Run `pnpm exec playwright install chromium` when no system Chrome or Edge path is configured.
 - Set `STATE_DIR` to a directory outside the application checkout. Restrict it to the dedicated service account because it contains supplier cookies, tokens, and optionally encrypted credentials.
 - Set `SUPPLIER_CREDENTIALS_ENCRYPTION_KEY` from the deployment secret manager to a base64-encoded random 32-byte key. Do not put the key in the checkout or `STATE_DIR`; losing it requires restoring the original key or moving the unreadable credential file aside and authorizing suppliers again.
-- Log in to Rossko from the supplier settings using the business-account login and password.
+- Connect Rossko from the supplier settings using API keys K1 and K2.
 - Terminate TLS and require authentication at the reverse proxy before exposing `/api/*`.
 - Keep the service bound to loopback and proxy only from a trusted local endpoint.
 - Pass supplier credentials and API keys through environment variables or the runtime authorization UI. Do not store them in files in the checkout.

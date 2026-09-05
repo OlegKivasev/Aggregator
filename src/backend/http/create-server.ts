@@ -7,7 +7,7 @@ import type {
   MladovCredentials,
   MotorDetalCredentials,
   PartKomCredentials,
-  RosskoSiteCredentials,
+  RosskoApiCredentials,
   SearchStreamEvent,
   StpartsCredentials,
   SupplierId,
@@ -18,6 +18,7 @@ import type {
 import {
   articleLengthLimit,
   parseCredentials,
+  parseRosskoApiCredentials,
   parseSessionValidationPayload,
   parseSupplierIds,
   readJsonBody,
@@ -33,7 +34,7 @@ export interface AggregatorApplication {
     suppliers: SupplierId[],
     signal: AbortSignal,
   ): Promise<{ results: SupplierSessionValidationResult[]; sessions: SupplierSessionState[] }>;
-  authorizeRossko(credentials: RosskoSiteCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
+  authorizeRossko(credentials: RosskoApiCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeArmtek(credentials: ArmtekCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizePartKom(credentials: PartKomCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeStparts(credentials: StpartsCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
@@ -89,12 +90,13 @@ function serveAuthorizationError(
   serveJson(response, statusCode, { message });
 }
 
-async function serveAuthorization(
+async function serveAuthorization<TCredentials>(
   request: IncomingMessage,
   response: ServerResponse,
-  authorize: (credentials: { login: string; password: string }, signal: AbortSignal) => Promise<SupplierSessionState>,
+  authorize: (credentials: TCredentials, signal: AbortSignal) => Promise<SupplierSessionState>,
   operation: string,
   reportError: (event: OperationalErrorEvent) => void,
+  parsePayload: (payload: unknown) => TCredentials,
 ): Promise<void> {
   const controller = new AbortController();
   const abortAuthorization = () => {
@@ -105,7 +107,7 @@ async function serveAuthorization(
   response.once("close", abortAuthorization);
 
   try {
-    const credentials = parseCredentials(await readJsonBody(request));
+    const credentials = parsePayload(await readJsonBody(request));
     const session = await authorize(credentials, controller.signal);
     if (!controller.signal.aborted) {
       serveJson(response, 200, { session });
@@ -174,7 +176,7 @@ export function createAggregatorServer({
     }
 
     if (request.method === "POST" && url.pathname === "/api/suppliers/rossko/authorize") {
-      await serveAuthorization(request, response, application.authorizeRossko.bind(application), "authorize-rossko", reportError);
+      await serveAuthorization(request, response, application.authorizeRossko.bind(application), "authorize-rossko", reportError, parseRosskoApiCredentials);
       return;
     }
 
@@ -184,7 +186,7 @@ export function createAggregatorServer({
     }
 
     if (request.method === "POST" && url.pathname === "/api/suppliers/armtek/authorize") {
-      await serveAuthorization(request, response, application.authorizeArmtek.bind(application), "authorize-armtek", reportError);
+      await serveAuthorization(request, response, application.authorizeArmtek.bind(application), "authorize-armtek", reportError, parseCredentials);
       return;
     }
 
@@ -194,7 +196,7 @@ export function createAggregatorServer({
     }
 
     if (request.method === "POST" && url.pathname === "/api/suppliers/part-kom/authorize") {
-      await serveAuthorization(request, response, application.authorizePartKom.bind(application), "authorize-part-kom", reportError);
+      await serveAuthorization(request, response, application.authorizePartKom.bind(application), "authorize-part-kom", reportError, parseCredentials);
       return;
     }
 
@@ -204,7 +206,7 @@ export function createAggregatorServer({
     }
 
     if (request.method === "POST" && url.pathname === "/api/suppliers/stparts/authorize") {
-      await serveAuthorization(request, response, application.authorizeStparts.bind(application), "authorize-stparts", reportError);
+      await serveAuthorization(request, response, application.authorizeStparts.bind(application), "authorize-stparts", reportError, parseCredentials);
       return;
     }
 
@@ -214,7 +216,7 @@ export function createAggregatorServer({
     }
 
     if (request.method === "POST" && url.pathname === "/api/suppliers/forum-auto/authorize") {
-      await serveAuthorization(request, response, application.authorizeForumAuto.bind(application), "authorize-forum-auto", reportError);
+      await serveAuthorization(request, response, application.authorizeForumAuto.bind(application), "authorize-forum-auto", reportError, parseCredentials);
       return;
     }
 
@@ -224,7 +226,7 @@ export function createAggregatorServer({
     }
 
     if (request.method === "POST" && url.pathname === "/api/suppliers/motordetal/authorize") {
-      await serveAuthorization(request, response, application.authorizeMotorDetal.bind(application), "authorize-motordetal", reportError);
+      await serveAuthorization(request, response, application.authorizeMotorDetal.bind(application), "authorize-motordetal", reportError, parseCredentials);
       return;
     }
 
@@ -234,7 +236,7 @@ export function createAggregatorServer({
     }
 
     if (request.method === "POST" && url.pathname === "/api/suppliers/mladov/authorize") {
-      await serveAuthorization(request, response, application.authorizeMladov.bind(application), "authorize-mladov", reportError);
+      await serveAuthorization(request, response, application.authorizeMladov.bind(application), "authorize-mladov", reportError, parseCredentials);
       return;
     }
 

@@ -259,15 +259,15 @@
 
             <form id="rossko-auth-form" class="auth-form" data-authorized="false">
               <label class="field">
-                <span>Логин</span>
-                <input id="rossko-login" name="login" type="text" autocomplete="username" required />
+                <span>K1</span>
+                <span class="password-field"><input id="rossko-key1" name="key1" type="password" autocomplete="off" required /><button class="password-toggle" type="button" aria-label="Показать K1" aria-controls="rossko-key1"><span aria-hidden="true">&#128065;</span></button></span>
               </label>
               <label class="field">
-                <span>Пароль</span>
-                <span class="password-field"><input id="rossko-password" name="password" type="password" autocomplete="current-password" required /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="rossko-password"><span aria-hidden="true">&#128065;</span></button></span>
+                <span>K2</span>
+                <span class="password-field"><input id="rossko-key2" name="key2" type="password" autocomplete="off" required /><button class="password-toggle" type="button" aria-label="Показать K2" aria-controls="rossko-key2"><span aria-hidden="true">&#128065;</span></button></span>
               </label>
                <div class="auth-actions">
-                 <button type="submit" id="rossko-connect-button" class="btn btn-primary">Войти</button>
+                 <button type="submit" id="rossko-connect-button" class="btn btn-primary">Подключить</button>
                 <button type="button" class="button-secondary btn btn-light" id="rossko-logout-button" hidden>Отключить</button>
               </div>
             </form>

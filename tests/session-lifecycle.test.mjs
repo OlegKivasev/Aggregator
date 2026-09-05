@@ -5,7 +5,11 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { SupplierSessionService } from "../src/backend/application/supplier-session-service.ts";
+import {
+  decodeRosskoApiCredentials,
+  encodeRosskoApiCredentials,
+  SupplierSessionService,
+} from "../src/backend/application/supplier-session-service.ts";
 import { EncryptedSupplierCredentialStore } from "../src/backend/session/encrypted-credential-store.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
 import { writeJsonStateFileAtomic } from "../src/backend/session/state-file.ts";
@@ -128,20 +132,26 @@ test("rejected credential rotation preserves the active session but reports auth
   const sessionManager = new SupplierSessionManager();
   sessionManager.markAuthorized("rossko", "Existing session");
   const sessionService = new SupplierSessionService([], sessionManager, {
-    async verifyRosskoCredentials() {
-      return { authorized: false, failure: "authorization" };
+    async verifyRosskoApiCredentials() {
+      throw new SupplierAuthError("rejected keys");
     },
   });
 
   await assert.rejects(
     sessionService.authorizeRossko(
-      { login: "replacement", password: "rejected" },
+      { key1: "replacement", key2: "rejected" },
       new AbortController().signal,
     ),
     SupplierAuthError,
   );
   assert.equal(sessionManager.getSession("rossko").authorized, true);
-  assert.equal(sessionManager.getSession("rossko").details, "Rossko rejected the login or password");
+  assert.equal(sessionManager.getSession("rossko").details, "Rossko API отклонил K1 или K2");
+});
+
+test("Rossko API credentials are marked so legacy website credentials cannot be reused as keys", () => {
+  const encoded = encodeRosskoApiCredentials({ key1: "api-key-one", key2: "api-key-two" });
+  assert.deepEqual(decodeRosskoApiCredentials(encoded), { key1: "api-key-one", key2: "api-key-two" });
+  assert.equal(decodeRosskoApiCredentials({ login: "legacy-login", password: "legacy-password" }), null);
 });
 
 test("expired validation automatically authorizes once with stored credentials", async () => {

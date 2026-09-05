@@ -138,7 +138,15 @@ test("JSON endpoints reject malformed and incomplete requests", async () => {
   assert.equal(malformedJson.status, 400);
   assert.deepEqual(await malformedJson.json(), { message: "Invalid JSON request body" });
 
-  for (const supplier of ["rossko", "armtek", "part-kom", "stparts", "forum-auto", "motordetal", "mladov"]) {
+  const missingRosskoKeys = await fetch(`${baseUrl}/api/suppliers/rossko/authorize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key1: "" }),
+  });
+  assert.equal(missingRosskoKeys.status, 400);
+  assert.deepEqual(await missingRosskoKeys.json(), { message: "K1 and K2 must be strings within the allowed length" });
+
+  for (const supplier of ["armtek", "part-kom", "stparts", "forum-auto", "motordetal", "mladov"]) {
     const missingCredentials = await fetch(`${baseUrl}/api/suppliers/${supplier}/authorize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

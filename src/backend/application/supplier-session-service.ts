@@ -5,7 +5,6 @@ import type { SupplierSessionManager } from "../session/session-manager.ts";
 import type { SupplierAdapter } from "../suppliers/supplier-adapter.ts";
 import {
   SupplierAuthError,
-  SupplierIntegrationError,
   SupplierSessionInvalidatedError,
   SupplierTimeoutError,
 } from "../suppliers/errors.ts";
@@ -15,7 +14,7 @@ import type {
   MladovCredentials,
   MotorDetalCredentials,
   PartKomCredentials,
-  RosskoSiteCredentials,
+  RosskoApiCredentials,
   StpartsCredentials,
   SupplierId,
   SupplierSessionValidationResult,
@@ -27,15 +26,33 @@ interface CredentialCheckResult {
   failure?: "authorization" | "integration";
 }
 
+const rosskoApiKey1StoragePrefix = "rossko-api-k1:";
+
+export function encodeRosskoApiCredentials(credentials: RosskoApiCredentials): StoredSupplierCredentials {
+  return {
+    login: `${rosskoApiKey1StoragePrefix}${credentials.key1}`,
+    password: credentials.key2,
+  };
+}
+
+export function decodeRosskoApiCredentials(credentials: StoredSupplierCredentials | null): RosskoApiCredentials | null {
+  if (!credentials?.login.startsWith(rosskoApiKey1StoragePrefix)) {
+    return null;
+  }
+  const key1 = credentials.login.slice(rosskoApiKey1StoragePrefix.length).trim();
+  const key2 = credentials.password.trim();
+  return key1 && key2 ? { key1, key2 } : null;
+}
+
 export interface SupplierSessionOperations {
-  verifyRosskoCredentials(credentials: RosskoSiteCredentials, signal: AbortSignal): Promise<CredentialCheckResult>;
+  verifyRosskoApiCredentials(credentials: RosskoApiCredentials, signal: AbortSignal): Promise<void>;
   verifyArmtekCredentials(credentials: ArmtekCredentials, signal: AbortSignal): Promise<string>;
   verifyPartKomApiCredentials(credentials: PartKomCredentials, signal: AbortSignal): Promise<void>;
   verifyStpartsApiCredentials(credentials: StpartsCredentials, signal: AbortSignal): Promise<void>;
   verifyForumAutoCredentials(credentials: ForumAutoCredentials, signal: AbortSignal): Promise<void>;
   verifyMotorDetalCredentials(credentials: MotorDetalCredentials, signal: AbortSignal): Promise<CredentialCheckResult>;
   verifyMladovCredentials(credentials: MladovCredentials, signal: AbortSignal): Promise<CredentialCheckResult>;
-  clearRosskoStorageState(): void;
+  clearRosskoApiState(): void;
   clearArmtekApiAccountState(): void;
   clearMotorDetalTokenState(): void;
   clearMladovStorageState(): void;
@@ -111,25 +128,29 @@ export class SupplierSessionService {
     }
   }
 
-  async authorizeRossko(credentials: RosskoSiteCredentials, signal: AbortSignal) {
+  async authorizeRossko(credentials: RosskoApiCredentials, signal: AbortSignal) {
     return this.runAuthorization(signal, "rossko", "Rossko", async (authorizationSignal, establishSession) => {
-      const result = await this.operations.verifyRosskoCredentials(credentials, authorizationSignal);
-      authorizationSignal.throwIfAborted();
-      if (!result.authorized) {
-        if (result.failure === "integration") {
-          throw new SupplierIntegrationError("Rossko authorization could not be verified");
+      try {
+        await this.operations.verifyRosskoApiCredentials(credentials, authorizationSignal);
+      } catch (error) {
+        authorizationSignal.throwIfAborted();
+        if (error instanceof SupplierAuthError) {
+          return this.rejectAuthorization("rossko", "Rossko API отклонил K1 или K2");
         }
-        return this.rejectAuthorization("rossko", "Rossko rejected the login or password");
+        throw error;
       }
+      authorizationSignal.throwIfAborted();
       establishSession();
-      this.rememberCredentials("rossko", credentials);
-      return this.sessionManager.markAuthorized("rossko", "Rossko business account login was verified successfully");
+      this.rememberCredentials("rossko", encodeRosskoApiCredentials(credentials));
+      this.sessionManager.setRosskoApiCredentials(credentials);
+      return this.sessionManager.markAuthorized("rossko", "Ключи Rossko API успешно проверены");
     });
   }
 
   logoutRossko() {
     this.sessionManager.invalidateOperations("rossko");
-    this.operations.clearRosskoStorageState();
+    this.sessionManager.clearRosskoApiCredentials();
+    this.operations.clearRosskoApiState();
     this.forgetCredentials("rossko");
     return this.sessionManager.markUnauthorized("rossko");
   }
@@ -337,6 +358,9 @@ export class SupplierSessionService {
   private credentialsForAutomaticLogin(supplier: SupplierId): StoredSupplierCredentials | null {
     const stored = this.credentialRepository?.get(supplier);
     if (stored) {
+      if (supplier === "rossko" && !decodeRosskoApiCredentials(stored)) {
+        return null;
+      }
       return stored;
     }
     switch (supplier) {
@@ -352,7 +376,13 @@ export class SupplierSessionService {
 
   private authorizeAutomatically(supplier: SupplierId, credentials: StoredSupplierCredentials, signal: AbortSignal) {
     switch (supplier) {
-      case "rossko": return this.authorizeRossko(credentials, signal);
+      case "rossko": {
+        const rosskoCredentials = decodeRosskoApiCredentials(credentials);
+        if (!rosskoCredentials) {
+          throw new SupplierAuthError("Stored Rossko credentials are not API keys");
+        }
+        return this.authorizeRossko(rosskoCredentials, signal);
+      }
       case "armtek": return this.authorizeArmtek(credentials, signal);
       case "part-kom": return this.authorizePartKom(credentials, signal);
       case "stparts": return this.authorizeStparts(credentials, signal);

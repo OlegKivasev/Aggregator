@@ -21,20 +21,6 @@ const configurationVariables = [
   "ARMTEK_REQUEST_TIMEOUT_MS",
   "ARMTEK_SEARCH_TIMEOUT_MS",
   "SUPPLIER_AUTHORIZATION_TIMEOUT_MS",
-  "ROSSKO_BASE_URL",
-  "ROSSKO_BROWSER_PATH",
-  "ROSSKO_NAVIGATION_TIMEOUT_MS",
-  "ROSSKO_NAVIGATION_ATTEMPTS",
-  "ROSSKO_POST_COMMIT_DELAY_MS",
-  "ROSSKO_RETRY_DELAY_MS",
-  "ROSSKO_SETTLED_TIMEOUT_MS",
-  "ROSSKO_SETTLED_FALLBACK_DELAY_MS",
-  "ROSSKO_LOGIN_FIELD_VISIBLE_TIMEOUT_MS",
-  "ROSSKO_AUTH_COOKIE_WAIT_TIMEOUT_MS",
-  "ROSSKO_AUTH_COOKIE_POLL_INTERVAL_MS",
-  "ROSSKO_AUTH_RESPONSE_TIMEOUT_MS",
-  "ROSSKO_API_REQUEST_ATTEMPTS",
-  "ROSSKO_API_HEDGE_DELAY_MS",
   "ROSSKO_API_REQUEST_TIMEOUT_MS",
   "ROSSKO_SEARCH_TIMEOUT_MS",
   "MLADOV_BASE_URL",
@@ -80,8 +66,7 @@ test("configuration exposes validated defaults", () => {
     import { mladovConfig, readPort, rosskoConfig, stpartsConfig } from "./src/backend/config.ts";
     console.log(JSON.stringify({
       port: readPort(),
-      rosskoUrl: rosskoConfig.businessUrl,
-      rosskoAttempts: rosskoConfig.apiRequestAttempts,
+      rosskoRequestTimeout: rosskoConfig.requestTimeoutMs,
       mladovTimeout: mladovConfig.searchTimeoutMs,
       stpartsUrl: stpartsConfig.apiUrl.toString(),
     }));
@@ -90,8 +75,7 @@ test("configuration exposes validated defaults", () => {
   assert.equal(execution.status, 0, execution.stderr);
   assert.deepEqual(JSON.parse(execution.stdout), {
     port: 3000,
-    rosskoUrl: "https://samara.rossko.ru/",
-    rosskoAttempts: 3,
+    rosskoRequestTimeout: 15000,
     mladovTimeout: 20000,
     stpartsUrl: "https://stpartsru.public.api.abcp.ru/",
   });
@@ -115,12 +99,12 @@ test("configuration rejects invalid timeout and attempt values", () => {
   assert.notEqual(invalidTimeout.status, 0);
   assert.match(invalidTimeout.stderr, /MOTORDETAL_SEARCH_TIMEOUT_MS must be an integer/);
 
-  const excessiveAttempts = runConfig(
+  const excessiveRosskoTimeout = runConfig(
     'await import("./src/backend/config.ts");',
-    { ROSSKO_API_REQUEST_ATTEMPTS: "1000" },
+    { ROSSKO_API_REQUEST_TIMEOUT_MS: "1000000" },
   );
-  assert.notEqual(excessiveAttempts.status, 0);
-  assert.match(excessiveAttempts.stderr, /ROSSKO_API_REQUEST_ATTEMPTS must be an integer between 1 and 5/);
+  assert.notEqual(excessiveRosskoTimeout.status, 0);
+  assert.match(excessiveRosskoTimeout.stderr, /ROSSKO_API_REQUEST_TIMEOUT_MS must be an integer between 1000 and 120000/);
 });
 
 test("configuration validates the supplier credential encryption key", () => {

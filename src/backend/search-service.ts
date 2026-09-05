@@ -1,5 +1,5 @@
 import { SearchApplicationService } from "./application/search-application-service.ts";
-import { SupplierSessionService } from "./application/supplier-session-service.ts";
+import { decodeRosskoApiCredentials, SupplierSessionService } from "./application/supplier-session-service.ts";
 import { getArmtekApiConfig, getStateFilePath, getStpartsApiConfig, supplierCredentialsEncryptionKey } from "./config.ts";
 import { EncryptedSupplierCredentialStore } from "./session/encrypted-credential-store.ts";
 import { SupplierSessionManager } from "./session/session-manager.ts";
@@ -20,8 +20,7 @@ import {
   verifyMotorDetalCredentials,
 } from "./suppliers/motordetal/motordetal-auth.ts";
 import { PartKomApiAdapter, verifyPartKomApiCredentials } from "./suppliers/part-kom/part-kom-api-adapter.ts";
-import { closeRosskoHttpAgent, RosskoSiteApiAdapter } from "./suppliers/rossko/rossko-site-api-adapter.ts";
-import { clearRosskoStorageState, hasRosskoStorageState, verifyRosskoCredentials } from "./suppliers/rossko/rossko-site-auth.ts";
+import { clearRosskoApiState, RosskoApiAdapter, verifyRosskoApiCredentials } from "./suppliers/rossko/rossko-api-adapter.ts";
 import { closeSiteHttpAgent } from "./suppliers/site-http.ts";
 import { StpartsApiAdapter, verifyStpartsApiCredentials } from "./suppliers/stparts/stparts-api-adapter.ts";
 import type {
@@ -30,7 +29,7 @@ import type {
   MladovCredentials,
   MotorDetalCredentials,
   PartKomCredentials,
-  RosskoSiteCredentials,
+  RosskoApiCredentials,
   SupplierSearchQuery,
   SearchStreamEvent,
   StpartsCredentials,
@@ -43,7 +42,7 @@ const credentialStore = new EncryptedSupplierCredentialStore(
   supplierCredentialsEncryptionKey,
 );
 const adapters = [
-  new RosskoSiteApiAdapter(),
+  new RosskoApiAdapter(),
   new ArmtekApiAdapter(),
   new PartKomApiAdapter(),
   new StpartsApiAdapter(),
@@ -53,14 +52,14 @@ const adapters = [
 ];
 
 const sessionService = new SupplierSessionService(adapters, sessionManager, {
-  verifyRosskoCredentials,
+  verifyRosskoApiCredentials,
   verifyArmtekCredentials,
   verifyPartKomApiCredentials: (credentials, signal) => verifyPartKomApiCredentials(credentials, undefined, signal),
   verifyStpartsApiCredentials,
   verifyForumAutoCredentials: (credentials, signal) => verifyForumAutoCredentials(credentials, undefined, signal),
   verifyMotorDetalCredentials,
   verifyMladovCredentials,
-  clearRosskoStorageState,
+  clearRosskoApiState,
   clearArmtekApiAccountState,
   clearMotorDetalTokenState,
   clearMladovStorageState,
@@ -79,6 +78,10 @@ function bootstrapPersistedSessions(): void {
   const forumAutoCredentials = credentialStore.get("forum-auto");
   const motorDetalCredentials = credentialStore.get("motordetal");
   const mladovCredentials = credentialStore.get("mladov");
+  const rosskoApiCredentials = decodeRosskoApiCredentials(rosskoCredentials);
+  if (rosskoApiCredentials) {
+    sessionManager.setRosskoApiCredentials(rosskoApiCredentials);
+  }
   if (armtekCredentials) {
     sessionManager.setArmtekCredentials(armtekCredentials);
   }
@@ -97,8 +100,8 @@ function bootstrapPersistedSessions(): void {
   if (mladovCredentials) {
     sessionManager.setMladovCredentials(mladovCredentials);
   }
-  if (hasRosskoStorageState() || rosskoCredentials) {
-    sessionManager.markAuthorized("rossko");
+  if (rosskoApiCredentials) {
+    sessionManager.markAuthorized("rossko", "Rossko API keys are configured");
   }
   if (armtekCredentials) {
     sessionManager.markAuthorized("armtek", "Armtek API credentials are configured");
@@ -123,7 +126,7 @@ function bootstrapPersistedSessions(): void {
 bootstrapPersistedSessions();
 
 export const listSupplierSessions = () => sessionService.listSupplierSessions();
-export const authorizeRossko = (credentials: RosskoSiteCredentials, signal: AbortSignal) => sessionService.authorizeRossko(credentials, signal);
+export const authorizeRossko = (credentials: RosskoApiCredentials, signal: AbortSignal) => sessionService.authorizeRossko(credentials, signal);
 export const authorizeArmtek = (credentials: ArmtekCredentials, signal: AbortSignal) => sessionService.authorizeArmtek(credentials, signal);
 export const authorizePartKom = (credentials: PartKomCredentials, signal: AbortSignal) => sessionService.authorizePartKom(credentials, signal);
 export const authorizeStparts = (credentials: StpartsCredentials, signal: AbortSignal) => sessionService.authorizeStparts(credentials, signal);
@@ -147,7 +150,6 @@ export function streamSearch(query: SupplierSearchQuery, emit: (event: SearchStr
 }
 
 export async function shutdownSearchService(): Promise<void> {
-  closeRosskoHttpAgent();
   closeSiteHttpAgent();
   await closeMladovBrowser();
 }

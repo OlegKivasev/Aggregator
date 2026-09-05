@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import type { SupplierId } from "../types.ts";
+import type { RosskoApiCredentials, SupplierId } from "../types.ts";
 
 const requestBodyLimitBytes = 16 * 1024;
 export const articleLengthLimit = 128;
@@ -56,6 +56,30 @@ export function parseCredentials(payload: unknown): { login: string; password: s
   }
 
   return { login: normalizedLogin, password };
+}
+
+export function parseRosskoApiCredentials(payload: unknown): RosskoApiCredentials {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new RequestBodyError(400, "K1 and K2 are required");
+  }
+  const { key1, key2 } = payload as { key1?: unknown; key2?: unknown };
+  if (typeof key1 !== "string" || typeof key2 !== "string") {
+    throw new RequestBodyError(400, "K1 and K2 must be strings within the allowed length");
+  }
+  const normalizedKey1 = key1.trim();
+  const normalizedKey2 = key2.trim();
+  if (!normalizedKey1 || !normalizedKey2) {
+    throw new RequestBodyError(400, "K1 and K2 are required");
+  }
+  if (
+    normalizedKey1.length > 256 ||
+    normalizedKey2.length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(normalizedKey1) ||
+    /[\u0000-\u001f\u007f]/.test(normalizedKey2)
+  ) {
+    throw new RequestBodyError(400, "K1 and K2 must be strings within the allowed length");
+  }
+  return { key1: normalizedKey1, key2: normalizedKey2 };
 }
 
 export async function readJsonBody(request: IncomingMessage): Promise<unknown> {

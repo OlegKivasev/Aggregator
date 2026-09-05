@@ -156,6 +156,27 @@ test("HTTP server transports mixed supplier SSE events without changing them", a
   assert.deepEqual(parseSseEvents(await response.text()), expectedEvents);
 });
 
+test("HTTP server parses Rossko K1 and K2 without exposing them", async () => {
+  let receivedCredentials;
+  const application = createApplication({
+    authorizeRossko: async (credentials) => {
+      receivedCredentials = credentials;
+      return session("rossko", true);
+    },
+  });
+  const { baseUrl } = await listen(application);
+
+  const response = await fetch(`${baseUrl}/api/suppliers/rossko/authorize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key1: " first-key ", key2: " second-key " }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(receivedCredentials, { key1: "first-key", key2: "second-key" });
+  assert.deepEqual(await response.json(), { session: session("rossko", true) });
+});
+
 test("HTTP server validates and transports an analog search query", async () => {
   let receivedQuery;
   const application = createApplication({

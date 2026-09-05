@@ -19,7 +19,14 @@ import {
   PartKomApiAdapter,
   verifyPartKomApiCredentials,
 } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
-import { parseRosskoQuantity, rosskoExactProductIds } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
+import {
+  buildRosskoSoapEnvelope,
+  normalizeRosskoApiAnalogResults,
+  normalizeRosskoApiSearchResults,
+  parseRosskoCheckoutDetails,
+  parseRosskoSearchParts,
+  parseRosskoXml,
+} from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { parseMotorDetalQuantity } from "../src/backend/suppliers/motordetal/motordetal-api-adapter.ts";
 import {
   createMladovSearchFailure,
@@ -94,17 +101,6 @@ test("Armtek identifies only confirmed zero return days as non-returnable", () =
   assert.equal(isArmtekReturnImpossible(1), false);
   assert.equal(isArmtekReturnImpossible("1"), false);
   assert.equal(isArmtekReturnImpossible(undefined), false);
-});
-
-test("Rossko exposes only valid positive inventory as quantity", () => {
-  assert.equal(parseRosskoQuantity(12), 12);
-  assert.equal(parseRosskoQuantity(1.5), 1.5);
-  assert.equal(parseRosskoQuantity(0), null);
-  assert.equal(parseRosskoQuantity(-1), null);
-  assert.equal(parseRosskoQuantity("12"), null);
-  assert.equal(parseRosskoQuantity(Number.POSITIVE_INFINITY), null);
-  assert.equal(parseRosskoQuantity(Number.MAX_SAFE_INTEGER + 1), null);
-  assert.equal(parseRosskoQuantity(undefined), null);
 });
 
 test("MotorDetal exposes only valid positive offer quantity", () => {
@@ -228,13 +224,85 @@ test("Armtek account state is accepted only for the login that discovered it", (
   assert.equal(parseArmtekApiAccountState({ ...state, kunnrRg: "" }, login), null);
 });
 
-test("Rossko keeps every exact article product returned by web search", () => {
-  assert.deepEqual(rosskoExactProductIds({
-    results: [
-      { searchResults: [{ id: "bardahl", article: "1072", part: { price: 1613 } }, { id: "other", article: "01072", part: { price: 100 } }] },
-      { searchResults: [{ id: "smilga", article: "1072", part: { price: 35.175 } }, { id: "without-price", article: "1072" }, { id: "bardahl", article: "1072", part: { price: 1613 } }] },
-    ],
-  }, "1072"), ["bardahl", "smilga"]);
+test("Rossko SOAP envelope escapes API keys and search text", () => {
+  const envelope = buildRosskoSoapEnvelope("GetSearch", {
+    KEY1: "key<&",
+    KEY2: 'second"key',
+    text: "A&B",
+    delivery_id: "000000002",
+  });
+
+  assert.match(envelope, /<ros:KEY1>key&lt;&amp;<\/ros:KEY1>/);
+  assert.match(envelope, /<ros:KEY2>second&quot;key<\/ros:KEY2>/);
+  assert.match(envelope, /<ros:text>A&amp;B<\/ros:text>/);
+});
+
+test("Rossko selects the first address-compatible delivery from checkout details", () => {
+  const xml = `<?xml version="1.0"?>
+    <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+      <soap:Body><GetCheckoutDetailsResponse><CheckoutDetailsResult>
+        <success>true</success>
+        <DeliveryType>
+          <delivery><id>000000001</id><name>Самовывоз со склада</name></delivery>
+          <delivery><id>000000002</id><name>Курьерская доставка</name></delivery>
+        </DeliveryType>
+        <DeliveryAddress><address>
+          <id>112233</id><city>Самара</city>
+          <Delivery><ids><id>000000002</id></ids></Delivery>
+        </address></DeliveryAddress>
+      </CheckoutDetailsResult></GetCheckoutDetailsResponse></soap:Body>
+    </soap:Envelope>`;
+
+  assert.deepEqual(parseRosskoCheckoutDetails(xml), {
+    deliveryId: "000000002",
+    addressId: "112233",
+  });
+});
+
+test("Rossko falls back to documented pickup when an account has no delivery address", () => {
+  const xml = `<Envelope><Body><CheckoutDetailsResult>
+    <success>true</success>
+    <DeliveryType><delivery><id>000000001</id><name>Самовывоз со склада</name></delivery></DeliveryType>
+    <DeliveryAddress />
+  </CheckoutDetailsResult></Body></Envelope>`;
+
+  assert.deepEqual(parseRosskoCheckoutDetails(xml), { deliveryId: "000000001" });
+});
+
+test("Rossko parses top-level products and nested crosses without mixing them", () => {
+  const xml = `<Envelope><Body><SearchResult>
+    <Success>true</Success><Text>OC47</Text><PartsList><Part>
+      <guid>main-guid</guid><brand>KNECHT</brand><partnumber>OC 47@7804</partnumber><name>Фильтр &amp; корпус</name>
+      <stocks><stock><id>HST1</id><price>194.04</price><count>20</count><delivery>1</delivery><description>Основной склад</description></stock></stocks>
+      <crosses><Part>
+        <guid>cross-guid</guid><brand>MANN</brand><partnumber>W 68/3</partnumber><name>Аналог</name>
+        <stocks><stock><id>HST2</id><price>200</price><count>3</count><deliveryStart>2026-09-08T10:00:00+03:00</deliveryStart><deliveryEnd>2026-09-08T15:00:00+03:00</deliveryEnd><description>Партнёрский склад</description></stock></stocks>
+      </Part></crosses>
+    </Part></PartsList>
+  </SearchResult></Body></Envelope>`;
+  const parts = parseRosskoSearchParts(xml);
+  const exact = normalizeRosskoApiSearchResults(parts, "OC47");
+  const analogs = normalizeRosskoApiAnalogResults(parts, "OC47", "KNECHT");
+
+  assert.equal(parts.length, 1);
+  assert.equal(parts[0].crosses.length, 1);
+  assert.equal(exact.length, 1);
+  assert.equal(exact[0].brand, "KNECHT");
+  assert.equal(exact[0].article, "OC 47");
+  assert.equal(exact[0].quantity, 20);
+  assert.equal(exact[0].warehouse, "Основной склад");
+  assert.equal(analogs.length, 1);
+  assert.equal(analogs[0].brand, "MANN");
+  assert.equal(analogs[0].isAnalog, true);
+  assert.ok(analogs[0].deliveryDateTo);
+});
+
+test("Rossko rejects XML entity declarations", () => {
+  assert.throws(
+    () => parseRosskoXml('<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>'),
+    SupplierIntegrationError,
+  );
+  assert.throws(() => parseRosskoXml("<foo></foo><"), SupplierIntegrationError);
 });
 
 test("PartKOM normalizes exact official API offers", () => {

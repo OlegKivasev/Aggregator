@@ -5,12 +5,12 @@ import { ForumAutoApiAdapter } from "../src/backend/suppliers/forum-auto/forum-a
 import { MladovWebAdapter } from "../src/backend/suppliers/mladov/mladov-web-adapter.ts";
 import { MotorDetalApiAdapter } from "../src/backend/suppliers/motordetal/motordetal-api-adapter.ts";
 import { PartKomApiAdapter } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
-import { RosskoSiteApiAdapter } from "../src/backend/suppliers/rossko/rossko-site-api-adapter.ts";
+import { RosskoApiAdapter } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { StpartsApiAdapter } from "../src/backend/suppliers/stparts/stparts-api-adapter.ts";
 
 test("every supplier adapter provides dedicated session validation", () => {
   const adapters = [
-    new RosskoSiteApiAdapter(),
+    new RosskoApiAdapter(),
     new ArmtekApiAdapter(),
     new PartKomApiAdapter(),
     new StpartsApiAdapter(),

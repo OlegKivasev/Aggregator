@@ -59,8 +59,8 @@ const settingsDrawer = document.querySelector("#settings-drawer");
 const settingsClose = document.querySelector("#settings-close");
 const settingsBackdrop = document.querySelector("#settings-backdrop");
 const rosskoAuthForm = document.querySelector("#rossko-auth-form");
-const rosskoLoginInput = document.querySelector("#rossko-login");
-const rosskoPasswordInput = document.querySelector("#rossko-password");
+const rosskoKey1Input = document.querySelector("#rossko-key1");
+const rosskoKey2Input = document.querySelector("#rossko-key2");
 const rosskoConnectButton = document.querySelector("#rossko-connect-button");
 const rosskoLogoutButton = document.querySelector("#rossko-logout-button");
 const rosskoSessionPill = document.querySelector("#rossko-session-pill");
@@ -2147,8 +2147,8 @@ rosskoAuthForm.addEventListener("submit", async (event) => {
 
   try {
     const payload = await postJson("/api/suppliers/rossko/authorize", {
-      login: rosskoLoginInput.value.trim(),
-      password: rosskoPasswordInput.value,
+      key1: rosskoKey1Input.value.trim(),
+      key2: rosskoKey2Input.value.trim(),
     });
     handleAuthorizeResult(payload.session, "rossko", rosskoAuthFeedback, "Rossko отклонил авторизацию", updateRosskoSessionCard);
   } catch (error) {
@@ -2162,7 +2162,7 @@ rosskoLogoutButton.addEventListener("click", async () => {
   try {
     const payload = await postJson("/api/suppliers/rossko/logout");
     updateRosskoSessionCard(payload.session);
-    clearAuthInputs(rosskoLoginInput, rosskoPasswordInput);
+    clearAuthInputs(rosskoKey1Input, rosskoKey2Input);
   } catch (error) {
     showAuthFeedback(rosskoAuthFeedback, error.message);
   }
