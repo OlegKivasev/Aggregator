@@ -250,7 +250,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /brand: result\.brand/);
   assert.match(app, /formatBrand\(result\.brand\)/);
   assert.match(app, /formatArticle\(result\.article\)/);
-  assert.match(app, /const analogSupplierIds = \["armtek", "part-kom", "stparts", "forum-auto"\]/);
+  assert.match(app, /const analogSupplierIds = \["rossko", "armtek", "part-kom", "stparts", "forum-auto"\]/);
   assert.match(app, /analogSupplierIds\.filter\(isSupplierVisible\)/);
   assert.match(app, /Выдали аналоги:/);
   assert.match(app, /hideSuccessfulAnalogStatus/);
