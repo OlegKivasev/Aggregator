@@ -319,9 +319,10 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
 
-  assert.match(html, /id="filters-toggle"[^>]*aria-controls="filters-sidebar"[^>]*aria-label="Открыть фильтры"[^>]*>⋮/);
+  assert.match(html, /id="filters-toggle"[^>]*aria-controls="filters-sidebar"[^>]*aria-expanded="true"[^>]*aria-label="Скрыть фильтры"[^>]*>⋮/);
   assert.match(html, /class="filters-control"[\s\S]*?id="filters-toggle"[\s\S]*?id="filters-sidebar"/);
-  assert.match(html, /id="filters-sidebar" hidden/);
+  assert.match(html, /id="filters-sidebar"/);
+  assert.doesNotMatch(html, /id="filters-sidebar" hidden/);
   assert.doesNotMatch(html, /<h2>Фильтры<\/h2>/);
   assert.doesNotMatch(html, /id="filters-close"/);
   assert.match(html, /id="filters-suppliers"/);
@@ -330,6 +331,7 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(html, /id="filters-resize" role="separator"/);
   assert.doesNotMatch(html, /Уточнить результаты/);
   assert.match(app, /filtersResize\.addEventListener\("pointerdown"/);
+  assert.match(app, /filtersToggle\.setAttribute\("aria-label", open \? "Скрыть фильтры" : "Открыть фильтры"\)/);
   assert.doesNotMatch(app, /filtersClose/);
   assert.match(app, /button\.setAttribute\("aria-pressed", String\(selected\)\)/);
   assert.match(app, /const candidateResults = getFilteredResults\(visibleExactResults, tableSearchTerm, markupPercent, column\);/);
@@ -339,6 +341,7 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(app, /Math\.max\(180, Math\.round\(width \/ 10\) \* 10\)/);
   assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-items: center;/s);
+  assert.match(styles, /\.filters-control\s*\{[^}]*align-self: start;/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\) \.filters-toggle\s*\{[^}]*order: 2;/s);
   assert.match(styles, /\.filters-sidebar\s*\{[^}]*--filters-sidebar-width: 200px;[^}]*min-width: 180px;/s);
   assert.match(styles, /@media \(max-width: 575\.98px\)\s*\{\s*\.workspace/);

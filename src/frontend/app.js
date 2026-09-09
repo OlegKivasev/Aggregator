@@ -430,6 +430,8 @@ const updateSupplierSearchToggle = (supplier, authorized) => {
 const setFiltersSidebarOpen = (open) => {
   filtersSidebar.hidden = !open;
   filtersToggle.setAttribute("aria-expanded", String(open));
+  filtersToggle.setAttribute("aria-label", open ? "Скрыть фильтры" : "Открыть фильтры");
+  filtersToggle.title = open ? "Скрыть фильтры" : "Открыть фильтры";
 };
 
 const setFiltersSidebarWidth = (value) => {

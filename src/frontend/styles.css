@@ -256,7 +256,7 @@ input {
 .filters-control {
   display: flex;
   grid-column: 1;
-  align-self: center;
+  align-self: start;
 }
 
 .filters-control:has(.filters-sidebar:not([hidden])) {
