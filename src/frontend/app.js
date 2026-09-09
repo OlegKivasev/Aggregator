@@ -48,8 +48,10 @@ const supplierVisibilityInputs = [...document.querySelectorAll(".supplier-visibi
 const supplierSettingsCards = Object.fromEntries(
   [...document.querySelectorAll(".auth-card[data-supplier]")].map((card) => [card.dataset.supplier, card]),
 );
-const suppliersDropdown = document.querySelector(".suppliers-dropdown");
-const filtersDropdown = document.querySelector("#filters-dropdown");
+const filtersToggle = document.querySelector("#filters-toggle");
+const filtersSidebar = document.querySelector("#filters-sidebar");
+const filtersClose = document.querySelector("#filters-close");
+const filtersWidth = document.querySelector("#filters-width");
 const filterColumns = document.querySelector("#filter-columns");
 const filterColumnButtons = [...document.querySelectorAll("[data-filter-column]")];
 const filterSubmenu = document.querySelector("#filter-submenu");
@@ -197,6 +199,7 @@ const armtekNonReturnableStorageKey = "autoservice.armtekNonReturnable";
 const partKomNonReturnableStorageKey = "autoservice.partKomNonReturnable";
 const forumAutoNonReturnableStorageKey = "autoservice.forumAutoNonReturnable";
 const supplierVisibilityStorageKey = "autoservice.supplierVisibility";
+const filtersWidthStorageKey = "autoservice.filtersWidth";
 const lastSearchStorageKey = "autoservice.lastSearchStartedAt";
 const supplierCheckIntervalMs = 2 * 60 * 60 * 1000;
 
@@ -232,7 +235,7 @@ let showPartKomNonReturnable = false;
 let showForumAutoNonReturnable = false;
 const filterColumnNames = Object.fromEntries(filterColumnButtons.map((button) => [
   button.dataset.filterColumn,
-  button.firstChild.textContent.trim(),
+  button.dataset.filterLabel,
 ]));
 const rangeFilterColumns = new Set(["quantity", "markupPrice", "deliveryDate"]);
 
@@ -356,7 +359,7 @@ const renderFilterValues = () => {
     const isDate = activeFilterColumn === "deliveryDate";
     const createRangeInput = (bound, labelText) => {
       const label = document.createElement("label");
-      label.className = "filters-dropdown__range";
+      label.className = "filters-sidebar__range";
       const text = document.createElement("span");
       text.textContent = labelText;
       const input = document.createElement("input");
@@ -380,7 +383,7 @@ const renderFilterValues = () => {
   const values = [...new Set(results.map((result) => getFilterValue(result, activeFilterColumn)))].sort(resultCollator.compare);
   filterValues.replaceChildren(...values.map((value) => {
     const label = document.createElement("label");
-    label.className = "filters-dropdown__value";
+    label.className = "filters-sidebar__value";
     const input = document.createElement("input");
     input.type = "checkbox";
     input.checked = getSelectedFilterValues(activeFilterColumn).has(value);
@@ -418,7 +421,34 @@ const updateSupplierSearchToggle = (supplier, authorized) => {
     }
   }
 
-  suppliersDropdown.hidden = !supplierEnabledInputs.some((candidate) => !supplierSearchToggles[candidate.value]?.hidden);
+};
+
+const setFiltersSidebarOpen = (open) => {
+  filtersSidebar.hidden = !open;
+  filtersToggle.setAttribute("aria-expanded", String(open));
+};
+
+const setFiltersSidebarWidth = (value) => {
+  const width = Number(value);
+  if (!Number.isFinite(width)) {
+    return;
+  }
+  const normalizedWidth = Math.min(420, Math.max(220, Math.round(width / 10) * 10));
+  filtersSidebar.style.setProperty("--filters-sidebar-width", `${normalizedWidth}px`);
+  filtersWidth.value = String(normalizedWidth);
+  try {
+    localStorage.setItem(filtersWidthStorageKey, String(normalizedWidth));
+  } catch {
+    // The panel remains resizable for this session when storage is unavailable.
+  }
+};
+
+const restoreFiltersSidebarWidth = () => {
+  try {
+    setFiltersSidebarWidth(localStorage.getItem(filtersWidthStorageKey) ?? filtersWidth.value);
+  } catch {
+    setFiltersSidebarWidth(filtersWidth.value);
+  }
 };
 
 const setSupplierEnabled = (supplier, enabled) => {
@@ -1410,6 +1440,9 @@ const clearAuthInputs = (...inputs) => {
 settingsToggle.addEventListener("click", openSettings);
 settingsClose.addEventListener("click", closeSettings);
 settingsBackdrop.addEventListener("click", closeSettings);
+filtersToggle.addEventListener("click", () => setFiltersSidebarOpen(filtersSidebar.hidden));
+filtersClose.addEventListener("click", () => setFiltersSidebarOpen(false));
+filtersWidth.addEventListener("input", () => setFiltersSidebarWidth(filtersWidth.value));
 passwordFields.forEach((passwordField) => {
   const input = passwordField.querySelector("input");
   const toggle = passwordField.querySelector(".password-toggle");
@@ -1427,12 +1460,6 @@ passwordFields.forEach((passwordField) => {
   });
 });
 document.addEventListener("click", (event) => {
-  if (suppliersDropdown.open && !suppliersDropdown.contains(event.target)) {
-    suppliersDropdown.open = false;
-  }
-  if (filtersDropdown.open && !filtersDropdown.contains(event.target)) {
-    filtersDropdown.open = false;
-  }
   if (!resultContextMenu.hidden && !resultContextMenu.contains(event.target)) {
     hideResultContextMenu();
   }
@@ -1530,20 +1557,6 @@ const selectFilterColumn = (column) => {
   activeFilterColumn = column;
   renderFilterValues();
 };
-
-filterColumns.addEventListener("mouseover", (event) => {
-  const button = event.target.closest("[data-filter-column]");
-  if (button) {
-    selectFilterColumn(button.dataset.filterColumn);
-  }
-});
-
-filterColumns.addEventListener("focusin", (event) => {
-  const button = event.target.closest("[data-filter-column]");
-  if (button) {
-    selectFilterColumn(button.dataset.filterColumn);
-  }
-});
 
 filterColumns.addEventListener("click", (event) => {
   const button = event.target.closest("[data-filter-column]");
@@ -2715,6 +2728,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 restoreSearchState();
+restoreFiltersSidebarWidth();
 restoreTableColumns();
 restoreStpartsWarehouses();
 restoreArmtekNonReturnable();

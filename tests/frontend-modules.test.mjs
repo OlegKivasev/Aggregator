@@ -314,6 +314,22 @@ test("frontend preserves selected search suppliers when sessions load after rest
   assert.doesNotMatch(app, /updateArmtekSessionCard\(armtekSession, true\)/);
 });
 
+test("main-search filters use a collapsible side panel with an empty supplier selection", async () => {
+  const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
+
+  assert.match(html, /id="filters-toggle"[^>]*aria-controls="filters-sidebar"/);
+  assert.match(html, /id="filters-sidebar" hidden/);
+  assert.match(html, /id="filters-width" type="range" min="220" max="420"/);
+  assert.match(html, /data-filter-column="supplier"[\s\S]*?data-filter-column="brand"[\s\S]*?data-filter-column="article"[\s\S]*?data-filter-column="warehouse"[\s\S]*?data-filter-column="markupPrice"[\s\S]*?data-filter-column="deliveryDate"/);
+  assert.doesNotMatch(html, /class="supplier-enabled-input form-check-input" type="checkbox" value="rossko" checked/);
+  assert.match(app, /const setFiltersSidebarOpen = \(open\) =>/);
+  assert.match(app, /const filtersWidthStorageKey = "autoservice\.filtersWidth"/);
+  assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
+  assert.match(styles, /\.filters-sidebar\s*\{[^}]*position: sticky;/s);
+});
+
 test("Rossko authorization form accepts only API keys", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
