@@ -148,9 +148,8 @@ const articleAnalogsModal = document.querySelector("#article-analogs-modal");
 const articleAnalogsModalDescription = document.querySelector("#article-analogs-modal-description");
 const articleAnalogsModalStatus = document.querySelector("#article-analogs-modal-status");
 const articleAnalogsModalBrand = document.querySelector("#article-analogs-modal-brand");
-const articleAnalogsModalBrandSelect = document.querySelector("#article-analogs-modal-brand-select");
+const articleAnalogsModalBrands = document.querySelector("#article-analogs-modal-brands");
 const articleAnalogsModalEmpty = document.querySelector("#article-analogs-modal-empty");
-const articleAnalogsModalSearch = document.querySelector("#article-analogs-modal-search");
 const articleAnalogsModalContinue = document.querySelector("#article-analogs-modal-continue");
 const closeArticleAnalogsModalButtons = [...document.querySelectorAll("[data-close-article-analogs-modal]")];
 
@@ -166,11 +165,12 @@ let contextMenuResult = null;
 let contextMenuAnchor = null;
 let contextMenuTabId = null;
 let contextMenuTabAnchor = null;
-let analogSearchSource = null;
+let analogSearchSources = new Set();
 let analogModalReturnFocus = null;
 let analogReturnResult = null;
 let analogSourceResult = null;
 let analogSearchResults = [];
+let analogSearchResultKeys = new Set();
 let analogSearchTerm = "";
 let analogSortState = { key: "price", direction: "ascending" };
 let analogSearchSuppliers = [];
@@ -1699,9 +1699,10 @@ supplierVisibilityInputs.forEach((input) => {
     renderResults();
     if (!analogsModal.hidden) {
       renderAnalogRowsNow();
-      if (!analogSearchSuppliers.length && analogSearchSource) {
-        analogSearchSource.close();
-        analogSearchSource = null;
+      if (!analogSearchSuppliers.length && analogSearchSources.size) {
+        analogSearchSources.forEach((source) => source.close());
+        analogSearchSources = new Set();
+        analogSearchCompleted = true;
         setAnalogSearchStatus("Поиск аналогов остановлен", "Включите хотя бы одного поставщика, поддерживающего поиск аналогов, в настройках.", "empty");
       } else {
         updateAnalogSearchProgress();
@@ -1833,10 +1834,9 @@ const formatAnalogResultSuppliers = () => analogSearchSuppliers
   .join(", ");
 
 const updateAnalogSearchProgress = () => {
-  const pendingSuppliers = analogSearchSuppliers.filter((supplier) => !searchTerminalStatuses.has(analogSupplierStatuses[supplier]));
   const receivedFrom = formatAnalogResultSuppliers();
-  const awaiting = pendingSuppliers.length
-    ? `Получаем аналоги: ${pendingSuppliers.map((supplier) => supplierNames[supplier] ?? supplier).join(", ")}.`
+  const awaiting = analogSearchSources.size
+    ? `Получаем аналоги: выполняется ${analogSearchSources.size} ${analogSearchSources.size === 1 ? "запрос" : "запроса"}.`
     : "Все поставщики ответили. Завершаем обработку результатов.";
   const received = receivedFrom
     ? `Выдали аналоги: ${receivedFrom}.`
@@ -1863,8 +1863,8 @@ const renderAnalogRowsNow = () => {
 };
 
 const closeAnalogsModal = () => {
-  analogSearchSource?.close();
-  analogSearchSource = null;
+  analogSearchSources.forEach((source) => source.close());
+  analogSearchSources = new Set();
   clearAnalogStatusHideTimer();
   if (analogRenderFrame !== null) {
     cancelAnimationFrame(analogRenderFrame);
@@ -1923,9 +1923,7 @@ const renderAnalogRows = () => {
     ? document.activeElement.closest("[data-analog-result-index]")?.dataset.analogResultIndex
     : null;
   const normalizedTerm = analogSearchTerm.trim().toLocaleLowerCase();
-  const visibleResults = filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
-    analogSearchResults.filter((result) => isSupplierVisible(result.supplier)),
-  ))));
+  const visibleResults = analogSearchResults;
   const filteredResults = visibleResults.filter((result) => !normalizedTerm || [
     supplierNames[result.supplier] ?? result.supplier,
     formatBrand(result.brand),
@@ -1949,7 +1947,7 @@ const renderAnalogRows = () => {
   if (!rows.length) {
     const message = normalizedTerm && analogSearchResults.length
       ? "По вашему запросу ничего не найдено"
-      : analogSearchSource
+      : analogSearchSources.size
         ? "Предложения появятся здесь по мере получения"
       : "Аналоги для выбранной позиции не найдены";
     analogsResultsBody.innerHTML = `<tr class="analogs-results__empty"><td colspan="9">${message}</td></tr>`;
@@ -1983,12 +1981,51 @@ const renderAnalogRows = () => {
   }
 };
 
-const startAnalogSearchForQuery = ({ article, brand, sourceResult, returnFocus = document.activeElement }) => {
-  analogSearchSource?.close();
+const finishAnalogSearch = (failureMessages) => {
+  if (analogSearchSources.size) {
+    return;
+  }
+  analogSearchCompleted = true;
+  renderAnalogRowsNow();
+  const receivedFrom = formatAnalogResultSuppliers();
+  const received = receivedFrom ? `Выдали аналоги: ${receivedFrom}.` : "Поставщики не выдали аналогов.";
+  if (failureMessages.size) {
+    setAnalogSearchStatus("Поиск завершен не полностью", [received, ...failureMessages], "warning");
+  } else if (analogSearchResults.length) {
+    setAnalogSearchStatus("Поиск аналогов завершен", received, "completed");
+    hideSuccessfulAnalogStatus();
+  } else {
+    setAnalogSearchStatus("Аналоги не найдены", "Попробуйте выбрать другой бренд.", "empty");
+  }
+};
+
+const completeAnalogSearchSource = (source, failureMessages) => {
+  source.close();
+  analogSearchSources.delete(source);
+  finishAnalogSearch(failureMessages);
+};
+
+const getAnalogResultKey = (result) => JSON.stringify([
+  result.supplier,
+  result.brand,
+  result.article,
+  result.title,
+  result.price,
+  result.quantity,
+  result.warehouse,
+  result.deliveryDate,
+  result.deliveryDateTo,
+]);
+
+const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus = document.activeElement }) => {
+  analogSearchSources.forEach((source) => source.close());
+  analogSearchSources = new Set();
+  const selectedBrands = [...new Set(brands.map((brand) => brand.trim()).filter(Boolean))];
   analogModalReturnFocus = returnFocus;
   analogReturnResult = sourceResult;
   analogSourceResult = sourceResult;
   analogSearchResults = [];
+  analogSearchResultKeys = new Set();
   analogSearchTerm = "";
   analogSortState = { key: "price", direction: "ascending" };
   analogSearchSuppliers = analogSupplierIds.filter(isSupplierVisible);
@@ -2002,11 +2039,11 @@ const startAnalogSearchForQuery = ({ article, brand, sourceResult, returnFocus =
   if (sourceResult) {
     renderAnalogSource(sourceResult);
   } else {
-    renderArticleAnalogSource(article, brand);
+    renderArticleAnalogSource(article, selectedBrands.join(", "));
   }
   analogsModal.hidden = false;
   analogsModal.focus();
-  if (!analogSearchSuppliers.length) {
+  if (!analogSearchSuppliers.length || !selectedBrands.length) {
     renderAnalogRowsNow();
     setAnalogSearchStatus("Поиск аналогов недоступен", "Включите хотя бы одного поставщика, поддерживающего поиск аналогов, в настройках.", "empty");
     return;
@@ -2014,101 +2051,78 @@ const startAnalogSearchForQuery = ({ article, brand, sourceResult, returnFocus =
 
   setAnalogSearchStatus(
     "Подготавливаем поиск аналогов",
-    `Запрашиваем: ${analogSearchSuppliers.map((supplier) => supplierNames[supplier] ?? supplier).join(", ")}.`,
+    `Запрашиваем бренды: ${selectedBrands.join(", ")}.`,
   );
 
   const failureMessages = new Set();
-  const searchParams = new URLSearchParams({
-    stream: "once",
-    mode: "analogs",
-    article,
-    brand,
+  selectedBrands.forEach((brand) => {
+    const searchParams = new URLSearchParams({ stream: "once", mode: "analogs", article, brand });
+    analogSearchSuppliers.forEach((supplier) => searchParams.append("supplier", supplier));
+    const source = openSearchStream(`/api/search?${searchParams.toString()}`);
+    analogSearchSources.add(source);
+    source.onmessage = (messageEvent) => {
+      if (!analogSearchSources.has(source)) {
+        return;
+      }
+      const payload = JSON.parse(messageEvent.data);
+      if (payload.type === "result") {
+        const resultKey = getAnalogResultKey(payload.result);
+        if (analogSearchResultKeys.has(resultKey)) {
+          return;
+        }
+        analogSearchResultKeys.add(resultKey);
+        analogSearchResults.push(payload.result);
+        analogResultCounts[payload.result.supplier] = (analogResultCounts[payload.result.supplier] ?? 0) + 1;
+        scheduleAnalogRowsRender();
+        updateAnalogSearchProgress();
+        return;
+      }
+      if (payload.type === "supplier_status") {
+        analogSupplierStatuses[payload.supplier] = payload.status;
+        if (["timeout", "auth_error", "error"].includes(payload.status)) {
+          const supplierName = supplierNames[payload.supplier] ?? payload.supplier;
+          const failureMessage = payload.status === "auth_error"
+            ? `Подключите ${supplierName} в настройках и повторите поиск.`
+            : payload.status === "timeout"
+              ? `${supplierName} не ответил вовремя. Повторите поиск позже.`
+              : `${supplierName} не удалось выполнить поиск аналогов.`;
+          failureMessages.add(failureMessage);
+        }
+        updateAnalogSearchProgress();
+        return;
+      }
+      if (payload.type === "search_completed") {
+        completeAnalogSearchSource(source, failureMessages);
+        return;
+      }
+      if (payload.type === "fatal_error") {
+        failureMessages.add(payload.message);
+        completeAnalogSearchSource(source, failureMessages);
+      }
+    };
+    source.onerror = () => {
+      if (!analogSearchSources.has(source)) {
+        return;
+      }
+      failureMessages.add("Не удалось получить полный результат поиска аналогов.");
+      completeAnalogSearchSource(source, failureMessages);
+    };
   });
-  analogSearchSuppliers.forEach((supplier) => searchParams.append("supplier", supplier));
-  const source = openSearchStream(`/api/search?${searchParams.toString()}`);
-  analogSearchSource = source;
   renderAnalogRows();
-
-  source.onmessage = (messageEvent) => {
-    if (analogSearchSource !== source) {
-      return;
-    }
-    const payload = JSON.parse(messageEvent.data);
-    if (payload.type === "result") {
-      if (!isSupplierVisible(payload.result.supplier)) {
-        return;
-      }
-      analogSearchResults.push(payload.result);
-      analogResultCounts[payload.result.supplier] = (analogResultCounts[payload.result.supplier] ?? 0) + 1;
-      scheduleAnalogRowsRender();
-      updateAnalogSearchProgress();
-      return;
-    }
-    if (payload.type === "supplier_status") {
-      if (!isSupplierVisible(payload.supplier)) {
-        return;
-      }
-      analogSupplierStatuses[payload.supplier] = payload.status;
-      if (["timeout", "auth_error", "error"].includes(payload.status)) {
-        const supplierName = supplierNames[payload.supplier] ?? payload.supplier;
-        const failureMessage = payload.status === "auth_error"
-          ? `Подключите ${supplierName} в настройках и повторите поиск.`
-          : payload.status === "timeout"
-            ? `${supplierName} не ответил вовремя. Повторите поиск позже.`
-            : `${supplierName} не удалось выполнить поиск аналогов.`;
-        failureMessages.add(failureMessage);
-      }
-      updateAnalogSearchProgress();
-      return;
-    }
-    if (payload.type === "search_completed") {
-      source.close();
-      analogSearchSource = null;
-      analogSearchCompleted = true;
-      renderAnalogRowsNow();
-      const receivedFrom = formatAnalogResultSuppliers();
-      const received = receivedFrom ? `Выдали аналоги: ${receivedFrom}.` : "Поставщики не выдали аналогов.";
-      if (failureMessages.size) {
-        setAnalogSearchStatus("Поиск завершен не полностью", [received, ...failureMessages], "warning");
-      } else if (analogSearchResults.length) {
-        setAnalogSearchStatus("Поиск аналогов завершен", received, "completed");
-        hideSuccessfulAnalogStatus();
-      } else {
-        setAnalogSearchStatus("Аналоги не найдены", "Попробуйте выбрать предложение другого бренда или артикула.", "empty");
-      }
-      return;
-    }
-    if (payload.type === "fatal_error") {
-      source.close();
-      analogSearchSource = null;
-      analogSearchCompleted = true;
-      renderAnalogRowsNow();
-      setAnalogSearchStatus("Не удалось выполнить поиск", payload.message, "error");
-    }
-  };
-  source.onerror = () => {
-    if (analogSearchSource !== source) {
-      return;
-    }
-    source.close();
-    analogSearchSource = null;
-    analogSearchCompleted = true;
-    renderAnalogRowsNow();
-    setAnalogSearchStatus("Соединение прервано", "Не удалось получить полный результат поиска аналогов.", "error");
-  };
+  updateAnalogSearchProgress();
 };
 
 const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   startAnalogSearchForQuery({
     article: result.article,
-    brand: result.brand,
+    brands: [result.brand],
     sourceResult: result,
     returnFocus,
   });
 };
 
-const startArticleAnalogSearch = (article, brand, returnFocus = document.activeElement) => {
-  startAnalogSearchForQuery({ article, brand, sourceResult: null, returnFocus });
+const startArticleAnalogSearch = (article, brands, returnFocus = document.activeElement) => {
+  startAnalogSearchForQuery({ article, brands, sourceResult: null, returnFocus });
 };
 
 const closeArticleAnalogsModal = (restoreFocus = true) => {
@@ -2128,24 +2142,24 @@ const setArticleAnalogsModalStatus = (message, visible = true) => {
 
 const renderArticleBrandCandidates = () => {
   const brands = [...articleBrandCandidates].sort((left, right) => resultCollator.compare(left, right));
-  articleAnalogsModalBrandSelect.replaceChildren();
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "Выберите бренд";
-  articleAnalogsModalBrandSelect.append(placeholder);
+  articleAnalogsModalBrands.replaceChildren();
   brands.forEach((brand) => {
-    const option = document.createElement("option");
-    option.value = brand;
-    option.textContent = brand;
-    articleAnalogsModalBrandSelect.append(option);
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    const text = document.createElement("span");
+    input.type = "checkbox";
+    input.value = brand;
+    input.className = "article-analogs-modal__brand-input";
+    text.textContent = brand;
+    label.append(input, text);
+    articleAnalogsModalBrands.append(label);
   });
   articleAnalogsModalBrand.hidden = brands.length === 0;
-  articleAnalogsModalBrandSelect.disabled = brands.length === 0;
   articleAnalogsModalEmpty.hidden = brands.length !== 0;
   articleAnalogsModalContinue.hidden = brands.length === 0;
   articleAnalogsModalContinue.disabled = true;
   setArticleAnalogsModalStatus(
-    brands.length ? "Выберите бренд для продолжения поиска по аналогам." : "",
+    brands.length ? "Выберите один или несколько брендов для продолжения поиска по аналогам." : "",
     brands.length > 0,
   );
 };
@@ -2156,32 +2170,27 @@ const openArticleAnalogsModal = (tab, returnFocus = document.activeElement) => {
   articleBrandModalReturnFocus = returnFocus;
   articleBrandArticle = tab.article;
   articleBrandCandidates = new Set();
-  articleAnalogsModalDescription.textContent = `По артикулу ${formatArticle(articleBrandArticle)} точных предложений не найдено. Выполнить поиск брендов для поиска аналогов?`;
+  articleAnalogsModalDescription.textContent = `По артикулу ${formatArticle(articleBrandArticle)} точных предложений не найдено.`;
   articleAnalogsModalBrand.hidden = true;
-  articleAnalogsModalBrandSelect.replaceChildren();
-  articleAnalogsModalBrandSelect.disabled = true;
+  articleAnalogsModalBrands.replaceChildren();
   articleAnalogsModalEmpty.hidden = true;
-  articleAnalogsModalSearch.hidden = false;
-  articleAnalogsModalSearch.disabled = false;
   articleAnalogsModalContinue.hidden = true;
   articleAnalogsModalContinue.disabled = true;
-  setArticleAnalogsModalStatus("", false);
+  setArticleAnalogsModalStatus("Ищем бренды по артикулу…");
   articleAnalogsModal.hidden = false;
-  articleAnalogsModalSearch.focus();
+  articleAnalogsModal.focus();
+  startArticleBrandSearch();
 };
 
 const startArticleBrandSearch = () => {
   const tab = getActiveTab();
   const suppliers = analogSupplierIds.filter((supplier) => tab?.enabledSuppliers.includes(supplier) && isSupplierVisible(supplier));
   if (!tab || !articleBrandArticle || !suppliers.length) {
-    articleAnalogsModalSearch.hidden = true;
     setArticleAnalogsModalStatus("Включите хотя бы одного API-поставщика, поддерживающего поиск аналогов, и повторите поиск.");
     return;
   }
 
   articleBrandCandidates = new Set();
-  articleAnalogsModalSearch.disabled = true;
-  articleAnalogsModalSearch.hidden = true;
   articleAnalogsModalBrand.hidden = true;
   articleAnalogsModalEmpty.hidden = true;
   articleAnalogsModalContinue.hidden = true;
@@ -2214,8 +2223,6 @@ const startArticleBrandSearch = () => {
       source.close();
       articleBrandSearchSource = null;
       setArticleAnalogsModalStatus("Не удалось выполнить поиск брендов. Повторите попытку позже.");
-      articleAnalogsModalSearch.hidden = false;
-      articleAnalogsModalSearch.disabled = false;
     }
   };
   source.onerror = () => {
@@ -2225,8 +2232,6 @@ const startArticleBrandSearch = () => {
     source.close();
     articleBrandSearchSource = null;
     setArticleAnalogsModalStatus("Соединение с поиском брендов прервано. Повторите попытку позже.");
-    articleAnalogsModalSearch.hidden = false;
-    articleAnalogsModalSearch.disabled = false;
   };
 };
 
@@ -2310,19 +2315,20 @@ analogsShowMore.addEventListener("click", () => {
 
 closeAnalogsModalButtons.forEach((button) => button.addEventListener("click", closeAnalogsModal));
 closeArticleAnalogsModalButtons.forEach((button) => button.addEventListener("click", () => closeArticleAnalogsModal()));
-articleAnalogsModalSearch.addEventListener("click", startArticleBrandSearch);
-articleAnalogsModalBrandSelect.addEventListener("change", () => {
-  articleAnalogsModalContinue.disabled = !articleAnalogsModalBrandSelect.value;
+articleAnalogsModalBrands.addEventListener("change", () => {
+  articleAnalogsModalContinue.disabled = !articleAnalogsModalBrands.querySelector("input:checked");
 });
 articleAnalogsModalContinue.addEventListener("click", () => {
-  const brand = articleAnalogsModalBrandSelect.value.trim();
-  if (!brand || !articleBrandArticle) {
+  const brands = [...articleAnalogsModalBrands.querySelectorAll("input:checked")]
+    .map((input) => input.value.trim())
+    .filter(Boolean);
+  if (!brands.length || !articleBrandArticle) {
     return;
   }
   const returnFocus = articleBrandModalReturnFocus;
   const article = articleBrandArticle;
   closeArticleAnalogsModal(false);
-  startArticleAnalogSearch(article, brand, returnFocus);
+  startArticleAnalogSearch(article, brands, returnFocus);
 });
 window.addEventListener("resize", () => {
   hideResultContextMenu(true);

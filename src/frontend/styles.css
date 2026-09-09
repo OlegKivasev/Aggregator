@@ -1250,17 +1250,48 @@ table tbody tr:hover td {
   display: grid;
   gap: 7px;
   margin-top: 18px;
+  padding: 0;
+  border: 0;
   color: var(--text);
   font-weight: 700;
 }
 
-.article-analogs-modal__brand select {
-  min-height: 38px;
-  padding: 0 10px;
+.article-analogs-modal__brands {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.article-analogs-modal__brands label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
   background: #fff;
+  cursor: pointer;
+}
+
+.article-analogs-modal__brands input {
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.article-analogs-modal__brands span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 460px) {
+  .article-analogs-modal__brands {
+    grid-template-columns: 1fr;
+  }
 }
 
 .article-analogs-modal__footer {

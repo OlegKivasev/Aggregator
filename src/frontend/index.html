@@ -556,14 +556,13 @@
         </header>
         <p class="article-analogs-modal__description" id="article-analogs-modal-description"></p>
         <div class="article-analogs-modal__status" id="article-analogs-modal-status" role="status" aria-live="polite" hidden></div>
-        <label class="article-analogs-modal__brand" id="article-analogs-modal-brand" hidden>
-          <span>Выберите бренд для продолжения поиска по аналогам</span>
-          <select id="article-analogs-modal-brand-select" disabled></select>
-        </label>
+        <fieldset class="article-analogs-modal__brand" id="article-analogs-modal-brand" hidden>
+          <legend>Выберите один или несколько брендов для поиска аналогов</legend>
+          <div class="article-analogs-modal__brands" id="article-analogs-modal-brands"></div>
+        </fieldset>
         <p class="article-analogs-modal__empty" id="article-analogs-modal-empty" hidden>По этому артикулу поставщики не вернули бренды.</p>
         <footer class="article-analogs-modal__footer">
           <button type="button" class="btn btn-light" data-close-article-analogs-modal>Отменить</button>
-          <button type="button" class="btn btn-primary" id="article-analogs-modal-search">Да</button>
           <button type="button" class="btn btn-primary" id="article-analogs-modal-continue" hidden disabled>Продолжить</button>
         </footer>
       </section>
