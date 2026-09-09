@@ -198,7 +198,7 @@ const armtekNonReturnableStorageKey = "autoservice.armtekNonReturnable";
 const partKomNonReturnableStorageKey = "autoservice.partKomNonReturnable";
 const forumAutoNonReturnableStorageKey = "autoservice.forumAutoNonReturnable";
 const supplierVisibilityStorageKey = "autoservice.supplierVisibility";
-const filtersWidthStorageKey = "autoservice.filtersWidth";
+const filtersWidthStorageKey = "autoservice.filtersWidth.v2";
 const lastSearchStorageKey = "autoservice.lastSearchStartedAt";
 const supplierCheckIntervalMs = 2 * 60 * 60 * 1000;
 
@@ -437,7 +437,7 @@ const setFiltersSidebarWidth = (value) => {
   if (!Number.isFinite(width)) {
     return;
   }
-  const normalizedWidth = Math.min(420, Math.max(220, Math.round(width / 10) * 10));
+  const normalizedWidth = Math.min(420, Math.max(180, Math.round(width / 10) * 10));
   filtersSidebar.style.setProperty("--filters-sidebar-width", `${normalizedWidth}px`);
   try {
     localStorage.setItem(filtersWidthStorageKey, String(normalizedWidth));
@@ -448,9 +448,9 @@ const setFiltersSidebarWidth = (value) => {
 
 const restoreFiltersSidebarWidth = () => {
   try {
-    setFiltersSidebarWidth(localStorage.getItem(filtersWidthStorageKey) ?? 280);
+    setFiltersSidebarWidth(localStorage.getItem(filtersWidthStorageKey) ?? 200);
   } catch {
-    setFiltersSidebarWidth(280);
+    setFiltersSidebarWidth(200);
   }
 };
 

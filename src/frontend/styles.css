@@ -331,12 +331,12 @@ input {
 }
 
 .filters-sidebar {
-  --filters-sidebar-width: 280px;
+  --filters-sidebar-width: 200px;
   position: sticky;
   grid-column: 2;
   top: 16px;
   width: var(--filters-sidebar-width);
-  min-width: 220px;
+  min-width: 180px;
   max-width: 420px;
   padding: 16px;
   border-radius: 14px;
@@ -2617,7 +2617,7 @@ th[aria-sort="descending"] .analogs-sort span::after {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 575.98px) {
   .workspace,
   .workspace:has(.filters-sidebar:not([hidden])) {
     grid-template-columns: 1fr;

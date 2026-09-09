@@ -334,9 +334,12 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(app, /const candidateResults = getFilteredResults\(visibleExactResults, tableSearchTerm, markupPercent, column\);/);
   assert.match(app, /section\.hidden = !visibleTableColumns\.has\(column\) \|\| values\.length === 0;/);
   assert.match(app, /section\.hidden = !visibleTableColumns\.has\(column\) \|\| !hasValues;/);
-  assert.match(app, /const filtersWidthStorageKey = "autoservice\.filtersWidth"/);
+  assert.match(app, /const filtersWidthStorageKey = "autoservice\.filtersWidth\.v2"/);
+  assert.match(app, /Math\.max\(180, Math\.round\(width \/ 10\) \* 10\)/);
   assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
   assert.match(styles, /\.workspace:has\(\.filters-sidebar:not\(\[hidden\]\)\) \.filters-toggle\s*\{[^}]*grid-column: 2;/s);
+  assert.match(styles, /\.filters-sidebar\s*\{[^}]*--filters-sidebar-width: 200px;[^}]*min-width: 180px;/s);
+  assert.match(styles, /@media \(max-width: 575\.98px\)\s*\{\s*\.workspace,/);
   assert.match(styles, /\.filters-suppliers\s*\{[^}]*margin-top: 0;/s);
   assert.match(styles, /\.filters-sidebar__resize\s*\{[^}]*cursor: col-resize;/s);
   assert.match(styles, /\.supplier-search-toggle \.supplier-enabled-input\s*\{[^}]*clip-path: inset\(50%\);/s);
