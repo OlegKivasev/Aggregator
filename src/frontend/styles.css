@@ -366,6 +366,27 @@ input {
   font-weight: 800;
 }
 
+.filters-sidebar__disclosure summary {
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  list-style: none;
+}
+
+.filters-sidebar__disclosure summary::after {
+  float: right;
+  color: var(--muted);
+  content: "›";
+  font-size: 18px;
+  line-height: 12px;
+  transform: rotate(90deg);
+}
+
+.filters-sidebar__disclosure[open] summary::after {
+  transform: rotate(-90deg);
+}
+
 .filters-sidebar__section {
   margin-top: 12px;
   padding-top: 12px;

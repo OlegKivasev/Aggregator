@@ -63,18 +63,18 @@
             <h3>Артикул</h3>
             <div class="filters-sidebar__values" data-filter-values="article" aria-live="polite"></div>
             </section>
-            <section class="filters-sidebar__section" data-filter-section="warehouse" hidden>
-            <h3>Склад</h3>
-            <div class="filters-sidebar__values" data-filter-values="warehouse" aria-live="polite"></div>
-            </section>
-            <section class="filters-sidebar__section" data-filter-section="markupPrice" hidden>
-            <h3>Цена</h3>
-            <div class="filters-sidebar__values" data-filter-values="markupPrice" aria-live="polite"></div>
-            </section>
-            <section class="filters-sidebar__section" data-filter-section="deliveryDate" hidden>
-            <h3>Дата доставки</h3>
-            <div class="filters-sidebar__values" data-filter-values="deliveryDate" aria-live="polite"></div>
-            </section>
+            <details class="filters-sidebar__section filters-sidebar__disclosure" data-filter-section="warehouse" hidden>
+              <summary>Склад</summary>
+              <div class="filters-sidebar__values" data-filter-values="warehouse" aria-live="polite"></div>
+            </details>
+            <details class="filters-sidebar__section filters-sidebar__disclosure" data-filter-section="markupPrice" hidden>
+              <summary>Цена</summary>
+              <div class="filters-sidebar__values" data-filter-values="markupPrice" aria-live="polite"></div>
+            </details>
+            <details class="filters-sidebar__section filters-sidebar__disclosure" data-filter-section="deliveryDate" hidden>
+              <summary>Дата доставки</summary>
+              <div class="filters-sidebar__values" data-filter-values="deliveryDate" aria-live="polite"></div>
+            </details>
             <button type="button" class="filters-sidebar__reset" id="filters-reset" hidden>Сбросить фильтры</button>
             <div class="filters-sidebar__resize" id="filters-resize" role="separator" aria-label="Изменить ширину фильтров" aria-orientation="vertical" tabindex="0"></div>
           </aside>

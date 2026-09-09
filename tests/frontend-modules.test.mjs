@@ -327,6 +327,9 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.doesNotMatch(html, /id="filters-close"/);
   assert.match(html, /id="filters-suppliers"/);
   assert.match(html, /class="supplier-enabled-input" type="checkbox" value="rossko" checked/);
+  assert.match(html, /<details class="filters-sidebar__section filters-sidebar__disclosure" data-filter-section="warehouse" hidden>/);
+  assert.match(html, /<details class="filters-sidebar__section filters-sidebar__disclosure" data-filter-section="markupPrice" hidden>/);
+  assert.match(html, /<details class="filters-sidebar__section filters-sidebar__disclosure" data-filter-section="deliveryDate" hidden>/);
   assert.match(html, /data-filter-section="supplier"[\s\S]*?data-filter-section="brand"[\s\S]*?data-filter-section="article"[\s\S]*?data-filter-section="warehouse"[\s\S]*?data-filter-section="markupPrice"[\s\S]*?data-filter-section="deliveryDate"/);
   assert.match(html, /id="filters-resize" role="separator"/);
   assert.doesNotMatch(html, /Уточнить результаты/);
@@ -346,6 +349,7 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(styles, /\.filters-sidebar\s*\{[^}]*--filters-sidebar-width: 200px;[^}]*min-width: 180px;/s);
   assert.match(styles, /@media \(max-width: 575\.98px\)\s*\{\s*\.workspace/);
   assert.match(styles, /\.filters-suppliers\s*\{[^}]*margin-top: 0;/s);
+  assert.match(styles, /\.filters-sidebar__disclosure summary\s*\{[^}]*cursor: pointer;/s);
   assert.match(styles, /\.filters-sidebar__resize\s*\{[^}]*cursor: col-resize;/s);
   assert.match(styles, /\.supplier-search-toggle \.supplier-enabled-input\s*\{[^}]*clip-path: inset\(50%\);/s);
 });
