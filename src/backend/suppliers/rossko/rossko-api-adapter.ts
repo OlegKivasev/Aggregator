@@ -294,10 +294,13 @@ export function parseRosskoSearchParts(xml: string): RosskoPart[] {
   if (!result) {
     throw new SupplierIntegrationError("Rossko API did not return a search result");
   }
+  const partsList = child(result, "PartsList");
   if (!parseSuccess(result)) {
+    if (!partsList && !elementText(result, "message")) {
+      return [];
+    }
     throw new SupplierIntegrationError("Rossko API reported an unsuccessful search");
   }
-  const partsList = child(result, "PartsList");
   if (!partsList) {
     return [];
   }

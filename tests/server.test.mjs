@@ -345,6 +345,22 @@ test("Rossko parses top-level products and nested crosses without mixing them", 
   assert.ok(analogs[0].deliveryDateTo);
 });
 
+test("Rossko treats a documented not-found search response as empty", () => {
+  const xml = `<Envelope><Body><SearchResult>
+    <Success>false</Success><Text>0532.T5</Text>
+  </SearchResult></Body></Envelope>`;
+
+  assert.deepEqual(parseRosskoSearchParts(xml), []);
+});
+
+test("Rossko preserves unsuccessful search responses with an error message", () => {
+  const xml = `<Envelope><Body><SearchResult>
+    <Success>false</Success><Message>Delivery is unavailable</Message>
+  </SearchResult></Body></Envelope>`;
+
+  assert.throws(() => parseRosskoSearchParts(xml), /unsuccessful search/);
+});
+
 test("Rossko rejects XML entity declarations", () => {
   assert.throws(
     () => parseRosskoXml('<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>'),
