@@ -50,7 +50,6 @@ const supplierSettingsCards = Object.fromEntries(
 );
 const filtersToggle = document.querySelector("#filters-toggle");
 const filtersSidebar = document.querySelector("#filters-sidebar");
-const filtersClose = document.querySelector("#filters-close");
 const filtersResize = document.querySelector("#filters-resize");
 const filterValueContainers = Object.fromEntries(
   [...document.querySelectorAll("[data-filter-values]")].map((container) => [container.dataset.filterValues, container]),
@@ -1444,7 +1443,6 @@ settingsToggle.addEventListener("click", openSettings);
 settingsClose.addEventListener("click", closeSettings);
 settingsBackdrop.addEventListener("click", closeSettings);
 filtersToggle.addEventListener("click", () => setFiltersSidebarOpen(filtersSidebar.hidden));
-filtersClose.addEventListener("click", () => setFiltersSidebarOpen(false));
 passwordFields.forEach((passwordField) => {
   const input = passwordField.querySelector("input");
   const toggle = passwordField.querySelector(".password-toggle");
