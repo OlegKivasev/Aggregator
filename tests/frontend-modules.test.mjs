@@ -357,12 +357,15 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(app, /formatQuantity\(result\.quantity\)/);
   assert.match(app, /main-result-row\$\{isBestPrice \? " is-best-price" : ""\}/);
   assert.match(app, /main-best-price/);
+  assert.match(app, /const tableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 150,\s+title: 325,\s+quantity: 120,\s+warehouse: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 120,/s);
   assert.match(app, /--results-table-min-width/);
   assert.match(app, /tableColumnWidths\[header\.dataset\.column\] \/ minimumWidth \* 100/);
   assert.match(app, /showWarehouseTooltip/);
   assert.match(styles, /\.results-data-table thead\s*\{[^}]*position: sticky;/s);
   assert.match(styles, /\.results-data-table\s*\{[^}]*width: max\(100%, var\(--results-table-min-width,/s);
-  assert.match(styles, /\.results-data-table \[data-column="purchasePrice"\],\s*\.results-data-table \[data-column="price"\],\s*\.results-data-table \[data-column="markupPrice"\]\s*\{[^}]*text-align: right;/s);
+  assert.match(styles, /\.results-data-table \[data-column="purchasePrice"\]\s*\{[^}]*text-align: center;/s);
+  assert.match(styles, /\.results-data-table \[data-column="markupPrice"\],\s*\.results-data-table \[data-column="warehouse"\]\s*\{[^}]*text-align: center;/s);
+  assert.match(styles, /\.results-data-table th\[data-column="markupPrice"\] \.table-sort,\s*\.results-data-table th\[data-column="warehouse"\] \.table-sort\s*\{[^}]*justify-content: center;/s);
   assert.doesNotMatch(styles, /\.results-data-table th:nth-child/);
   assert.match(styles, /\.warehouse-code\s*\{[^}]*max-width: 100%;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/s);
   assert.match(styles, /\.results-table\s*\{[^}]*overflow: auto;/s);

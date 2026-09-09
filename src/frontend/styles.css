@@ -1015,17 +1015,36 @@ table tbody tr:hover td {
   background: #fff8f4;
 }
 
-.results-data-table [data-column="purchasePrice"],
-.results-data-table [data-column="price"],
-.results-data-table [data-column="markupPrice"] {
+.results-data-table [data-column="purchasePrice"] {
+  text-align: center;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.results-data-table [data-column="price"] {
   text-align: right;
   font-weight: 800;
   white-space: nowrap;
 }
 
-.results-data-table th[data-column="price"] .table-sort,
-.results-data-table th[data-column="markupPrice"] .table-sort {
+.results-data-table th[data-column="price"] .table-sort {
   justify-content: flex-end;
+  width: 100%;
+}
+
+.results-data-table [data-column="markupPrice"],
+.results-data-table [data-column="warehouse"] {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.results-data-table [data-column="markupPrice"] {
+  font-weight: 800;
+}
+
+.results-data-table th[data-column="markupPrice"] .table-sort,
+.results-data-table th[data-column="warehouse"] .table-sort {
+  justify-content: center;
   width: 100%;
 }
 

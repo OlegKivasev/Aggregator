@@ -216,14 +216,14 @@ let supplierSearchSelectionsRestored = false;
 const tableColumnIds = tableColumnInputs.map((input) => input.value);
 const tableColumnWidths = {
   supplier: 100,
-  brand: 115,
-  article: 125,
-  title: 350,
-  quantity: 105,
-  warehouse: 130,
+  brand: 125,
+  article: 150,
+  title: 325,
+  quantity: 120,
+  warehouse: 120,
   purchasePrice: 120,
-  markupPrice: 125,
-  deliveryDate: 145,
+  markupPrice: 120,
+  deliveryDate: 120,
 };
 let visibleTableColumns = new Set(tableColumnIds);
 let visibleStpartsWarehouses = new Set(["green"]);
