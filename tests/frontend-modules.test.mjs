@@ -357,6 +357,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(app, /formatQuantity\(result\.quantity\)/);
   assert.match(app, /main-result-row\$\{isBestPrice \? " is-best-price" : ""\}/);
   assert.match(app, /main-best-price/);
+  assert.match(app, /const tableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 150,\s+title: 325,\s+quantity: 120,\s+warehouse: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 120,/s);
   assert.match(app, /--results-table-min-width/);
   assert.match(app, /tableColumnWidths\[header\.dataset\.column\] \/ minimumWidth \* 100/);
   assert.match(app, /showWarehouseTooltip/);
