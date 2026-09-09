@@ -36,9 +36,10 @@
       </details>
 
       <div class="workspace">
-        <button type="button" class="filters-toggle" id="filters-toggle" aria-controls="filters-sidebar" aria-expanded="false" aria-label="Открыть фильтры" title="Фильтры">⋮</button>
-        <aside class="filters-sidebar card border-0 shadow-sm" id="filters-sidebar" hidden>
-          <details class="filters-suppliers" id="filters-suppliers">
+        <div class="filters-control">
+          <button type="button" class="filters-toggle" id="filters-toggle" aria-controls="filters-sidebar" aria-expanded="false" aria-label="Открыть фильтры" title="Фильтры">⋮</button>
+          <aside class="filters-sidebar card border-0 shadow-sm" id="filters-sidebar" hidden>
+            <details class="filters-suppliers" id="filters-suppliers">
             <summary>Поставщики</summary>
             <div class="filters-sidebar__suppliers">
               <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="rossko" checked /><span>Rossko</span></label>
@@ -49,34 +50,35 @@
               <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="motordetal" checked /><span>MotorDetal</span></label>
               <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="mladov" checked /><span>Механик Ладов</span></label>
             </div>
-          </details>
-          <section class="filters-sidebar__section" data-filter-section="supplier" hidden>
+            </details>
+            <section class="filters-sidebar__section" data-filter-section="supplier" hidden>
             <h3>Поставщик</h3>
             <div class="filters-sidebar__values" data-filter-values="supplier" aria-live="polite"></div>
-          </section>
-          <section class="filters-sidebar__section" data-filter-section="brand" hidden>
+            </section>
+            <section class="filters-sidebar__section" data-filter-section="brand" hidden>
             <h3>Бренд</h3>
             <div class="filters-sidebar__values" data-filter-values="brand" aria-live="polite"></div>
-          </section>
-          <section class="filters-sidebar__section" data-filter-section="article" hidden>
+            </section>
+            <section class="filters-sidebar__section" data-filter-section="article" hidden>
             <h3>Артикул</h3>
             <div class="filters-sidebar__values" data-filter-values="article" aria-live="polite"></div>
-          </section>
-          <section class="filters-sidebar__section" data-filter-section="warehouse" hidden>
+            </section>
+            <section class="filters-sidebar__section" data-filter-section="warehouse" hidden>
             <h3>Склад</h3>
             <div class="filters-sidebar__values" data-filter-values="warehouse" aria-live="polite"></div>
-          </section>
-          <section class="filters-sidebar__section" data-filter-section="markupPrice" hidden>
+            </section>
+            <section class="filters-sidebar__section" data-filter-section="markupPrice" hidden>
             <h3>Цена</h3>
             <div class="filters-sidebar__values" data-filter-values="markupPrice" aria-live="polite"></div>
-          </section>
-          <section class="filters-sidebar__section" data-filter-section="deliveryDate" hidden>
+            </section>
+            <section class="filters-sidebar__section" data-filter-section="deliveryDate" hidden>
             <h3>Дата доставки</h3>
             <div class="filters-sidebar__values" data-filter-values="deliveryDate" aria-live="polite"></div>
-          </section>
-          <button type="button" class="filters-sidebar__reset" id="filters-reset" hidden>Сбросить фильтры</button>
-          <div class="filters-sidebar__resize" id="filters-resize" role="separator" aria-label="Изменить ширину фильтров" aria-orientation="vertical" tabindex="0"></div>
-        </aside>
+            </section>
+            <button type="button" class="filters-sidebar__reset" id="filters-reset" hidden>Сбросить фильтры</button>
+            <div class="filters-sidebar__resize" id="filters-resize" role="separator" aria-label="Изменить ширину фильтров" aria-orientation="vertical" tabindex="0"></div>
+          </aside>
+        </div>
         <section class="search-shell">
           <div class="search-row card shadow-sm border-0">
             <form class="search-form" id="search-form">
