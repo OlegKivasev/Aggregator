@@ -342,6 +342,12 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(styles, /\.supplier-search-toggle \.supplier-enabled-input\s*\{[^}]*clip-path: inset\(50%\);/s);
 });
 
+test("main application frame uses the expanded shared width", async () => {
+  const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
+
+  assert.match(styles, /\.page\s*\{[^}]*max-width: 2400px;/s);
+});
+
 test("Rossko authorization form accepts only API keys", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
