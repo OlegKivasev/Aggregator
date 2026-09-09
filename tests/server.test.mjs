@@ -14,6 +14,7 @@ import { parseArmtekApiAccountState } from "../src/backend/suppliers/armtek/armt
 import {
   findPartKomMakerId,
   parsePartKomApiAnalogResults,
+  parsePartKomArticleBrands,
   parsePartKomApiResponse,
   parsePartKomApiResults,
   PartKomApiAdapter,
@@ -38,6 +39,7 @@ import {
 import {
   createStpartsBatchParams,
   parseStpartsApiAnalogResults,
+  parseStpartsApiBrands,
   parseStpartsApiResponse,
   parseStpartsApiResults,
   StpartsApiAdapter,
@@ -45,6 +47,7 @@ import {
 import {
   ForumAutoApiAdapter,
   parseForumAutoApiAnalogResults,
+  parseForumAutoApiBrands,
   parseForumAutoApiResponse,
   parseForumAutoApiResults,
   verifyForumAutoCredentials,
@@ -196,6 +199,51 @@ test("analog search invokes only an adapter with explicit analog support", async
   assert.deepEqual(events, [
     { type: "search_started", article: "90915YZZJ1", suppliers: ["armtek"] },
     { type: "supplier_status", supplier: "armtek", status: "searching", details: undefined },
+    { type: "supplier_status", supplier: "armtek", status: "completed", details: undefined },
+    { type: "search_completed", article: "90915YZZJ1" },
+  ]);
+});
+
+test("brand discovery invokes only an adapter with explicit brand support", async () => {
+  const sessionManager = new SupplierSessionManager();
+  sessionManager.markAuthorized("armtek");
+  let receivedQuery;
+  const service = new SearchApplicationService([
+    {
+      id: "armtek",
+      displayName: "Armtek",
+      timeoutMs: 1000,
+      async ensureSession() {
+        return sessionManager.getSession("armtek");
+      },
+      async search() {
+        assert.fail("ordinary search must not run for a brand request");
+      },
+      async searchBrands(query, _context, onBrands) {
+        receivedQuery = query;
+        onBrands(["Brand A", "Brand A", "Brand B"]);
+      },
+    },
+    {
+      id: "rossko",
+      displayName: "Rossko",
+      timeoutMs: 1000,
+      async ensureSession() {
+        assert.fail("adapter without brand support must not run");
+      },
+      async search() {},
+    },
+  ], sessionManager, () => undefined);
+  const events = [];
+  const query = { mode: "brands", article: "90915YZZJ1", suppliers: ["armtek", "rossko"] };
+
+  await service.streamSearch(query, (event) => events.push(event), new AbortController().signal);
+
+  assert.deepEqual(receivedQuery, query);
+  assert.deepEqual(events, [
+    { type: "search_started", article: "90915YZZJ1", suppliers: ["armtek"] },
+    { type: "supplier_status", supplier: "armtek", status: "searching", details: undefined },
+    { type: "brand_candidates", supplier: "armtek", brands: ["Brand A", "Brand B"] },
     { type: "supplier_status", supplier: "armtek", status: "completed", details: undefined },
     { type: "search_completed", article: "90915YZZJ1" },
   ]);
@@ -417,12 +465,35 @@ test("Forum-Auto validates credentials through clientInfo and uses documented se
   sessionManager.setForumAutoCredentials(credentials);
   await adapter.search({ article: "OC 47" }, { signal: new AbortController().signal, timeoutMs: 1000 }, () => {}, sessionManager);
   await adapter.searchAnalogs({ mode: "analogs", article: "OC 47", brand: "KNECHT" }, { signal: new AbortController().signal, timeoutMs: 1000 }, () => {}, sessionManager);
+  await adapter.searchBrands({ mode: "brands", article: "OC 47" }, { signal: new AbortController().signal, timeoutMs: 1000 }, () => {}, sessionManager);
 
   assert.deepEqual(calls, [
     { method: "clientinfo", params: "", credentials },
     { method: "listgoods", params: "art=OC+47&cross=0", credentials },
     { method: "listgoods", params: "art=OC+47&cross=1&br=KNECHT", credentials },
+    { method: "listbrands", params: "art=OC+47", credentials },
   ]);
+});
+
+test("brand discovery parsers retain only valid supplier brands", () => {
+  assert.deepEqual(parsePartKomArticleBrands([
+    { id: 1, name: "Brand A" },
+    { id: 2, name: " Brand A " },
+    { id: 3, name: "Brand B" },
+    { id: 4, name: "" },
+  ]), ["Brand A", "Brand B"]);
+  assert.deepEqual(parseStpartsApiBrands([
+    { brand: "Brand A" },
+    { brand: " Brand A " },
+    { brand: "Brand B" },
+    { brand: 1 },
+  ]), ["Brand A", "Brand B"]);
+  assert.deepEqual(parseForumAutoApiBrands([
+    { art: "ABC-123", brand: "Brand A" },
+    { art: "ABC123", brand: "Brand A" },
+    { art: "OTHER", brand: "Brand B" },
+    { art: "ABC-123", brand: "" },
+  ], "ABC123"), ["Brand A"]);
 });
 
 test("PartKOM discards a reversed delivery interval returned by the API", () => {

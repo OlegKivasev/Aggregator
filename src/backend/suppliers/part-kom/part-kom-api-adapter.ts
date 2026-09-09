@@ -2,6 +2,7 @@ import { partKomSearchTimeoutMs } from "../../config.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type {
   AnalogSearchQuery,
+  BrandDiscoveryQuery,
   NormalizedSearchResult,
   PartKomCredentials,
   SearchQuery,
@@ -282,6 +283,13 @@ export function findPartKomMakerId(payload: unknown, requestedBrand: string): st
   return null;
 }
 
+export function parsePartKomArticleBrands(payload: unknown): string[] {
+  return [...new Set(apiItems(payload, "article brands")
+    .filter((value): value is PartKomArticleBrand => Boolean(value) && typeof value === "object" && !Array.isArray(value))
+    .map((value) => typeof value.name === "string" ? value.name.trim() : "")
+    .filter(Boolean))];
+}
+
 async function partKomApiRequest(
   path: "search/brands" | "search/articule-brands" | "search/offers",
   params: URLSearchParams,
@@ -413,5 +421,25 @@ export class PartKomApiAdapter implements SupplierAdapter {
       credentials,
     );
     parsePartKomApiAnalogResults(offersPayload).forEach(onResult);
+  }
+
+  async searchBrands(
+    query: BrandDiscoveryQuery,
+    context: SupplierSearchContext,
+    onBrands: (brands: string[]) => void,
+    sessionManager: SupplierSessionManager,
+  ): Promise<void> {
+    const credentials = sessionManager.getPartKomCredentials();
+    if (!credentials) {
+      throw new SupplierAuthError("PartKOM API credentials are not configured");
+    }
+    const payload = await this.request(
+      "search/articule-brands",
+      new URLSearchParams({ number: query.article.trim() }),
+      context.signal,
+      context.timeoutMs,
+      credentials,
+    );
+    onBrands(parsePartKomArticleBrands(payload));
   }
 }

@@ -261,6 +261,27 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /const exactResults = results\.filter\(\(result\) => result\.isAnalog !== true\);/);
 });
 
+test("frontend keeps retail price as the configurable column and discovers brands after an empty search", async () => {
+  const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
+
+  assert.match(html, /id="purchase-price-toggle"[^>]*aria-pressed="false"/);
+  assert.match(html, /data-column="purchasePrice" hidden>Закупочная цена/);
+  assert.match(html, /data-column="markupPrice"[^>]*><button[^>]*data-sort-key="markupPrice">Цена/);
+  assert.match(html, /table-column-input" type="checkbox" value="markupPrice" checked><span>Цена/);
+  assert.doesNotMatch(html, /table-column-input" type="checkbox" value="price"/);
+  assert.match(app, /let sortState = \{ key: "markupPrice", direction: "ascending" \}/);
+  assert.match(app, /state\.key === "markupPrice" && comparison === 0/);
+  assert.match(app, /compareDeliveryDates\(left, right\)/);
+  assert.match(html, /id="article-analogs-modal"/);
+  assert.match(html, /id="article-analogs-modal-brand-select"/);
+  assert.match(app, /mode: "brands"/);
+  assert.match(app, /payload\.type === "brand_candidates"/);
+  assert.match(app, /startArticleAnalogSearch\(article, brand/);
+  assert.match(app, /tab\.results\.length === 0/);
+  assert.match(app, /analogSupplierIds\.filter\(\(supplier\) => tab\?\.enabledSuppliers\.includes\(supplier\)/);
+});
+
 test("frontend can hide a supplier from searches, results, and authorization settings", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");

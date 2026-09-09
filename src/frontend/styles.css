@@ -21,7 +21,8 @@ body {
   font-size: 13px;
 }
 
-body:has(.analogs-modal:not([hidden])) {
+body:has(.analogs-modal:not([hidden])),
+body:has(.article-analogs-modal:not([hidden])) {
   overflow: hidden;
 }
 
@@ -842,6 +843,34 @@ input {
   color: var(--muted);
 }
 
+.purchase-price-toggle {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  background: #fff;
+}
+
+.purchase-price-toggle:hover,
+.purchase-price-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.purchase-price-toggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
 .table-search-control {
   width: min(390px, 100%);
   min-width: 160px;
@@ -1151,8 +1180,94 @@ table tbody tr:hover td {
 .result-context-menu[hidden],
 .tab-context-menu[hidden],
 .analogs-modal[hidden],
+.article-analogs-modal[hidden],
 .analogs-search-status[hidden] {
   display: none;
+}
+
+.article-analogs-modal {
+  position: fixed;
+  z-index: 1160;
+  inset: 0;
+  display: grid;
+  padding: 16px;
+  place-items: center;
+}
+
+.article-analogs-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(17, 24, 32, 0.64);
+  backdrop-filter: blur(5px);
+}
+
+.article-analogs-modal__card {
+  position: relative;
+  width: min(480px, calc(100vw - 32px));
+  padding: 22px;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.article-analogs-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.article-analogs-modal__header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.article-analogs-modal__close {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  font-size: 23px;
+  line-height: 1;
+}
+
+.article-analogs-modal__description,
+.article-analogs-modal__empty {
+  margin: 18px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.article-analogs-modal__status {
+  margin-top: 18px;
+  padding: 11px 12px;
+  border-radius: 9px;
+  color: var(--accent-dark);
+  background: #fff3ed;
+  font-weight: 700;
+}
+
+.article-analogs-modal__brand {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.article-analogs-modal__brand select {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: #fff;
+}
+
+.article-analogs-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 24px;
 }
 
 .result-context-menu,

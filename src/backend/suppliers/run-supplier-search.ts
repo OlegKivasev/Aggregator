@@ -124,16 +124,33 @@ export async function runSupplierSearch({
         invalidResultCount += 1;
       }
     };
+    const onBrands = (brands: string[]) => {
+      if (!operation.isCurrent()) {
+        return;
+      }
+      const validBrands = [...new Set(brands
+        .filter((brand) => typeof brand === "string")
+        .map((brand) => brand.replace(/\s+/g, " ").trim())
+        .filter((brand) => brand.length > 0 && brand.length <= 128))];
+      if (validBrands.length) {
+        emit({ type: "brand_candidates", supplier: adapter.id, brands: validBrands });
+      }
+    };
     if ("mode" in query && query.mode === "analogs") {
       if (!adapter.searchAnalogs) {
         throw new SupplierIntegrationError("Supplier does not support analog search");
       }
       await adapter.searchAnalogs(query, context, onResult, sessionManager);
+    } else if ("mode" in query && query.mode === "brands") {
+      if (!adapter.searchBrands) {
+        throw new SupplierIntegrationError("Supplier does not support brand discovery");
+      }
+      await adapter.searchBrands(query, context, onBrands, sessionManager);
     } else {
       await adapter.search(query, context, onResult, sessionManager);
     }
 
-    if (invalidResultCount > 0 && validResultCount === 0) {
+    if (!("mode" in query && query.mode === "brands") && invalidResultCount > 0 && validResultCount === 0) {
       throw new SupplierIntegrationError("Supplier returned only invalid search results");
     }
 

@@ -1,5 +1,6 @@
 import type {
   AnalogSearchQuery,
+  BrandDiscoveryQuery,
   NormalizedSearchResult,
   SearchQuery,
   SupplierId,
@@ -25,6 +26,12 @@ export interface SupplierAdapter {
     query: AnalogSearchQuery,
     context: SupplierSearchContext,
     onResult: (result: NormalizedSearchResult) => void,
+    sessionManager: SupplierSessionManager,
+  ): Promise<void>;
+  searchBrands?(
+    query: BrandDiscoveryQuery,
+    context: SupplierSearchContext,
+    onBrands: (brands: string[]) => void,
     sessionManager: SupplierSessionManager,
   ): Promise<void>;
 }

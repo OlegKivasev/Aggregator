@@ -266,7 +266,7 @@ export function createAggregatorServer({
         serveJson(response, 400, { message: `Query parameter article must not exceed ${articleLengthLimit} characters` });
         return;
       }
-      if (mode !== null && mode !== "analogs") {
+      if (mode !== null && mode !== "analogs" && mode !== "brands") {
         serveJson(response, 400, { message: "Query parameter mode is invalid" });
         return;
       }
@@ -292,7 +292,9 @@ export function createAggregatorServer({
       try {
         const query: SupplierSearchQuery = mode === "analogs"
           ? { mode, article, brand: brand!, suppliers }
-          : { article, suppliers };
+          : mode === "brands"
+            ? { mode, article, suppliers }
+            : { article, suppliers };
         await application.streamSearch(query, (event) => writeSseEvent(response, event), controller.signal);
       } catch (error) {
         if (!controller.signal.aborted && !response.destroyed) {

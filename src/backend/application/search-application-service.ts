@@ -30,7 +30,9 @@ export class SearchApplicationService {
     const selectedAdapters = selectSupplierAdapters(this.adapters, query.suppliers);
     const currentAdapters = "mode" in query && query.mode === "analogs"
       ? selectedAdapters.filter((adapter) => adapter.searchAnalogs)
-      : selectedAdapters;
+      : "mode" in query && query.mode === "brands"
+        ? selectedAdapters.filter((adapter) => adapter.searchBrands)
+        : selectedAdapters;
 
     emit({
       type: "search_started",

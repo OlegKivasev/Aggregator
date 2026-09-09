@@ -35,6 +35,7 @@ const searchLoadingNote = document.querySelector("#search-loading-note");
 const searchLoadingCancel = document.querySelector("#search-loading-cancel");
 const cancelSearchButton = document.querySelector("#cancel-search-button");
 const markupPercentInput = document.querySelector("#markup-percent");
+const purchasePriceToggle = document.querySelector("#purchase-price-toggle");
 const tableSearchInput = document.querySelector("#table-search");
 const sortButtons = [...resultsTable.querySelectorAll(".table-sort")];
 const tableColumnInputs = [...document.querySelectorAll(".table-column-input")];
@@ -143,13 +144,23 @@ const analogsMarkupPercent = document.querySelector("#analogs-markup-percent");
 const analogsShowMore = document.querySelector("#analogs-show-more");
 const analogSortButtons = [...document.querySelectorAll("[data-analog-sort-key]")];
 const closeAnalogsModalButtons = [...document.querySelectorAll("[data-close-analogs-modal]")];
+const articleAnalogsModal = document.querySelector("#article-analogs-modal");
+const articleAnalogsModalDescription = document.querySelector("#article-analogs-modal-description");
+const articleAnalogsModalStatus = document.querySelector("#article-analogs-modal-status");
+const articleAnalogsModalBrand = document.querySelector("#article-analogs-modal-brand");
+const articleAnalogsModalBrandSelect = document.querySelector("#article-analogs-modal-brand-select");
+const articleAnalogsModalEmpty = document.querySelector("#article-analogs-modal-empty");
+const articleAnalogsModalSearch = document.querySelector("#article-analogs-modal-search");
+const articleAnalogsModalContinue = document.querySelector("#article-analogs-modal-continue");
+const closeArticleAnalogsModalButtons = [...document.querySelectorAll("[data-close-article-analogs-modal]")];
 
 let searchTabs = [];
 let activeTabId = null;
 let tabSequence = 1;
 let results = [];
-let sortState = { key: "price", direction: "ascending" };
+let sortState = { key: "markupPrice", direction: "ascending" };
 let markupPercent = 35;
+let showPurchasePrices = false;
 let tableSearchTerm = "";
 let contextMenuResult = null;
 let contextMenuAnchor = null;
@@ -169,6 +180,10 @@ let analogVisibleLimit = 200;
 let analogRenderFrame = null;
 let analogSearchCompleted = false;
 let analogStatusHideTimer = null;
+let articleBrandSearchSource = null;
+let articleBrandModalReturnFocus = null;
+let articleBrandArticle = "";
+let articleBrandCandidates = new Set();
 let supplierCheckInProgress = false;
 let searchProgressTimer = null;
 let activeFilterColumn = "";
@@ -207,7 +222,7 @@ const tableColumnWidths = {
   title: 350,
   quantity: 105,
   warehouse: 130,
-  price: 120,
+  purchasePrice: 120,
   markupPrice: 125,
   deliveryDate: 145,
 };
@@ -220,7 +235,7 @@ const filterColumnNames = Object.fromEntries(filterColumnButtons.map((button) =>
   button.dataset.filterColumn,
   button.firstChild.textContent.trim(),
 ]));
-const rangeFilterColumns = new Set(["quantity", "price", "markupPrice", "deliveryDate"]);
+const rangeFilterColumns = new Set(["quantity", "markupPrice", "deliveryDate"]);
 
 const supplierSearchToggles = Object.fromEntries(
   supplierEnabledInputs.map((input) => [input.value, input.closest(".supplier-search-toggle")]),
@@ -248,9 +263,6 @@ const getFilterValue = (result, column) => {
   if (column === "quantity") {
     return formatQuantity(result.quantity);
   }
-  if (column === "price") {
-    return formatPrice(result.price);
-  }
   if (column === "markupPrice") {
     return formatPrice(getMarkupPrice(result));
   }
@@ -265,9 +277,6 @@ const getFilterValue = (result, column) => {
 const getRangeFilterValue = (result, column, percent = markupPercent) => {
   if (column === "quantity") {
     return Number.isFinite(result.quantity) ? result.quantity : null;
-  }
-  if (column === "price") {
-    return Number(result.price);
   }
   if (column === "markupPrice") {
     return getMarkupPrice(result, percent);
@@ -672,6 +681,9 @@ const compareResults = (left, right, state = sortState, percent = markupPercent)
     ? compareDeliveryDates(left, right)
     : compareSortValues(getSortValue(left, state.key, percent), getSortValue(right, state.key, percent));
 
+  if (state.key === "markupPrice" && comparison === 0) {
+    return compareDeliveryDates(left, right);
+  }
   return state.direction === "ascending" ? comparison : -comparison;
 };
 
@@ -705,7 +717,10 @@ const updateResultCount = (items) => {
   resultCount.setAttribute("aria-label", breakdown ? `По поставщикам:\n${breakdown}` : "Нет результатов");
 };
 
-const getVisibleTableColumns = () => tableColumnIds.filter((column) => visibleTableColumns.has(column));
+const getVisibleTableColumns = () => [
+  ...(showPurchasePrices ? ["purchasePrice"] : []),
+  ...tableColumnIds.filter((column) => visibleTableColumns.has(column)),
+];
 
 const saveTableColumns = () => {
   try {
@@ -720,13 +735,13 @@ const applyTableColumns = () => {
   const minimumWidth = visibleColumns.reduce((width, column) => width + tableColumnWidths[column], 0);
   resultsTable.style.setProperty("--results-table-min-width", `${minimumWidth}px`);
   resultsTable.querySelectorAll("th[data-column]").forEach((header) => {
-    header.style.width = visibleTableColumns.has(header.dataset.column)
+    header.style.width = visibleColumns.includes(header.dataset.column)
       ? `${tableColumnWidths[header.dataset.column] / minimumWidth * 100}%`
       : "";
   });
-  tableColumnsReset.hidden = visibleColumns.length === tableColumnIds.length;
+  tableColumnsReset.hidden = visibleTableColumns.size === tableColumnIds.length;
   document.querySelectorAll("[data-column]").forEach((element) => {
-    element.hidden = !visibleTableColumns.has(element.dataset.column);
+    element.hidden = !visibleColumns.includes(element.dataset.column);
   });
   resultsBody.querySelectorAll(".results-table__empty td").forEach((cell) => {
     cell.colSpan = visibleColumns.length;
@@ -749,7 +764,11 @@ const restoreTableColumns = () => {
     if (!Array.isArray(savedColumns)) {
       return;
     }
-    visibleTableColumns = new Set(savedColumns.filter((column) => tableColumnIds.includes(column)));
+    const savedTableColumns = new Set(savedColumns.filter((column) => tableColumnIds.includes(column)));
+    if (savedColumns.includes("price")) {
+      savedTableColumns.add("markupPrice");
+    }
+    visibleTableColumns = savedTableColumns;
   } catch {
     localStorage.removeItem(tableColumnsStorageKey);
   }
@@ -998,8 +1017,8 @@ const renderResults = () => {
   const sortedResults = [...filteredResults].sort((left, right) =>
     compareResults(left, right, sortState, markupPercent));
   const bestPrice = filteredResults
-    .filter((result) => Number.isFinite(result.price) && result.price > 0)
-    .reduce((best, result) => !best || result.price < best.price ? result : best, null);
+    .filter((result) => getMarkupPrice(result, markupPercent) !== null)
+    .reduce((best, result) => !best || getMarkupPrice(result, markupPercent) < getMarkupPrice(best, markupPercent) ? result : best, null);
   const isSearching = Boolean(getActiveTab()?.source);
   updateSortHeaders(sortButtons, sortState);
   const renderResult = (result, percent) => {
@@ -1017,8 +1036,8 @@ const renderResults = () => {
         <td data-column="title"><div class="result-title-cell"><span title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</span></div></td>
         <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-column="warehouse">${renderWarehouse(result)}</td>
-        <td data-column="price"><span class="main-result-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
-        <td data-column="markupPrice">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</td>
+        <td data-column="purchasePrice">${escapeHtml(formatPrice(result.price))}</td>
+        <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         <td data-column="deliveryDate">${escapeHtml(deliveryDate)}</td>
       </tr>
     `;
@@ -1046,6 +1065,14 @@ const setMarkupPercent = (value) => {
   }
   renderResults();
   saveSearchState();
+};
+
+const setPurchasePricesVisible = (visible) => {
+  showPurchasePrices = visible;
+  purchasePriceToggle.setAttribute("aria-pressed", String(visible));
+  purchasePriceToggle.setAttribute("aria-label", visible ? "Скрыть закупочные цены" : "Показать закупочные цены");
+  purchasePriceToggle.title = visible ? "Скрыть закупочные цены" : "Показать закупочные цены";
+  renderResults();
 };
 
 const resetSearchState = () => {
@@ -1455,17 +1482,18 @@ document.addEventListener("focusout", (event) => {
   }
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Tab" && !analogsModal.hidden) {
-    const focusable = [...analogsModal.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex='0']")]
+  const openModal = !articleAnalogsModal.hidden ? articleAnalogsModal : !analogsModal.hidden ? analogsModal : null;
+  if (event.key === "Tab" && openModal) {
+    const focusable = [...openModal.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex='0']")]
       .filter((element) => element.offsetParent !== null);
     if (!focusable.length) {
       event.preventDefault();
-      analogsModal.focus();
+      openModal.focus();
       return;
     }
     const first = focusable[0];
     const last = focusable.at(-1);
-    if (event.shiftKey && (document.activeElement === first || document.activeElement === analogsModal)) {
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === openModal)) {
       event.preventDefault();
       last.focus();
     } else if (!event.shiftKey && document.activeElement === last) {
@@ -1481,6 +1509,8 @@ document.addEventListener("keydown", (event) => {
     hideTabContextMenu(true);
   } else if (!resultContextMenu.hidden) {
     hideResultContextMenu(true);
+  } else if (!articleAnalogsModal.hidden) {
+    closeArticleAnalogsModal();
   } else if (!analogsModal.hidden) {
     closeAnalogsModal();
   }
@@ -1866,6 +1896,19 @@ const renderAnalogSource = (result) => {
   analogsSourceWarehouse.title = formatWarehouse(result.warehouse);
 };
 
+const renderArticleAnalogSource = (article, brand) => {
+  analogsSourceBrand.textContent = formatBrand(brand);
+  analogsSourceArticle.textContent = formatArticle(article);
+  analogsSourceTitle.textContent = "Поиск аналогов по выбранному бренду";
+  analogsSourceTitle.title = "Поиск аналогов по выбранному бренду";
+  analogsSourceSupplier.textContent = "Выбранный бренд";
+  analogsSourcePrice.textContent = "-";
+  analogsSourceMarkupPrice.textContent = "-";
+  analogsSourceDelivery.textContent = "-";
+  analogsSourceWarehouse.textContent = "-";
+  analogsSourceWarehouse.title = "";
+};
+
 const updateAnalogSortHeaders = () => {
   analogSortButtons.forEach((button) => {
     const isActive = button.dataset.analogSortKey === analogSortState.key;
@@ -1940,11 +1983,11 @@ const renderAnalogRows = () => {
   }
 };
 
-const startAnalogSearch = (result, returnFocus = document.activeElement) => {
+const startAnalogSearchForQuery = ({ article, brand, sourceResult, returnFocus = document.activeElement }) => {
   analogSearchSource?.close();
   analogModalReturnFocus = returnFocus;
-  analogReturnResult = result;
-  analogSourceResult = result;
+  analogReturnResult = sourceResult;
+  analogSourceResult = sourceResult;
   analogSearchResults = [];
   analogSearchTerm = "";
   analogSortState = { key: "price", direction: "ascending" };
@@ -1956,7 +1999,11 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   clearAnalogStatusHideTimer();
   analogsTableSearch.value = "";
   analogsMarkupPercent.value = String(markupPercent);
-  renderAnalogSource(result);
+  if (sourceResult) {
+    renderAnalogSource(sourceResult);
+  } else {
+    renderArticleAnalogSource(article, brand);
+  }
   analogsModal.hidden = false;
   analogsModal.focus();
   if (!analogSearchSuppliers.length) {
@@ -1974,8 +2021,8 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
   const searchParams = new URLSearchParams({
     stream: "once",
     mode: "analogs",
-    article: result.article,
-    brand: result.brand,
+    article,
+    brand,
   });
   analogSearchSuppliers.forEach((supplier) => searchParams.append("supplier", supplier));
   const source = openSearchStream(`/api/search?${searchParams.toString()}`);
@@ -2048,6 +2095,138 @@ const startAnalogSearch = (result, returnFocus = document.activeElement) => {
     analogSearchCompleted = true;
     renderAnalogRowsNow();
     setAnalogSearchStatus("Соединение прервано", "Не удалось получить полный результат поиска аналогов.", "error");
+  };
+};
+
+const startAnalogSearch = (result, returnFocus = document.activeElement) => {
+  startAnalogSearchForQuery({
+    article: result.article,
+    brand: result.brand,
+    sourceResult: result,
+    returnFocus,
+  });
+};
+
+const startArticleAnalogSearch = (article, brand, returnFocus = document.activeElement) => {
+  startAnalogSearchForQuery({ article, brand, sourceResult: null, returnFocus });
+};
+
+const closeArticleAnalogsModal = (restoreFocus = true) => {
+  articleBrandSearchSource?.close();
+  articleBrandSearchSource = null;
+  articleAnalogsModal.hidden = true;
+  if (restoreFocus && articleBrandModalReturnFocus?.isConnected) {
+    articleBrandModalReturnFocus.focus();
+  }
+  articleBrandModalReturnFocus = null;
+};
+
+const setArticleAnalogsModalStatus = (message, visible = true) => {
+  articleAnalogsModalStatus.textContent = message;
+  articleAnalogsModalStatus.hidden = !visible;
+};
+
+const renderArticleBrandCandidates = () => {
+  const brands = [...articleBrandCandidates].sort((left, right) => resultCollator.compare(left, right));
+  articleAnalogsModalBrandSelect.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Выберите бренд";
+  articleAnalogsModalBrandSelect.append(placeholder);
+  brands.forEach((brand) => {
+    const option = document.createElement("option");
+    option.value = brand;
+    option.textContent = brand;
+    articleAnalogsModalBrandSelect.append(option);
+  });
+  articleAnalogsModalBrand.hidden = brands.length === 0;
+  articleAnalogsModalBrandSelect.disabled = brands.length === 0;
+  articleAnalogsModalEmpty.hidden = brands.length !== 0;
+  articleAnalogsModalContinue.hidden = brands.length === 0;
+  articleAnalogsModalContinue.disabled = true;
+  setArticleAnalogsModalStatus(
+    brands.length ? "Выберите бренд для продолжения поиска по аналогам." : "",
+    brands.length > 0,
+  );
+};
+
+const openArticleAnalogsModal = (tab, returnFocus = document.activeElement) => {
+  articleBrandSearchSource?.close();
+  articleBrandSearchSource = null;
+  articleBrandModalReturnFocus = returnFocus;
+  articleBrandArticle = tab.article;
+  articleBrandCandidates = new Set();
+  articleAnalogsModalDescription.textContent = `По артикулу ${formatArticle(articleBrandArticle)} точных предложений не найдено. Выполнить поиск брендов для поиска аналогов?`;
+  articleAnalogsModalBrand.hidden = true;
+  articleAnalogsModalBrandSelect.replaceChildren();
+  articleAnalogsModalBrandSelect.disabled = true;
+  articleAnalogsModalEmpty.hidden = true;
+  articleAnalogsModalSearch.hidden = false;
+  articleAnalogsModalSearch.disabled = false;
+  articleAnalogsModalContinue.hidden = true;
+  articleAnalogsModalContinue.disabled = true;
+  setArticleAnalogsModalStatus("", false);
+  articleAnalogsModal.hidden = false;
+  articleAnalogsModalSearch.focus();
+};
+
+const startArticleBrandSearch = () => {
+  const tab = getActiveTab();
+  const suppliers = analogSupplierIds.filter((supplier) => tab?.enabledSuppliers.includes(supplier) && isSupplierVisible(supplier));
+  if (!tab || !articleBrandArticle || !suppliers.length) {
+    articleAnalogsModalSearch.hidden = true;
+    setArticleAnalogsModalStatus("Включите хотя бы одного API-поставщика, поддерживающего поиск аналогов, и повторите поиск.");
+    return;
+  }
+
+  articleBrandCandidates = new Set();
+  articleAnalogsModalSearch.disabled = true;
+  articleAnalogsModalSearch.hidden = true;
+  articleAnalogsModalBrand.hidden = true;
+  articleAnalogsModalEmpty.hidden = true;
+  articleAnalogsModalContinue.hidden = true;
+  setArticleAnalogsModalStatus("Ищем бренды по артикулу…");
+  const searchParams = new URLSearchParams({ stream: "once", mode: "brands", article: articleBrandArticle });
+  suppliers.forEach((supplier) => searchParams.append("supplier", supplier));
+  const source = openSearchStream(`/api/search?${searchParams.toString()}`);
+  articleBrandSearchSource = source;
+
+  source.onmessage = (messageEvent) => {
+    if (articleBrandSearchSource !== source) {
+      return;
+    }
+    const payload = JSON.parse(messageEvent.data);
+    if (payload.type === "brand_candidates" && Array.isArray(payload.brands)) {
+      payload.brands.forEach((brand) => {
+        if (typeof brand === "string" && brand.trim()) {
+          articleBrandCandidates.add(brand.trim());
+        }
+      });
+      return;
+    }
+    if (payload.type === "search_completed") {
+      source.close();
+      articleBrandSearchSource = null;
+      renderArticleBrandCandidates();
+      return;
+    }
+    if (payload.type === "fatal_error") {
+      source.close();
+      articleBrandSearchSource = null;
+      setArticleAnalogsModalStatus("Не удалось выполнить поиск брендов. Повторите попытку позже.");
+      articleAnalogsModalSearch.hidden = false;
+      articleAnalogsModalSearch.disabled = false;
+    }
+  };
+  source.onerror = () => {
+    if (articleBrandSearchSource !== source) {
+      return;
+    }
+    source.close();
+    articleBrandSearchSource = null;
+    setArticleAnalogsModalStatus("Соединение с поиском брендов прервано. Повторите попытку позже.");
+    articleAnalogsModalSearch.hidden = false;
+    articleAnalogsModalSearch.disabled = false;
   };
 };
 
@@ -2130,6 +2309,21 @@ analogsShowMore.addEventListener("click", () => {
 });
 
 closeAnalogsModalButtons.forEach((button) => button.addEventListener("click", closeAnalogsModal));
+closeArticleAnalogsModalButtons.forEach((button) => button.addEventListener("click", () => closeArticleAnalogsModal()));
+articleAnalogsModalSearch.addEventListener("click", startArticleBrandSearch);
+articleAnalogsModalBrandSelect.addEventListener("change", () => {
+  articleAnalogsModalContinue.disabled = !articleAnalogsModalBrandSelect.value;
+});
+articleAnalogsModalContinue.addEventListener("click", () => {
+  const brand = articleAnalogsModalBrandSelect.value.trim();
+  if (!brand || !articleBrandArticle) {
+    return;
+  }
+  const returnFocus = articleBrandModalReturnFocus;
+  const article = articleBrandArticle;
+  closeArticleAnalogsModal(false);
+  startArticleAnalogSearch(article, brand, returnFocus);
+});
 window.addEventListener("resize", () => {
   hideResultContextMenu(true);
   hideTabContextMenu(true);
@@ -2415,6 +2609,9 @@ const startSearch = (article, enabledSuppliers) => {
       showIncompleteSearchWarning(tab);
       renderTabs();
       saveSearchState();
+      if (tab.id === activeTabId && tab.results.length === 0) {
+        openArticleAnalogsModal(tab, submitButton);
+      }
       return;
     }
 
@@ -2534,6 +2731,9 @@ if (restoredTab) {
 supplierSearchSelectionsRestored = true;
 markupPercentInput.addEventListener("change", () => {
   setMarkupPercent(markupPercentInput.value);
+});
+purchasePriceToggle.addEventListener("click", () => {
+  setPurchasePricesVisible(!showPurchasePrices);
 });
 
 tableSearchInput.addEventListener("input", () => {
