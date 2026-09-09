@@ -57,6 +57,7 @@ import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../src/backend/suppliers/errors.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
 import { buildIncompleteSearchWarnings, buildSupplierResultTooltip, formatDeliveryDate } from "../src/frontend/supplier-search-summary.js";
+import { resolveRosskoCredentials } from "../scripts/rossko-soap-search.mjs";
 
 const port = 31847;
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -343,6 +344,18 @@ test("Rossko parses top-level products and nested crosses without mixing them", 
   assert.equal(analogs[0].brand, "MANN");
   assert.equal(analogs[0].isAnalog, true);
   assert.ok(analogs[0].deliveryDateTo);
+});
+
+test("Rossko diagnostic uses saved API keys unless an explicit pair is supplied", () => {
+  const savedCredentials = { login: "rossko-api-k1:saved-k1", password: "saved-k2" };
+
+  assert.deepEqual(resolveRosskoCredentials({}, savedCredentials), { key1: "saved-k1", key2: "saved-k2" });
+  assert.deepEqual(resolveRosskoCredentials({ ROSSKO_KEY1: "override-k1", ROSSKO_KEY2: "override-k2" }, savedCredentials), {
+    key1: "override-k1",
+    key2: "override-k2",
+  });
+  assert.throws(() => resolveRosskoCredentials({ ROSSKO_KEY1: "override-k1" }, savedCredentials), /must be set together/);
+  assert.throws(() => resolveRosskoCredentials({}, { login: "legacy-login", password: "legacy-password" }), /No saved Rossko API keys/);
 });
 
 test("Rossko treats a documented not-found search response as empty", () => {

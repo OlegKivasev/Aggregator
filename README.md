@@ -303,25 +303,25 @@ It calls the same official API as the production adapter, but does not normalize
 It prints the complete SOAP XML response, including all product, stock, and cross fields
 returned by Rossko.
 
-Set keys only in the current shell or a secret manager. Do not place them in `.env.example`
-or the repository:
+The command reuses the authorized Rossko API keys from the application's encrypted
+credential store and obtains a compatible delivery method automatically. Run it in
+the same service environment, which has access to `STATE_DIR` and
+`SUPPLIER_CREDENTIALS_ENCRYPTION_KEY`. It never prints the keys:
 
 ```powershell
-$env:ROSSKO_KEY1 = "..."
-$env:ROSSKO_KEY2 = "..."
+pnpm rossko:search -- 0532.T5
+```
+
+For a one-off diagnostic account, a complete `ROSSKO_KEY1`/`ROSSKO_KEY2` pair may
+be provided through the process environment. To inspect the account's checkout
+configuration, run:
+
+```powershell
 pnpm rossko:search -- --checkout
 ```
 
-`--checkout` calls `GetCheckoutDetails`. From its response, use an account-available
-`delivery_id` and, unless the delivery method is pickup, an `address_id` for the search:
-
-```powershell
-pnpm rossko:search -- 90915YZZJ1 --delivery-id "..." --address-id "..."
-```
-
-Alternatively, set `ROSSKO_DELIVERY_ID` and `ROSSKO_ADDRESS_ID`; then `pnpm rossko:search`
-prompts only for the article. The SOAP API has a 300 requests/minute and 100,000 requests/day
-limit, and returns at most 80 product cards and 80 crosses per product.
+The SOAP API has a 300 requests/minute and 100,000 requests/day limit, and returns
+at most 80 product cards and 80 crosses per product.
 
 ## Production
 

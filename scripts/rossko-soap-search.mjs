@@ -1,6 +1,9 @@
 import { parseArgs } from "node:util";
-import { createInterface } from "node:readline/promises";
-import { stdin, stdout } from "node:process";
+import { pathToFileURL } from "node:url";
+import { decodeRosskoApiCredentials } from "../src/backend/application/supplier-session-service.ts";
+import { getStateFilePath, supplierCredentialsEncryptionKey } from "../src/backend/config.ts";
+import { EncryptedSupplierCredentialStore } from "../src/backend/session/encrypted-credential-store.ts";
+import { parseRosskoCheckoutDetails } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 
 const API_ORIGIN = "https://api.rossko.ru";
 const API_VERSION = "v2.1";
@@ -19,38 +22,37 @@ const { values, positionals } = parseArgs({
 
 function usage() {
   console.log(`Usage:
-  ROSSKO_KEY1=... ROSSKO_KEY2=... pnpm rossko:search -- <article> --delivery-id <id> [--address-id <id>]
-  ROSSKO_KEY1=... ROSSKO_KEY2=... pnpm rossko:search -- --checkout
+  pnpm rossko:search -- <article>
+  pnpm rossko:search -- --checkout
 
 Environment variables:
-  ROSSKO_KEY1, ROSSKO_KEY2   Required API keys.
-  ROSSKO_DELIVERY_ID         Optional default for --delivery-id.
-  ROSSKO_ADDRESS_ID          Optional default for --address-id.
+  ROSSKO_KEY1, ROSSKO_KEY2   Optional complete API-key pair, used instead of saved keys.
 
---checkout prints the complete GetCheckoutDetails response. Choose delivery_id and
-address_id assigned to your account, then run an article search. For pickup, the
-address ID may be omitted only when Rossko returns a pickup delivery method.`);
+The command reads the authorized Rossko keys from the application's encrypted
+credential store and obtains the compatible delivery and address automatically.
+--delivery-id and --address-id are optional overrides. --checkout prints the
+complete GetCheckoutDetails response.`);
 }
 
 function xmlEscape(value) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 }
 
-function requiredEnvironment(name) {
-  const value = process.env[name]?.trim();
-  if (!value) {
-    throw new Error(`${name} must be set in the environment`);
+export function resolveRosskoCredentials(environment, storedCredentials) {
+  const key1 = environment.ROSSKO_KEY1?.trim();
+  const key2 = environment.ROSSKO_KEY2?.trim();
+  if (key1 || key2) {
+    if (!key1 || !key2) {
+      throw new Error("ROSSKO_KEY1 and ROSSKO_KEY2 must be set together");
+    }
+    return { key1, key2 };
   }
-  return value;
-}
 
-async function prompt(question) {
-  const readline = createInterface({ input: stdin, output: stdout });
-  try {
-    return (await readline.question(question)).trim();
-  } finally {
-    readline.close();
+  const savedCredentials = decodeRosskoApiCredentials(storedCredentials);
+  if (!savedCredentials) {
+    throw new Error("No saved Rossko API keys are available for diagnostics");
   }
+  return savedCredentials;
 }
 
 function envelope(method, fields) {
@@ -107,29 +109,39 @@ async function callRossko(method, fields) {
   return body;
 }
 
-if (values.help) {
-  usage();
-  process.exitCode = 0;
-} else {
+async function main() {
+  if (values.help) {
+    usage();
+    return;
+  }
+
   try {
-    const key1 = requiredEnvironment("ROSSKO_KEY1");
-    const key2 = requiredEnvironment("ROSSKO_KEY2");
+    const credentialStore = new EncryptedSupplierCredentialStore(
+      getStateFilePath("supplier-credentials.enc.json"),
+      supplierCredentialsEncryptionKey,
+    );
+    const credentials = resolveRosskoCredentials(process.env, credentialStore.get("rossko"));
 
     if (values.checkout) {
-      console.log(await callRossko("GetCheckoutDetails", { KEY1: key1, KEY2: key2 }));
+      console.log(await callRossko("GetCheckoutDetails", { KEY1: credentials.key1, KEY2: credentials.key2 }));
     } else {
-      const article = positionals[0]?.trim() || await prompt("Article: ");
+      const article = positionals[0]?.trim();
       if (!article) {
-        throw new Error("Article must not be empty");
+        throw new Error("Article must be provided as a command argument");
       }
 
-      const deliveryId = values["delivery-id"] || process.env.ROSSKO_DELIVERY_ID?.trim() || await prompt("delivery_id: ");
-      if (!deliveryId) {
-        throw new Error("delivery_id is required; run with --checkout to retrieve account settings");
-      }
-
-      const addressId = values["address-id"] || process.env.ROSSKO_ADDRESS_ID?.trim() || await prompt("address_id (blank for pickup): ");
-      const fields = { KEY1: key1, KEY2: key2, text: article, delivery_id: deliveryId };
+      const checkout = await callRossko("GetCheckoutDetails", {
+        KEY1: credentials.key1,
+        KEY2: credentials.key2,
+      });
+      const delivery = parseRosskoCheckoutDetails(checkout);
+      const fields = {
+        KEY1: credentials.key1,
+        KEY2: credentials.key2,
+        text: article,
+        delivery_id: values["delivery-id"] || delivery.deliveryId,
+      };
+      const addressId = values["address-id"] || delivery.addressId;
       if (addressId) {
         fields.address_id = addressId;
       }
@@ -140,4 +152,8 @@ if (values.help) {
     console.error(`Rossko diagnostic failed: ${message}`);
     process.exitCode = 1;
   }
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
 }
