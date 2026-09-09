@@ -149,7 +149,6 @@ const articleAnalogsModalDescription = document.querySelector("#article-analogs-
 const articleAnalogsModalStatus = document.querySelector("#article-analogs-modal-status");
 const articleAnalogsModalBrand = document.querySelector("#article-analogs-modal-brand");
 const articleAnalogsModalBrands = document.querySelector("#article-analogs-modal-brands");
-const articleAnalogsModalEmpty = document.querySelector("#article-analogs-modal-empty");
 const articleAnalogsModalContinue = document.querySelector("#article-analogs-modal-continue");
 const closeArticleAnalogsModalButtons = [...document.querySelectorAll("[data-close-article-analogs-modal]")];
 
@@ -2150,6 +2149,11 @@ const setArticleAnalogsModalStatus = (message, visible = true) => {
 
 const renderArticleBrandCandidates = () => {
   const brands = [...articleBrandCandidates].sort((left, right) => resultCollator.compare(left, right));
+  if (!brands.length) {
+    closeArticleAnalogsModal();
+    return;
+  }
+
   articleAnalogsModalBrands.replaceChildren();
   brands.forEach((brand) => {
     const label = document.createElement("label");
@@ -2162,14 +2166,10 @@ const renderArticleBrandCandidates = () => {
     label.append(input, text);
     articleAnalogsModalBrands.append(label);
   });
-  articleAnalogsModalBrand.hidden = brands.length === 0;
-  articleAnalogsModalEmpty.hidden = brands.length !== 0;
-  articleAnalogsModalContinue.hidden = brands.length === 0;
+  articleAnalogsModalBrand.hidden = false;
+  articleAnalogsModalContinue.hidden = false;
   articleAnalogsModalContinue.disabled = true;
-  setArticleAnalogsModalStatus(
-    brands.length ? "Выберите один или несколько брендов для продолжения поиска по аналогам." : "",
-    brands.length > 0,
-  );
+  setArticleAnalogsModalStatus("Выберите один или несколько брендов для продолжения поиска по аналогам.");
 };
 
 const openArticleAnalogsModal = (tab, returnFocus = document.activeElement) => {
@@ -2181,7 +2181,6 @@ const openArticleAnalogsModal = (tab, returnFocus = document.activeElement) => {
   articleAnalogsModalDescription.textContent = `По артикулу ${formatArticle(articleBrandArticle)} точных предложений не найдено.`;
   articleAnalogsModalBrand.hidden = true;
   articleAnalogsModalBrands.replaceChildren();
-  articleAnalogsModalEmpty.hidden = true;
   articleAnalogsModalContinue.hidden = true;
   articleAnalogsModalContinue.disabled = true;
   setArticleAnalogsModalStatus("Ищем бренды по артикулу…");
@@ -2200,7 +2199,6 @@ const startArticleBrandSearch = () => {
 
   articleBrandCandidates = new Set();
   articleAnalogsModalBrand.hidden = true;
-  articleAnalogsModalEmpty.hidden = true;
   articleAnalogsModalContinue.hidden = true;
   setArticleAnalogsModalStatus("Ищем бренды по артикулу…");
   const searchParams = new URLSearchParams({ stream: "once", mode: "brands", article: articleBrandArticle });

@@ -276,6 +276,7 @@ test("frontend keeps retail price as the configurable column and discovers brand
   assert.match(html, /id="article-analogs-modal"/);
   assert.match(html, /id="article-analogs-modal-brands"/);
   assert.match(html, /Выберите один или несколько брендов/);
+  assert.doesNotMatch(html, /По этому артикулу поставщики не вернули бренды/);
   assert.doesNotMatch(html, /id="article-analogs-modal-search"/);
   assert.match(app, /mode: "brands"/);
   assert.match(app, /payload\.type === "brand_candidates"/);
@@ -287,6 +288,7 @@ test("frontend keeps retail price as the configurable column and discovers brand
   assert.match(app, /const visibleResults = analogSearchResults;/);
   assert.match(app, /const getMainTableResults = \(items\) =>/);
   assert.match(app, /getMainTableResults\(tab\.results\)\.filteredResults\.length === 0/);
+  assert.match(app, /if \(!brands\.length\) \{\s+closeArticleAnalogsModal\(\);\s+return;/);
   assert.match(app, /analogSupplierIds\.filter\(\(supplier\) => tab\?\.enabledSuppliers\.includes\(supplier\)/);
 });
 

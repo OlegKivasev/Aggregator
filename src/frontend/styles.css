@@ -1230,8 +1230,7 @@ table tbody tr:hover td {
   line-height: 1;
 }
 
-.article-analogs-modal__description,
-.article-analogs-modal__empty {
+.article-analogs-modal__description {
   margin: 18px 0 0;
   color: var(--muted);
   line-height: 1.5;
