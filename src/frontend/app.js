@@ -999,6 +999,19 @@ const closeTab = (tabId) => {
   saveSearchState();
 };
 
+const getMainTableResults = (items) => {
+  // Older persisted tabs can still contain automatically fetched analogs.
+  const exactResults = items.filter((result) => result.isAnalog !== true);
+  const visibleExactResults = filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
+    exactResults.filter((result) => isSupplierVisible(result.supplier)),
+  ))));
+
+  return {
+    exactResults,
+    filteredResults: getFilteredResults(visibleExactResults, tableSearchTerm, markupPercent),
+  };
+};
+
 const renderResults = () => {
   if (activeFilterColumn && !visibleTableColumns.has(activeFilterColumn)) {
     activeFilterColumn = "";
@@ -1008,12 +1021,7 @@ const renderResults = () => {
     filterRangesByColumn.delete(column);
   });
 
-  // Older persisted tabs can still contain automatically fetched analogs.
-  const exactResults = results.filter((result) => result.isAnalog !== true);
-  const visibleExactResults = filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
-    exactResults.filter((result) => isSupplierVisible(result.supplier)),
-  ))));
-  const filteredResults = getFilteredResults(visibleExactResults, tableSearchTerm, markupPercent);
+  const { exactResults, filteredResults } = getMainTableResults(results);
   const sortedResults = [...filteredResults].sort((left, right) =>
     compareResults(left, right, sortState, markupPercent));
   const bestPrice = filteredResults
@@ -2615,7 +2623,7 @@ const startSearch = (article, enabledSuppliers) => {
       showIncompleteSearchWarning(tab);
       renderTabs();
       saveSearchState();
-      if (tab.id === activeTabId && tab.results.length === 0) {
+      if (tab.id === activeTabId && getMainTableResults(tab.results).filteredResults.length === 0) {
         openArticleAnalogsModal(tab, submitButton);
       }
       return;

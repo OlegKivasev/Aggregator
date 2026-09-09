@@ -258,7 +258,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /analogSearchCompleted \? Number\.POSITIVE_INFINITY/);
   assert.match(app, /analogsCount\.dataset\.tooltip = supplierBreakdown/);
   assert.match(app, /scheduleAnalogRowsRender/);
-  assert.match(app, /const exactResults = results\.filter\(\(result\) => result\.isAnalog !== true\);/);
+  assert.match(app, /const exactResults = items\.filter\(\(result\) => result\.isAnalog !== true\);/);
 });
 
 test("frontend keeps retail price as the configurable column and discovers brands after an empty search", async () => {
@@ -285,7 +285,8 @@ test("frontend keeps retail price as the configurable column and discovers brand
   assert.match(app, /selectedBrands\.forEach\(\(brand\) =>/);
   assert.match(app, /let analogSearchSources = new Set\(\);/);
   assert.match(app, /const visibleResults = analogSearchResults;/);
-  assert.match(app, /tab\.results\.length === 0/);
+  assert.match(app, /const getMainTableResults = \(items\) =>/);
+  assert.match(app, /getMainTableResults\(tab\.results\)\.filteredResults\.length === 0/);
   assert.match(app, /analogSupplierIds\.filter\(\(supplier\) => tab\?\.enabledSuppliers\.includes\(supplier\)/);
 });
 
