@@ -289,6 +289,10 @@ function parseRosskoPart(part: XmlElement, includeNestedCrosses: boolean): Rossk
   };
 }
 
+function isRosskoNotFoundMessage(message: string | null): boolean {
+  return message !== null && /^ничего\s+не\s+найдено$/iu.test(message);
+}
+
 export function parseRosskoSearchParts(xml: string): RosskoPart[] {
   const result = findDescendant(parseRosskoXml(xml), "SearchResult");
   if (!result) {
@@ -296,8 +300,9 @@ export function parseRosskoSearchParts(xml: string): RosskoPart[] {
   }
   const partsList = child(result, "PartsList");
   const parts = partsList ? children(partsList, "Part") : [];
+  const message = elementText(result, "message");
   if (!parseSuccess(result)) {
-    if (parts.length === 0 && !elementText(result, "message")) {
+    if (parts.length === 0 && (!message || isRosskoNotFoundMessage(message))) {
       return [];
     }
     throw new SupplierIntegrationError("Rossko API reported an unsuccessful search");

@@ -366,6 +366,16 @@ test("Rossko treats a documented not-found search response as empty", () => {
   assert.deepEqual(parseRosskoSearchParts(xml), []);
 });
 
+test("Rossko treats its observed not-found message as an empty result", () => {
+  const xml = `<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns1="https://api.rossko.ru/">
+    <SOAP-ENV:Body><ns1:GetSearchResponse><ns1:SearchResult>
+      <ns1:success>false</ns1:success><ns1:message>Ничего не найдено</ns1:message>
+    </ns1:SearchResult></ns1:GetSearchResponse></SOAP-ENV:Body>
+  </SOAP-ENV:Envelope>`;
+
+  assert.deepEqual(parseRosskoSearchParts(xml), []);
+});
+
 test("Rossko treats an empty unsuccessful parts list without a message as empty", () => {
   const xml = `<Envelope><Body><SearchResult>
     <Success>false</Success><Text>0532.T5</Text><PartsList />
