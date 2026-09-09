@@ -1015,7 +1015,12 @@ table tbody tr:hover td {
   background: #fff8f4;
 }
 
-.results-data-table [data-column="purchasePrice"],
+.results-data-table [data-column="purchasePrice"] {
+  text-align: center;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .results-data-table [data-column="price"],
 .results-data-table [data-column="markupPrice"] {
   text-align: right;
