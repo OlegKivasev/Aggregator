@@ -51,12 +51,13 @@ const supplierSettingsCards = Object.fromEntries(
 const filtersToggle = document.querySelector("#filters-toggle");
 const filtersSidebar = document.querySelector("#filters-sidebar");
 const filtersClose = document.querySelector("#filters-close");
-const filtersWidth = document.querySelector("#filters-width");
-const filterColumns = document.querySelector("#filter-columns");
-const filterColumnButtons = [...document.querySelectorAll("[data-filter-column]")];
-const filterSubmenu = document.querySelector("#filter-submenu");
-const filterSubmenuTitle = document.querySelector("#filter-submenu-title");
-const filterValues = document.querySelector("#filter-values");
+const filtersResize = document.querySelector("#filters-resize");
+const filterValueContainers = Object.fromEntries(
+  [...document.querySelectorAll("[data-filter-values]")].map((container) => [container.dataset.filterValues, container]),
+);
+const filterSections = Object.fromEntries(
+  [...document.querySelectorAll("[data-filter-section]")].map((section) => [section.dataset.filterSection, section]),
+);
 const filtersReset = document.querySelector("#filters-reset");
 const settingsDrawer = document.querySelector("#settings-drawer");
 const settingsClose = document.querySelector("#settings-close");
@@ -187,7 +188,6 @@ let articleBrandArticle = "";
 let articleBrandCandidates = new Set();
 let supplierCheckInProgress = false;
 let searchProgressTimer = null;
-let activeFilterColumn = "";
 const selectedFilterValuesByColumn = new Map();
 const filterRangesByColumn = new Map();
 const supplierSessionStates = new Map();
@@ -233,11 +233,8 @@ let visibleStpartsWarehouses = new Set(["green"]);
 let showArmtekNonReturnable = false;
 let showPartKomNonReturnable = false;
 let showForumAutoNonReturnable = false;
-const filterColumnNames = Object.fromEntries(filterColumnButtons.map((button) => [
-  button.dataset.filterColumn,
-  button.dataset.filterLabel,
-]));
-const rangeFilterColumns = new Set(["quantity", "markupPrice", "deliveryDate"]);
+const mainFilterColumns = ["supplier", "brand", "article", "warehouse", "markupPrice", "deliveryDate"];
+const rangeFilterColumns = new Set(["markupPrice", "deliveryDate"]);
 
 const supplierSearchToggles = Object.fromEntries(
   supplierEnabledInputs.map((input) => [input.value, input.closest(".supplier-search-toggle")]),
@@ -344,19 +341,11 @@ const getFilteredResults = (sourceResults, searchTerm, percent) => {
 };
 
 const renderFilterValues = () => {
-  filterValues.replaceChildren();
-  if (!activeFilterColumn) {
-    filterSubmenu.hidden = true;
-    filtersReset.hidden = !hasAnyActiveFilters();
-    filterColumnButtons.forEach((button) => button.classList.remove("is-active"));
-    return;
-  }
-
-  filterSubmenu.hidden = false;
-  filterSubmenuTitle.textContent = filterColumnNames[activeFilterColumn];
-  filterColumnButtons.forEach((button) => button.classList.toggle("is-active", button.dataset.filterColumn === activeFilterColumn));
-  if (rangeFilterColumns.has(activeFilterColumn)) {
-    const isDate = activeFilterColumn === "deliveryDate";
+  mainFilterColumns.forEach((column) => {
+    const container = filterValueContainers[column];
+    container.replaceChildren();
+    if (rangeFilterColumns.has(column)) {
+      const isDate = column === "deliveryDate";
     const createRangeInput = (bound, labelText) => {
       const label = document.createElement("label");
       label.className = "filters-sidebar__range";
@@ -367,32 +356,32 @@ const renderFilterValues = () => {
       input.min = isDate ? "" : "0";
       input.step = isDate ? "" : "0.01";
       input.placeholder = isDate ? "дд.мм.гггг" : "0";
-      input.value = getFilterRange(activeFilterColumn)[bound];
+      input.value = getFilterRange(column)[bound];
+      input.dataset.filterColumn = column;
       input.dataset.filterRange = bound;
       label.append(text, input);
       return label;
     };
-    filterValues.replaceChildren(
+      container.replaceChildren(
       createRangeInput("from", "От"),
       createRangeInput("to", "До"),
     );
-    filtersReset.hidden = !hasAnyActiveFilters();
-    return;
-  }
+      return;
+    }
 
-  const values = [...new Set(results.map((result) => getFilterValue(result, activeFilterColumn)))].sort(resultCollator.compare);
-  filterValues.replaceChildren(...values.map((value) => {
-    const label = document.createElement("label");
-    label.className = "filters-sidebar__value";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = getSelectedFilterValues(activeFilterColumn).has(value);
-    input.value = value;
-    const text = document.createElement("span");
-    text.textContent = value;
-    label.append(input, text);
-    return label;
-  }));
+    const values = [...new Set(results.map((result) => getFilterValue(result, column)))].sort(resultCollator.compare);
+    container.replaceChildren(...values.map((value) => {
+      const button = document.createElement("button");
+      const selected = getSelectedFilterValues(column).has(value);
+      button.type = "button";
+      button.className = "filters-sidebar__value";
+      button.dataset.filterColumn = column;
+      button.dataset.filterValue = value;
+      button.setAttribute("aria-pressed", String(selected));
+      button.textContent = value;
+      return button;
+    }));
+  });
   filtersReset.hidden = !hasAnyActiveFilters();
 };
 
@@ -435,7 +424,6 @@ const setFiltersSidebarWidth = (value) => {
   }
   const normalizedWidth = Math.min(420, Math.max(220, Math.round(width / 10) * 10));
   filtersSidebar.style.setProperty("--filters-sidebar-width", `${normalizedWidth}px`);
-  filtersWidth.value = String(normalizedWidth);
   try {
     localStorage.setItem(filtersWidthStorageKey, String(normalizedWidth));
   } catch {
@@ -445,9 +433,9 @@ const setFiltersSidebarWidth = (value) => {
 
 const restoreFiltersSidebarWidth = () => {
   try {
-    setFiltersSidebarWidth(localStorage.getItem(filtersWidthStorageKey) ?? filtersWidth.value);
+    setFiltersSidebarWidth(localStorage.getItem(filtersWidthStorageKey) ?? 280);
   } catch {
-    setFiltersSidebarWidth(filtersWidth.value);
+    setFiltersSidebarWidth(280);
   }
 };
 
@@ -775,12 +763,9 @@ const applyTableColumns = () => {
   resultsBody.querySelectorAll(".results-table__empty td").forEach((cell) => {
     cell.colSpan = visibleColumns.length;
   });
-  filterColumnButtons.forEach((button) => {
-    button.hidden = !visibleTableColumns.has(button.dataset.filterColumn);
+  Object.entries(filterSections).forEach(([column, section]) => {
+    section.hidden = !visibleTableColumns.has(column);
   });
-  if (activeFilterColumn && !visibleTableColumns.has(activeFilterColumn)) {
-    activeFilterColumn = "";
-  }
   tableColumnIds.filter((column) => !visibleTableColumns.has(column)).forEach((column) => {
     selectedFilterValuesByColumn.delete(column);
     filterRangesByColumn.delete(column);
@@ -1042,9 +1027,6 @@ const getMainTableResults = (items) => {
 };
 
 const renderResults = () => {
-  if (activeFilterColumn && !visibleTableColumns.has(activeFilterColumn)) {
-    activeFilterColumn = "";
-  }
   tableColumnIds.filter((column) => !visibleTableColumns.has(column)).forEach((column) => {
     selectedFilterValuesByColumn.delete(column);
     filterRangesByColumn.delete(column);
@@ -1114,7 +1096,6 @@ const setPurchasePricesVisible = (visible) => {
 
 const resetSearchState = () => {
   results = [];
-  activeFilterColumn = "";
   selectedFilterValuesByColumn.clear();
   filterRangesByColumn.clear();
   const tab = getActiveTab();
@@ -1442,7 +1423,6 @@ settingsClose.addEventListener("click", closeSettings);
 settingsBackdrop.addEventListener("click", closeSettings);
 filtersToggle.addEventListener("click", () => setFiltersSidebarOpen(filtersSidebar.hidden));
 filtersClose.addEventListener("click", () => setFiltersSidebarOpen(false));
-filtersWidth.addEventListener("input", () => setFiltersSidebarWidth(filtersWidth.value));
 passwordFields.forEach((passwordField) => {
   const input = passwordField.querySelector("input");
   const toggle = passwordField.querySelector(".password-toggle");
@@ -1550,47 +1530,73 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-const selectFilterColumn = (column) => {
-  if (activeFilterColumn === column) {
+filtersSidebar.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-filter-value]");
+  if (!(button instanceof HTMLButtonElement)) {
     return;
   }
-  activeFilterColumn = column;
-  renderFilterValues();
-};
-
-filterColumns.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-filter-column]");
-  if (button) {
-    selectFilterColumn(button.dataset.filterColumn);
+  const column = button.dataset.filterColumn;
+  const value = button.dataset.filterValue;
+  if (!column || value === undefined) {
+    return;
   }
+  const selectedValues = getSelectedFilterValues(column);
+  if (selectedValues.has(value)) {
+    selectedValues.delete(value);
+  } else {
+    selectedValues.add(value);
+  }
+  selectedFilterValuesByColumn.set(column, selectedValues);
+  renderResults();
 });
 
-filterValues.addEventListener("change", (event) => {
+filtersSidebar.addEventListener("change", (event) => {
   const input = event.target;
   if (!(input instanceof HTMLInputElement)) {
     return;
   }
 
-  if (input.dataset.filterRange) {
-    filterRangesByColumn.set(activeFilterColumn, {
-      ...getFilterRange(activeFilterColumn),
+  if (input.dataset.filterRange && input.dataset.filterColumn) {
+    filterRangesByColumn.set(input.dataset.filterColumn, {
+      ...getFilterRange(input.dataset.filterColumn),
       [input.dataset.filterRange]: input.value,
     });
     renderResults();
+  }
+});
+
+let filtersResizeStart = null;
+
+filtersResize.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  filtersResizeStart = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startWidth: filtersSidebar.getBoundingClientRect().width,
+  };
+  filtersResize.setPointerCapture(event.pointerId);
+});
+
+filtersResize.addEventListener("pointermove", (event) => {
+  if (!filtersResizeStart || event.pointerId !== filtersResizeStart.pointerId) {
     return;
   }
+  setFiltersSidebarWidth(filtersResizeStart.startWidth + event.clientX - filtersResizeStart.startX);
+});
 
-  if (input.type !== "checkbox") {
+filtersResize.addEventListener("pointerup", (event) => {
+  if (filtersResizeStart && event.pointerId === filtersResizeStart.pointerId) {
+    filtersResizeStart = null;
+  }
+});
+
+filtersResize.addEventListener("keydown", (event) => {
+  if (!["ArrowLeft", "ArrowRight"].includes(event.key)) {
     return;
   }
-
-  if (input.checked) {
-    getSelectedFilterValues(activeFilterColumn).add(input.value);
-  } else {
-    getSelectedFilterValues(activeFilterColumn).delete(input.value);
-  }
-  selectedFilterValuesByColumn.set(activeFilterColumn, getSelectedFilterValues(activeFilterColumn));
-  renderResults();
+  event.preventDefault();
+  const width = filtersSidebar.getBoundingClientRect().width;
+  setFiltersSidebarWidth(width + (event.key === "ArrowRight" ? 10 : -10));
 });
 
 filtersReset.addEventListener("click", () => {

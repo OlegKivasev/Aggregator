@@ -314,20 +314,24 @@ test("frontend preserves selected search suppliers when sessions load after rest
   assert.doesNotMatch(app, /updateArmtekSessionCard\(armtekSession, true\)/);
 });
 
-test("main-search filters use a collapsible side panel with an empty supplier selection", async () => {
+test("main-search filters use a compact trigger, supplier disclosure, and direct filter buttons", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
 
-  assert.match(html, /id="filters-toggle"[^>]*aria-controls="filters-sidebar"/);
+  assert.match(html, /id="filters-toggle"[^>]*aria-controls="filters-sidebar"[^>]*aria-label="Открыть фильтры"[^>]*>•••/);
   assert.match(html, /id="filters-sidebar" hidden/);
-  assert.match(html, /id="filters-width" type="range" min="220" max="420"/);
-  assert.match(html, /data-filter-column="supplier"[\s\S]*?data-filter-column="brand"[\s\S]*?data-filter-column="article"[\s\S]*?data-filter-column="warehouse"[\s\S]*?data-filter-column="markupPrice"[\s\S]*?data-filter-column="deliveryDate"/);
-  assert.doesNotMatch(html, /class="supplier-enabled-input form-check-input" type="checkbox" value="rossko" checked/);
-  assert.match(app, /const setFiltersSidebarOpen = \(open\) =>/);
+  assert.match(html, /id="filters-suppliers"/);
+  assert.match(html, /class="supplier-enabled-input" type="checkbox" value="rossko" checked/);
+  assert.match(html, /data-filter-section="supplier"[\s\S]*?data-filter-section="brand"[\s\S]*?data-filter-section="article"[\s\S]*?data-filter-section="warehouse"[\s\S]*?data-filter-section="markupPrice"[\s\S]*?data-filter-section="deliveryDate"/);
+  assert.match(html, /id="filters-resize" role="separator"/);
+  assert.doesNotMatch(html, /Уточнить результаты/);
+  assert.match(app, /filtersResize\.addEventListener\("pointerdown"/);
+  assert.match(app, /button\.setAttribute\("aria-pressed", String\(selected\)\)/);
   assert.match(app, /const filtersWidthStorageKey = "autoservice\.filtersWidth"/);
   assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
-  assert.match(styles, /\.filters-sidebar\s*\{[^}]*position: sticky;/s);
+  assert.match(styles, /\.filters-sidebar__resize\s*\{[^}]*cursor: col-resize;/s);
+  assert.match(styles, /\.supplier-search-toggle \.supplier-enabled-input\s*\{[^}]*clip-path: inset\(50%\);/s);
 });
 
 test("Rossko authorization form accepts only API keys", async () => {

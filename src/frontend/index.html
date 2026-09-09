@@ -40,42 +40,47 @@
           <div class="filters-sidebar__header">
             <div>
               <h2>Фильтры</h2>
-              <p>Только для основного поиска</p>
             </div>
             <button type="button" class="filters-sidebar__close" id="filters-close" aria-label="Скрыть фильтры" title="Скрыть фильтры">×</button>
           </div>
-          <label class="filters-sidebar__width" for="filters-width">Ширина
-            <input id="filters-width" type="range" min="220" max="420" step="10" value="280" />
-          </label>
-          <section class="filters-sidebar__section">
-            <h3>Поставщики поиска</h3>
-            <p class="filters-sidebar__hint">Ничего не выбрано по умолчанию.</p>
+          <details class="filters-suppliers" id="filters-suppliers">
+            <summary>Поставщики</summary>
             <div class="filters-sidebar__suppliers">
-              <label class="supplier-search-toggle form-check form-switch" hidden><input class="supplier-enabled-input form-check-input" type="checkbox" value="rossko" /><span class="form-check-label">Rossko</span></label>
-              <label class="supplier-search-toggle form-check form-switch" hidden><input class="supplier-enabled-input form-check-input" type="checkbox" value="armtek" /><span class="form-check-label">Armtek</span></label>
-              <label class="supplier-search-toggle form-check form-switch" hidden><input class="supplier-enabled-input form-check-input" type="checkbox" value="part-kom" /><span class="form-check-label">PartKOM</span></label>
-              <label class="supplier-search-toggle form-check form-switch" hidden><input class="supplier-enabled-input form-check-input" type="checkbox" value="stparts" /><span class="form-check-label">STParts</span></label>
-              <label class="supplier-search-toggle form-check form-switch" hidden><input class="supplier-enabled-input form-check-input" type="checkbox" value="forum-auto" /><span class="form-check-label">Forum-Auto</span></label>
-              <label class="supplier-search-toggle form-check form-switch" hidden><input class="supplier-enabled-input form-check-input" type="checkbox" value="motordetal" /><span class="form-check-label">MotorDetal</span></label>
-              <label class="supplier-search-toggle form-check form-switch" hidden><input class="supplier-enabled-input form-check-input" type="checkbox" value="mladov" /><span class="form-check-label">Механик Ладов</span></label>
+              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="rossko" checked /><span>Rossko</span></label>
+              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="armtek" checked /><span>Armtek</span></label>
+              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="part-kom" checked /><span>PartKOM</span></label>
+              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="stparts" checked /><span>STParts</span></label>
+              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="forum-auto" checked /><span>Forum-Auto</span></label>
+              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="motordetal" checked /><span>MotorDetal</span></label>
+              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="mladov" checked /><span>Механик Ладов</span></label>
             </div>
+          </details>
+          <section class="filters-sidebar__section" data-filter-section="supplier">
+            <h3>Поставщик</h3>
+            <div class="filters-sidebar__values" data-filter-values="supplier" aria-live="polite"></div>
           </section>
-          <section class="filters-sidebar__section">
-            <h3>Уточнить результаты</h3>
-            <div class="filters-sidebar__columns" id="filter-columns">
-              <button type="button" data-filter-column="supplier" data-filter-label="Поставщик">Поставщик<span>›</span></button>
-              <button type="button" data-filter-column="brand" data-filter-label="Бренд">Бренд<span>›</span></button>
-              <button type="button" data-filter-column="article" data-filter-label="Артикул">Артикул<span>›</span></button>
-              <button type="button" data-filter-column="warehouse" data-filter-label="Склад">Склад<span>›</span></button>
-              <button type="button" data-filter-column="markupPrice" data-filter-label="Цена">Цена<span>›</span></button>
-              <button type="button" data-filter-column="deliveryDate" data-filter-label="Дата доставки">Дата доставки<span>›</span></button>
-            </div>
-            <div class="filters-sidebar__submenu" id="filter-submenu" hidden>
-              <strong id="filter-submenu-title"></strong>
-              <div class="filters-sidebar__values" id="filter-values" aria-live="polite"></div>
-            </div>
-            <button type="button" class="filters-sidebar__reset" id="filters-reset" hidden>Сбросить фильтры</button>
+          <section class="filters-sidebar__section" data-filter-section="brand">
+            <h3>Бренд</h3>
+            <div class="filters-sidebar__values" data-filter-values="brand" aria-live="polite"></div>
           </section>
+          <section class="filters-sidebar__section" data-filter-section="article">
+            <h3>Артикул</h3>
+            <div class="filters-sidebar__values" data-filter-values="article" aria-live="polite"></div>
+          </section>
+          <section class="filters-sidebar__section" data-filter-section="warehouse">
+            <h3>Склад</h3>
+            <div class="filters-sidebar__values" data-filter-values="warehouse" aria-live="polite"></div>
+          </section>
+          <section class="filters-sidebar__section" data-filter-section="markupPrice">
+            <h3>Цена</h3>
+            <div class="filters-sidebar__values" data-filter-values="markupPrice" aria-live="polite"></div>
+          </section>
+          <section class="filters-sidebar__section" data-filter-section="deliveryDate">
+            <h3>Дата доставки</h3>
+            <div class="filters-sidebar__values" data-filter-values="deliveryDate" aria-live="polite"></div>
+          </section>
+          <button type="button" class="filters-sidebar__reset" id="filters-reset" hidden>Сбросить фильтры</button>
+          <div class="filters-sidebar__resize" id="filters-resize" role="separator" aria-label="Изменить ширину фильтров" aria-orientation="vertical" tabindex="0"></div>
         </aside>
         <section class="search-shell">
           <div class="search-row card shadow-sm border-0">
@@ -89,7 +94,7 @@
                 autocomplete="off"
                 required
               />
-              <button type="button" class="filters-toggle" id="filters-toggle" aria-controls="filters-sidebar" aria-expanded="false">Фильтры</button>
+              <button type="button" class="filters-toggle" id="filters-toggle" aria-controls="filters-sidebar" aria-expanded="false" aria-label="Открыть фильтры" title="Фильтры">•••</button>
               <button type="button" class="settings-button" id="settings-toggle" aria-label="Открыть настройки" title="Настройки">
                 <svg aria-hidden="true" viewBox="0 0 24 24">
                   <path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" />
