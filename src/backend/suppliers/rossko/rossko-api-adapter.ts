@@ -295,8 +295,9 @@ export function parseRosskoSearchParts(xml: string): RosskoPart[] {
     throw new SupplierIntegrationError("Rossko API did not return a search result");
   }
   const partsList = child(result, "PartsList");
+  const parts = partsList ? children(partsList, "Part") : [];
   if (!parseSuccess(result)) {
-    if (!partsList && !elementText(result, "message")) {
+    if (parts.length === 0 && !elementText(result, "message")) {
       return [];
     }
     throw new SupplierIntegrationError("Rossko API reported an unsuccessful search");
@@ -304,7 +305,7 @@ export function parseRosskoSearchParts(xml: string): RosskoPart[] {
   if (!partsList) {
     return [];
   }
-  return children(partsList, "Part")
+  return parts
     .map((part) => parseRosskoPart(part, true))
     .filter((part): part is RosskoPart => part !== null);
 }

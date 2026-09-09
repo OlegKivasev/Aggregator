@@ -353,6 +353,14 @@ test("Rossko treats a documented not-found search response as empty", () => {
   assert.deepEqual(parseRosskoSearchParts(xml), []);
 });
 
+test("Rossko treats an empty unsuccessful parts list without a message as empty", () => {
+  const xml = `<Envelope><Body><SearchResult>
+    <Success>false</Success><Text>0532.T5</Text><PartsList />
+  </SearchResult></Body></Envelope>`;
+
+  assert.deepEqual(parseRosskoSearchParts(xml), []);
+});
+
 test("Rossko preserves unsuccessful search responses with an error message", () => {
   const xml = `<Envelope><Body><SearchResult>
     <Success>false</Success><Message>Delivery is unavailable</Message>
