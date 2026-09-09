@@ -17,7 +17,11 @@ export interface AnalogSearchQuery extends SearchQuery {
   brand: string;
 }
 
-export type SupplierSearchQuery = SearchQuery | AnalogSearchQuery;
+export interface BrandDiscoveryQuery extends SearchQuery {
+  mode: "brands";
+}
+
+export type SupplierSearchQuery = SearchQuery | AnalogSearchQuery | BrandDiscoveryQuery;
 
 export interface NormalizedSearchResult {
   supplier: SupplierId;
@@ -103,6 +107,12 @@ export interface SearchResultEvent {
   result: NormalizedSearchResult;
 }
 
+export interface SearchBrandCandidatesEvent {
+  type: "brand_candidates";
+  supplier: SupplierId;
+  brands: string[];
+}
+
 export interface SearchStartedEvent {
   type: "search_started";
   article: string;
@@ -122,6 +132,7 @@ export interface SearchFatalEvent {
 export type SearchStreamEvent =
   | SearchSupplierStatusEvent
   | SearchResultEvent
+  | SearchBrandCandidatesEvent
   | SearchStartedEvent
   | SearchCompletedEvent
   | SearchFatalEvent;

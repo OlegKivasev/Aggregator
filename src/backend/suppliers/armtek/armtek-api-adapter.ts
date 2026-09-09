@@ -3,6 +3,7 @@ import { createBoundedAbortSignal } from "../../abort.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type {
   AnalogSearchQuery,
+  BrandDiscoveryQuery,
   ArmtekCredentials,
   NormalizedSearchResult,
   SearchQuery,
@@ -608,5 +609,34 @@ export class ArmtekApiAdapter implements SupplierAdapter {
         onResult(result);
       }
     }
+  }
+
+  async searchBrands(
+    query: BrandDiscoveryQuery,
+    searchContext: SupplierSearchContext,
+    onBrands: (brands: string[]) => void,
+    sessionManager: SupplierSessionManager,
+  ): Promise<void> {
+    const credentials = getConfiguredCredentials(sessionManager);
+    if (!credentials) {
+      throw new SupplierAuthError("Armtek credentials are missing");
+    }
+    const resolved = await resolveArmtekConfig(credentials, searchContext.signal);
+    const article = query.article.trim();
+    let response: { ARRAY?: ArmtekSearchItem | ArmtekSearchItem[] } | ArmtekSearchItem[];
+    try {
+      response = await requestArmtek("ws_search/assortment_search", credentials, {
+        method: "POST",
+        params: new URLSearchParams({ VKORG: resolved.vkorg, PIN: article }),
+        signal: searchContext.signal,
+      });
+    } catch (error) {
+      rethrowArmtekStageError(error, "Armtek brand search request failed", "armtek_brand_search_request");
+    }
+    const target = normalizeArticle(article);
+    onBrands([...new Set(armtekSearchItems(response)
+      .filter((item) => normalizeArticle(item.PIN ?? "") === target)
+      .map((item) => item.BRAND?.trim() ?? "")
+      .filter(Boolean))]);
   }
 }

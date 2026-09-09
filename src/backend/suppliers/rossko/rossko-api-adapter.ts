@@ -4,6 +4,7 @@ import { rosskoConfig, supplierMaxResponseBytes } from "../../config.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type {
   AnalogSearchQuery,
+  BrandDiscoveryQuery,
   NormalizedSearchResult,
   RosskoApiCredentials,
   SearchQuery,
@@ -563,5 +564,23 @@ export class RosskoApiAdapter implements SupplierAdapter {
       context.signal.throwIfAborted();
       onResult(result);
     }
+  }
+
+  async searchBrands(
+    query: BrandDiscoveryQuery,
+    context: SupplierSearchContext,
+    onBrands: (brands: string[]) => void,
+    sessionManager: SupplierSessionManager,
+  ): Promise<void> {
+    const credentials = sessionManager.getRosskoApiCredentials();
+    if (!credentials) {
+      throw new SupplierAuthError("Rossko API keys are missing");
+    }
+    const target = normalizedArticle(query.article);
+    const parts = await searchRosskoParts(credentials, query.article.trim(), context.signal);
+    onBrands([...new Set(parts
+      .filter((part) => normalizedArticle(part.article) === target)
+      .map((part) => part.brand.trim())
+      .filter(Boolean))]);
   }
 }

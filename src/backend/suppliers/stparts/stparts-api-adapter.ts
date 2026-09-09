@@ -3,6 +3,7 @@ import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import { getStpartsApiConfig, stpartsConfig } from "../../config.ts";
 import type {
   AnalogSearchQuery,
+  BrandDiscoveryQuery,
   NormalizedSearchResult,
   SearchQuery,
   SupplierSearchContext,
@@ -177,6 +178,13 @@ export function parseStpartsApiResults(payload: unknown, requestedArticle: strin
     }
   }
   return results;
+}
+
+export function parseStpartsApiBrands(payload: unknown): string[] {
+  return [...new Set(abcpItems(payload, "brand")
+    .filter((value): value is AbcpBrand => Boolean(value) && typeof value === "object" && !Array.isArray(value))
+    .map((value) => typeof value.brand === "string" ? value.brand.trim() : "")
+    .filter(Boolean))];
 }
 
 function normalizeStpartsResult(item: AbcpArticle, isAnalog = false): NormalizedSearchResult | null {
@@ -475,6 +483,26 @@ export class StpartsApiAdapter implements SupplierAdapter {
       credentials,
     );
     parseStpartsApiAnalogResults(payload, article, brand).forEach(onResult);
+  }
+
+  async searchBrands(
+    query: BrandDiscoveryQuery,
+    context: SupplierSearchContext,
+    onBrands: (brands: string[]) => void,
+    sessionManager: SupplierSessionManager,
+  ): Promise<void> {
+    const credentials = sessionManager.getStpartsCredentials() ?? undefined;
+    if (!getStpartsApiConfig(credentials)) {
+      throw new SupplierAuthError("STParts API credentials are not configured");
+    }
+    const payload = await this.request(
+      "search/brands/",
+      new URLSearchParams({ number: query.article.trim(), useOnlineStocks: "0" }),
+      context.signal,
+      context.timeoutMs,
+      credentials,
+    );
+    onBrands(parseStpartsApiBrands(payload));
   }
 
   private async waitForSearch(searchPromise: Promise<NormalizedSearchResult[]>, signal: AbortSignal): Promise<NormalizedSearchResult[]> {

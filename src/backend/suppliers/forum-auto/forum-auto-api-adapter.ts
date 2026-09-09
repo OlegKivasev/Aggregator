@@ -2,6 +2,7 @@ import { forumAutoSearchTimeoutMs, supplierMaxResponseBytes } from "../../config
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type {
   AnalogSearchQuery,
+  BrandDiscoveryQuery,
   ForumAutoCredentials,
   NormalizedSearchResult,
   SearchQuery,
@@ -30,7 +31,7 @@ interface ForumAutoFault {
   code?: unknown;
 }
 
-export type ForumAutoApiMethod = "clientinfo" | "listgoods";
+export type ForumAutoApiMethod = "clientinfo" | "listgoods" | "listbrands";
 export type ForumAutoApiRequester = (
   method: ForumAutoApiMethod,
   params: URLSearchParams,
@@ -115,7 +116,7 @@ export function parseForumAutoApiResponse(response: SiteHttpResponse, method?: F
   if (response.status === 401 || response.status === 403) {
     throw new SupplierAuthError("Forum-Auto rejected the configured credentials");
   }
-  if (method === "listgoods" && (response.status === 400 || response.status === 422)) {
+  if ((method === "listgoods" || method === "listbrands") && (response.status === 400 || response.status === 422)) {
     return [];
   }
   if (response.status < 200 || response.status >= 300) {
@@ -124,7 +125,7 @@ export function parseForumAutoApiResponse(response: SiteHttpResponse, method?: F
     });
   }
   if (!response.contentType?.toLocaleLowerCase().startsWith("application/json")) {
-    if (method === "listgoods") {
+    if (method === "listgoods" || method === "listbrands") {
       return [];
     }
     throw new SupplierIntegrationError("Forum-Auto API returned an unexpected content type", {
@@ -136,7 +137,7 @@ export function parseForumAutoApiResponse(response: SiteHttpResponse, method?: F
   try {
     payload = JSON.parse(response.body) as unknown;
   } catch {
-    if (method === "listgoods") {
+    if (method === "listgoods" || method === "listbrands") {
       return [];
     }
     throw new SupplierIntegrationError("Forum-Auto API returned invalid JSON", {
@@ -146,12 +147,12 @@ export function parseForumAutoApiResponse(response: SiteHttpResponse, method?: F
 
   const faultCode = forumAutoFaultCode(payload);
   if (faultCode !== null) {
-    if (method === "listgoods" && ![5, 6, 10, 11, 12].includes(faultCode)) {
+    if ((method === "listgoods" || method === "listbrands") && ![5, 6, 10, 11, 12].includes(faultCode)) {
       return [];
     }
     throw forumAutoFaultError(faultCode);
   }
-  if (method === "listgoods" && !Array.isArray(payload)) {
+  if ((method === "listgoods" || method === "listbrands") && !Array.isArray(payload)) {
     return [];
   }
   return payload;
@@ -236,6 +237,23 @@ export function parseForumAutoApiAnalogResults(
     }
   }
   return results;
+}
+
+export function parseForumAutoApiBrands(payload: unknown, requestedArticle: string): string[] {
+  const target = normalizeArticle(requestedArticle);
+  const brands = new Set<string>();
+  for (const value of apiItems(payload, "listBrands")) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      continue;
+    }
+    const item = value as { art?: unknown; brand?: unknown };
+    const article = typeof item.art === "string" ? item.art : "";
+    const brand = typeof item.brand === "string" ? item.brand.trim() : "";
+    if (article && normalizeArticle(article) === target && brand) {
+      brands.add(brand);
+    }
+  }
+  return [...brands];
 }
 
 async function forumAutoApiRequest(
@@ -347,5 +365,26 @@ export class ForumAutoApiAdapter implements SupplierAdapter {
       credentials,
     );
     parseForumAutoApiAnalogResults(payload, article, query.brand).forEach(onResult);
+  }
+
+  async searchBrands(
+    query: BrandDiscoveryQuery,
+    context: SupplierSearchContext,
+    onBrands: (brands: string[]) => void,
+    sessionManager: SupplierSessionManager,
+  ): Promise<void> {
+    const credentials = sessionManager.getForumAutoCredentials();
+    if (!credentials) {
+      throw new SupplierAuthError("Forum-Auto API credentials are not configured");
+    }
+    const article = query.article.trim();
+    const payload = await this.request(
+      "listbrands",
+      new URLSearchParams({ art: article }),
+      context.signal,
+      context.timeoutMs,
+      credentials,
+    );
+    onBrands(parseForumAutoApiBrands(payload, article));
   }
 }

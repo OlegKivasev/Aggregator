@@ -99,34 +99,34 @@ test("Armtek return setting hides only confirmed non-returnable offers", () => {
   assert.equal(isArmtekReturnableVisible({ supplier: "stparts", isReturnable: false }, false), true);
 });
 
-test("PartKOM return preference is rendered and applied to regular and analog results", async () => {
+test("PartKOM return preference is rendered and applied only to regular results", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
 
   assert.match(html, /id="part-kom-non-returnable"/);
   assert.match(app, /autoservice\.partKomNonReturnable/);
   assert.match(app, /filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
-  assert.match(app, /filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?analogSearchResults\.filter/);
+  assert.match(app, /const visibleResults = analogSearchResults;/);
 });
 
-test("Forum-Auto return preference is rendered and applied to regular and analog results", async () => {
+test("Forum-Auto return preference is rendered and applied only to regular results", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
 
   assert.match(html, /id="forum-auto-non-returnable"/);
   assert.match(app, /autoservice\.forumAutoNonReturnable/);
   assert.match(app, /filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
-  assert.match(app, /filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?analogSearchResults\.filter/);
+  assert.match(app, /const visibleResults = analogSearchResults;/);
 });
 
-test("Armtek return preference is rendered and applied to regular and analog results", async () => {
+test("Armtek return preference is rendered and applied only to regular results", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
 
   assert.match(html, /id="armtek-non-returnable"/);
   assert.match(app, /autoservice\.armtekNonReturnable/);
   assert.match(app, /filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
-  assert.match(app, /filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?analogSearchResults\.filter/);
+  assert.match(app, /const visibleResults = analogSearchResults;/);
 });
 
 test("delivery date sorting moves intervals above dates they finish before", () => {
@@ -247,7 +247,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /analogs-best-price/);
   assert.match(app, /mode: "analogs"/);
   assert.match(app, /article: result\.article/);
-  assert.match(app, /brand: result\.brand/);
+  assert.match(app, /brands: \[result\.brand\]/);
   assert.match(app, /formatBrand\(result\.brand\)/);
   assert.match(app, /formatArticle\(result\.article\)/);
   assert.match(app, /const analogSupplierIds = \["rossko", "armtek", "part-kom", "stparts", "forum-auto"\]/);
@@ -258,7 +258,38 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /analogSearchCompleted \? Number\.POSITIVE_INFINITY/);
   assert.match(app, /analogsCount\.dataset\.tooltip = supplierBreakdown/);
   assert.match(app, /scheduleAnalogRowsRender/);
-  assert.match(app, /const exactResults = results\.filter\(\(result\) => result\.isAnalog !== true\);/);
+  assert.match(app, /const exactResults = items\.filter\(\(result\) => result\.isAnalog !== true\);/);
+});
+
+test("frontend keeps retail price as the configurable column and discovers brands after an empty search", async () => {
+  const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
+
+  assert.match(html, /id="purchase-price-toggle"[^>]*aria-pressed="false"/);
+  assert.match(html, /data-column="purchasePrice" hidden>Закупочная цена/);
+  assert.match(html, /data-column="markupPrice"[^>]*><button[^>]*data-sort-key="markupPrice">Цена/);
+  assert.match(html, /table-column-input" type="checkbox" value="markupPrice" checked><span>Цена/);
+  assert.doesNotMatch(html, /table-column-input" type="checkbox" value="price"/);
+  assert.match(app, /let sortState = \{ key: "markupPrice", direction: "ascending" \}/);
+  assert.match(app, /state\.key === "markupPrice" && comparison === 0/);
+  assert.match(app, /compareDeliveryDates\(left, right\)/);
+  assert.match(html, /id="article-analogs-modal"/);
+  assert.match(html, /id="article-analogs-modal-brands"/);
+  assert.match(html, /Выберите один или несколько брендов/);
+  assert.doesNotMatch(html, /По этому артикулу поставщики не вернули бренды/);
+  assert.doesNotMatch(html, /id="article-analogs-modal-search"/);
+  assert.match(app, /mode: "brands"/);
+  assert.match(app, /payload\.type === "brand_candidates"/);
+  assert.match(app, /startArticleBrandSearch\(\);/);
+  assert.match(app, /startArticleAnalogSearch\(article, brands/);
+  assert.match(app, /input\.type = "checkbox"/);
+  assert.match(app, /selectedBrands\.forEach\(\(brand\) =>/);
+  assert.match(app, /let analogSearchSources = new Set\(\);/);
+  assert.match(app, /const visibleResults = analogSearchResults;/);
+  assert.match(app, /const getMainTableResults = \(items\) =>/);
+  assert.match(app, /getMainTableResults\(tab\.results\)\.filteredResults\.length === 0/);
+  assert.match(app, /if \(!brands\.length\) \{\s+closeArticleAnalogsModal\(\);\s+return;/);
+  assert.match(app, /analogSupplierIds\.filter\(\(supplier\) => tab\?\.enabledSuppliers\.includes\(supplier\)/);
 });
 
 test("frontend can hide a supplier from searches, results, and authorization settings", async () => {
@@ -270,7 +301,7 @@ test("frontend can hide a supplier from searches, results, and authorization set
   assert.match(app, /const supplierVisibilityStorageKey = "autoservice\.supplierVisibility"/);
   assert.match(app, /const updateSupplierVisibility = \(supplier\)/);
   assert.match(app, /result\.isAnalog !== true\)[\s\S]*?isSupplierVisible\(result\.supplier\)/);
-  assert.match(app, /analogSearchResults\.filter\(\(result\) => isSupplierVisible\(result\.supplier\)\)/);
+  assert.match(app, /analogSearchSuppliers = analogSearchSuppliers\.filter\(isSupplierVisible\);/);
 });
 
 test("frontend preserves selected search suppliers when sessions load after restart", async () => {

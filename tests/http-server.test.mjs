@@ -206,6 +206,32 @@ test("HTTP server validates and transports an analog search query", async () => 
   ]);
 });
 
+test("HTTP server validates and transports a brand discovery query", async () => {
+  let receivedQuery;
+  const application = createApplication({
+    streamSearch: async (query, emit) => {
+      receivedQuery = query;
+      emit({ type: "search_started", article: query.article, suppliers: ["armtek"] });
+      emit({ type: "brand_candidates", supplier: "armtek", brands: ["Brand"] });
+      emit({ type: "search_completed", article: query.article });
+    },
+  });
+  const { baseUrl } = await listen(application);
+  const response = await fetch(`${baseUrl}/api/search?stream=once&mode=brands&article=ABC-123&supplier=armtek`);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(receivedQuery, {
+    mode: "brands",
+    article: "ABC-123",
+    suppliers: ["armtek"],
+  });
+  assert.deepEqual(parseSseEvents(await response.text()), [
+    { type: "search_started", article: "ABC-123", suppliers: ["armtek"] },
+    { type: "brand_candidates", supplier: "armtek", brands: ["Brand"] },
+    { type: "search_completed", article: "ABC-123" },
+  ]);
+});
+
 test("HTTP server aborts injected search work when the client disconnects", async () => {
   let resolveAbort;
   const abortObserved = new Promise((resolve) => {
