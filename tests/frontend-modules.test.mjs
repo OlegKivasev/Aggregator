@@ -319,8 +319,9 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
 
-  assert.match(html, /id="filters-toggle"[^>]*aria-controls="filters-sidebar"[^>]*aria-label="Открыть фильтры"[^>]*>•••/);
+  assert.match(html, /id="filters-toggle"[^>]*aria-controls="filters-sidebar"[^>]*aria-label="Открыть фильтры"[^>]*>⋮/);
   assert.match(html, /id="filters-sidebar" hidden/);
+  assert.doesNotMatch(html, /<h2>Фильтры<\/h2>/);
   assert.match(html, /id="filters-suppliers"/);
   assert.match(html, /class="supplier-enabled-input" type="checkbox" value="rossko" checked/);
   assert.match(html, /data-filter-section="supplier"[\s\S]*?data-filter-section="brand"[\s\S]*?data-filter-section="article"[\s\S]*?data-filter-section="warehouse"[\s\S]*?data-filter-section="markupPrice"[\s\S]*?data-filter-section="deliveryDate"/);
@@ -328,6 +329,9 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.doesNotMatch(html, /Уточнить результаты/);
   assert.match(app, /filtersResize\.addEventListener\("pointerdown"/);
   assert.match(app, /button\.setAttribute\("aria-pressed", String\(selected\)\)/);
+  assert.match(app, /const candidateResults = getFilteredResults\(visibleExactResults, tableSearchTerm, markupPercent, column\);/);
+  assert.match(app, /section\.hidden = !visibleTableColumns\.has\(column\) \|\| values\.length === 0;/);
+  assert.match(app, /section\.hidden = !visibleTableColumns\.has\(column\) \|\| !hasValues;/);
   assert.match(app, /const filtersWidthStorageKey = "autoservice\.filtersWidth"/);
   assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
   assert.match(styles, /\.filters-sidebar__resize\s*\{[^}]*cursor: col-resize;/s);

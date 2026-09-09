@@ -299,7 +299,7 @@ const hasActiveFilter = (column) => (rangeFilterColumns.has(column)
 
 const hasAnyActiveFilters = () => tableColumnIds.some((column) => hasActiveFilter(column));
 
-const getFilteredResults = (sourceResults, searchTerm, percent) => {
+const getFilteredResults = (sourceResults, searchTerm, percent, ignoredFilterColumn = null) => {
   const normalizedSearchTerm = searchTerm.trim().toLocaleLowerCase();
 
   return sourceResults.filter((result) => {
@@ -317,6 +317,10 @@ const getFilteredResults = (sourceResults, searchTerm, percent) => {
     }
 
     return tableColumnIds.every((column) => {
+      if (column === ignoredFilterColumn) {
+        return true;
+      }
+
       if (!hasActiveFilter(column)) {
         return true;
       }
@@ -341,35 +345,47 @@ const getFilteredResults = (sourceResults, searchTerm, percent) => {
 };
 
 const renderFilterValues = () => {
+  const visibleExactResults = getVisibleMainExactResults(results);
+
   mainFilterColumns.forEach((column) => {
     const container = filterValueContainers[column];
+    const section = filterSections[column];
+    const candidateResults = getFilteredResults(visibleExactResults, tableSearchTerm, markupPercent, column);
     container.replaceChildren();
+
     if (rangeFilterColumns.has(column)) {
+      const hasValues = candidateResults.some((result) => Number.isFinite(getRangeFilterValue(result, column, markupPercent)));
+      section.hidden = !visibleTableColumns.has(column) || !hasValues;
+      if (!hasValues) {
+        return;
+      }
+
       const isDate = column === "deliveryDate";
-    const createRangeInput = (bound, labelText) => {
-      const label = document.createElement("label");
-      label.className = "filters-sidebar__range";
-      const text = document.createElement("span");
-      text.textContent = labelText;
-      const input = document.createElement("input");
-      input.type = isDate ? "date" : "number";
-      input.min = isDate ? "" : "0";
-      input.step = isDate ? "" : "0.01";
-      input.placeholder = isDate ? "дд.мм.гггг" : "0";
-      input.value = getFilterRange(column)[bound];
-      input.dataset.filterColumn = column;
-      input.dataset.filterRange = bound;
-      label.append(text, input);
-      return label;
-    };
+      const createRangeInput = (bound, labelText) => {
+        const label = document.createElement("label");
+        label.className = "filters-sidebar__range";
+        const text = document.createElement("span");
+        text.textContent = labelText;
+        const input = document.createElement("input");
+        input.type = isDate ? "date" : "number";
+        input.min = isDate ? "" : "0";
+        input.step = isDate ? "" : "0.01";
+        input.placeholder = isDate ? "дд.мм.гггг" : "0";
+        input.value = getFilterRange(column)[bound];
+        input.dataset.filterColumn = column;
+        input.dataset.filterRange = bound;
+        label.append(text, input);
+        return label;
+      };
       container.replaceChildren(
-      createRangeInput("from", "От"),
-      createRangeInput("to", "До"),
-    );
+        createRangeInput("from", "От"),
+        createRangeInput("to", "До"),
+      );
       return;
     }
 
-    const values = [...new Set(results.map((result) => getFilterValue(result, column)))].sort(resultCollator.compare);
+    const values = [...new Set(candidateResults.map((result) => getFilterValue(result, column)))].sort(resultCollator.compare);
+    section.hidden = !visibleTableColumns.has(column) || values.length === 0;
     container.replaceChildren(...values.map((value) => {
       const button = document.createElement("button");
       const selected = getSelectedFilterValues(column).has(value);
@@ -1013,12 +1029,18 @@ const closeTab = (tabId) => {
   saveSearchState();
 };
 
-const getMainTableResults = (items) => {
+const getVisibleMainExactResults = (items) => {
   // Older persisted tabs can still contain automatically fetched analogs.
   const exactResults = items.filter((result) => result.isAnalog !== true);
-  const visibleExactResults = filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
+  return filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
     exactResults.filter((result) => isSupplierVisible(result.supplier)),
   ))));
+};
+
+const getMainTableResults = (items) => {
+  // Kept separately so the empty-state message considers all exact results.
+  const exactResults = items.filter((result) => result.isAnalog !== true);
+  const visibleExactResults = getVisibleMainExactResults(items);
 
   return {
     exactResults,

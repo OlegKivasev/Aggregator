@@ -250,11 +250,17 @@ input {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
+  gap: 10px;
+}
+
+.workspace:has(.filters-sidebar:not([hidden])) {
+  grid-template-columns: auto auto minmax(0, 1fr);
   gap: 18px;
 }
 
 .search-shell {
   display: flex;
+  grid-column: 2;
   width: 100%;
   min-width: 0;
   flex-direction: column;
@@ -302,27 +308,32 @@ input {
 }
 
 .filters-toggle {
-  width: 44px;
+  grid-column: 1;
+  width: 28px;
+  height: 34px;
+  align-self: start;
+  padding: 0;
   border: 0;
-  border-left: 1px solid #e1e6eb;
-  color: #455363;
-  background: #fff;
-  font-size: 18px;
+  color: #8d99a6;
+  background: transparent;
+  font-size: 24px;
   font-weight: 800;
-  letter-spacing: 1px;
+  line-height: 1;
 }
 
 .filters-toggle:hover,
 .filters-toggle:focus-visible,
 .filters-toggle[aria-expanded="true"] {
   color: var(--accent-dark);
-  background: #fff8f4;
+  border-radius: 7px;
+  background: #fff1eb;
   outline: 0;
 }
 
 .filters-sidebar {
   --filters-sidebar-width: 280px;
   position: sticky;
+  grid-column: 2;
   top: 16px;
   width: var(--filters-sidebar-width);
   min-width: 220px;
@@ -332,18 +343,20 @@ input {
   background: var(--surface);
 }
 
+.workspace:has(.filters-sidebar:not([hidden])) .search-shell {
+  grid-column: 3;
+}
+
 .filters-sidebar[hidden] {
   display: none;
 }
 
 .filters-sidebar__header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
 }
 
-.filters-sidebar__header h2,
 .filters-sidebar__section h3 {
   margin: 0;
   color: var(--ink);
@@ -486,9 +499,12 @@ input {
   touch-action: none;
 }
 
-.filters-sidebar__resize:hover,
 .filters-sidebar__resize:focus-visible {
-  background: rgba(255, 75, 19, 0.16);
+  outline: 2px solid rgba(255, 75, 19, 0.45);
+  outline-offset: 2px;
+}
+
+.filters-sidebar__resize:hover {
   outline: 0;
 }
 
@@ -2594,10 +2610,10 @@ th[aria-sort="descending"] .analogs-sort span::after {
   }
 
   .filters-toggle {
-    min-height: 40px;
-    min-width: 44px;
-    margin-left: auto;
-    border-left: 1px solid var(--line);
+    min-height: 34px;
+    min-width: 28px;
+    margin-left: 0;
+    border-left: 0;
   }
 
   .settings-button {
@@ -2621,8 +2637,16 @@ th[aria-sort="descending"] .analogs-sort span::after {
 }
 
 @media (max-width: 900px) {
-  .workspace {
+  .workspace,
+  .workspace:has(.filters-sidebar:not([hidden])) {
     grid-template-columns: 1fr;
+  }
+
+  .filters-toggle,
+  .filters-sidebar,
+  .search-shell,
+  .workspace:has(.filters-sidebar:not([hidden])) .search-shell {
+    grid-column: 1;
   }
 
   .filters-sidebar {
