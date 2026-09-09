@@ -362,6 +362,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(app, /showWarehouseTooltip/);
   assert.match(styles, /\.results-data-table thead\s*\{[^}]*position: sticky;/s);
   assert.match(styles, /\.results-data-table\s*\{[^}]*width: max\(100%, var\(--results-table-min-width,/s);
+  assert.match(styles, /\.results-data-table \[data-column="purchasePrice"\],\s*\.results-data-table \[data-column="price"\],\s*\.results-data-table \[data-column="markupPrice"\]\s*\{[^}]*text-align: right;/s);
   assert.doesNotMatch(styles, /\.results-data-table th:nth-child/);
   assert.match(styles, /\.warehouse-code\s*\{[^}]*max-width: 100%;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/s);
   assert.match(styles, /\.results-table\s*\{[^}]*overflow: auto;/s);
