@@ -328,6 +328,7 @@ at most 80 product cards and 80 crosses per product.
 - Use Node.js 26 and install dependencies from `pnpm-lock.yaml` with `pnpm install --frozen-lockfile`.
 - Run `pnpm exec playwright install chromium` when no system Chrome or Edge path is configured.
 - Set `STATE_DIR` to a directory outside the application checkout. Restrict it to the dedicated service account because it contains supplier cookies, tokens, and optionally encrypted credentials.
+- Set `GARAGE_DB_PATH` to an absolute SQLite path outside both the checkout and `STATE_DIR`. Restrict and back up its directory, including SQLite WAL/SHM files.
 - Set `SUPPLIER_CREDENTIALS_ENCRYPTION_KEY` from the deployment secret manager to a base64-encoded random 32-byte key. Do not put the key in the checkout or `STATE_DIR`; losing it requires restoring the original key or moving the unreadable credential file aside and authorizing suppliers again.
 - Connect Rossko from the supplier settings using API keys K1 and K2.
 - Terminate TLS and require authentication at the reverse proxy before exposing `/api/*`.

@@ -105,6 +105,7 @@ export interface SearchSupplierStatusEvent {
 export interface SearchResultEvent {
   type: "result";
   result: NormalizedSearchResult;
+  offerId?: string;
 }
 
 export interface SearchBrandCandidatesEvent {

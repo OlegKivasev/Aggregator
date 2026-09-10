@@ -153,7 +153,11 @@ test("HTTP server transports mixed supplier SSE events without changing them", a
   const response = await fetch(`${baseUrl}/api/search?stream=once&article=ABC-123&supplier=rossko&supplier=armtek`);
 
   assert.equal(response.status, 200);
-  assert.deepEqual(parseSseEvents(await response.text()), expectedEvents);
+  const events = parseSseEvents(await response.text());
+  const result = events.find((event) => event.type === "result");
+  assert.match(result.offerId, /^[0-9a-f-]{36}$/i);
+  delete result.offerId;
+  assert.deepEqual(events, expectedEvents);
 });
 
 test("HTTP server parses Rossko K1 and K2 without exposing them", async () => {

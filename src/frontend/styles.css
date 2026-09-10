@@ -8,6 +8,28 @@
   --page: #f5f7fa;
 }
 
+.garage-control { display: flex; align-items: flex-start; }
+.garage-sidebar { width: min(280px, 28vw); min-width: 210px; padding: .75rem; }
+.garage-sidebar header, .garage-view__header, .garage-add-modal__card header { display: flex; gap: .75rem; align-items: center; justify-content: space-between; }
+.garage-sidebar input { width: 100%; margin: .65rem 0; }
+.garage-vehicles { list-style: none; padding: 0; margin: 0; max-height: 55vh; overflow: auto; }
+.garage-vehicles__item { padding: .55rem .4rem; border-radius: .35rem; cursor: pointer; }
+.garage-vehicles__item:hover, .garage-vehicles__item:focus, .garage-add-modal__vehicle.is-selected { background: #e7f0ff; outline: 0; }
+.garage-view { margin-top: 1rem; padding: 1rem; }
+.garage-view__table { overflow: auto; }
+.garage-view td input { min-width: 7rem; width: 100%; }
+.garage-item--problem { background: #fff0f0; }
+.garage-add-cell { width: 2.5rem; text-align: center; }
+.garage-offer-button { border: 0; background: transparent; font-size: 1.1rem; }
+.garage-add-modal { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; }
+.garage-add-modal__backdrop { position: absolute; inset: 0; background: rgba(20, 31, 45, .46); }
+.garage-add-modal__card { position: relative; width: min(440px, calc(100vw - 2rem)); padding: 1rem; display: grid; gap: .8rem; }
+.garage-add-modal__card label { display: grid; gap: .35rem; }
+.garage-add-modal__card footer { display: flex; justify-content: flex-end; gap: .5rem; }
+.garage-add-modal__vehicle { display: block; width: 100%; text-align: left; margin: .2rem 0; }
+
+@media (max-width: 800px) { .garage-sidebar { position: fixed; right: .75rem; top: 5rem; width: calc(100vw - 1.5rem); z-index: 1000; } }
+
 * {
   box-sizing: border-box;
 }
@@ -248,7 +270,7 @@ input {
 
 .workspace {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   height: calc(100dvh - 52px);
   min-height: 420px;
   align-items: start;
@@ -281,6 +303,10 @@ input {
   flex-direction: column;
   gap: 18px;
 }
+
+.garage-control { grid-column: 3; grid-row: 1; }
+.garage-sidebar { grid-column: 3; grid-row: 1; height: 100%; }
+.workspace:has(.garage-sidebar:not([hidden])) .garage-control { display: none; }
 
 .search-row {
   display: flex;
@@ -2669,7 +2695,9 @@ th[aria-sort="descending"] .analogs-sort span::after {
   }
 
   .filters-control,
-  .search-shell {
+  .search-shell,
+  .garage-control,
+  .garage-sidebar {
     grid-column: 1;
   }
 

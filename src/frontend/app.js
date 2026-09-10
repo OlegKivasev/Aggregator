@@ -19,6 +19,7 @@ import {
 import { isPartKomReturnableVisible } from "./partkom-return-settings.js";
 import { isForumAutoReturnableVisible } from "./forum-auto-return-settings.js";
 import { isArmtekReturnableVisible } from "./armtek-return-settings.js";
+import { bootstrapGarage } from "./garage-ui.js";
 
 const form = document.querySelector("#search-form");
 const articleInput = document.querySelector("#article-input");
@@ -1222,7 +1223,7 @@ const renderResults = () => {
     const isBestPrice = result === bestPrice;
 
     return `
-      <tr class="results-table__row main-result-row${isBestPrice ? " is-best-price" : ""}" data-result-index="${results.indexOf(result)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Действия для ${escapeHtml(result.title)}">
+      <tr class="results-table__row main-result-row${isBestPrice ? " is-best-price" : ""}" data-result-index="${results.indexOf(result)}" draggable="${Boolean(result.offerId)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Действия для ${escapeHtml(result.title)}">
         <td data-column="supplier">${escapeHtml(supplierName)}</td>
         <td data-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-column="article">${escapeHtml(formatArticle(result.article))}</td>
@@ -1232,11 +1233,12 @@ const renderResults = () => {
         <td data-column="purchasePrice">${escapeHtml(formatPrice(result.price))}</td>
         <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         <td data-column="deliveryDate">${escapeHtml(deliveryDate)}</td>
+        <td class="garage-add-cell"><button type="button" class="garage-offer-button" data-garage-offer-id="${escapeHtml(result.offerId ?? "")}" ${result.offerId ? "" : "disabled"} aria-label="Добавить в гараж">▣</button></td>
       </tr>
     `;
   };
   const renderEmptyRow = (message) => `
-    <tr class="results-table__empty"><td colspan="${Math.max(getVisibleTableColumns().length, 1)}">${message}</td></tr>
+      <tr class="results-table__empty"><td colspan="${Math.max(getVisibleTableColumns().length + 1, 1)}">${message}</td></tr>
   `;
 
   const emptyMessage = exactResults.length ? "Нет позиций с выбранными условиями." : "По вашему запросу ничего не найдено.";
@@ -2277,6 +2279,7 @@ const renderAnalogRows = () => {
         <td data-analog-column="purchasePrice"${showPurchasePrices ? "" : " hidden"}><span class="analogs-result-price">${escapeHtml(formatPrice(result.price))}</span></td>
         <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
         <td data-analog-column="deliveryDate">${escapeHtml(deliveryDate)}</td>
+        <td class="garage-add-cell"><button type="button" class="garage-offer-button" data-garage-offer-id="${escapeHtml(result.offerId ?? "")}" ${result.offerId ? "" : "disabled"} aria-label="Добавить в гараж">▣</button></td>
       </tr>`;
   }).join("");
   applyAnalogTableColumns();
@@ -2880,7 +2883,7 @@ const startSearch = (article, enabledSuppliers) => {
     }
 
     if (payload.type === "result") {
-      tab.results.push(payload.result);
+      tab.results.push({ ...payload.result, offerId: typeof payload.offerId === "string" ? payload.offerId : "" });
       updateSearchProgress(tab);
       if (tab.id === activeTabId) {
         results = tab.results;
@@ -3044,3 +3047,4 @@ setSearchUiState(false);
 renderTabs();
 renderResults();
 loadSessions().catch(() => undefined);
+bootstrapGarage({ getMarkupPercent: () => markupPercent });

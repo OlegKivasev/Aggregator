@@ -385,7 +385,7 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(app, /Средняя закуп\. цена/);
   assert.match(app, /Средняя цена/);
   assert.match(app, /Math\.max\(180, Math\.round\(width \/ 10\) \* 10\)/);
-  assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
+  assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\) auto;/s);
   assert.match(styles, /\.workspace\s*\{[^}]*height: calc\(100dvh - 52px\);[^}]*overflow: hidden;/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-items: center;/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-self: stretch;/s);

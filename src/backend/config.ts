@@ -139,6 +139,29 @@ export function getStateFilePath(fileName: string): string {
   return resolve(stateDir, fileName);
 }
 
+export function getGarageDatabasePath(): string {
+  const configuredPath = optionalEnvironmentValue("GARAGE_DB_PATH");
+  if (!configuredPath) {
+    throw new Error("GARAGE_DB_PATH is required");
+  }
+  if (!isAbsolute(configuredPath)) {
+    throw new Error("GARAGE_DB_PATH must be an absolute path");
+  }
+  const databasePath = resolve(configuredPath);
+  const databaseDirectory = dirname(databasePath);
+  if (isInsideDirectory(resolvePotentialRealPath(checkoutDir), resolvePotentialRealPath(databasePath))) {
+    throw new Error("GARAGE_DB_PATH must be outside the application checkout");
+  }
+  const configuredStateDir = optionalEnvironmentValue("STATE_DIR");
+  if (configuredStateDir && isInsideDirectory(resolvePotentialRealPath(resolve(configuredStateDir)), resolvePotentialRealPath(databasePath))) {
+    throw new Error("GARAGE_DB_PATH must be outside STATE_DIR");
+  }
+  if (basename(databasePath) !== databasePath.slice(databaseDirectory.length + 1)) {
+    throw new Error("GARAGE_DB_PATH must name a database file");
+  }
+  return databasePath;
+}
+
 export const armtekApiBaseUrl = readSupplierUrl(
   "ARMTEK_API_BASE_URL",
   "https://ws.armtek.ru/api",

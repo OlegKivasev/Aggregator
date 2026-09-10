@@ -26,6 +26,8 @@ import {
 } from "./request-body.ts";
 import { securityHeaders, serveJson, writeSseEvent } from "./responses.ts";
 import { serveStatic } from "./static-files.ts";
+import { createHttpGarageApplication } from "../garage/http-garage-application.ts";
+import { GarageConflictError, GarageNotFoundError, GarageOfferExpiredError, GarageValidationError } from "../garage/garage-application-service.ts";
 
 export interface AggregatorApplication {
   listSupplierSessions(): SupplierSessionState[];
@@ -121,6 +123,34 @@ async function serveAuthorization<TCredentials>(
   }
 }
 
+function garagePayload(payload: unknown): Record<string, unknown> {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new GarageValidationError("request payload is invalid");
+  }
+  return payload as Record<string, unknown>;
+}
+
+function serveGarageError(response: ServerResponse, error: unknown, reportError: (event: OperationalErrorEvent) => void, operation: string): void {
+  if (error instanceof RequestBodyError || error instanceof GarageValidationError) {
+    serveJson(response, 400, { message: "Garage request is invalid" });
+    return;
+  }
+  if (error instanceof GarageOfferExpiredError) {
+    serveJson(response, 410, { message: "Search offer has expired. Run the search again." });
+    return;
+  }
+  if (error instanceof GarageConflictError) {
+    serveJson(response, 409, { message: "Garage data was changed by another employee. Reload it and try again." });
+    return;
+  }
+  if (error instanceof GarageNotFoundError) {
+    serveJson(response, 404, { message: "Garage record was not found" });
+    return;
+  }
+  reportError({ operation, category: "internal" });
+  serveJson(response, 500, { message: "Garage operation failed" });
+}
+
 export function createAggregatorServer({
   application,
   publicDir,
@@ -129,8 +159,9 @@ export function createAggregatorServer({
   ),
 }: CreateAggregatorServerOptions): Server {
   const resolvedPublicDir = resolve(publicDir);
+  const garage = createHttpGarageApplication(application.streamSearch.bind(application));
 
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     if (!request.url) {
       serveJson(response, 400, { message: "Missing URL" });
       return;
@@ -146,6 +177,72 @@ export function createAggregatorServer({
     if (request.method === "GET" && url.pathname === "/api/suppliers/sessions") {
       serveJson(response, 200, { sessions: application.listSupplierSessions() });
       return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/garage/vehicles") {
+      try {
+        serveJson(response, 200, { vehicles: garage.listVehicles(url.searchParams.get("search") ?? "") });
+      } catch (error) { serveGarageError(response, error, reportError, "list-garage-vehicles"); }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/garage/vehicles") {
+      try {
+        serveJson(response, 201, { vehicle: garage.createVehicle(garagePayload(await readJsonBody(request)).name) });
+      } catch (error) { serveGarageError(response, error, reportError, "create-garage-vehicle"); }
+      return;
+    }
+
+    const vehicleMatch = /^\/api\/garage\/vehicles\/([0-9a-f-]{36})(?:\/(items|refresh))?$/.exec(url.pathname);
+    if (vehicleMatch) {
+      const [, vehicleId, action] = vehicleMatch;
+      try {
+        if (!action && request.method === "GET") {
+          serveJson(response, 200, { vehicle: garage.getVehicle(vehicleId) });
+          return;
+        }
+        if (!action && request.method === "PATCH") {
+          const payload = garagePayload(await readJsonBody(request));
+          serveJson(response, 200, { vehicle: garage.renameVehicle(vehicleId, payload.revision, payload.name) });
+          return;
+        }
+        if (!action && request.method === "DELETE") {
+          const payload = garagePayload(await readJsonBody(request));
+          garage.deleteVehicle(vehicleId, payload.revision);
+          serveJson(response, 204, null);
+          return;
+        }
+        if (action === "items" && request.method === "POST") {
+          const payload = garagePayload(await readJsonBody(request));
+          const item = garage.addOffer(vehicleId, payload.vehicleRevision, payload.offerId, payload.markupPercent, payload.requiredQuantity, payload.duplicateStrategy);
+          serveJson(response, "duplicate" in item ? 409 : 201, "duplicate" in item ? { duplicate: item.duplicate } : { item });
+          return;
+        }
+        if (action === "refresh" && request.method === "POST") {
+          const payload = garagePayload(await readJsonBody(request));
+          const controller = new AbortController();
+          response.once("close", () => controller.abort(new Error("Client disconnected")));
+          const vehicle = await garage.refreshVehicle(vehicleId, payload.revision, controller.signal);
+          if (!controller.signal.aborted) serveJson(response, 200, { vehicle });
+          return;
+        }
+      } catch (error) { serveGarageError(response, error, reportError, "garage-vehicle"); return; }
+    }
+
+    const itemMatch = /^\/api\/garage\/items\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (itemMatch) {
+      try {
+        const payload = garagePayload(await readJsonBody(request));
+        if (request.method === "PATCH") {
+          serveJson(response, 200, { item: garage.updateItem(itemMatch[1], payload.revision, payload.requiredQuantity, payload.comment) });
+          return;
+        }
+        if (request.method === "DELETE") {
+          garage.deleteItem(itemMatch[1], payload.revision);
+          serveJson(response, 204, null);
+          return;
+        }
+      } catch (error) { serveGarageError(response, error, reportError, "garage-item"); return; }
     }
 
     if (request.method === "POST" && url.pathname === "/api/suppliers/sessions/validate") {
@@ -295,7 +392,13 @@ export function createAggregatorServer({
           : mode === "brands"
             ? { mode, article, suppliers }
             : { article, suppliers };
-        await application.streamSearch(query, (event) => writeSseEvent(response, event), controller.signal);
+        await application.streamSearch(query, (event) => {
+          if (event.type === "result") {
+            writeSseEvent(response, { ...event, offerId: garage.registerSearchOffer(event.result) });
+            return;
+          }
+          writeSseEvent(response, event);
+        }, controller.signal);
       } catch (error) {
         if (!controller.signal.aborted && !response.destroyed) {
           reportError({ operation: "stream-search", category: classifyOperationalError(error) });
@@ -314,4 +417,6 @@ export function createAggregatorServer({
 
     serveJson(response, 405, { message: "Method not allowed" });
   });
+  server.once("close", () => garage.close());
+  return server;
 }
