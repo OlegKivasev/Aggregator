@@ -24,12 +24,7 @@
       </nav>
       <header class="garage-titlebar card border-0 shadow-sm mb-4" id="garage-titlebar" hidden>
         <button type="button" class="btn btn-light garage-titlebar__back" id="garage-back" aria-label="Вернуться к поиску" title="Вернуться к поиску">←</button>
-        <h1 id="garage-vehicle-name"></h1>
-        <label class="table-search-control garage-titlebar__search" for="garage-table-search">
-          <span class="visually-hidden">Поиск по таблице гаража</span>
-          <input id="garage-table-search" type="search" placeholder="Бренд, артикул или название" autocomplete="off" />
-        </label>
-        <button type="button" class="purchase-price-toggle" id="garage-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены" title="Показать закупочные цены"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.8" /><path d="m3 3 18 18" /></svg></button>
+        <div class="garage-titlebar__heading"><span>Товары для автомобиля</span><h1 id="garage-vehicle-name"></h1></div>
         <button type="button" class="btn btn-primary" id="garage-refresh">Актуализировать предложения</button>
       </header>
 
@@ -196,33 +191,43 @@
           <div class="garage-sidebar__resize" id="garage-resize" role="separator" aria-label="Изменить ширину гаража" aria-orientation="vertical" tabindex="0"></div>
         </aside>
       </div>
-      <section class="garage-view results-panel card border-0 shadow-sm overflow-hidden" id="garage-view" hidden>
-        <header class="results-panel__header garage-view__header card-header bg-white border-0">
-          <div class="results-panel__heading">
-            <h2>Предложения</h2>
-            <span class="panel__meta results-panel__status" id="garage-status" role="status"></span>
-            <span class="panel__meta results-count" id="garage-result-count" tabindex="0">0</span>
-          </div>
-          <button type="button" class="filters-toggle garage-filters-toggle" id="garage-filters-toggle" aria-controls="garage-filters-sidebar" aria-expanded="false" aria-label="Показать фильтры" title="Показать фильтры">⋮</button>
-        </header>
-        <div class="garage-view__content">
+      <div class="garage-workspace" id="garage-workspace" hidden>
+        <div class="filters-control garage-filters-control">
+          <button type="button" class="filters-toggle garage-filters-toggle" id="garage-filters-toggle" aria-controls="garage-filters-sidebar" aria-expanded="false" aria-label="Открыть фильтры" title="Открыть фильтры">⋮</button>
           <aside class="filters-sidebar garage-filters-sidebar card border-0 shadow-sm" id="garage-filters-sidebar" hidden>
             <section class="filters-sidebar__section garage-filters-sidebar__section"><h3>Поставщик</h3><div class="filters-sidebar__values" id="garage-filter-supplier" aria-live="polite"></div></section>
             <section class="filters-sidebar__section"><h3>Бренд</h3><div class="filters-sidebar__values" id="garage-filter-brand" aria-live="polite"></div></section>
             <section class="filters-sidebar__section"><h3>Артикул</h3><div class="filters-sidebar__values" id="garage-filter-article" aria-live="polite"></div></section>
             <section class="filters-sidebar__section"><h3>Наличие</h3><div class="filters-sidebar__values" id="garage-filter-availability" aria-live="polite"></div></section>
             <button type="button" class="filters-sidebar__reset" id="garage-filters-reset" hidden>Сбросить фильтры</button>
+            <div class="filters-sidebar__resize" id="garage-filters-resize" role="separator" aria-label="Изменить ширину фильтров гаража" aria-orientation="vertical" tabindex="0"></div>
           </aside>
+        </div>
+      <section class="garage-view results-panel card border-0 shadow-sm overflow-hidden" id="garage-view">
+        <header class="results-panel__header garage-view__header card-header bg-white border-0">
+          <div class="results-panel__heading">
+            <h2>Предложения</h2>
+            <span class="panel__meta results-panel__status" id="garage-status" role="status"></span>
+            <span class="panel__meta results-count" id="garage-result-count" tabindex="0">0</span>
+          </div>
+          <div class="results-panel__controls">
+            <label class="table-search-control" for="garage-table-search">
+              <span class="visually-hidden">Поиск по таблице гаража</span>
+              <input id="garage-table-search" type="search" placeholder="Бренд, артикул или название" autocomplete="off" />
+            </label>
+            <button type="button" class="purchase-price-toggle" id="garage-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены" title="Показать закупочные цены"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.8" /><path d="m3 3 18 18" /></svg></button>
+          </div>
+        </header>
           <div class="results-table garage-view__table">
             <table class="table table-hover align-middle mb-0 results-data-table garage-data-table">
               <thead><tr>
-              <th scope="col" data-garage-column="purchase-price" id="garage-purchase-price-heading" hidden aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="purchasePrice">Закупочная цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="supplier" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="supplier">Поставщик<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="brand" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="brand">Бренд<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="article" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="article">Артикул<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="title" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="title">Наименование<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="availability" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="availability">Наличие<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="quantity" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="quantity">Количество<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              <th scope="col" data-garage-column="purchase-price" id="garage-purchase-price-heading" hidden aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="purchasePrice">Закупочная цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="price" aria-sort="ascending"><button type="button" class="table-sort is-active" data-garage-sort-key="price">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="sum" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="sum">Сумма<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" class="garage-actions-column"><span class="visually-hidden">Удалить товар</span></th>
@@ -230,9 +235,9 @@
               <tbody id="garage-items"></tbody>
             </table>
           </div>
-        </div>
         <footer class="results-panel__footer" aria-hidden="true"></footer>
       </section>
+      </div>
       <div class="garage-toast" id="garage-toast" role="status" aria-live="polite" hidden></div>
     </main>
 

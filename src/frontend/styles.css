@@ -33,15 +33,18 @@
 .garage-vehicle-delete { color: #7a271a; font-size: 12px; font-weight: 700; }
 .garage-vehicle-delete__confirm { color: #fff; border-color: #b42318; background: #b42318; }
 .garage-vehicle-delete__confirm:hover, .garage-vehicle-delete__confirm:focus-visible { border-color: #8f1c13; background: #8f1c13; }
-.garage-titlebar { display: grid; min-height: 58px; grid-template-columns: 34px minmax(0, 1fr) minmax(160px, 390px) 34px auto; gap: 12px; align-items: center; padding: 10px 18px; }
+.garage-titlebar { display: grid; min-height: 58px; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 18px; }
 .garage-titlebar__back { width: 34px; min-width: 34px; height: 34px; padding: 0; font-size: 18px; line-height: 1; }
-.garage-titlebar h1 { min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font-size: 16px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
-.garage-titlebar__search { width: 100%; min-width: 0; }
-.garage-view { margin-top: 1rem; padding: 0; }
-.garage-view__content { display: flex; min-height: 0; flex: 1 1 auto; }
+.garage-titlebar__heading { min-width: 0; }
+.garage-titlebar__heading > span { display: block; color: var(--muted); font-size: 11px; font-weight: 700; }
+.garage-titlebar h1 { min-width: 0; margin: 1px 0 0; overflow: hidden; color: var(--ink); font-size: 16px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.garage-workspace { display: grid; grid-template-columns: auto minmax(0, 1fr); min-height: 420px; margin-top: 1rem; gap: 10px; }
+.garage-filters-control { grid-column: 1; display: flex; min-height: 0; align-self: stretch; align-items: center; }
+.garage-filters-control:has(.garage-filters-sidebar:not([hidden])) { align-self: stretch; align-items: center; gap: 10px; }
+.garage-filters-control:has(.garage-filters-sidebar:not([hidden])) .garage-filters-toggle { display: none; }
+.garage-view { grid-column: 2; margin: 0; padding: 0; min-width: 0; }
 .garage-view__table { min-width: 0; overflow: auto; }
-.garage-filters-toggle { margin-left: auto; }
-.garage-filters-sidebar { flex: 0 0 var(--filters-sidebar-width); height: auto; border-radius: 0; }
+.garage-filters-sidebar { flex: 0 0 var(--filters-sidebar-width); height: 100%; border-radius: 14px; }
 .garage-filters-sidebar__section { margin-top: 0; padding-top: 0; border-top: 0; }
 .garage-data-table { --results-table-min-width: 1220px; }
 .garage-data-table [data-garage-column="availability"],
@@ -2423,12 +2426,10 @@ th[aria-sort="descending"] .analogs-sort span::after {
 }
 
 @media (max-width: 720px) {
-  .garage-titlebar { grid-template-columns: 34px minmax(0, 1fr) 34px auto; }
-  .garage-titlebar__search { grid-column: 1 / -1; grid-row: 2; }
+  .garage-titlebar { grid-template-columns: 34px minmax(0, 1fr) auto; }
   .garage-titlebar__back { grid-column: 1; }
-  .garage-titlebar h1 { grid-column: 2; }
-  .garage-titlebar #garage-price-toggle { grid-column: 3; }
-  .garage-titlebar #garage-refresh { grid-column: 4; }
+  .garage-titlebar__heading { grid-column: 2; }
+  .garage-titlebar #garage-refresh { grid-column: 3; }
 
   .results-panel__header {
     align-items: stretch;
@@ -2811,10 +2812,17 @@ th[aria-sort="descending"] .analogs-sort span::after {
     grid-template-columns: 1fr;
   }
 
+  .garage-workspace {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
   .filters-control,
   .search-shell,
   .garage-control,
-  .garage-sidebar {
+  .garage-sidebar,
+  .garage-filters-control,
+  .garage-view {
     grid-column: 1;
   }
 
@@ -2822,7 +2830,15 @@ th[aria-sort="descending"] .analogs-sort span::after {
     grid-row: 1;
   }
 
+  .garage-filters-control {
+    grid-row: 1;
+  }
+
   .search-shell {
+    grid-row: 2;
+  }
+
+  .garage-view {
     grid-row: 2;
   }
 

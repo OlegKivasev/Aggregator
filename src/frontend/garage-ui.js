@@ -25,6 +25,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const renameButton = document.querySelector("#garage-rename-button");
   const deleteButton = document.querySelector("#garage-delete-button");
   const titlebar = document.querySelector("#garage-titlebar");
+  const garageWorkspace = document.querySelector("#garage-workspace");
   const view = document.querySelector("#garage-view");
   const viewName = document.querySelector("#garage-vehicle-name");
   const itemsBody = document.querySelector("#garage-items");
@@ -33,6 +34,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const tableSearch = document.querySelector("#garage-table-search");
   const filtersToggle = document.querySelector("#garage-filters-toggle");
   const filtersSidebar = document.querySelector("#garage-filters-sidebar");
+  const filtersResize = document.querySelector("#garage-filters-resize");
   const filtersReset = document.querySelector("#garage-filters-reset");
   const filterContainers = {
     supplier: document.querySelector("#garage-filter-supplier"),
@@ -67,12 +69,14 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   let garageSortState = { key: "price", direction: "ascending" };
   const selectedFilterValues = new Map(["supplier", "brand", "article", "availability"].map((column) => [column, new Set()]));
   let resizeStart = null;
+  let filtersResizeStart = null;
   let editingVehicle = null;
   let deletingVehicleId = null;
   let contextVehicleId = null;
   let contextMenuAnchor = null;
   let toastTimer = null;
   const widthStorageKey = "autoservice-garage-sidebar-width-v1";
+  const filtersWidthStorageKey = "autoservice-garage-filters-width-v1";
   const closeThresholdRatio = 0.02;
   const garageColumnWidths = { supplier: 100, brand: 125, article: 140, title: 323, availability: 120, quantity: 120, purchasePrice: 120, price: 120, sum: 120 };
   const garageActionColumnWidth = 52;
@@ -96,8 +100,8 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const setFiltersOpen = (open) => {
     filtersSidebar.hidden = !open;
     filtersToggle.setAttribute("aria-expanded", String(open));
-    filtersToggle.setAttribute("aria-label", open ? "Скрыть фильтры" : "Показать фильтры");
-    filtersToggle.title = open ? "Скрыть фильтры" : "Показать фильтры";
+    filtersToggle.setAttribute("aria-label", open ? "Скрыть фильтры" : "Открыть фильтры");
+    filtersToggle.title = open ? "Скрыть фильтры" : "Открыть фильтры";
   };
   const setSidebarOpen = (open) => {
     sidebar.hidden = !open;
@@ -123,10 +127,29 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       setSidebarWidth(260);
     }
   };
+  const setFiltersSidebarWidth = (value) => {
+    const width = Number(value);
+    if (!Number.isFinite(width)) return;
+    const normalizedWidth = Math.min(420, Math.max(180, Math.round(width / 10) * 10));
+    filtersSidebar.style.setProperty("--filters-sidebar-width", `${normalizedWidth}px`);
+    try {
+      localStorage.setItem(filtersWidthStorageKey, String(normalizedWidth));
+    } catch {
+      // The panel remains resizable for this session when storage is unavailable.
+    }
+  };
+  const restoreFiltersSidebarWidth = () => {
+    try {
+      setFiltersSidebarWidth(localStorage.getItem(filtersWidthStorageKey) ?? 200);
+    } catch {
+      setFiltersSidebarWidth(200);
+    }
+  };
   const getCloseWidth = () => (sidebar.closest(".workspace")?.getBoundingClientRect().width ?? 0) * closeThresholdRatio;
+  const getFiltersCloseWidth = () => (garageWorkspace.getBoundingClientRect().width ?? 0) * closeThresholdRatio;
   const findVehicle = (id) => vehicles.find((vehicle) => vehicle.id === id) ?? null;
   const focusVehicleEditor = () => requestAnimationFrame(() => vehiclesList.querySelector(".garage-vehicle-editor__input")?.focus());
-  const showSearch = () => { view.hidden = true; titlebar.hidden = true; workspace.hidden = false; searchShell.hidden = false; searchTabs.hidden = false; };
+  const showSearch = () => { garageWorkspace.hidden = true; titlebar.hidden = true; workspace.hidden = false; searchShell.hidden = false; searchTabs.hidden = false; };
   const showVehicle = async (id) => {
     const { payload } = await api(`/api/garage/vehicles/${encodeURIComponent(id)}`);
     if (!payload.vehicle.items.length) {
@@ -136,12 +159,12 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       return;
     }
     selectedVehicle = payload.vehicle;
-    viewName.textContent = `Товары для автомобиля: ${selectedVehicle.name}`;
+    viewName.textContent = selectedVehicle.name;
     workspace.hidden = true;
     searchShell.hidden = true;
     searchTabs.hidden = true;
     titlebar.hidden = false;
-    view.hidden = false;
+    garageWorkspace.hidden = false;
     setStatus("");
     renderItems();
     await loadVehicles();
@@ -230,7 +253,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
           const { payload } = await api(`/api/garage/vehicles/${vehicle.id}`, { method: "PATCH", body: JSON.stringify({ revision: vehicle.revision, name }) });
           if (selectedVehicle?.id === vehicle.id) {
             selectedVehicle = { ...selectedVehicle, ...payload.vehicle };
-            viewName.textContent = `Товары для автомобиля: ${selectedVehicle.name}`;
+            viewName.textContent = selectedVehicle.name;
           }
         } else {
           await api("/api/garage/vehicles", { method: "POST", body: JSON.stringify({ name }) });
@@ -378,8 +401,9 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     filtersReset.hidden = ![...selectedFilterValues.values()].some((values) => values.size > 0);
   };
   const getGarageVisibleColumns = () => [
+    "supplier", "brand", "article", "title", "availability", "quantity",
     ...(showPurchase ? ["purchasePrice"] : []),
-    "supplier", "brand", "article", "title", "availability", "quantity", "price", "sum",
+    "price", "sum",
   ];
   const applyGarageTableColumns = () => {
     const columns = getGarageVisibleColumns();
@@ -410,10 +434,6 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     }
     for (const item of [...visibleItems].sort(compareGarageItems)) {
       const row = element("tr", undefined, item.availabilityStatus === "available" || item.availabilityStatus === "unknown" ? "" : "garage-item--problem");
-      const purchasePriceCell = element("td", formatPrice(item.purchasePrice));
-      purchasePriceCell.dataset.garageColumn = "purchase-price";
-      purchasePriceCell.hidden = !showPurchase;
-      row.append(purchasePriceCell);
       const cells = [["supplier", item.supplier], ["brand", formatBrand(item.brand)], ["article", formatArticle(item.article)], ["title", item.title], ["availability", formatQuantity(item.supplierQuantity)]];
       for (const [column, value] of cells) {
         const cell = element("td", value);
@@ -448,6 +468,10 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
         required.select();
       });
       requiredCell.append(requiredDisplay); row.append(requiredCell);
+      const purchasePriceCell = element("td", formatPrice(item.purchasePrice));
+      purchasePriceCell.dataset.garageColumn = "purchase-price";
+      purchasePriceCell.hidden = !showPurchase;
+      row.append(purchasePriceCell);
       const regularPriceCell = element("td", formatPrice(item.regularPrice)); regularPriceCell.dataset.garageColumn = "price"; row.append(regularPriceCell);
       const sumCell = element("td", formatPrice(item.regularPrice * item.requiredQuantity)); sumCell.dataset.garageColumn = "sum"; row.append(sumCell);
       const actions = document.createElement("td"); actions.className = "garage-actions-cell";
@@ -517,6 +541,38 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       return;
     }
     setSidebarWidth(width + (event.key === "ArrowLeft" ? 10 : -10));
+  });
+  filtersResize.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    filtersResizeStart = { pointerId: event.pointerId, startX: event.clientX, startWidth: filtersSidebar.getBoundingClientRect().width };
+    filtersResize.setPointerCapture(event.pointerId);
+  });
+  filtersResize.addEventListener("pointermove", (event) => {
+    if (!filtersResizeStart || event.pointerId !== filtersResizeStart.pointerId) return;
+    const width = filtersResizeStart.startWidth + event.clientX - filtersResizeStart.startX;
+    if (width <= getFiltersCloseWidth()) {
+      filtersResizeStart = null;
+      filtersResize.releasePointerCapture(event.pointerId);
+      setFiltersOpen(false);
+      return;
+    }
+    setFiltersSidebarWidth(width);
+  });
+  const stopFiltersResize = (event) => {
+    if (filtersResizeStart && event.pointerId === filtersResizeStart.pointerId) filtersResizeStart = null;
+  };
+  filtersResize.addEventListener("pointerup", stopFiltersResize);
+  filtersResize.addEventListener("pointercancel", stopFiltersResize);
+  filtersResize.addEventListener("lostpointercapture", () => { filtersResizeStart = null; });
+  filtersResize.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const width = filtersSidebar.getBoundingClientRect().width;
+    if (event.key === "ArrowLeft" && width <= 180) {
+      setFiltersOpen(false);
+      return;
+    }
+    setFiltersSidebarWidth(width + (event.key === "ArrowRight" ? 10 : -10));
   });
   searchForm.addEventListener("submit", (event) => event.preventDefault());
   search.addEventListener("input", () => loadVehicles().catch((error) => setStatus(error.message)));
@@ -597,5 +653,6 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   window.addEventListener("scroll", () => hideContextMenu(true), true);
   document.addEventListener("dragstart", (event) => { const button = event.target.closest(".garage-offer-button"); if (button?.dataset.garageOfferId) { event.dataTransfer.effectAllowed = "copy"; event.dataTransfer.setData("application/x-garage-offer", button.dataset.garageOfferId); setSidebarOpen(true); } });
   restoreSidebarWidth();
+  restoreFiltersSidebarWidth();
   loadVehicles().catch((error) => setStatus(error.message));
 };
