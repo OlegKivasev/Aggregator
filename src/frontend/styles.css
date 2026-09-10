@@ -1259,8 +1259,7 @@ table tbody tr:hover td {
 .result-context-menu[hidden],
 .tab-context-menu[hidden],
 .analogs-modal[hidden],
-.article-analogs-modal[hidden],
-.analogs-search-status[hidden] {
+.article-analogs-modal[hidden] {
   display: none;
 }
 
@@ -1705,62 +1704,6 @@ table tbody tr:hover td {
   color: var(--muted);
 }
 
-.analogs-search-status {
-  display: flex;
-  min-height: 48px;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 22px;
-  color: var(--ink);
-  border-bottom: 1px solid #f4d9cf;
-  background: #fff8f4;
-}
-
-.analogs-search-status[data-state="warning"] {
-  border-color: #f1c36d;
-  background: #fff8e5;
-}
-
-.analogs-search-status[data-state="error"] {
-  border-color: #f2c7c7;
-  background: #fff1f1;
-}
-
-.analogs-search-status[data-state="empty"] {
-  min-height: 70px;
-  justify-content: center;
-  text-align: center;
-  border-color: var(--line);
-  background: #f8fafc;
-}
-
-.analogs-search-status[data-state="completed"] {
-  border-color: #c8e6d5;
-  background: #f3fbf6;
-}
-
-.analogs-search-status__spinner {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-  border: 2px solid rgba(255, 75, 19, 0.2);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: search-loading-spin 0.75s linear infinite;
-}
-
-.analogs-search-status strong,
-.analogs-search-status div span {
-  display: block;
-}
-
-.analogs-search-status div span {
-  margin-top: 1px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
 .analogs-results {
   flex: 1 1 auto;
   min-height: 0;
@@ -1894,13 +1837,6 @@ th[aria-sort="descending"] .analogs-sort span::after {
   text-transform: uppercase;
 }
 
-.analogs-results__empty td {
-  height: 150px;
-  color: var(--muted);
-  text-align: center !important;
-  vertical-align: middle;
-}
-
 .analogs-modal__footer {
   display: flex;
   min-height: 48px;
@@ -1983,11 +1919,6 @@ th[aria-sort="descending"] .analogs-sort span::after {
 
   .analogs-markup {
     justify-content: space-between;
-  }
-
-  .analogs-search-status {
-    padding-right: 12px;
-    padding-left: 12px;
   }
 
 }

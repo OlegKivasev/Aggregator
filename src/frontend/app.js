@@ -1,6 +1,7 @@
 import { buildIncompleteSearchWarnings, buildSupplierResultTooltip, formatDeliveryDate } from "./supplier-search-summary.js";
 import {
   compareDeliveryDates,
+  compareDeliveryDatesThenPrice,
   escapeHtml,
   formatArticle,
   formatBrand,
@@ -136,6 +137,7 @@ const supplierNoticeList = document.querySelector("#supplier-notice-list");
 const passwordFields = [...document.querySelectorAll(".password-field")];
 const resultContextMenu = document.querySelector("#result-context-menu");
 const openResultButton = document.querySelector("#open-result-button");
+const searchResultButton = document.querySelector("#search-result-button");
 const tabContextMenu = document.querySelector("#tab-context-menu");
 const renameTabButton = document.querySelector("#rename-tab-button");
 const warehouseTooltip = document.querySelector("#warehouse-tooltip");
@@ -149,7 +151,6 @@ const analogsSourcePrice = document.querySelector("#analogs-source-price");
 const analogsSourceMarkupPrice = document.querySelector("#analogs-source-markup-price");
 const analogsSourceDelivery = document.querySelector("#analogs-source-delivery");
 const analogsSourceWarehouse = document.querySelector("#analogs-source-warehouse");
-const analogsSearchStatus = document.querySelector("#analogs-search-status");
 const analogsResultsBody = document.querySelector("#analogs-results-body");
 const analogsCount = document.querySelector("#analogs-count");
 const analogsTableSearch = document.querySelector("#analogs-table-search");
@@ -186,12 +187,9 @@ let analogSearchResultKeys = new Set();
 let analogSearchTerm = "";
 let analogSortState = { key: "price", direction: "ascending" };
 let analogSearchSuppliers = [];
-let analogSupplierStatuses = {};
-let analogResultCounts = {};
 let analogVisibleLimit = 200;
 let analogRenderFrame = null;
 let analogSearchCompleted = false;
-let analogStatusHideTimer = null;
 let articleBrandSearchSource = null;
 let articleBrandModalReturnFocus = null;
 let articleBrandArticle = "";
@@ -863,7 +861,7 @@ const compareSortValues = (leftValue, rightValue) => {
 
 const compareResults = (left, right, state = sortState, percent = markupPercent) => {
   const comparison = state.key === "deliveryDate"
-    ? compareDeliveryDates(left, right)
+    ? compareDeliveryDatesThenPrice(left, right)
     : compareSortValues(getSortValue(left, state.key, percent), getSortValue(right, state.key, percent));
 
   if (state.key === "markupPrice" && comparison === 0) {
@@ -2040,9 +2038,6 @@ supplierVisibilityInputs.forEach((input) => {
         analogSearchSources.forEach((source) => source.close());
         analogSearchSources = new Set();
         analogSearchCompleted = true;
-        setAnalogSearchStatus("Поиск аналогов остановлен", "Включите хотя бы одного поставщика, поддерживающего поиск аналогов, в настройках.", "empty");
-      } else {
-        updateAnalogSearchProgress();
       }
     }
   });
@@ -2117,68 +2112,16 @@ const hideResultContextMenu = (restoreFocus = false) => {
   contextMenuAnchor = null;
 };
 
-const showResultContextMenu = (result, clientX, clientY, anchor, canShowAnalogs) => {
+const showResultContextMenu = (result, clientX, clientY, anchor, canShowAnalogs, canSearchResult) => {
   contextMenuResult = result;
   contextMenuAnchor = anchor;
   showAnalogsButton.hidden = !canShowAnalogs;
+  searchResultButton.hidden = !canSearchResult;
   resultContextMenu.hidden = false;
   const bounds = resultContextMenu.getBoundingClientRect();
   resultContextMenu.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - bounds.width - 8))}px`;
   resultContextMenu.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - bounds.height - 8))}px`;
   openResultButton.focus();
-};
-
-const clearAnalogStatusHideTimer = () => {
-  if (analogStatusHideTimer !== null) {
-    clearTimeout(analogStatusHideTimer);
-    analogStatusHideTimer = null;
-  }
-};
-
-const setAnalogSearchStatus = (title, description, state = "searching") => {
-  clearAnalogStatusHideTimer();
-  const content = document.createElement("div");
-  const heading = document.createElement("strong");
-  heading.textContent = title;
-  content.append(heading);
-  (Array.isArray(description) ? description : [description]).filter(Boolean).forEach((line) => {
-    const details = document.createElement("span");
-    details.textContent = line;
-    content.append(details);
-  });
-  const children = [content];
-  if (state === "searching") {
-    const spinner = document.createElement("span");
-    spinner.className = "analogs-search-status__spinner";
-    spinner.setAttribute("aria-hidden", "true");
-    children.unshift(spinner);
-  }
-  analogsSearchStatus.replaceChildren(...children);
-  analogsSearchStatus.dataset.state = state;
-  analogsSearchStatus.hidden = false;
-};
-
-const hideSuccessfulAnalogStatus = () => {
-  analogStatusHideTimer = setTimeout(() => {
-    analogStatusHideTimer = null;
-    analogsSearchStatus.hidden = true;
-  }, 5_000);
-};
-
-const formatAnalogResultSuppliers = () => analogSearchSuppliers
-  .filter((supplier) => analogResultCounts[supplier])
-  .map((supplier) => `${supplierNames[supplier] ?? supplier}: ${analogResultCounts[supplier]}`)
-  .join(", ");
-
-const updateAnalogSearchProgress = () => {
-  const receivedFrom = formatAnalogResultSuppliers();
-  const awaiting = analogSearchSources.size
-    ? `Получаем аналоги: выполняется ${analogSearchSources.size} ${analogSearchSources.size === 1 ? "запрос" : "запроса"}.`
-    : "Все поставщики ответили. Завершаем обработку результатов.";
-  const received = receivedFrom
-    ? `Выдали аналоги: ${receivedFrom}.`
-    : "Пока ни один поставщик не выдал аналогов.";
-  setAnalogSearchStatus(awaiting, received);
 };
 
 const scheduleAnalogRowsRender = () => {
@@ -2202,7 +2145,6 @@ const renderAnalogRowsNow = () => {
 const closeAnalogsModal = () => {
   analogSearchSources.forEach((source) => source.close());
   analogSearchSources = new Set();
-  clearAnalogStatusHideTimer();
   if (analogRenderFrame !== null) {
     cancelAnimationFrame(analogRenderFrame);
     analogRenderFrame = null;
@@ -2301,12 +2243,7 @@ const renderAnalogRows = () => {
   renderAnalogFilterValues();
 
   if (!rows.length) {
-    const message = normalizedTerm && analogSearchResults.length
-      ? "По вашему запросу ничего не найдено"
-      : analogSearchSources.size
-        ? "Предложения появятся здесь по мере получения"
-      : "Аналоги для выбранной позиции не найдены";
-    analogsResultsBody.innerHTML = `<tr class="analogs-results__empty"><td colspan="${showPurchasePrices ? 9 : 8}">${message}</td></tr>`;
+    analogsResultsBody.replaceChildren();
     analogsShowMore.hidden = true;
     return;
   }
@@ -2338,29 +2275,19 @@ const renderAnalogRows = () => {
   }
 };
 
-const finishAnalogSearch = (failureMessages) => {
+const finishAnalogSearch = () => {
   if (analogSearchSources.size) {
     return;
   }
   analogSearchCompleted = true;
   renderAnalogRowsNow();
   setAnalogFiltersSidebarOpen(true);
-  const receivedFrom = formatAnalogResultSuppliers();
-  const received = receivedFrom ? `Выдали аналоги: ${receivedFrom}.` : "Поставщики не выдали аналогов.";
-  if (failureMessages.size) {
-    setAnalogSearchStatus("Поиск завершен не полностью", [received, ...failureMessages], "warning");
-  } else if (analogSearchResults.length) {
-    setAnalogSearchStatus("Поиск аналогов завершен", received, "completed");
-    hideSuccessfulAnalogStatus();
-  } else {
-    setAnalogSearchStatus("Аналоги не найдены", "Попробуйте выбрать другой бренд.", "empty");
-  }
 };
 
-const completeAnalogSearchSource = (source, failureMessages) => {
+const completeAnalogSearchSource = (source) => {
   source.close();
   analogSearchSources.delete(source);
-  finishAnalogSearch(failureMessages);
+  finishAnalogSearch();
 };
 
 const getAnalogResultKey = (result) => JSON.stringify([
@@ -2389,12 +2316,9 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
   analogSearchTerm = "";
   analogSortState = { key: "price", direction: "ascending" };
   analogSearchSuppliers = analogSupplierIds.filter(isSupplierVisible);
-  analogSupplierStatuses = {};
-  analogResultCounts = {};
   analogVisibleLimit = 200;
   analogSearchCompleted = false;
   setAnalogFiltersSidebarOpen(false);
-  clearAnalogStatusHideTimer();
   analogsTableSearch.value = "";
   analogsMarkupPercent.value = String(markupPercent);
   if (sourceResult) {
@@ -2406,16 +2330,8 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
   analogsModal.focus();
   if (!analogSearchSuppliers.length || !selectedBrands.length) {
     renderAnalogRowsNow();
-    setAnalogSearchStatus("Поиск аналогов недоступен", "Включите хотя бы одного поставщика, поддерживающего поиск аналогов, в настройках.", "empty");
     return;
   }
-
-  setAnalogSearchStatus(
-    "Подготавливаем поиск аналогов",
-    `Запрашиваем бренды: ${selectedBrands.join(", ")}.`,
-  );
-
-  const failureMessages = new Set();
   selectedBrands.forEach((brand) => {
     const searchParams = new URLSearchParams({ stream: "once", mode: "analogs", article, brand });
     analogSearchSuppliers.forEach((supplier) => searchParams.append("supplier", supplier));
@@ -2433,44 +2349,28 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
         }
         analogSearchResultKeys.add(resultKey);
         analogSearchResults.push(payload.result);
-        analogResultCounts[payload.result.supplier] = (analogResultCounts[payload.result.supplier] ?? 0) + 1;
         scheduleAnalogRowsRender();
-        updateAnalogSearchProgress();
         return;
       }
       if (payload.type === "supplier_status") {
-        analogSupplierStatuses[payload.supplier] = payload.status;
-        if (["timeout", "auth_error", "error"].includes(payload.status)) {
-          const supplierName = supplierNames[payload.supplier] ?? payload.supplier;
-          const failureMessage = payload.status === "auth_error"
-            ? `Подключите ${supplierName} в настройках и повторите поиск.`
-            : payload.status === "timeout"
-              ? `${supplierName} не ответил вовремя. Повторите поиск позже.`
-              : `${supplierName} не удалось выполнить поиск аналогов.`;
-          failureMessages.add(failureMessage);
-        }
-        updateAnalogSearchProgress();
         return;
       }
       if (payload.type === "search_completed") {
-        completeAnalogSearchSource(source, failureMessages);
+        completeAnalogSearchSource(source);
         return;
       }
       if (payload.type === "fatal_error") {
-        failureMessages.add(payload.message);
-        completeAnalogSearchSource(source, failureMessages);
+        completeAnalogSearchSource(source);
       }
     };
     source.onerror = () => {
       if (!analogSearchSources.has(source)) {
         return;
       }
-      failureMessages.add("Не удалось получить полный результат поиска аналогов.");
-      completeAnalogSearchSource(source, failureMessages);
+      completeAnalogSearchSource(source);
     };
   });
   renderAnalogRows();
-  updateAnalogSearchProgress();
 };
 
 const startAnalogSearch = (result, returnFocus = document.activeElement) => {
@@ -2603,7 +2503,7 @@ const registerResultContextMenu = (body, resolveResult, canShowAnalogs) => {
       return;
     }
     event.preventDefault();
-    showResultContextMenu(result, event.clientX, event.clientY, row, canShowAnalogs);
+    showResultContextMenu(result, event.clientX, event.clientY, row, canShowAnalogs, !canShowAnalogs);
   });
 
   body.addEventListener("keydown", (event) => {
@@ -2617,7 +2517,7 @@ const registerResultContextMenu = (body, resolveResult, canShowAnalogs) => {
     }
     event.preventDefault();
     const bounds = row.getBoundingClientRect();
-    showResultContextMenu(result, bounds.left + 16, bounds.top + 16, row, canShowAnalogs);
+    showResultContextMenu(result, bounds.left + 16, bounds.top + 16, row, canShowAnalogs, !canShowAnalogs);
   });
 };
 
@@ -2630,6 +2530,22 @@ openResultButton.addEventListener("click", () => {
   if (link) {
     window.open(link, "_blank", "noreferrer");
   }
+});
+
+searchResultButton.addEventListener("click", () => {
+  const article = typeof contextMenuResult?.article === "string" ? contextMenuResult.article.trim() : "";
+  hideResultContextMenu();
+  if (!article) {
+    return;
+  }
+  closeAnalogsModal();
+  syncActiveTab();
+  const tab = createSearchTab({ article, enabledSuppliers: getEnabledSuppliers() });
+  searchTabs.push(tab);
+  activeTabId = null;
+  renderTabs();
+  activateTab(tab.id);
+  form.requestSubmit();
 });
 
 showAnalogsButton.addEventListener("click", () => {

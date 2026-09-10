@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   compareDeliveryDates,
+  compareDeliveryDatesThenPrice,
   escapeHtml,
   formatArticle,
   formatBrand,
@@ -220,12 +221,31 @@ test("delivery date sorting places an interval starting on the 29th above the 30
   ]);
 });
 
+test("delivery date sorting preserves delivery groups and uses price within one group", () => {
+  const today = new Date();
+  const date = (offset) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset, 12).toISOString();
+  const results = [
+    { label: "expensive interval", deliveryDate: date(2), deliveryDateTo: date(4), price: 4500 },
+    { label: "approximate day after tomorrow", deliveryDate: date(2), deliveryDateApproximate: true, price: 1000 },
+    { label: "known day after tomorrow", deliveryDate: date(2), price: 1900 },
+    { label: "cheap interval", deliveryDate: date(2), deliveryDateTo: date(3), price: 1200 },
+  ];
+
+  assert.deepEqual(results.sort(compareDeliveryDatesThenPrice).map((result) => result.label), [
+    "known day after tomorrow",
+    "approximate day after tomorrow",
+    "cheap interval",
+    "expensive interval",
+  ]);
+});
+
 test("frontend opens on-demand analog search for a selected result", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
 
   assert.match(html, /id="result-context-menu"/);
   assert.match(html, /id="open-result-button"/);
+  assert.match(html, /id="open-result-button"[\s\S]*?id="search-result-button"[\s\S]*?id="show-analogs-button"/);
   assert.match(html, /id="show-analogs-button"/);
   assert.match(html, /id="analogs-modal"/);
   assert.match(html, /id="analogs-source-title"/);
@@ -264,8 +284,11 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /formatArticle\(result\.article\)/);
   assert.match(app, /const analogSupplierIds = \["rossko", "armtek", "part-kom", "stparts", "forum-auto"\]/);
   assert.match(app, /analogSupplierIds\.filter\(isSupplierVisible\)/);
-  assert.match(app, /Выдали аналоги:/);
-  assert.match(app, /hideSuccessfulAnalogStatus/);
+  assert.doesNotMatch(html, /id="analogs-search-status"/);
+  assert.doesNotMatch(app, /setAnalogSearchStatus|updateAnalogSearchProgress/);
+  assert.match(app, /searchResultButton\.addEventListener\("click"/);
+  assert.match(app, /const tab = createSearchTab\(\{ article, enabledSuppliers: getEnabledSuppliers\(\) \}\);/);
+  assert.match(app, /form\.requestSubmit\(\);/);
   assert.match(app, /Показать всё/);
   assert.match(app, /analogSearchCompleted \? Number\.POSITIVE_INFINITY/);
   assert.match(app, /analogsCount\.dataset\.tooltip = supplierBreakdown/);
@@ -285,6 +308,7 @@ test("frontend keeps retail price as the configurable column and discovers brand
   assert.match(app, /let sortState = \{ key: "markupPrice", direction: "ascending" \}/);
   assert.match(app, /state\.key === "markupPrice" && comparison === 0/);
   assert.match(app, /compareDeliveryDates\(left, right\)/);
+  assert.match(app, /compareDeliveryDatesThenPrice\(left, right\)/);
   assert.match(html, /id="article-analogs-modal"/);
   assert.match(html, /id="article-analogs-modal-brands"/);
   assert.match(html, /Выберите один или несколько брендов/);

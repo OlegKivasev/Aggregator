@@ -104,6 +104,11 @@ const isSameCalendarDay = (leftValue, rightValue) => {
 
 const getEffectiveDeliveryTo = (from, to) => (to !== null && !isSameCalendarDay(from, to) ? to : null);
 
+const getCalendarDayTimestamp = (value) => {
+  const date = new Date(value);
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+};
+
 const getDeliverySortGroup = (result, from, to) => {
   const dayOffset = getCalendarDayOffset(from);
   if (to === null && dayOffset >= 0 && dayOffset <= 2) {
@@ -139,4 +144,31 @@ export const compareDeliveryDates = (left, right) => {
     || resultTypeComparison
     || Number(left.deliveryDateApproximate === true) - Number(right.deliveryDateApproximate === true)
     || (effectiveLeftTo ?? leftFrom) - (effectiveRightTo ?? rightFrom);
+};
+
+export const compareDeliveryDatesThenPrice = (left, right) => {
+  const deliveryComparison = compareDeliveryDates(left, right);
+  const leftFrom = getDeliveryTimestamp(left.deliveryDate);
+  const rightFrom = getDeliveryTimestamp(right.deliveryDate);
+  const leftTo = leftFrom === null ? null : getEffectiveDeliveryTo(leftFrom, getDeliveryTimestamp(left.deliveryDateTo));
+  const rightTo = rightFrom === null ? null : getEffectiveDeliveryTo(rightFrom, getDeliveryTimestamp(right.deliveryDateTo));
+  const canBreakDeliveryTieByPrice = leftFrom !== null
+    && rightFrom !== null
+    && getDeliverySortGroup(left, leftFrom, leftTo) === getDeliverySortGroup(right, rightFrom, rightTo)
+    && getCalendarDayTimestamp(leftFrom) === getCalendarDayTimestamp(rightFrom);
+
+  if (deliveryComparison !== 0 && !canBreakDeliveryTieByPrice) {
+    return deliveryComparison;
+  }
+
+  const leftPrice = Number(left.price);
+  const rightPrice = Number(right.price);
+  const leftPriceMissing = !Number.isFinite(leftPrice) || leftPrice <= 0;
+  const rightPriceMissing = !Number.isFinite(rightPrice) || rightPrice <= 0;
+
+  if (leftPriceMissing || rightPriceMissing) {
+    return leftPriceMissing === rightPriceMissing ? 0 : leftPriceMissing ? 1 : -1;
+  }
+
+  return leftPrice - rightPrice;
 };
