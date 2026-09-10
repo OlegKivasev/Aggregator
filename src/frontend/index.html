@@ -651,14 +651,16 @@
       <div class="garage-add-modal__backdrop"></div>
       <section class="garage-add-modal__card card border-0 shadow-sm">
         <header class="garage-add-modal__header"><h2 id="garage-add-title">Добавить в автомобиль</h2><button type="button" class="btn btn-light garage-add-modal__close" data-garage-close aria-label="Закрыть окно">×</button></header>
-        <label class="garage-add-modal__field">Автомобиль<input class="garage-add-modal__input garage-add-modal__search" id="garage-add-search" type="search" placeholder="Поиск автомобиля" autocomplete="off" /></label>
-        <div class="garage-add-modal__vehicles" id="garage-add-vehicles"></div>
-        <label class="garage-add-modal__field">Количество<input class="garage-add-modal__input" id="garage-add-quantity" type="number" min="0.001" step="0.001" value="1" /></label>
-        <div class="garage-add-modal__duplicate" id="garage-add-duplicate" hidden>
-          <p>Такая позиция уже добавлена в автомобиль.</p>
-          <div><button type="button" class="btn btn-primary garage-inline-action" id="garage-add-duplicate-increment">Увеличить количество</button><button type="button" class="btn btn-light garage-inline-action" id="garage-add-duplicate-new">Добавить отдельной строкой</button></div>
-        </div>
-        <footer class="garage-add-modal__footer"><button type="button" class="btn btn-primary garage-inline-action" id="garage-add-confirm" disabled>Добавить</button></footer>
+        <form id="garage-add-form">
+          <label class="garage-add-modal__field" id="garage-add-vehicle-picker">Автомобиль<input class="garage-add-modal__input garage-add-modal__search" id="garage-add-search" type="search" placeholder="Поиск автомобиля" autocomplete="off" /></label>
+          <div class="garage-add-modal__vehicles" id="garage-add-vehicles"></div>
+          <label class="garage-add-modal__field">Количество<input class="garage-add-modal__input" id="garage-add-quantity" type="number" min="0.001" step="0.001" value="1" required /></label>
+          <div class="garage-add-modal__duplicate" id="garage-add-duplicate" hidden>
+            <p>Такая позиция уже добавлена в автомобиль.</p>
+            <div><button type="button" class="btn btn-primary garage-inline-action" id="garage-add-duplicate-increment">Увеличить количество</button><button type="button" class="btn btn-light garage-inline-action" id="garage-add-duplicate-new">Добавить отдельной строкой</button></div>
+          </div>
+          <footer class="garage-add-modal__footer"><button type="submit" class="btn btn-primary garage-inline-action" id="garage-add-confirm" disabled>Добавить</button></footer>
+        </form>
       </section>
     </div>
 

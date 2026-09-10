@@ -49,6 +49,9 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const garageSortButtons = [...document.querySelectorAll("[data-garage-sort-key]")];
   const resize = document.querySelector("#garage-resize");
   const modal = document.querySelector("#garage-add-modal");
+  const modalTitle = document.querySelector("#garage-add-title");
+  const modalForm = document.querySelector("#garage-add-form");
+  const modalVehiclePicker = document.querySelector("#garage-add-vehicle-picker");
   const modalSearch = document.querySelector("#garage-add-search");
   const modalVehicles = document.querySelector("#garage-add-vehicles");
   const modalQuantity = document.querySelector("#garage-add-quantity");
@@ -502,9 +505,34 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       showToast("Сначала создайте автомобиль, затем добавьте в него товар.");
       return;
     }
-    pendingOfferId = offerId; selectedAddVehicleId = vehicleId; modalConfirm.disabled = !vehicleId; modalConfirm.hidden = false; modalDuplicate.hidden = true; modal.hidden = false; modalSearch.value = ""; renderModalVehicles();
+    const vehicle = vehicleId ? findVehicle(vehicleId) : null;
+    pendingOfferId = offerId;
+    selectedAddVehicleId = vehicle?.id ?? null;
+    const hasSelectedVehicle = Boolean(vehicle);
+    modal.dataset.vehicleSelected = String(hasSelectedVehicle);
+    modalTitle.textContent = hasSelectedVehicle ? `Добавить в «${vehicle.name}»` : "Добавить в автомобиль";
+    modalVehiclePicker.hidden = hasSelectedVehicle;
+    modalVehicles.hidden = hasSelectedVehicle;
+    modalConfirm.disabled = !hasSelectedVehicle;
+    modalConfirm.hidden = hasSelectedVehicle;
+    modalDuplicate.hidden = true;
+    modal.hidden = false;
+    modalSearch.value = "";
+    modalQuantity.value = "1";
+    renderModalVehicles();
+    requestAnimationFrame(() => (hasSelectedVehicle ? modalQuantity : modalSearch).focus());
   };
-  const closeModal = () => { modal.hidden = true; modalConfirm.hidden = false; modalDuplicate.hidden = true; pendingOfferId = null; selectedAddVehicleId = null; };
+  const closeModal = () => {
+    modal.hidden = true;
+    modal.dataset.vehicleSelected = "false";
+    modalTitle.textContent = "Добавить в автомобиль";
+    modalVehiclePicker.hidden = false;
+    modalVehicles.hidden = false;
+    modalConfirm.hidden = false;
+    modalDuplicate.hidden = true;
+    pendingOfferId = null;
+    selectedAddVehicleId = null;
+  };
   toggle.addEventListener("click", () => setSidebarOpen(sidebar.hidden));
   sidebar.addEventListener("dragenter", (event) => { event.preventDefault(); sidebar.classList.add("is-drop-target"); });
   sidebar.addEventListener("dragover", (event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; });
@@ -615,7 +643,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       : { key, direction: "ascending" };
     renderItems();
   }));
-  refresh.addEventListener("click", async () => { refresh.disabled = true; setStatus("Актуализируем предложения…"); try { const { payload } = await api(`/api/garage/vehicles/${selectedVehicle.id}/refresh`, { method: "POST", body: JSON.stringify({ revision: selectedVehicle.revision }) }); selectedVehicle = payload.vehicle; renderItems(); setStatus("Предложения актуализированы"); await loadVehicles(); } catch (error) { setStatus(error.message); } finally { refresh.disabled = false; } });
+  refresh.addEventListener("click", async () => { refresh.disabled = true; try { const { payload } = await api(`/api/garage/vehicles/${selectedVehicle.id}/refresh`, { method: "POST", body: JSON.stringify({ revision: selectedVehicle.revision }) }); selectedVehicle = payload.vehicle; renderItems(); await loadVehicles(); } catch (error) { setStatus(error.message); showToast(error.message, "error"); } finally { refresh.disabled = false; } });
   priceToggle.addEventListener("click", () => setPurchasePricesVisible(!showPurchase));
   modal.querySelectorAll("[data-garage-close]").forEach((button) => button.addEventListener("click", closeModal));
   const addOfferToVehicle = async (duplicateStrategy) => {
@@ -638,7 +666,10 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       showToast(error.message, "error");
     }
   };
-  modalConfirm.addEventListener("click", () => addOfferToVehicle());
+  modalForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (selectedAddVehicleId) addOfferToVehicle();
+  });
   modalDuplicateIncrement.addEventListener("click", () => addOfferToVehicle("increment"));
   modalDuplicateNew.addEventListener("click", () => addOfferToVehicle("new"));
   document.addEventListener("click", (event) => {

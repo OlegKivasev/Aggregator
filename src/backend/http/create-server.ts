@@ -136,7 +136,7 @@ function serveGarageError(response: ServerResponse, error: unknown, reportError:
     return;
   }
   if (error instanceof GarageOfferExpiredError) {
-    serveJson(response, 410, { message: "Search offer has expired. Run the search again." });
+    serveJson(response, 410, { message: "Предложение устарело. Выполните поиск ещё раз." });
     return;
   }
   if (error instanceof GarageConflictError) {

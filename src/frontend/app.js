@@ -666,6 +666,13 @@ const normalizeMarkupPercent = (value) => {
 };
 
 const normalizeTabName = (value) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 100) : "");
+const withoutOfferId = (result) => {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return result;
+  }
+  const { offerId: _offerId, ...persistedResult } = result;
+  return persistedResult;
+};
 
 const createSearchTab = (data = {}) => ({
   id: data.id ?? `tab-${Date.now()}-${tabSequence++}`,
@@ -673,7 +680,7 @@ const createSearchTab = (data = {}) => ({
   name: normalizeTabName(data.name),
   enabledSuppliers: Array.isArray(data.enabledSuppliers) ? data.enabledSuppliers : getEnabledSuppliers(),
   status: typeof data.status === "string" && data.status !== "Ожидание поиска" ? data.status : "",
-  results: Array.isArray(data.results) ? data.results.filter((result) => result?.isAnalog !== true) : [],
+  results: Array.isArray(data.results) ? data.results.map(withoutOfferId).filter((result) => result?.isAnalog !== true) : [],
   hasSearched:
     typeof data.hasSearched === "boolean"
       ? data.hasSearched
@@ -1064,7 +1071,7 @@ const saveSearchState = () => {
           name: tab.name,
           enabledSuppliers: tab.enabledSuppliers,
           status: tab.status,
-          results: tab.results,
+          results: tab.results.map(withoutOfferId),
           hasSearched: tab.hasSearched,
           markupPercent: tab.markupPercent,
         })),

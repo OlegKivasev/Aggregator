@@ -480,6 +480,13 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /sidebar\.addEventListener\("drop"/);
   assert.match(app, /const garageActionColumnWidth = 52;/);
   assert.match(app, /garage-offer-button" draggable="\$\{Boolean\(result\.offerId\)\}"/);
+  assert.match(app, /const withoutOfferId = \(result\) =>/);
+  assert.match(app, /results: tab\.results\.map\(withoutOfferId\)/);
+  assert.match(garage, /modal\.dataset\.vehicleSelected = String\(hasSelectedVehicle\);/);
+  assert.match(garage, /modalConfirm\.hidden = hasSelectedVehicle;/);
+  assert.match(garage, /modalForm\.addEventListener\("submit"/);
+  assert.doesNotMatch(garage, /setStatus\("Предложения актуализированы"\)/);
+  assert.match(styles, /\.garage-toast\s*\{[^}]*top: 24px;[^}]*right: 24px;/s);
   assert.doesNotMatch(app, /main-result-row[\s\S]{0,250}draggable=|analogs-result-row[\s\S]{0,250}draggable=/);
   assert.doesNotMatch(garage, /window\.(?:prompt|confirm)/);
 });

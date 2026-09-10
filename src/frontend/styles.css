@@ -78,6 +78,8 @@ body:has(.garage-add-modal:not([hidden])) { overflow: hidden; }
 .garage-add-modal[hidden] { display: none; }
 .garage-add-modal__backdrop { position: absolute; inset: 0; background: rgba(17, 24, 32, .64); backdrop-filter: blur(5px); }
 .garage-add-modal__card { position: relative; width: min(480px, calc(100vw - 32px)); padding: 16px; display: grid; gap: 12px; border-radius: 10px; background: var(--surface); }
+.garage-add-modal[data-vehicle-selected="true"] .garage-add-modal__card { width: min(320px, calc(100vw - 32px)); }
+.garage-add-modal__card form { display: grid; gap: 12px; }
 .garage-add-modal__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .garage-add-modal__header h2 { margin: 0; font-size: 17px; font-weight: 800; line-height: 1.25; }
 .garage-add-modal__close { width: 28px; min-width: 28px; height: 28px; padding: 0; color: var(--muted); line-height: 1; }
@@ -92,7 +94,7 @@ body:has(.garage-add-modal:not([hidden])) { overflow: hidden; }
 .garage-add-modal__duplicate p { margin: 0 0 8px; }
 .garage-add-modal__duplicate div, .garage-add-modal__footer { display: flex; flex-wrap: wrap; gap: 6px; }
 .garage-add-modal__footer { justify-content: flex-end; padding-top: 10px; border-top: 1px solid var(--line); }
-.garage-toast { position: fixed; z-index: 1200; right: 24px; bottom: 24px; max-width: min(360px, calc(100vw - 32px)); padding: 11px 14px; border: 1px solid #f4c7b8; border-radius: 8px; color: var(--accent-dark); background: #fff; box-shadow: 0 10px 30px rgba(23, 32, 42, .16); font-size: 13px; font-weight: 700; }
+.garage-toast { position: fixed; z-index: 1200; top: 24px; right: 24px; max-width: min(360px, calc(100vw - 32px)); padding: 11px 14px; border: 1px solid #f4c7b8; border-radius: 8px; color: var(--accent-dark); background: #fff; box-shadow: 0 10px 30px rgba(23, 32, 42, .16); font-size: 13px; font-weight: 700; }
 .garage-toast[data-tone="error"] { border-color: #f1b6b2; color: #9d241c; background: #fff5f4; }
 
 .garage-toggle { display: inline-grid; place-items: center; }
