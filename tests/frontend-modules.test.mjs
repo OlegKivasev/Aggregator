@@ -426,10 +426,11 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(styles, /\.garage-add-modal__search\s*\{[^}]*border: 2px solid var\(--accent\);/s);
   assert.match(styles, /\.garage-add-modal__vehicle\s*\{[^}]*background: transparent;/s);
   assert.match(html, /id="garage-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены"[\s\S]*?<svg/);
-  assert.match(html, /id="garage-purchase-price-heading" hidden>Закупочная цена/);
+  assert.match(html, /id="garage-purchase-price-heading" hidden aria-sort="none">[\s\S]*?data-garage-sort-key="purchasePrice">Закупочная цена/);
   assert.match(garage, /const setPurchasePricesVisible = \(visible\) =>/);
   assert.match(garage, /priceToggle\.addEventListener\("click", \(\) => setPurchasePricesVisible\(!showPurchase\)\)/);
-  assert.match(html, /<th>Наличие<\/th><th>Количество<\/th><th>Цена<\/th><th id="garage-purchase-price-heading" hidden>Закупочная цена<\/th><th>Сумма<\/th>/);
+  assert.match(html, /class="table table-hover align-middle mb-0 results-data-table garage-data-table"/);
+  assert.match(html, /data-garage-sort-key="availability">Наличие[\s\S]*?data-garage-sort-key="quantity">Количество[\s\S]*?data-garage-sort-key="price">Цена[\s\S]*?data-garage-sort-key="sum">Сумма/);
   assert.doesNotMatch(html, /<th>Комментарий<\/th>|<th>Нужно<\/th>|<th>Итог<\/th>/);
   assert.doesNotMatch(garage, /const comment = document\.createElement/);
   assert.match(styles, /\.garage-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
@@ -451,10 +452,16 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(html, /id="garage-toast" role="status" aria-live="polite" hidden/);
   assert.match(garage, /showToast\(`В «\$\{payload\.vehicle\.name\}» пока нет товаров/);
   assert.match(garage, /showToast\(`Товар добавлен в «\$\{vehicle\.name\}»\.`\)/);
-  assert.match(garage, /\.main-result-row, \.analogs-result-row/);
+  assert.match(html, /class="garage-view__actions">[\s\S]*?id="garage-price-toggle"[\s\S]*?id="garage-refresh"/);
+  assert.match(garage, /const garageSortButtons = \[\.\.\.document\.querySelectorAll\("\[data-garage-sort-key\]"\)\]/);
+  assert.match(garage, /const compareGarageItems =/);
+  assert.match(garage, /const button = event\.target\.closest\("\.garage-offer-button"\)/);
+  assert.match(garage, /className = "garage-item-remove"/);
+  assert.doesNotMatch(garage, /Сохранить", "btn btn-light"|confirmRemove|cancelRemove/);
   assert.match(garage, /sidebar\.addEventListener\("drop"/);
   assert.match(app, /const garageActionColumnWidth = 52;/);
-  assert.match(app, /draggable="\$\{Boolean\(result\.offerId\)\}"/);
+  assert.match(app, /garage-offer-button" draggable="\$\{Boolean\(result\.offerId\)\}"/);
+  assert.doesNotMatch(app, /main-result-row[\s\S]{0,250}draggable=|analogs-result-row[\s\S]{0,250}draggable=/);
   assert.doesNotMatch(garage, /window\.(?:prompt|confirm)/);
 });
 

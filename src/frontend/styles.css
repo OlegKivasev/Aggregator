@@ -10,7 +10,7 @@
 
 .garage-control { display: flex; align-self: stretch; align-items: center; }
 .garage-sidebar { --garage-sidebar-width: 260px; position: relative; width: var(--garage-sidebar-width); min-width: 180px; max-width: 420px; padding: .75rem; overflow-y: auto; overscroll-behavior: contain; }
-.garage-sidebar header, .garage-view__header { display: flex; gap: .75rem; align-items: center; justify-content: space-between; }
+.garage-sidebar header { display: flex; gap: .75rem; align-items: center; justify-content: space-between; }
 .garage-sidebar__header { min-height: 34px; }
 .garage-create { align-self: auto; width: 34px; min-width: 34px; flex-basis: 34px; margin: 0; }
 .garage-search-form { width: 100%; min-height: 40px; margin: 12px 0; }
@@ -33,15 +33,35 @@
 .garage-vehicle-delete { color: #7a271a; font-size: 12px; font-weight: 700; }
 .garage-vehicle-delete__confirm { color: #fff; border-color: #b42318; background: #b42318; }
 .garage-vehicle-delete__confirm:hover, .garage-vehicle-delete__confirm:focus-visible { border-color: #8f1c13; background: #8f1c13; }
-.garage-view { margin-top: 1rem; padding: 1rem; }
+.garage-view { margin-top: 1rem; padding: 0; }
+.garage-view__header { display: flex; min-height: 58px; gap: .75rem; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.garage-view__header h2 { min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.garage-view__actions { display: flex; flex: none; gap: 8px; align-items: center; margin-left: auto; }
 .garage-view__table { overflow: auto; }
-.garage-view td input { min-width: 7rem; width: 100%; }
+#garage-status { min-height: 0; margin: 0; padding: 0 14px; }
+.garage-data-table { --results-table-min-width: 1315px; }
+.garage-data-table [data-garage-column="availability"],
+.garage-data-table [data-garage-column="quantity"],
+.garage-data-table [data-garage-column="price"],
+.garage-data-table [data-garage-column="purchase-price"],
+.garage-data-table [data-garage-column="sum"] { text-align: center; white-space: nowrap; }
+.garage-data-table th[data-garage-column="availability"] .table-sort,
+.garage-data-table th[data-garage-column="quantity"] .table-sort,
+.garage-data-table th[data-garage-column="price"] .table-sort,
+.garage-data-table th[data-garage-column="purchase-price"] .table-sort,
+.garage-data-table th[data-garage-column="sum"] .table-sort { justify-content: center; width: 100%; }
+.garage-data-table td[data-garage-column="article"] { color: #0666d6; font-weight: 700; }
+.garage-quantity-input { min-width: 76px; max-width: 96px; }
 .garage-item--problem { background: #fff0f0; }
-.garage-item-remove__confirm { color: #fff; border-color: #b42318; background: #b42318; }
-.garage-item-remove__confirm:hover, .garage-item-remove__confirm:focus-visible { border-color: #8f1c13; background: #8f1c13; }
+.garage-actions-column, .garage-actions-cell { width: 44px; min-width: 44px; padding-right: 8px !important; padding-left: 8px !important; text-align: center; }
+.garage-item-remove { display: inline-grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
+.garage-item-remove svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; }
+.garage-item-remove:hover, .garage-item-remove:focus-visible { color: #b42318; background: #fff0ee; outline: 0; }
 .garage-add-column, .garage-add-cell { width: 52px; min-width: 52px; padding-right: 8px !important; padding-left: 8px !important; text-align: center; }
 .garage-offer-button { display: inline-grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
 .garage-offer-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; }
+.garage-offer-button[draggable="true"] { cursor: grab; }
+.garage-offer-button[draggable="true"]:active { cursor: grabbing; }
 .garage-offer-button:hover:not([aria-disabled="true"]), .garage-offer-button:focus-visible:not([aria-disabled="true"]) { color: var(--accent-dark); background: #fff3ed; outline: 0; }
 .garage-offer-button[aria-disabled="true"] { color: #aab4c0; }
 body:has(.garage-add-modal:not([hidden])) { overflow: hidden; }

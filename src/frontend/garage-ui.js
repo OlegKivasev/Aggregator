@@ -33,6 +33,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const refresh = document.querySelector("#garage-refresh");
   const priceToggle = document.querySelector("#garage-price-toggle");
   const purchasePriceHeading = document.querySelector("#garage-purchase-price-heading");
+  const garageSortButtons = [...document.querySelectorAll("[data-garage-sort-key]")];
   const resize = document.querySelector("#garage-resize");
   const modal = document.querySelector("#garage-add-modal");
   const modalSearch = document.querySelector("#garage-add-search");
@@ -51,6 +52,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   let selectedAddVehicleId = null;
   let pendingOfferId = null;
   let showPurchase = false;
+  let garageSortState = { key: "price", direction: "ascending" };
   let resizeStart = null;
   let editingVehicle = null;
   let deletingVehicleId = null;
@@ -74,7 +76,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     priceToggle.setAttribute("aria-label", visible ? "Скрыть закупочные цены" : "Показать закупочные цены");
     priceToggle.title = visible ? "Скрыть закупочные цены" : "Показать закупочные цены";
     purchasePriceHeading.hidden = !visible;
-    renderItems();
+    if (selectedVehicle) renderItems();
   };
   const setSidebarOpen = (open) => {
     sidebar.hidden = !open;
@@ -107,6 +109,8 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const showVehicle = async (id) => {
     const { payload } = await api(`/api/garage/vehicles/${encodeURIComponent(id)}`);
     if (!payload.vehicle.items.length) {
+      if (!view.hidden) showSearch();
+      if (selectedVehicle?.id === id) selectedVehicle = null;
       showToast(`В «${payload.vehicle.name}» пока нет товаров. Добавьте позицию из результатов поиска.`);
       return;
     }
@@ -293,50 +297,83 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       modalVehicles.append(button);
     }
   };
+  const garageSortValue = (item, key) => {
+    if (key === "availability") return item.supplierQuantity ?? -1;
+    if (key === "quantity") return item.requiredQuantity;
+    if (key === "price") return item.regularPrice;
+    if (key === "purchasePrice") return item.purchasePrice;
+    if (key === "sum") return item.regularPrice * item.requiredQuantity;
+    return item[key] ?? "";
+  };
+  const updateGarageSortHeaders = () => {
+    for (const button of garageSortButtons) {
+      const active = button.dataset.garageSortKey === garageSortState.key;
+      button.classList.toggle("is-active", active);
+      button.closest("th")?.setAttribute("aria-sort", active ? garageSortState.direction : "none");
+    }
+  };
+  const compareGarageItems = (left, right) => {
+    const leftValue = garageSortValue(left, garageSortState.key);
+    const rightValue = garageSortValue(right, garageSortState.key);
+    const comparison = typeof leftValue === "number" && typeof rightValue === "number"
+      ? leftValue - rightValue
+      : String(leftValue).localeCompare(String(rightValue), "ru-RU", { numeric: true, sensitivity: "base" });
+    if (comparison !== 0) return garageSortState.direction === "ascending" ? comparison : -comparison;
+    return left.title.localeCompare(right.title, "ru-RU", { numeric: true, sensitivity: "base" });
+  };
   const renderItems = () => {
     itemsBody.replaceChildren();
-    for (const item of selectedVehicle.items) {
+    updateGarageSortHeaders();
+    for (const item of [...selectedVehicle.items].sort(compareGarageItems)) {
       const row = element("tr", undefined, item.availabilityStatus === "available" || item.availabilityStatus === "unknown" ? "" : "garage-item--problem");
-      const cells = [item.supplier, item.brand, item.article, item.title, `${quantity(item.supplierQuantity)} (${item.availabilityStatus})`];
-      for (const value of cells) row.append(element("td", value));
-      const required = document.createElement("input"); required.type = "number"; required.min = "0.001"; required.step = "0.001"; required.value = String(item.requiredQuantity);
-      const requiredCell = document.createElement("td"); requiredCell.append(required); row.append(requiredCell);
-      row.append(element("td", price(item.regularPrice)));
+      const cells = [["supplier", item.supplier], ["brand", item.brand], ["article", item.article], ["title", item.title], ["availability", `${quantity(item.supplierQuantity)} (${item.availabilityStatus})`]];
+      for (const [column, value] of cells) {
+        const cell = element("td", value);
+        cell.dataset.garageColumn = column;
+        row.append(cell);
+      }
+      const required = document.createElement("input"); required.className = "garage-quantity-input"; required.type = "number"; required.min = "0.001"; required.step = "0.001"; required.value = String(item.requiredQuantity); required.setAttribute("aria-label", `Количество: ${item.title}`);
+      const requiredCell = document.createElement("td"); requiredCell.dataset.garageColumn = "quantity"; requiredCell.append(required); row.append(requiredCell);
+      const regularPriceCell = element("td", price(item.regularPrice)); regularPriceCell.dataset.garageColumn = "price"; row.append(regularPriceCell);
       const purchasePriceCell = element("td", price(item.purchasePrice));
+      purchasePriceCell.dataset.garageColumn = "purchase-price";
       purchasePriceCell.hidden = !showPurchase;
       row.append(purchasePriceCell);
-      row.append(element("td", price(item.regularPrice * item.requiredQuantity)));
-      const actions = document.createElement("td");
-      const save = element("button", "Сохранить", "btn btn-light"); save.type = "button";
-      save.addEventListener("click", async () => { await api(`/api/garage/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, requiredQuantity: Number(required.value), comment: item.comment }) }); await showVehicle(selectedVehicle.id); });
-      const remove = element("button", "Удалить", "btn btn-light"); remove.type = "button";
-      const confirmRemove = element("button", "Удалить", "btn garage-item-remove__confirm"); confirmRemove.type = "button"; confirmRemove.hidden = true;
-      const cancelRemove = element("button", "Отмена", "btn btn-light"); cancelRemove.type = "button"; cancelRemove.hidden = true;
-      remove.addEventListener("click", () => {
-        remove.hidden = true;
-        confirmRemove.hidden = false;
-        cancelRemove.hidden = false;
-        confirmRemove.focus();
+      const sumCell = element("td", price(item.regularPrice * item.requiredQuantity)); sumCell.dataset.garageColumn = "sum"; row.append(sumCell);
+      const actions = document.createElement("td"); actions.className = "garage-actions-cell";
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "garage-item-remove"; remove.title = "Удалить товар"; remove.setAttribute("aria-label", `Удалить «${item.title}»`);
+      const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg"); icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
+      ["M4 7h16", "M10 11v6", "M14 11v6", "M6.5 7 7.5 20h9l1-13", "M9 7V4h6v3"].forEach((pathData) => { const path = document.createElementNS("http://www.w3.org/2000/svg", "path"); path.setAttribute("d", pathData); icon.append(path); });
+      remove.append(icon);
+      required.addEventListener("change", async () => {
+        const requiredQuantity = Number(required.value);
+        if (!Number.isFinite(requiredQuantity) || requiredQuantity <= 0) {
+          required.value = String(item.requiredQuantity);
+          showToast("Укажите количество больше нуля.", "error");
+          return;
+        }
+        required.disabled = true;
+        try {
+          await api(`/api/garage/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, requiredQuantity, comment: item.comment }) });
+          await showVehicle(selectedVehicle.id);
+        } catch (error) {
+          setStatus(error.message);
+          showToast(error.message, "error");
+          required.disabled = false;
+        }
       });
-      cancelRemove.addEventListener("click", () => {
-        remove.hidden = false;
-        confirmRemove.hidden = true;
-        cancelRemove.hidden = true;
-        remove.focus();
-      });
-      confirmRemove.addEventListener("click", async () => {
-        confirmRemove.disabled = true;
-        cancelRemove.disabled = true;
+      remove.addEventListener("click", async () => {
+        remove.disabled = true;
         try {
           await api(`/api/garage/items/${item.id}`, { method: "DELETE", body: JSON.stringify({ revision: item.revision }) });
           await showVehicle(selectedVehicle.id);
         } catch (error) {
           setStatus(error.message);
-          confirmRemove.disabled = false;
-          cancelRemove.disabled = false;
+          showToast(error.message, "error");
+          remove.disabled = false;
         }
       });
-      actions.append(save, remove, confirmRemove, cancelRemove); row.append(actions); itemsBody.append(row);
+      actions.append(remove); row.append(actions); itemsBody.append(row);
     }
   };
   const openAdd = (offerId, vehicleId = null) => {
@@ -415,6 +452,14 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     renderVehicles();
   });
   back.addEventListener("click", showSearch);
+  garageSortButtons.forEach((button) => button.addEventListener("click", () => {
+    const key = button.dataset.garageSortKey;
+    if (!key) return;
+    garageSortState = garageSortState.key === key
+      ? { key, direction: garageSortState.direction === "ascending" ? "descending" : "ascending" }
+      : { key, direction: "ascending" };
+    renderItems();
+  }));
   refresh.addEventListener("click", async () => { refresh.disabled = true; setStatus("Актуализируем предложения…"); try { const { payload } = await api(`/api/garage/vehicles/${selectedVehicle.id}/refresh`, { method: "POST", body: JSON.stringify({ revision: selectedVehicle.revision }) }); selectedVehicle = payload.vehicle; renderItems(); setStatus("Предложения актуализированы"); await loadVehicles(); } catch (error) { setStatus(error.message); } finally { refresh.disabled = false; } });
   priceToggle.addEventListener("click", () => setPurchasePricesVisible(!showPurchase));
   modal.querySelectorAll("[data-garage-close]").forEach((button) => button.addEventListener("click", closeModal));
@@ -451,7 +496,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   });
   window.addEventListener("resize", () => hideContextMenu(true));
   window.addEventListener("scroll", () => hideContextMenu(true), true);
-  document.addEventListener("dragstart", (event) => { const row = event.target.closest(".main-result-row, .analogs-result-row"); const button = row?.querySelector(".garage-offer-button"); if (button?.dataset.garageOfferId) { event.dataTransfer.effectAllowed = "copy"; event.dataTransfer.setData("application/x-garage-offer", button.dataset.garageOfferId); setSidebarOpen(true); } });
+  document.addEventListener("dragstart", (event) => { const button = event.target.closest(".garage-offer-button"); if (button?.dataset.garageOfferId) { event.dataTransfer.effectAllowed = "copy"; event.dataTransfer.setData("application/x-garage-offer", button.dataset.garageOfferId); setSidebarOpen(true); } });
   restoreSidebarWidth();
   loadVehicles().catch((error) => setStatus(error.message));
 };

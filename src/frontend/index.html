@@ -186,10 +186,33 @@
           <div class="garage-sidebar__resize" id="garage-resize" role="separator" aria-label="Изменить ширину гаража" aria-orientation="vertical" tabindex="0"></div>
         </aside>
       </div>
-      <section class="garage-view card border-0 shadow-sm" id="garage-view" hidden>
-        <header class="garage-view__header"><button type="button" class="btn btn-light" id="garage-back">← Поиск</button><h2 id="garage-vehicle-name"></h2><button type="button" class="purchase-price-toggle" id="garage-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены" title="Показать закупочные цены"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.8" /><path d="m3 3 18 18" /></svg></button><button type="button" class="btn btn-primary" id="garage-refresh">Актуализировать предложения</button></header>
+      <section class="garage-view card border-0 shadow-sm overflow-hidden" id="garage-view" hidden>
+        <header class="garage-view__header">
+          <button type="button" class="btn btn-light" id="garage-back">← Поиск</button>
+          <h2 id="garage-vehicle-name"></h2>
+          <div class="garage-view__actions">
+            <button type="button" class="purchase-price-toggle" id="garage-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены" title="Показать закупочные цены"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.8" /><path d="m3 3 18 18" /></svg></button>
+            <button type="button" class="btn btn-primary" id="garage-refresh">Актуализировать предложения</button>
+          </div>
+        </header>
         <p id="garage-status" role="status"></p>
-        <div class="garage-view__table"><table class="table align-middle"><thead><tr><th>Поставщик</th><th>Бренд</th><th>Артикул</th><th>Наименование</th><th>Наличие</th><th>Количество</th><th>Цена</th><th id="garage-purchase-price-heading" hidden>Закупочная цена</th><th>Сумма</th><th></th></tr></thead><tbody id="garage-items"></tbody></table></div>
+        <div class="results-table garage-view__table">
+          <table class="table table-hover align-middle mb-0 results-data-table garage-data-table">
+            <thead><tr>
+              <th scope="col" data-garage-column="supplier" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="supplier">Поставщик<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              <th scope="col" data-garage-column="brand" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="brand">Бренд<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              <th scope="col" data-garage-column="article" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="article">Артикул<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              <th scope="col" data-garage-column="title" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="title">Наименование<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              <th scope="col" data-garage-column="availability" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="availability">Наличие<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              <th scope="col" data-garage-column="quantity" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="quantity">Количество<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              <th scope="col" data-garage-column="price" aria-sort="ascending"><button type="button" class="table-sort is-active" data-garage-sort-key="price">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              <th scope="col" data-garage-column="purchase-price" id="garage-purchase-price-heading" hidden aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="purchasePrice">Закупочная цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              <th scope="col" data-garage-column="sum" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="sum">Сумма<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              <th scope="col" class="garage-actions-column"><span class="visually-hidden">Удалить товар</span></th>
+            </tr></thead>
+            <tbody id="garage-items"></tbody>
+          </table>
+        </div>
       </section>
       <div class="garage-toast" id="garage-toast" role="status" aria-live="polite" hidden></div>
     </main>
