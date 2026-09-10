@@ -245,6 +245,8 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /registerResultContextMenu\(resultsBody/);
   assert.match(app, /registerResultContextMenu\(analogsResultsBody/);
   assert.match(app, /const setAnalogFiltersSidebarOpen = \(open\) =>/);
+  assert.match(app, /analogSearchCompleted = false;\s+setAnalogFiltersSidebarOpen\(false\);/s);
+  assert.match(app, /analogSearchCompleted = true;\s+renderAnalogRowsNow\(\);\s+setAnalogFiltersSidebarOpen\(true\);/s);
   assert.match(app, /renderAveragePrices\(container, getFilteredAnalogResults\(visibleResults\)\);/);
   assert.doesNotMatch(app, /renderAveragePrices\(container, getFilteredAnalogResults\(visibleResults\), showPurchasePrices\)/);
   assert.match(app, /analogFiltersToggle\.addEventListener\("click", \(\) => setAnalogFiltersSidebarOpen\(analogFiltersSidebar\.hidden\)\)/);

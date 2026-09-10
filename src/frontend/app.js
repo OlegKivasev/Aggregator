@@ -2344,6 +2344,7 @@ const finishAnalogSearch = (failureMessages) => {
   }
   analogSearchCompleted = true;
   renderAnalogRowsNow();
+  setAnalogFiltersSidebarOpen(true);
   const receivedFrom = formatAnalogResultSuppliers();
   const received = receivedFrom ? `Выдали аналоги: ${receivedFrom}.` : "Поставщики не выдали аналогов.";
   if (failureMessages.size) {
@@ -2392,6 +2393,7 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
   analogResultCounts = {};
   analogVisibleLimit = 200;
   analogSearchCompleted = false;
+  setAnalogFiltersSidebarOpen(false);
   clearAnalogStatusHideTimer();
   analogsTableSearch.value = "";
   analogsMarkupPercent.value = String(markupPercent);
