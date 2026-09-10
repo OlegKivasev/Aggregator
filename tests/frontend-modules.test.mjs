@@ -487,6 +487,9 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /modalForm\.addEventListener\("submit"/);
   assert.doesNotMatch(garage, /setStatus\("Предложения актуализированы"\)/);
   assert.match(garage, /const setModalQuantityMaximum = \(value\) =>/);
+  assert.match(garage, /const api = async \(path, options = \{\}, allowConflict = false\) =>/);
+  assert.match(garage, /\(!allowConflict \|\| response\.status !== 409\)/);
+  assert.match(garage, /duplicateStrategy \? \{ duplicateStrategy \} : \{\}\) \}\) \}, true\);/);
   assert.match(garage, /modalQuantity\.max = String\(quantity\);/);
   assert.match(garage, /required\.max = String\(item\.supplierQuantity\);/);
   assert.match(garage, /const remainingQuantity = Math\.max\(0, supplierQuantity - result\.payload\.duplicate\.requiredQuantity\);/);

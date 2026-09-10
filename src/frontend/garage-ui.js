@@ -1,9 +1,9 @@
 import { formatArticle, formatBrand, formatPrice, formatQuantity } from "./result-formatting.js";
 
-const api = async (path, options = {}) => {
+const api = async (path, options = {}, allowConflict = false) => {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
   const payload = response.status === 204 ? null : await response.json().catch(() => null);
-  if (!response.ok && response.status !== 409) throw new Error(payload?.message || "Не удалось выполнить действие в гараже");
+  if (!response.ok && (!allowConflict || response.status !== 409)) throw new Error(payload?.message || "Не удалось выполнить действие в гараже");
   return { response, payload };
 };
 
@@ -670,7 +670,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       return;
     }
     try {
-      const result = await api(`/api/garage/vehicles/${vehicle.id}/items`, { method: "POST", body: JSON.stringify({ vehicleRevision: vehicle.revision, offerId: pendingOfferId, markupPercent: getMarkupPercent(), requiredQuantity, ...(duplicateStrategy ? { duplicateStrategy } : {}) }) });
+      const result = await api(`/api/garage/vehicles/${vehicle.id}/items`, { method: "POST", body: JSON.stringify({ vehicleRevision: vehicle.revision, offerId: pendingOfferId, markupPercent: getMarkupPercent(), requiredQuantity, ...(duplicateStrategy ? { duplicateStrategy } : {}) }) }, true);
       if (result.response.status === 409 && result.payload?.duplicate && !duplicateStrategy) {
         const supplierQuantity = result.payload.duplicate.supplierQuantity;
         if (typeof supplierQuantity === "number" && supplierQuantity >= 0) {
