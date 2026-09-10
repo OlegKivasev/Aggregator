@@ -249,17 +249,24 @@ input {
 .workspace {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  height: calc(100dvh - 52px);
+  min-height: 420px;
   align-items: start;
+  overflow: hidden;
   gap: 10px;
 }
 
 .filters-control {
   display: flex;
   grid-column: 1;
-  align-self: start;
+  height: 100%;
+  min-height: 0;
+  align-self: stretch;
+  align-items: center;
 }
 
 .filters-control:has(.filters-sidebar:not([hidden])) {
+  align-self: stretch;
   align-items: center;
   gap: 10px;
 }
@@ -268,7 +275,9 @@ input {
   display: flex;
   grid-column: 2;
   width: 100%;
+  height: 100%;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   gap: 18px;
 }
@@ -337,14 +346,18 @@ input {
 
 .filters-sidebar {
   --filters-sidebar-width: 200px;
-  position: sticky;
-  top: 16px;
+  position: relative;
+  top: auto;
   width: var(--filters-sidebar-width);
+  height: 100%;
   min-width: 180px;
+  min-height: 0;
   max-width: 420px;
   padding: 16px;
   border-radius: 14px;
   background: var(--surface);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .filters-control:has(.filters-sidebar:not([hidden])) .filters-sidebar {
@@ -352,7 +365,7 @@ input {
 }
 
 .filters-control:has(.filters-sidebar:not([hidden])) .filters-toggle {
-  order: 2;
+  display: none;
 }
 
 .filters-sidebar[hidden] {
@@ -450,6 +463,18 @@ input {
   color: var(--ink);
 }
 
+.filters-sidebar__averages {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.filters-sidebar__averages strong {
+  color: var(--ink);
+}
+
 .filters-sidebar__reset {
   width: 100%;
   margin-top: 9px;
@@ -492,13 +517,27 @@ input {
 .filters-sidebar__resize {
   position: absolute;
   z-index: 2;
-  top: 14px;
-  right: -6px;
-  bottom: 14px;
-  width: 12px;
+  top: 0;
+  right: -10px;
+  bottom: 0;
+  display: grid;
+  width: 20px;
+  place-items: center;
   border-radius: 6px;
   cursor: col-resize;
   touch-action: none;
+}
+
+.filters-sidebar__resize::before {
+  width: 4px;
+  height: 72px;
+  border-right: 1px solid #c5d0da;
+  border-left: 1px solid #c5d0da;
+  border-radius: 2px;
+  background: repeating-linear-gradient(to bottom, #c5d0da 0 3px, transparent 3px 7px);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.94);
+  content: "";
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
 }
 
 .filters-sidebar__resize:focus-visible {
@@ -508,6 +547,13 @@ input {
 
 .filters-sidebar__resize:hover {
   outline: 0;
+}
+
+.filters-sidebar__resize:hover::before,
+.filters-sidebar__resize:focus-visible::before {
+  border-color: var(--accent);
+  background: repeating-linear-gradient(to bottom, var(--accent) 0 3px, transparent 3px 7px);
+  transform: scaleY(1.08);
 }
 
 #submit-button {
@@ -579,6 +625,10 @@ input {
 
 .results-panel {
   position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
   overflow: hidden !important;
   border-radius: 14px;
 }
@@ -907,7 +957,8 @@ input {
 
 .results-table {
   position: relative;
-  height: max(420px, calc(100dvh - 300px));
+  min-height: 0;
+  flex: 1 1 auto;
   overflow: auto;
   background: #fff;
 }
@@ -1377,8 +1428,8 @@ table tbody tr:hover td {
 .analogs-modal__card {
   position: relative;
   display: flex;
-  width: min(1600px, calc(100vw - 24px));
-  height: min(960px, calc(100dvh - 24px));
+  width: min(2400px, calc(100vw - 24px));
+  height: min(1440px, calc(100dvh - 24px));
   max-height: calc(100dvh - 24px);
   flex-direction: column;
   overflow: hidden;
@@ -1566,6 +1617,37 @@ table tbody tr:hover td {
   gap: 12px;
 }
 
+.analogs-workspace {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  gap: 10px;
+}
+
+.analogs-filters-control {
+  align-self: stretch;
+  height: 100%;
+  min-height: 0;
+}
+
+.analogs-filters-sidebar {
+  position: relative;
+  height: 100%;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.analogs-shell {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
 .analogs-search {
   width: min(390px, 100%);
 }
@@ -1687,8 +1769,8 @@ table tbody tr:hover td {
 }
 
 .analogs-results table {
-  width: 100%;
-  min-width: 1315px;
+  width: max(100%, var(--analogs-results-table-min-width, 1315px));
+  min-width: max(100%, var(--analogs-results-table-min-width, 1315px));
   table-layout: fixed;
 }
 
@@ -1703,39 +1785,46 @@ table tbody tr:hover td {
   background: #f4f6f8;
 }
 
-.analogs-results th:nth-child(1) { width: 90px; }
-.analogs-results th:nth-child(2) { width: 115px; }
-.analogs-results th:nth-child(3) { width: 125px; }
-.analogs-results th:nth-child(4) { width: 350px; }
-.analogs-results th:nth-child(5) { width: 105px; }
-.analogs-results th:nth-child(6) { width: 130px; }
-.analogs-results th:nth-child(7) { width: 120px; }
-.analogs-results th:nth-child(8) { width: 125px; }
-.analogs-results th:nth-child(9) { width: 145px; }
-
-.analogs-results th:nth-child(7),
-.analogs-results td:nth-child(7),
-.analogs-results th:nth-child(8),
-.analogs-results td:nth-child(8) {
-  text-align: right;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.analogs-results th:nth-child(5),
-.analogs-results td:nth-child(5) {
+.analogs-results [data-analog-column="purchasePrice"] {
   text-align: center;
   font-weight: 800;
   white-space: nowrap;
 }
 
-.analogs-results th:nth-child(9),
-.analogs-results td:nth-child(9) {
+.analogs-results [data-analog-column="markupPrice"],
+.analogs-results [data-analog-column="warehouse"] {
   text-align: center;
   white-space: nowrap;
 }
 
-.analogs-results td:nth-child(3) {
+.analogs-results [data-analog-column="markupPrice"] {
+  font-weight: 800;
+}
+
+.analogs-results th[data-analog-column="markupPrice"] .analogs-sort,
+.analogs-results th[data-analog-column="warehouse"] .analogs-sort {
+  justify-content: center;
+  width: 100%;
+}
+
+.analogs-results [data-analog-column="quantity"] {
+  text-align: center;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.analogs-results th[data-analog-column="quantity"] .analogs-sort,
+.analogs-results th[data-analog-column="deliveryDate"] .analogs-sort {
+  justify-content: center;
+  width: 100%;
+}
+
+.analogs-results [data-analog-column="deliveryDate"] {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.analogs-results td[data-analog-column="article"] {
   color: #0666d6;
   font-weight: 700;
 }

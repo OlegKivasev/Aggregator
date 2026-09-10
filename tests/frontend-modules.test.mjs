@@ -106,7 +106,7 @@ test("PartKOM return preference is rendered and applied only to regular results"
   assert.match(html, /id="part-kom-non-returnable"/);
   assert.match(app, /autoservice\.partKomNonReturnable/);
   assert.match(app, /filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
-  assert.match(app, /const visibleResults = analogSearchResults;/);
+  assert.match(app, /const getVisibleAnalogResults = \(items\) => filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses/);
 });
 
 test("Forum-Auto return preference is rendered and applied only to regular results", async () => {
@@ -116,7 +116,7 @@ test("Forum-Auto return preference is rendered and applied only to regular resul
   assert.match(html, /id="forum-auto-non-returnable"/);
   assert.match(app, /autoservice\.forumAutoNonReturnable/);
   assert.match(app, /filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
-  assert.match(app, /const visibleResults = analogSearchResults;/);
+  assert.match(app, /const getVisibleAnalogResults = \(items\) => filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses/);
 });
 
 test("Armtek return preference is rendered and applied only to regular results", async () => {
@@ -126,7 +126,7 @@ test("Armtek return preference is rendered and applied only to regular results",
   assert.match(html, /id="armtek-non-returnable"/);
   assert.match(app, /autoservice\.armtekNonReturnable/);
   assert.match(app, /filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
-  assert.match(app, /const visibleResults = analogSearchResults;/);
+  assert.match(app, /const getVisibleAnalogResults = \(items\) => filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses/);
 });
 
 test("delivery date sorting moves intervals above dates they finish before", () => {
@@ -232,6 +232,10 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(html, /id="analogs-source-markup-price"/);
   assert.match(html, /id="analogs-table-search"/);
   assert.match(html, /id="analogs-markup-percent"/);
+  assert.match(html, /id="analogs-purchase-price-toggle"[^>]*aria-pressed="false"/);
+  assert.match(html, /id="analogs-filters-toggle"[^>]*aria-controls="analogs-filters-sidebar"[^>]*aria-expanded="true"/);
+  assert.match(html, /id="analogs-filters-sidebar"/);
+  assert.match(html, /data-analog-filter-section="supplier"[\s\S]*?data-analog-filter-section="brand"[\s\S]*?data-analog-filter-section="article"[\s\S]*?data-analog-filter-section="warehouse"[\s\S]*?data-analog-filter-section="markupPrice"[\s\S]*?data-analog-filter-section="deliveryDate"/);
   assert.match(html, /data-analog-sort-key="price"/);
   assert.match(html, /id="analogs-results-body"/);
   assert.match(html, /id="analogs-show-more"/);
@@ -240,6 +244,14 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.doesNotMatch(html, /id="results-view-toggle"/);
   assert.match(app, /registerResultContextMenu\(resultsBody/);
   assert.match(app, /registerResultContextMenu\(analogsResultsBody/);
+  assert.match(app, /const setAnalogFiltersSidebarOpen = \(open\) =>/);
+  assert.match(app, /analogSearchCompleted = false;\s+setAnalogFiltersSidebarOpen\(false\);/s);
+  assert.match(app, /analogSearchCompleted = true;\s+renderAnalogRowsNow\(\);\s+setAnalogFiltersSidebarOpen\(true\);/s);
+  assert.match(app, /renderAveragePrices\(container, getFilteredAnalogResults\(visibleResults\)\);/);
+  assert.doesNotMatch(app, /renderAveragePrices\(container, getFilteredAnalogResults\(visibleResults\), showPurchasePrices\)/);
+  assert.match(app, /analogFiltersToggle\.addEventListener\("click", \(\) => setAnalogFiltersSidebarOpen\(analogFiltersSidebar\.hidden\)\)/);
+  assert.match(app, /analogFiltersResize\.releasePointerCapture\(event\.pointerId\);\s+setAnalogFiltersSidebarOpen\(false\);/s);
+  assert.match(app, /data-analog-column="purchasePrice"\$\{showPurchasePrices \? "" : " hidden"\}/);
   assert.doesNotMatch(app, /data-show-row-analogs/);
   assert.match(app, /openResultButton\.addEventListener/);
   assert.match(app, /analogsTableSearch\.addEventListener\("input"/);
@@ -285,7 +297,7 @@ test("frontend keeps retail price as the configurable column and discovers brand
   assert.match(app, /input\.type = "checkbox"/);
   assert.match(app, /selectedBrands\.forEach\(\(brand\) =>/);
   assert.match(app, /let analogSearchSources = new Set\(\);/);
-  assert.match(app, /const visibleResults = analogSearchResults;/);
+  assert.match(app, /const getVisibleAnalogResults = \(items\) =>/);
   assert.match(app, /const getMainTableResults = \(items\) =>/);
   assert.match(app, /getMainTableResults\(tab\.results\)\.filteredResults\.length === 0/);
   assert.match(app, /if \(!brands\.length\) \{\s+closeArticleAnalogsModal\(\);\s+return;/);
@@ -335,22 +347,30 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.doesNotMatch(html, /Уточнить результаты/);
   assert.match(app, /filtersResize\.addEventListener\("pointerdown"/);
   assert.match(app, /filtersToggle\.setAttribute\("aria-label", open \? "Скрыть фильтры" : "Открыть фильтры"\)/);
-  assert.doesNotMatch(app, /filtersClose/);
   assert.match(app, /button\.setAttribute\("aria-pressed", String\(selected\)\)/);
   assert.match(app, /const candidateResults = getFilteredResults\(visibleExactResults, tableSearchTerm, markupPercent, column\);/);
   assert.match(app, /section\.hidden = !visibleTableColumns\.has\(column\) \|\| values\.length === 0;/);
   assert.match(app, /section\.hidden = !visibleTableColumns\.has\(column\) \|\| !hasValues;/);
   assert.match(app, /const filtersWidthStorageKey = "autoservice\.filtersWidth\.v2"/);
+  assert.match(app, /Средняя закуп\. цена/);
+  assert.match(app, /Средняя цена/);
   assert.match(app, /Math\.max\(180, Math\.round\(width \/ 10\) \* 10\)/);
   assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
+  assert.match(styles, /\.workspace\s*\{[^}]*height: calc\(100dvh - 52px\);[^}]*overflow: hidden;/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-items: center;/s);
-  assert.match(styles, /\.filters-control\s*\{[^}]*align-self: start;/s);
-  assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\) \.filters-toggle\s*\{[^}]*order: 2;/s);
+  assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-self: stretch;/s);
+  assert.match(styles, /\.filters-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
+  assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\) \.filters-toggle\s*\{[^}]*display: none;/s);
   assert.match(styles, /\.filters-sidebar\s*\{[^}]*--filters-sidebar-width: 200px;[^}]*min-width: 180px;/s);
+  assert.match(styles, /\.filters-sidebar\s*\{[^}]*height: 100%;[^}]*overflow-y: auto;/s);
   assert.match(styles, /@media \(max-width: 575\.98px\)\s*\{\s*\.workspace/);
   assert.match(styles, /\.filters-suppliers\s*\{[^}]*margin-top: 0;/s);
   assert.match(styles, /\.filters-sidebar__disclosure summary\s*\{[^}]*cursor: pointer;/s);
   assert.match(styles, /\.filters-sidebar__resize\s*\{[^}]*cursor: col-resize;/s);
+  assert.match(styles, /\.filters-sidebar__resize::before\s*\{[^}]*height: 72px;/s);
+  assert.match(app, /const filtersCloseThresholdRatio = 0\.02;/);
+  assert.match(app, /const getFiltersCloseWidth = \(sidebar\) =>/);
+  assert.match(app, /filtersResize\.releasePointerCapture\(event\.pointerId\);\s+setFiltersSidebarOpen\(false\);/s);
   assert.match(styles, /\.supplier-search-toggle \.supplier-enabled-input\s*\{[^}]*clip-path: inset\(50%\);/s);
 });
 
@@ -396,6 +416,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(html, /class="table table-hover align-middle mb-0 results-data-table"/);
   assert.match(html, /class="results-panel__footer" aria-hidden="true"><\/footer>/);
   assert.match(html, /class="analogs-modal__footer">\s*<button[^>]*id="analogs-show-more"/s);
+  assert.match(html, /id="analogs-filters-resize" role="separator"/);
   assert.doesNotMatch(html, /Нажмите на строку/);
   assert.match(html, /id="warehouse-tooltip"/);
   assert.match(html, /data-column="quantity"[^>]*[\s\S]*?Количество[\s\S]*?data-column="warehouse"/);
@@ -406,6 +427,10 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(app, /const tableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 150,\s+title: 325,\s+quantity: 120,\s+warehouse: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 120,/s);
   assert.match(app, /--results-table-min-width/);
   assert.match(app, /tableColumnWidths\[header\.dataset\.column\] \/ minimumWidth \* 100/);
+  assert.match(app, /const analogTableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 150,\s+title: 325,\s+quantity: 120,\s+warehouse: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 120,/s);
+  assert.match(app, /const applyAnalogTableColumns = \(\) =>/);
+  assert.match(app, /--analogs-results-table-min-width/);
+  assert.match(app, /analogFiltersResize\.addEventListener\("pointerdown"/);
   assert.match(app, /showWarehouseTooltip/);
   assert.match(styles, /\.results-data-table thead\s*\{[^}]*position: sticky;/s);
   assert.match(styles, /\.results-data-table\s*\{[^}]*width: max\(100%, var\(--results-table-min-width,/s);
@@ -415,9 +440,16 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.doesNotMatch(styles, /\.results-data-table th:nth-child/);
   assert.match(styles, /\.warehouse-code\s*\{[^}]*max-width: 100%;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/s);
   assert.match(styles, /\.results-table\s*\{[^}]*overflow: auto;/s);
-  assert.match(styles, /height: max\(420px, calc\(100dvh - 300px\)\)/);
-  assert.match(styles, /width: min\(1600px, calc\(100vw - 24px\)\)/);
-  assert.match(styles, /height: min\(960px, calc\(100dvh - 24px\)\)/);
+  assert.match(styles, /\.results-table\s*\{[^}]*flex: 1 1 auto;[^}]*overflow: auto;/s);
+  assert.match(styles, /width: min\(2400px, calc\(100vw - 24px\)\)/);
+  assert.match(styles, /height: min\(1440px, calc\(100dvh - 24px\)\)/);
+  assert.match(styles, /\.analogs-workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
+  assert.match(styles, /\.analogs-workspace\s*\{[^}]*height: 100%;[^}]*overflow: hidden;/s);
+  assert.match(styles, /\.analogs-filters-sidebar\s*\{[^}]*height: 100%;[^}]*overflow-y: auto;/s);
+  assert.match(styles, /\.analogs-results table\s*\{[^}]*width: max\(100%, var\(--analogs-results-table-min-width,/s);
+  assert.match(styles, /\.analogs-results \[data-analog-column="markupPrice"\]/);
+  assert.match(styles, /\.analogs-results \[data-analog-column="markupPrice"\],\s*\.analogs-results \[data-analog-column="warehouse"\]\s*\{[^}]*text-align: center;/s);
+  assert.doesNotMatch(styles, /\.analogs-results th:nth-child/);
 });
 
 test("search shows authorization progress before waiting for session validation", async () => {

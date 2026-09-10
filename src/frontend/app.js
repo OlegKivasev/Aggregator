@@ -36,6 +36,7 @@ const searchLoadingCancel = document.querySelector("#search-loading-cancel");
 const cancelSearchButton = document.querySelector("#cancel-search-button");
 const markupPercentInput = document.querySelector("#markup-percent");
 const purchasePriceToggle = document.querySelector("#purchase-price-toggle");
+const analogsPurchasePriceToggle = document.querySelector("#analogs-purchase-price-toggle");
 const tableSearchInput = document.querySelector("#table-search");
 const sortButtons = [...resultsTable.querySelectorAll(".table-sort")];
 const tableColumnInputs = [...document.querySelectorAll(".table-column-input")];
@@ -58,6 +59,16 @@ const filterSections = Object.fromEntries(
   [...document.querySelectorAll("[data-filter-section]")].map((section) => [section.dataset.filterSection, section]),
 );
 const filtersReset = document.querySelector("#filters-reset");
+const analogFilterValueContainers = Object.fromEntries(
+  [...document.querySelectorAll("[data-analog-filter-values]")].map((container) => [container.dataset.analogFilterValues, container]),
+);
+const analogFilterSections = Object.fromEntries(
+  [...document.querySelectorAll("[data-analog-filter-section]")].map((section) => [section.dataset.analogFilterSection, section]),
+);
+const analogFiltersReset = document.querySelector("#analogs-filters-reset");
+const analogFiltersToggle = document.querySelector("#analogs-filters-toggle");
+const analogFiltersSidebar = document.querySelector("#analogs-filters-sidebar");
+const analogFiltersResize = document.querySelector("#analogs-filters-resize");
 const settingsDrawer = document.querySelector("#settings-drawer");
 const settingsClose = document.querySelector("#settings-close");
 const settingsBackdrop = document.querySelector("#settings-backdrop");
@@ -189,6 +200,8 @@ let supplierCheckInProgress = false;
 let searchProgressTimer = null;
 const selectedFilterValuesByColumn = new Map();
 const filterRangesByColumn = new Map();
+const selectedAnalogFilterValuesByColumn = new Map();
+const analogFilterRangesByColumn = new Map();
 const supplierSessionStates = new Map();
 
 const searchStateStorageKey = "autoservice.searchState";
@@ -199,6 +212,7 @@ const partKomNonReturnableStorageKey = "autoservice.partKomNonReturnable";
 const forumAutoNonReturnableStorageKey = "autoservice.forumAutoNonReturnable";
 const supplierVisibilityStorageKey = "autoservice.supplierVisibility";
 const filtersWidthStorageKey = "autoservice.filtersWidth.v2";
+const analogFiltersWidthStorageKey = "autoservice.analogFiltersWidth.v1";
 const lastSearchStorageKey = "autoservice.lastSearchStartedAt";
 const supplierCheckIntervalMs = 2 * 60 * 60 * 1000;
 
@@ -298,6 +312,38 @@ const hasActiveFilter = (column) => (rangeFilterColumns.has(column)
 
 const hasAnyActiveFilters = () => tableColumnIds.some((column) => hasActiveFilter(column));
 
+const getAveragePrice = (items, getPrice) => {
+  const prices = items.map(getPrice).filter((price) => Number.isFinite(price) && price > 0);
+  return prices.length ? prices.reduce((total, price) => total + price, 0) / prices.length : null;
+};
+const analogTableColumnWidths = {
+  supplier: 100,
+  brand: 125,
+  article: 150,
+  title: 325,
+  quantity: 120,
+  warehouse: 120,
+  purchasePrice: 120,
+  markupPrice: 120,
+  deliveryDate: 120,
+};
+const analogTableColumnIds = Object.keys(analogTableColumnWidths);
+
+const renderAveragePrices = (container, items) => {
+  const averages = document.createElement("div");
+  averages.className = "filters-sidebar__averages";
+  const appendAverage = (label, price) => {
+    const line = document.createElement("div");
+    const value = document.createElement("strong");
+    value.textContent = formatPrice(price);
+    line.append(`${label}: `, value);
+    averages.append(line);
+  };
+  appendAverage("Средняя закуп. цена", getAveragePrice(items, (result) => result.price));
+  appendAverage("Средняя цена", getAveragePrice(items, (result) => getMarkupPrice(result)));
+  container.append(averages);
+};
+
 const getFilteredResults = (sourceResults, searchTerm, percent, ignoredFilterColumn = null) => {
   const normalizedSearchTerm = searchTerm.trim().toLocaleLowerCase();
 
@@ -380,6 +426,9 @@ const renderFilterValues = () => {
         createRangeInput("from", "От"),
         createRangeInput("to", "До"),
       );
+      if (column === "markupPrice") {
+        renderAveragePrices(container, getMainTableResults(results).filteredResults);
+      }
       return;
     }
 
@@ -398,6 +447,108 @@ const renderFilterValues = () => {
     }));
   });
   filtersReset.hidden = !hasAnyActiveFilters();
+};
+
+const getSelectedAnalogFilterValues = (column) => selectedAnalogFilterValuesByColumn.get(column) ?? new Set();
+
+const getAnalogFilterRange = (column) => analogFilterRangesByColumn.get(column) ?? { from: "", to: "" };
+
+const hasActiveAnalogFilter = (column) => (rangeFilterColumns.has(column)
+  ? Boolean(getAnalogFilterRange(column).from || getAnalogFilterRange(column).to)
+  : getSelectedAnalogFilterValues(column).size > 0);
+
+const getVisibleAnalogResults = (items) => filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
+  items.filter((result) => isSupplierVisible(result.supplier)),
+))));
+
+const getFilteredAnalogResults = (sourceResults, ignoredFilterColumn = null) => {
+  const normalizedSearchTerm = analogSearchTerm.trim().toLocaleLowerCase();
+  return sourceResults.filter((result) => {
+    if (normalizedSearchTerm && ![
+      supplierNames[result.supplier] ?? result.supplier,
+      formatBrand(result.brand),
+      formatArticle(result.article),
+      result.title,
+      result.warehouse,
+    ].some((value) => String(value ?? "").toLocaleLowerCase().includes(normalizedSearchTerm))) {
+      return false;
+    }
+
+    return mainFilterColumns.every((column) => {
+      if (column === ignoredFilterColumn || !hasActiveAnalogFilter(column)) {
+        return true;
+      }
+      if (rangeFilterColumns.has(column)) {
+        const range = getAnalogFilterRange(column);
+        const from = column === "deliveryDate" && range.from
+          ? new Date(`${range.from}T00:00:00`).getTime()
+          : Number(range.from);
+        const to = column === "deliveryDate" && range.to
+          ? new Date(`${range.to}T23:59:59.999`).getTime()
+          : Number(range.to);
+        const value = getRangeFilterValue(result, column);
+        return Number.isFinite(value)
+          && (!range.from || value >= from)
+          && (!range.to || value <= to);
+      }
+      return getSelectedAnalogFilterValues(column).has(getFilterValue(result, column));
+    });
+  });
+};
+
+const renderAnalogFilterValues = () => {
+  const visibleResults = getVisibleAnalogResults(analogSearchResults);
+  mainFilterColumns.forEach((column) => {
+    const container = analogFilterValueContainers[column];
+    const section = analogFilterSections[column];
+    const candidateResults = getFilteredAnalogResults(visibleResults, column);
+    container.replaceChildren();
+
+    if (rangeFilterColumns.has(column)) {
+      const hasValues = candidateResults.some((result) => Number.isFinite(getRangeFilterValue(result, column)));
+      section.hidden = !hasValues;
+      if (!hasValues) {
+        return;
+      }
+      const isDate = column === "deliveryDate";
+      const createRangeInput = (bound, labelText) => {
+        const label = document.createElement("label");
+        label.className = "filters-sidebar__range";
+        const text = document.createElement("span");
+        text.textContent = labelText;
+        const input = document.createElement("input");
+        input.type = isDate ? "date" : "number";
+        input.min = isDate ? "" : "0";
+        input.step = isDate ? "" : "0.01";
+        input.placeholder = isDate ? "дд.мм.гггг" : "0";
+        input.value = getAnalogFilterRange(column)[bound];
+        input.dataset.analogFilterColumn = column;
+        input.dataset.analogFilterRange = bound;
+        label.append(text, input);
+        return label;
+      };
+      container.replaceChildren(createRangeInput("from", "От"), createRangeInput("to", "До"));
+      if (column === "markupPrice") {
+        renderAveragePrices(container, getFilteredAnalogResults(visibleResults));
+      }
+      return;
+    }
+
+    const values = [...new Set(candidateResults.map((result) => getFilterValue(result, column)))].sort(resultCollator.compare);
+    section.hidden = values.length === 0;
+    container.replaceChildren(...values.map((value) => {
+      const button = document.createElement("button");
+      const selected = getSelectedAnalogFilterValues(column).has(value);
+      button.type = "button";
+      button.className = "filters-sidebar__value";
+      button.dataset.analogFilterColumn = column;
+      button.dataset.analogFilterValue = value;
+      button.setAttribute("aria-pressed", String(selected));
+      button.textContent = value;
+      return button;
+    }));
+  });
+  analogFiltersReset.hidden = !mainFilterColumns.some((column) => hasActiveAnalogFilter(column));
 };
 
 const hidePassword = (passwordField) => {
@@ -1111,10 +1262,44 @@ const setMarkupPercent = (value) => {
 
 const setPurchasePricesVisible = (visible) => {
   showPurchasePrices = visible;
-  purchasePriceToggle.setAttribute("aria-pressed", String(visible));
-  purchasePriceToggle.setAttribute("aria-label", visible ? "Скрыть закупочные цены" : "Показать закупочные цены");
-  purchasePriceToggle.title = visible ? "Скрыть закупочные цены" : "Показать закупочные цены";
+  [purchasePriceToggle, analogsPurchasePriceToggle].forEach((toggle) => {
+    toggle.setAttribute("aria-pressed", String(visible));
+    toggle.setAttribute("aria-label", visible ? "Скрыть закупочные цены" : "Показать закупочные цены");
+    toggle.title = visible ? "Скрыть закупочные цены" : "Показать закупочные цены";
+  });
   renderResults();
+  if (!analogsModal.hidden) {
+    renderAnalogRowsNow();
+  }
+};
+
+const setAnalogFiltersSidebarWidth = (value) => {
+  const width = Number(value);
+  if (!Number.isFinite(width)) {
+    return;
+  }
+  const normalizedWidth = Math.min(420, Math.max(180, Math.round(width / 10) * 10));
+  analogFiltersSidebar.style.setProperty("--filters-sidebar-width", `${normalizedWidth}px`);
+  try {
+    localStorage.setItem(analogFiltersWidthStorageKey, String(normalizedWidth));
+  } catch {
+    // The panel remains resizable for this session when storage is unavailable.
+  }
+};
+
+const restoreAnalogFiltersSidebarWidth = () => {
+  try {
+    setAnalogFiltersSidebarWidth(localStorage.getItem(analogFiltersWidthStorageKey) ?? 200);
+  } catch {
+    setAnalogFiltersSidebarWidth(200);
+  }
+};
+
+const setAnalogFiltersSidebarOpen = (open) => {
+  analogFiltersSidebar.hidden = !open;
+  analogFiltersToggle.setAttribute("aria-expanded", String(open));
+  analogFiltersToggle.setAttribute("aria-label", open ? "Скрыть фильтры" : "Открыть фильтры");
+  analogFiltersToggle.title = open ? "Скрыть фильтры" : "Открыть фильтры";
 };
 
 const resetSearchState = () => {
@@ -1445,6 +1630,7 @@ settingsToggle.addEventListener("click", openSettings);
 settingsClose.addEventListener("click", closeSettings);
 settingsBackdrop.addEventListener("click", closeSettings);
 filtersToggle.addEventListener("click", () => setFiltersSidebarOpen(filtersSidebar.hidden));
+analogFiltersToggle.addEventListener("click", () => setAnalogFiltersSidebarOpen(analogFiltersSidebar.hidden));
 passwordFields.forEach((passwordField) => {
   const input = passwordField.querySelector("input");
   const toggle = passwordField.querySelector(".password-toggle");
@@ -1588,6 +1774,12 @@ filtersSidebar.addEventListener("change", (event) => {
 });
 
 let filtersResizeStart = null;
+const filtersCloseThresholdRatio = 0.02;
+
+const getFiltersCloseWidth = (sidebar) => {
+  const workspace = sidebar.closest(".workspace, .analogs-workspace");
+  return (workspace?.getBoundingClientRect().width ?? 0) * filtersCloseThresholdRatio;
+};
 
 filtersResize.addEventListener("pointerdown", (event) => {
   event.preventDefault();
@@ -1603,7 +1795,14 @@ filtersResize.addEventListener("pointermove", (event) => {
   if (!filtersResizeStart || event.pointerId !== filtersResizeStart.pointerId) {
     return;
   }
-  setFiltersSidebarWidth(filtersResizeStart.startWidth + event.clientX - filtersResizeStart.startX);
+  const width = filtersResizeStart.startWidth + event.clientX - filtersResizeStart.startX;
+  if (width <= getFiltersCloseWidth(filtersSidebar)) {
+    filtersResizeStart = null;
+    filtersResize.releasePointerCapture(event.pointerId);
+    setFiltersSidebarOpen(false);
+    return;
+  }
+  setFiltersSidebarWidth(width);
 });
 
 filtersResize.addEventListener("pointerup", (event) => {
@@ -1618,6 +1817,10 @@ filtersResize.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
   const width = filtersSidebar.getBoundingClientRect().width;
+  if (event.key === "ArrowLeft" && width <= 180) {
+    setFiltersSidebarOpen(false);
+    return;
+  }
   setFiltersSidebarWidth(width + (event.key === "ArrowRight" ? 10 : -10));
 });
 
@@ -1625,6 +1828,92 @@ filtersReset.addEventListener("click", () => {
   selectedFilterValuesByColumn.clear();
   filterRangesByColumn.clear();
   renderResults();
+});
+
+let analogFiltersResizeStart = null;
+
+analogFiltersResize.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  analogFiltersResizeStart = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startWidth: analogFiltersSidebar.getBoundingClientRect().width,
+  };
+  analogFiltersResize.setPointerCapture(event.pointerId);
+});
+
+analogFiltersResize.addEventListener("pointermove", (event) => {
+  if (!analogFiltersResizeStart || event.pointerId !== analogFiltersResizeStart.pointerId) {
+    return;
+  }
+  const width = analogFiltersResizeStart.startWidth + event.clientX - analogFiltersResizeStart.startX;
+  if (width <= getFiltersCloseWidth(analogFiltersSidebar)) {
+    analogFiltersResizeStart = null;
+    analogFiltersResize.releasePointerCapture(event.pointerId);
+    setAnalogFiltersSidebarOpen(false);
+    return;
+  }
+  setAnalogFiltersSidebarWidth(width);
+});
+
+analogFiltersResize.addEventListener("pointerup", (event) => {
+  if (analogFiltersResizeStart && event.pointerId === analogFiltersResizeStart.pointerId) {
+    analogFiltersResizeStart = null;
+  }
+});
+
+analogFiltersResize.addEventListener("keydown", (event) => {
+  if (!["ArrowLeft", "ArrowRight"].includes(event.key)) {
+    return;
+  }
+  event.preventDefault();
+  const width = analogFiltersSidebar.getBoundingClientRect().width;
+  if (event.key === "ArrowLeft" && width <= 180) {
+    setAnalogFiltersSidebarOpen(false);
+    return;
+  }
+  setAnalogFiltersSidebarWidth(width + (event.key === "ArrowRight" ? 10 : -10));
+});
+
+analogsModal.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-analog-filter-column][data-analog-filter-value]");
+  if (!button) {
+    return;
+  }
+  const column = button.dataset.analogFilterColumn;
+  const value = button.dataset.analogFilterValue;
+  if (!column || value === undefined) {
+    return;
+  }
+  const selectedValues = getSelectedAnalogFilterValues(column);
+  if (selectedValues.has(value)) {
+    selectedValues.delete(value);
+  } else {
+    selectedValues.add(value);
+  }
+  selectedAnalogFilterValuesByColumn.set(column, selectedValues);
+  analogVisibleLimit = 200;
+  renderAnalogRowsNow();
+});
+
+analogsModal.addEventListener("change", (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || !input.dataset.analogFilterRange || !input.dataset.analogFilterColumn) {
+    return;
+  }
+  analogFilterRangesByColumn.set(input.dataset.analogFilterColumn, {
+    ...getAnalogFilterRange(input.dataset.analogFilterColumn),
+    [input.dataset.analogFilterRange]: input.value,
+  });
+  analogVisibleLimit = 200;
+  renderAnalogRowsNow();
+});
+
+analogFiltersReset.addEventListener("click", () => {
+  selectedAnalogFilterValuesByColumn.clear();
+  analogFilterRangesByColumn.clear();
+  analogVisibleLimit = 200;
+  renderAnalogRowsNow();
 });
 
 searchTabsList.addEventListener("click", (event) => {
@@ -1965,32 +2254,51 @@ const updateAnalogSortHeaders = () => {
   });
 };
 
+const getVisibleAnalogTableColumns = () => analogTableColumnIds.filter((column) => column !== "purchasePrice" || showPurchasePrices);
+
+const applyAnalogTableColumns = () => {
+  const visibleColumns = getVisibleAnalogTableColumns();
+  const minimumWidth = visibleColumns.reduce((width, column) => width + analogTableColumnWidths[column], 0);
+  const analogsTable = analogsResultsBody.closest("table");
+  analogsTable.style.setProperty("--analogs-results-table-min-width", `${minimumWidth}px`);
+  analogsTable.querySelectorAll("th[data-analog-column]").forEach((header) => {
+    header.style.width = visibleColumns.includes(header.dataset.analogColumn)
+      ? `${analogTableColumnWidths[header.dataset.analogColumn] / minimumWidth * 100}%`
+      : "";
+  });
+  analogsTable.querySelectorAll("[data-analog-column]").forEach((element) => {
+    const visible = visibleColumns.includes(element.dataset.analogColumn);
+    element.hidden = !visible;
+    element.style.display = visible ? "" : "none";
+  });
+  analogsModal.querySelectorAll('.analogs-source [data-analog-column="purchasePrice"]').forEach((element) => {
+    element.hidden = !showPurchasePrices;
+  });
+};
+
 const renderAnalogRows = () => {
   hideWarehouseTooltip();
+  applyAnalogTableColumns();
   const focusedResultIndex = analogsResultsBody.contains(document.activeElement)
     ? document.activeElement.closest("[data-analog-result-index]")?.dataset.analogResultIndex
     : null;
   const normalizedTerm = analogSearchTerm.trim().toLocaleLowerCase();
-  const visibleResults = analogSearchResults;
-  const filteredResults = visibleResults.filter((result) => !normalizedTerm || [
-    supplierNames[result.supplier] ?? result.supplier,
-    formatBrand(result.brand),
-    formatArticle(result.article),
-    result.title,
-    result.warehouse,
-  ].some((value) => String(value ?? "").toLocaleLowerCase().includes(normalizedTerm)));
+  const visibleResults = getVisibleAnalogResults(analogSearchResults);
+  const filteredResults = getFilteredAnalogResults(visibleResults);
   const rows = [...filteredResults].sort((left, right) => compareResults(left, right, analogSortState));
   const bestPrice = filteredResults
     .filter((result) => Number.isFinite(result.price) && result.price > 0)
     .reduce((best, result) => !best || result.price < best.price ? result : best, null);
-  analogsCount.textContent = normalizedTerm ? `${rows.length} из ${visibleResults.length}` : String(visibleResults.length);
-  analogsCount.title = normalizedTerm ? "Показано с учетом поиска" : "Всего найдено";
+  const hasActiveAnalogFilters = mainFilterColumns.some((column) => hasActiveAnalogFilter(column));
+  analogsCount.textContent = normalizedTerm || hasActiveAnalogFilters ? `${rows.length} из ${visibleResults.length}` : String(visibleResults.length);
+  analogsCount.title = normalizedTerm || hasActiveAnalogFilters ? "Показано с учетом поиска и фильтров" : "Всего найдено";
   const supplierBreakdown = analogSearchSuppliers
     .map((supplier) => `${supplierNames[supplier] ?? supplier}: ${rows.filter((result) => result.supplier === supplier).length} позиций`)
     .join("\n");
   analogsCount.dataset.tooltip = supplierBreakdown;
   analogsCount.setAttribute("aria-label", supplierBreakdown ? `По поставщикам:\n${supplierBreakdown}` : "Нет аналогов");
   updateAnalogSortHeaders();
+  renderAnalogFilterValues();
 
   if (!rows.length) {
     const message = normalizedTerm && analogSearchResults.length
@@ -1998,7 +2306,7 @@ const renderAnalogRows = () => {
       : analogSearchSources.size
         ? "Предложения появятся здесь по мере получения"
       : "Аналоги для выбранной позиции не найдены";
-    analogsResultsBody.innerHTML = `<tr class="analogs-results__empty"><td colspan="9">${message}</td></tr>`;
+    analogsResultsBody.innerHTML = `<tr class="analogs-results__empty"><td colspan="${showPurchasePrices ? 9 : 8}">${message}</td></tr>`;
     analogsShowMore.hidden = true;
     return;
   }
@@ -2013,17 +2321,18 @@ const renderAnalogRows = () => {
     const isBestPrice = result === bestPrice;
     return `
       <tr class="results-table__row analogs-result-row${isBestPrice ? " is-best-price" : ""}" data-analog-result-index="${analogSearchResults.indexOf(result)}" tabindex="0" aria-label="Действия для ${escapeHtml(result.title)}">
-        <td>${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}</td>
-        <td>${escapeHtml(formatBrand(result.brand))}</td>
-        <td>${escapeHtml(formatArticle(result.article))}</td>
-        <td class="analogs-result-title" title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</td>
-        <td>${escapeHtml(formatQuantity(result.quantity))}</td>
-        <td>${renderWarehouse(result)}</td>
-        <td><span class="analogs-result-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
-        <td>${escapeHtml(formatPrice(getMarkupPrice(result)))}</td>
-        <td>${escapeHtml(deliveryDate)}</td>
+        <td data-analog-column="supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}</td>
+        <td data-analog-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
+        <td data-analog-column="article">${escapeHtml(formatArticle(result.article))}</td>
+        <td class="analogs-result-title" data-analog-column="title" title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</td>
+        <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
+        <td data-analog-column="warehouse">${renderWarehouse(result)}</td>
+        <td data-analog-column="purchasePrice"${showPurchasePrices ? "" : " hidden"}><span class="analogs-result-price">${escapeHtml(formatPrice(result.price))}</span></td>
+        <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
+        <td data-analog-column="deliveryDate">${escapeHtml(deliveryDate)}</td>
       </tr>`;
   }).join("");
+  applyAnalogTableColumns();
   if (focusedResultIndex !== null) {
     analogsResultsBody.querySelector(`[data-analog-result-index="${focusedResultIndex}"]`)?.focus();
   }
@@ -2035,6 +2344,7 @@ const finishAnalogSearch = (failureMessages) => {
   }
   analogSearchCompleted = true;
   renderAnalogRowsNow();
+  setAnalogFiltersSidebarOpen(true);
   const receivedFrom = formatAnalogResultSuppliers();
   const received = receivedFrom ? `Выдали аналоги: ${receivedFrom}.` : "Поставщики не выдали аналогов.";
   if (failureMessages.size) {
@@ -2074,6 +2384,8 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
   analogSourceResult = sourceResult;
   analogSearchResults = [];
   analogSearchResultKeys = new Set();
+  selectedAnalogFilterValuesByColumn.clear();
+  analogFilterRangesByColumn.clear();
   analogSearchTerm = "";
   analogSortState = { key: "price", direction: "ascending" };
   analogSearchSuppliers = analogSupplierIds.filter(isSupplierVisible);
@@ -2081,6 +2393,7 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
   analogResultCounts = {};
   analogVisibleLimit = 200;
   analogSearchCompleted = false;
+  setAnalogFiltersSidebarOpen(false);
   clearAnalogStatusHideTimer();
   analogsTableSearch.value = "";
   analogsMarkupPercent.value = String(markupPercent);
@@ -2757,6 +3070,7 @@ form.addEventListener("submit", async (event) => {
 
 restoreSearchState();
 restoreFiltersSidebarWidth();
+restoreAnalogFiltersSidebarWidth();
 restoreTableColumns();
 restoreStpartsWarehouses();
 restoreArmtekNonReturnable();
@@ -2787,6 +3101,9 @@ markupPercentInput.addEventListener("change", () => {
   setMarkupPercent(markupPercentInput.value);
 });
 purchasePriceToggle.addEventListener("click", () => {
+  setPurchasePricesVisible(!showPurchasePrices);
+});
+analogsPurchasePriceToggle.addEventListener("click", () => {
   setPurchasePricesVisible(!showPurchasePrices);
 });
 
