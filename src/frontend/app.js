@@ -592,7 +592,7 @@ const setFiltersSidebarWidth = (value) => {
   if (!Number.isFinite(width)) {
     return;
   }
-  const normalizedWidth = Math.min(420, Math.max(180, Math.round(width / 10) * 10));
+  const normalizedWidth = Math.min(420, Math.max(50, Math.round(width / 10) * 10));
   filtersSidebar.style.setProperty("--filters-sidebar-width", `${normalizedWidth}px`);
   try {
     localStorage.setItem(filtersWidthStorageKey, String(normalizedWidth));
@@ -1280,7 +1280,7 @@ const setAnalogFiltersSidebarWidth = (value) => {
   if (!Number.isFinite(width)) {
     return;
   }
-  const normalizedWidth = Math.min(420, Math.max(180, Math.round(width / 10) * 10));
+  const normalizedWidth = Math.min(420, Math.max(50, Math.round(width / 10) * 10));
   analogFiltersSidebar.style.setProperty("--filters-sidebar-width", `${normalizedWidth}px`);
   try {
     localStorage.setItem(analogFiltersWidthStorageKey, String(normalizedWidth));
@@ -1776,7 +1776,12 @@ filtersSidebar.addEventListener("change", (event) => {
 });
 
 let filtersResizeStart = null;
-const filtersCloseWidth = 170;
+const filtersCloseThresholdRatio = 0.05;
+
+const getFiltersCloseWidth = (sidebar) => {
+  const workspace = sidebar.closest(".workspace, .analogs-workspace");
+  return (workspace?.getBoundingClientRect().width ?? 0) * filtersCloseThresholdRatio;
+};
 
 filtersResize.addEventListener("pointerdown", (event) => {
   event.preventDefault();
@@ -1793,7 +1798,7 @@ filtersResize.addEventListener("pointermove", (event) => {
     return;
   }
   const width = filtersResizeStart.startWidth + event.clientX - filtersResizeStart.startX;
-  if (width <= filtersCloseWidth) {
+  if (width <= getFiltersCloseWidth(filtersSidebar)) {
     filtersResizeStart = null;
     filtersResize.releasePointerCapture(event.pointerId);
     setFiltersSidebarOpen(false);
@@ -1814,7 +1819,7 @@ filtersResize.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
   const width = filtersSidebar.getBoundingClientRect().width;
-  if (event.key === "ArrowLeft" && width <= 180) {
+  if (event.key === "ArrowLeft" && width <= 50) {
     setFiltersSidebarOpen(false);
     return;
   }
@@ -1844,7 +1849,7 @@ analogFiltersResize.addEventListener("pointermove", (event) => {
     return;
   }
   const width = analogFiltersResizeStart.startWidth + event.clientX - analogFiltersResizeStart.startX;
-  if (width <= filtersCloseWidth) {
+  if (width <= getFiltersCloseWidth(analogFiltersSidebar)) {
     analogFiltersResizeStart = null;
     analogFiltersResize.releasePointerCapture(event.pointerId);
     setAnalogFiltersSidebarOpen(false);
@@ -1865,7 +1870,7 @@ analogFiltersResize.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
   const width = analogFiltersSidebar.getBoundingClientRect().width;
-  if (event.key === "ArrowLeft" && width <= 180) {
+  if (event.key === "ArrowLeft" && width <= 50) {
     setAnalogFiltersSidebarOpen(false);
     return;
   }
