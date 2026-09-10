@@ -245,6 +245,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
 
   assert.match(html, /id="result-context-menu"/);
   assert.match(html, /id="open-result-button"/);
+  assert.match(html, /id="open-result-button"[\s\S]*?id="search-result-button"[\s\S]*?id="show-analogs-button"/);
   assert.match(html, /id="show-analogs-button"/);
   assert.match(html, /id="analogs-modal"/);
   assert.match(html, /id="analogs-source-title"/);
@@ -283,8 +284,11 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /formatArticle\(result\.article\)/);
   assert.match(app, /const analogSupplierIds = \["rossko", "armtek", "part-kom", "stparts", "forum-auto"\]/);
   assert.match(app, /analogSupplierIds\.filter\(isSupplierVisible\)/);
-  assert.match(app, /Выдали аналоги:/);
-  assert.match(app, /hideSuccessfulAnalogStatus/);
+  assert.doesNotMatch(html, /id="analogs-search-status"/);
+  assert.doesNotMatch(app, /setAnalogSearchStatus|updateAnalogSearchProgress/);
+  assert.match(app, /searchResultButton\.addEventListener\("click"/);
+  assert.match(app, /const tab = createSearchTab\(\{ article, enabledSuppliers: getEnabledSuppliers\(\) \}\);/);
+  assert.match(app, /form\.requestSubmit\(\);/);
   assert.match(app, /Показать всё/);
   assert.match(app, /analogSearchCompleted \? Number\.POSITIVE_INFINITY/);
   assert.match(app, /analogsCount\.dataset\.tooltip = supplierBreakdown/);
