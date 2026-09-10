@@ -33,12 +33,11 @@
 .garage-vehicle-delete { color: #7a271a; font-size: 12px; font-weight: 700; }
 .garage-vehicle-delete__confirm { color: #fff; border-color: #b42318; background: #b42318; }
 .garage-vehicle-delete__confirm:hover, .garage-vehicle-delete__confirm:focus-visible { border-color: #8f1c13; background: #8f1c13; }
+.garage-titlebar { display: flex; min-height: 58px; align-items: center; gap: 12px; padding: 10px 18px; }
+.garage-titlebar__back { width: 34px; min-width: 34px; height: 34px; padding: 0; font-size: 18px; line-height: 1; }
+.garage-titlebar h1 { min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font-size: 16px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
 .garage-view { margin-top: 1rem; padding: 0; }
-.garage-view__header { display: flex; min-height: 58px; gap: .75rem; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
-.garage-view__header h2 { min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
-.garage-view__actions { display: flex; flex: none; gap: 8px; align-items: center; margin-left: auto; }
 .garage-view__table { overflow: auto; }
-#garage-status { min-height: 0; margin: 0; padding: 0 14px; }
 .garage-data-table { --results-table-min-width: 1315px; }
 .garage-data-table [data-garage-column="availability"],
 .garage-data-table [data-garage-column="quantity"],
@@ -769,13 +768,15 @@ input {
 }
 
 #result-count,
-#analogs-count {
+#analogs-count,
+#garage-result-count {
   position: relative;
   cursor: help;
 }
 
 #result-count::after,
-#analogs-count::after {
+#analogs-count::after,
+#garage-result-count::after {
   position: absolute;
   z-index: 10;
   top: calc(100% + 8px);
@@ -801,7 +802,9 @@ input {
 #result-count:hover::after,
 #result-count:focus-visible::after,
 #analogs-count:hover::after,
-#analogs-count:focus-visible::after {
+#analogs-count:focus-visible::after,
+#garage-result-count:hover::after,
+#garage-result-count:focus-visible::after {
   opacity: 1;
   transform: translateY(0);
 }

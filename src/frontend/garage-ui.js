@@ -25,10 +25,13 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const contextMenu = document.querySelector("#garage-context-menu");
   const renameButton = document.querySelector("#garage-rename-button");
   const deleteButton = document.querySelector("#garage-delete-button");
+  const titlebar = document.querySelector("#garage-titlebar");
   const view = document.querySelector("#garage-view");
   const viewName = document.querySelector("#garage-vehicle-name");
   const itemsBody = document.querySelector("#garage-items");
   const status = document.querySelector("#garage-status");
+  const resultCount = document.querySelector("#garage-result-count");
+  const tableSearch = document.querySelector("#garage-table-search");
   const back = document.querySelector("#garage-back");
   const refresh = document.querySelector("#garage-refresh");
   const priceToggle = document.querySelector("#garage-price-toggle");
@@ -52,6 +55,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   let selectedAddVehicleId = null;
   let pendingOfferId = null;
   let showPurchase = false;
+  let garageTableSearchTerm = "";
   let garageSortState = { key: "price", direction: "ascending" };
   let resizeStart = null;
   let editingVehicle = null;
@@ -105,7 +109,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const getCloseWidth = () => (sidebar.closest(".workspace")?.getBoundingClientRect().width ?? 0) * closeThresholdRatio;
   const findVehicle = (id) => vehicles.find((vehicle) => vehicle.id === id) ?? null;
   const focusVehicleEditor = () => requestAnimationFrame(() => vehiclesList.querySelector(".garage-vehicle-editor__input")?.focus());
-  const showSearch = () => { view.hidden = true; workspace.hidden = false; searchShell.hidden = false; searchTabs.hidden = false; };
+  const showSearch = () => { view.hidden = true; titlebar.hidden = true; workspace.hidden = false; searchShell.hidden = false; searchTabs.hidden = false; };
   const showVehicle = async (id) => {
     const { payload } = await api(`/api/garage/vehicles/${encodeURIComponent(id)}`);
     if (!payload.vehicle.items.length) {
@@ -115,10 +119,11 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       return;
     }
     selectedVehicle = payload.vehicle;
-    viewName.textContent = selectedVehicle.name;
+    viewName.textContent = `Товары для автомобиля: ${selectedVehicle.name}`;
     workspace.hidden = true;
     searchShell.hidden = true;
     searchTabs.hidden = true;
+    titlebar.hidden = false;
     view.hidden = false;
     setStatus("");
     renderItems();
@@ -321,10 +326,31 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     if (comparison !== 0) return garageSortState.direction === "ascending" ? comparison : -comparison;
     return left.title.localeCompare(right.title, "ru-RU", { numeric: true, sensitivity: "base" });
   };
+  const updateGarageResultCount = (items) => {
+    const suppliers = new Map();
+    for (const item of items) suppliers.set(item.supplier, (suppliers.get(item.supplier) ?? 0) + 1);
+    const breakdown = [...suppliers].map(([supplier, count]) => `${supplier}: ${count} позиций`).join("\n");
+    resultCount.textContent = String(items.length);
+    resultCount.dataset.tooltip = breakdown;
+    resultCount.title = `Показано предложений: ${items.length}`;
+    resultCount.setAttribute("aria-label", breakdown ? `По поставщикам:\n${breakdown}` : "Нет предложений");
+  };
   const renderItems = () => {
     itemsBody.replaceChildren();
     updateGarageSortHeaders();
-    for (const item of [...selectedVehicle.items].sort(compareGarageItems)) {
+    updateGarageResultCount(selectedVehicle.items);
+    const term = garageTableSearchTerm.toLocaleLowerCase("ru-RU");
+    const visibleItems = selectedVehicle.items.filter((item) => [item.brand, item.article, item.title]
+      .some((value) => value.toLocaleLowerCase("ru-RU").includes(term)));
+    if (!visibleItems.length) {
+      const empty = element("tr", undefined, "results-table__empty");
+      const emptyCell = element("td", "Нет позиций с выбранным условием.");
+      emptyCell.colSpan = 10;
+      empty.append(emptyCell);
+      itemsBody.append(empty);
+      return;
+    }
+    for (const item of [...visibleItems].sort(compareGarageItems)) {
       const row = element("tr", undefined, item.availabilityStatus === "available" || item.availabilityStatus === "unknown" ? "" : "garage-item--problem");
       const cells = [["supplier", item.supplier], ["brand", item.brand], ["article", item.article], ["title", item.title], ["availability", `${quantity(item.supplierQuantity)} (${item.availabilityStatus})`]];
       for (const [column, value] of cells) {
@@ -427,6 +453,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   });
   searchForm.addEventListener("submit", (event) => event.preventDefault());
   search.addEventListener("input", () => loadVehicles().catch((error) => setStatus(error.message)));
+  tableSearch.addEventListener("input", () => { garageTableSearchTerm = tableSearch.value.trim(); renderItems(); });
   modalSearch.addEventListener("input", renderModalVehicles);
   create.addEventListener("click", () => {
     deletingVehicleId = null;

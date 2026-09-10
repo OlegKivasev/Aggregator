@@ -22,6 +22,10 @@
         <div class="search-tabs__list" id="search-tabs-list" role="tablist"></div>
         <button type="button" class="new-tab-button btn btn-light" id="new-tab-button" aria-label="Открыть новую вкладку">+</button>
       </nav>
+      <header class="garage-titlebar card border-0 shadow-sm mb-4" id="garage-titlebar" hidden>
+        <button type="button" class="btn btn-light garage-titlebar__back" id="garage-back" aria-label="Вернуться к поиску" title="Вернуться к поиску">←</button>
+        <h1 id="garage-vehicle-name"></h1>
+      </header>
 
       <details class="supplier-notice" id="supplier-notice" hidden>
         <summary class="supplier-notice__summary">
@@ -186,16 +190,22 @@
           <div class="garage-sidebar__resize" id="garage-resize" role="separator" aria-label="Изменить ширину гаража" aria-orientation="vertical" tabindex="0"></div>
         </aside>
       </div>
-      <section class="garage-view card border-0 shadow-sm overflow-hidden" id="garage-view" hidden>
-        <header class="garage-view__header">
-          <button type="button" class="btn btn-light" id="garage-back">← Поиск</button>
-          <h2 id="garage-vehicle-name"></h2>
-          <div class="garage-view__actions">
+      <section class="garage-view results-panel card border-0 shadow-sm overflow-hidden" id="garage-view" hidden>
+        <header class="results-panel__header garage-view__header card-header bg-white border-0">
+          <div class="results-panel__heading">
+            <h2>Предложения</h2>
+            <span class="panel__meta results-panel__status" id="garage-status" role="status"></span>
+            <span class="panel__meta results-count" id="garage-result-count" tabindex="0">0</span>
+          </div>
+          <div class="results-panel__controls">
+            <label class="table-search-control" for="garage-table-search">
+              <span class="visually-hidden">Поиск по таблице гаража</span>
+              <input id="garage-table-search" type="search" placeholder="Бренд, артикул или название" autocomplete="off" />
+            </label>
             <button type="button" class="purchase-price-toggle" id="garage-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены" title="Показать закупочные цены"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.8" /><path d="m3 3 18 18" /></svg></button>
             <button type="button" class="btn btn-primary" id="garage-refresh">Актуализировать предложения</button>
           </div>
         </header>
-        <p id="garage-status" role="status"></p>
         <div class="results-table garage-view__table">
           <table class="table table-hover align-middle mb-0 results-data-table garage-data-table">
             <thead><tr>
@@ -213,6 +223,7 @@
             <tbody id="garage-items"></tbody>
           </table>
         </div>
+        <footer class="results-panel__footer" aria-hidden="true"></footer>
       </section>
       <div class="garage-toast" id="garage-toast" role="status" aria-live="polite" hidden></div>
     </main>
@@ -624,7 +635,7 @@
     </div>
 
     <div class="garage-add-modal" id="garage-add-modal" role="dialog" aria-modal="true" aria-labelledby="garage-add-title" hidden>
-      <div class="garage-add-modal__backdrop" data-garage-close></div>
+      <div class="garage-add-modal__backdrop"></div>
       <section class="garage-add-modal__card card border-0 shadow-sm">
         <header class="garage-add-modal__header"><h2 id="garage-add-title">Добавить в автомобиль</h2><button type="button" class="btn btn-light garage-add-modal__close" data-garage-close aria-label="Закрыть окно">×</button></header>
         <label class="garage-add-modal__field">Автомобиль<input class="garage-add-modal__input garage-add-modal__search" id="garage-add-search" type="search" placeholder="Поиск автомобиля" autocomplete="off" /></label>
@@ -634,7 +645,7 @@
           <p>Такая позиция уже добавлена в автомобиль.</p>
           <div><button type="button" class="btn btn-primary garage-inline-action" id="garage-add-duplicate-increment">Увеличить количество</button><button type="button" class="btn btn-light garage-inline-action" id="garage-add-duplicate-new">Добавить отдельной строкой</button></div>
         </div>
-        <footer class="garage-add-modal__footer"><button type="button" class="btn btn-light garage-inline-action" data-garage-close>Отменить</button><button type="button" class="btn btn-primary garage-inline-action" id="garage-add-confirm" disabled>Добавить</button></footer>
+        <footer class="garage-add-modal__footer"><button type="button" class="btn btn-primary garage-inline-action" id="garage-add-confirm" disabled>Добавить</button></footer>
       </section>
     </div>
 

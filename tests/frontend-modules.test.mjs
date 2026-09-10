@@ -422,6 +422,8 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(html, /class="garage-add-modal__header"/);
   assert.match(html, /class="garage-add-modal__input garage-add-modal__search" id="garage-add-search"/);
   assert.match(html, /class="garage-add-modal__footer"/);
+  assert.doesNotMatch(html, /garage-add-modal__footer[\s\S]*?data-garage-close>Отменить/);
+  assert.doesNotMatch(html, /class="garage-add-modal__backdrop" data-garage-close/);
   assert.match(styles, /\.garage-add-modal__header h2\s*\{[^}]*font-size: 17px;/s);
   assert.match(styles, /\.garage-add-modal__search\s*\{[^}]*border: 2px solid var\(--accent\);/s);
   assert.match(styles, /\.garage-add-modal__vehicle\s*\{[^}]*background: transparent;/s);
@@ -452,8 +454,14 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(html, /id="garage-toast" role="status" aria-live="polite" hidden/);
   assert.match(garage, /showToast\(`В «\$\{payload\.vehicle\.name\}» пока нет товаров/);
   assert.match(garage, /showToast\(`Товар добавлен в «\$\{vehicle\.name\}»\.`\)/);
-  assert.match(html, /class="garage-view__actions">[\s\S]*?id="garage-price-toggle"[\s\S]*?id="garage-refresh"/);
+  assert.match(html, /id="garage-titlebar" hidden>[\s\S]*?id="garage-vehicle-name"/);
+  assert.match(html, /class="garage-view results-panel card border-0 shadow-sm overflow-hidden" id="garage-view"/);
+  assert.match(html, /class="results-panel__header garage-view__header card-header bg-white border-0">[\s\S]*?id="garage-result-count"[\s\S]*?id="garage-table-search"[\s\S]*?id="garage-price-toggle"[\s\S]*?id="garage-refresh"/);
+  assert.doesNotMatch(html, /garage-table-search[\s\S]{0,400}Наценка/);
   assert.match(garage, /const garageSortButtons = \[\.\.\.document\.querySelectorAll\("\[data-garage-sort-key\]"\)\]/);
+  assert.match(garage, /const updateGarageResultCount = \(items\) =>/);
+  assert.match(garage, /const tableSearch = document\.querySelector\("#garage-table-search"\)/);
+  assert.match(garage, /tableSearch\.addEventListener\("input"/);
   assert.match(garage, /const compareGarageItems =/);
   assert.match(garage, /const button = event\.target\.closest\("\.garage-offer-button"\)/);
   assert.match(garage, /className = "garage-item-remove"/);
