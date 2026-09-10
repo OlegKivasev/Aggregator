@@ -221,19 +221,21 @@ test("delivery date sorting places an interval starting on the 29th above the 30
   ]);
 });
 
-test("delivery date sorting uses the lowest price for the same delivery start day", () => {
+test("delivery date sorting preserves delivery groups and uses price within one group", () => {
   const today = new Date();
-  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  const date = (offset) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset, 12).toISOString();
   const results = [
-    { label: "more expensive", deliveryDate: new Date(tomorrow.getTime() + 20 * 60 * 60 * 1_000).toISOString(), deliveryDateTo: new Date(tomorrow.getTime() + 4 * 86_400_000).toISOString(), price: 4500 },
-    { label: "lowest price", deliveryDate: new Date(tomorrow.getTime() + 8 * 60 * 60 * 1_000).toISOString(), deliveryDateApproximate: true, price: 1200 },
-    { label: "middle price", deliveryDate: new Date(tomorrow.getTime() + 14 * 60 * 60 * 1_000).toISOString(), deliveryDateTo: new Date(tomorrow.getTime() + 2 * 86_400_000).toISOString(), price: 2800 },
+    { label: "expensive interval", deliveryDate: date(2), deliveryDateTo: date(4), price: 4500 },
+    { label: "approximate day after tomorrow", deliveryDate: date(2), deliveryDateApproximate: true, price: 1000 },
+    { label: "known day after tomorrow", deliveryDate: date(2), price: 1900 },
+    { label: "cheap interval", deliveryDate: date(2), deliveryDateTo: date(3), price: 1200 },
   ];
 
   assert.deepEqual(results.sort(compareDeliveryDatesThenPrice).map((result) => result.label), [
-    "lowest price",
-    "middle price",
-    "more expensive",
+    "known day after tomorrow",
+    "approximate day after tomorrow",
+    "cheap interval",
+    "expensive interval",
   ]);
 });
 

@@ -150,11 +150,14 @@ export const compareDeliveryDatesThenPrice = (left, right) => {
   const deliveryComparison = compareDeliveryDates(left, right);
   const leftFrom = getDeliveryTimestamp(left.deliveryDate);
   const rightFrom = getDeliveryTimestamp(right.deliveryDate);
-  const hasSameDeliveryStartDay = leftFrom === null || rightFrom === null
-    ? leftFrom === rightFrom
-    : getCalendarDayTimestamp(leftFrom) === getCalendarDayTimestamp(rightFrom);
+  const leftTo = leftFrom === null ? null : getEffectiveDeliveryTo(leftFrom, getDeliveryTimestamp(left.deliveryDateTo));
+  const rightTo = rightFrom === null ? null : getEffectiveDeliveryTo(rightFrom, getDeliveryTimestamp(right.deliveryDateTo));
+  const canBreakDeliveryTieByPrice = leftFrom !== null
+    && rightFrom !== null
+    && getDeliverySortGroup(left, leftFrom, leftTo) === getDeliverySortGroup(right, rightFrom, rightTo)
+    && getCalendarDayTimestamp(leftFrom) === getCalendarDayTimestamp(rightFrom);
 
-  if (deliveryComparison !== 0 && !hasSameDeliveryStartDay) {
+  if (deliveryComparison !== 0 && !canBreakDeliveryTieByPrice) {
     return deliveryComparison;
   }
 
