@@ -487,58 +487,60 @@
           </dl>
         </section>
 
-        <div class="analogs-toolbar">
-          <div class="analogs-toolbar__heading">
-            <h3>Найденные аналоги</h3>
-            <span class="analogs-count" id="analogs-count" tabindex="0">0</span>
+        <div class="analogs-workspace">
+          <div class="filters-control analogs-filters-control">
+            <button type="button" class="filters-toggle" id="analogs-filters-toggle" aria-controls="analogs-filters-sidebar" aria-expanded="true" aria-label="Скрыть фильтры" title="Скрыть фильтры">⋮</button>
+            <aside class="filters-sidebar analogs-filters-sidebar" id="analogs-filters-sidebar">
+              <section class="filters-sidebar__section" data-analog-filter-section="supplier" hidden><h3>Поставщик</h3><div class="filters-sidebar__values" data-analog-filter-values="supplier" aria-live="polite"></div></section>
+              <section class="filters-sidebar__section" data-analog-filter-section="brand" hidden><h3>Бренд</h3><div class="filters-sidebar__values" data-analog-filter-values="brand" aria-live="polite"></div></section>
+              <section class="filters-sidebar__section" data-analog-filter-section="article" hidden><h3>Артикул</h3><div class="filters-sidebar__values" data-analog-filter-values="article" aria-live="polite"></div></section>
+              <details class="filters-sidebar__section filters-sidebar__disclosure" data-analog-filter-section="warehouse" hidden><summary>Склад</summary><div class="filters-sidebar__values" data-analog-filter-values="warehouse" aria-live="polite"></div></details>
+              <details class="filters-sidebar__section filters-sidebar__disclosure" data-analog-filter-section="markupPrice" hidden><summary>Цена</summary><div class="filters-sidebar__values" data-analog-filter-values="markupPrice" aria-live="polite"></div></details>
+              <details class="filters-sidebar__section filters-sidebar__disclosure" data-analog-filter-section="deliveryDate" hidden><summary>Дата доставки</summary><div class="filters-sidebar__values" data-analog-filter-values="deliveryDate" aria-live="polite"></div></details>
+              <button type="button" class="filters-sidebar__reset" id="analogs-filters-reset" hidden>Сбросить фильтры</button>
+            </aside>
           </div>
-          <div class="analogs-toolbar__controls">
-            <label class="analogs-search" for="analogs-table-search">
-              <span class="visually-hidden">Поиск по аналогам</span>
-              <input id="analogs-table-search" type="search" placeholder="Бренд, артикул или название" autocomplete="off" />
-            </label>
-            <label class="analogs-markup" for="analogs-markup-percent">Наценка
-              <span><input id="analogs-markup-percent" type="number" min="0" max="1000" step="1" inputmode="decimal" /><b>%</b></span>
-            </label>
-            <button type="button" class="purchase-price-toggle" id="analogs-purchase-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены" title="Показать закупочные цены">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.8" /><path d="m3 3 18 18" /></svg>
-            </button>
+          <div class="analogs-shell">
+            <div class="analogs-toolbar">
+              <div class="analogs-toolbar__heading">
+                <h3>Найденные аналоги</h3>
+                <span class="analogs-count" id="analogs-count" tabindex="0">0</span>
+              </div>
+              <div class="analogs-toolbar__controls">
+                <label class="analogs-search" for="analogs-table-search">
+                  <span class="visually-hidden">Поиск по аналогам</span>
+                  <input id="analogs-table-search" type="search" placeholder="Бренд, артикул или название" autocomplete="off" />
+                </label>
+                <label class="analogs-markup" for="analogs-markup-percent">Наценка
+                  <span><input id="analogs-markup-percent" type="number" min="0" max="1000" step="1" inputmode="decimal" /><b>%</b></span>
+                </label>
+                <button type="button" class="purchase-price-toggle" id="analogs-purchase-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены" title="Показать закупочные цены">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.8" /><path d="m3 3 18 18" /></svg>
+                </button>
+              </div>
+            </div>
+            <div class="analogs-search-status" id="analogs-search-status" role="status" aria-live="polite"></div>
+            <div class="analogs-results" id="analogs-results">
+              <table class="table table-hover align-middle mb-0">
+                <thead><tr>
+                  <th><button type="button" class="analogs-sort" data-analog-sort-key="supplier">Поставщик<span aria-hidden="true"></span></button></th>
+                  <th><button type="button" class="analogs-sort" data-analog-sort-key="brand">Бренд<span aria-hidden="true"></span></button></th>
+                  <th><button type="button" class="analogs-sort" data-analog-sort-key="article">Артикул<span aria-hidden="true"></span></button></th>
+                  <th><button type="button" class="analogs-sort" data-analog-sort-key="title">Наименование<span aria-hidden="true"></span></button></th>
+                  <th><button type="button" class="analogs-sort" data-analog-sort-key="quantity">Количество<span aria-hidden="true"></span></button></th>
+                  <th><button type="button" class="analogs-sort" data-analog-sort-key="warehouse">Склад<span aria-hidden="true"></span></button></th>
+                  <th data-analog-column="purchasePrice" hidden><button type="button" class="analogs-sort is-active" data-analog-sort-key="price">Закупочная цена<span aria-hidden="true"></span></button></th>
+                  <th><button type="button" class="analogs-sort" data-analog-sort-key="markupPrice">Цена<span aria-hidden="true"></span></button></th>
+                  <th><button type="button" class="analogs-sort" data-analog-sort-key="deliveryDate">Доставка<span aria-hidden="true"></span></button></th>
+                </tr></thead>
+                <tbody id="analogs-results-body"></tbody>
+              </table>
+            </div>
+            <footer class="analogs-modal__footer">
+              <button type="button" class="analogs-show-more btn btn-light" id="analogs-show-more" hidden></button>
+            </footer>
           </div>
         </div>
-
-        <details class="analogs-filters" id="analogs-filters">
-          <summary>Фильтры</summary>
-          <div class="analogs-filters__grid">
-            <section class="filters-sidebar__section" data-analog-filter-section="supplier" hidden><h3>Поставщик</h3><div class="filters-sidebar__values" data-analog-filter-values="supplier" aria-live="polite"></div></section>
-            <section class="filters-sidebar__section" data-analog-filter-section="brand" hidden><h3>Бренд</h3><div class="filters-sidebar__values" data-analog-filter-values="brand" aria-live="polite"></div></section>
-            <section class="filters-sidebar__section" data-analog-filter-section="article" hidden><h3>Артикул</h3><div class="filters-sidebar__values" data-analog-filter-values="article" aria-live="polite"></div></section>
-            <details class="filters-sidebar__section filters-sidebar__disclosure" data-analog-filter-section="warehouse" hidden><summary>Склад</summary><div class="filters-sidebar__values" data-analog-filter-values="warehouse" aria-live="polite"></div></details>
-            <details class="filters-sidebar__section filters-sidebar__disclosure" data-analog-filter-section="markupPrice" hidden><summary>Цена</summary><div class="filters-sidebar__values" data-analog-filter-values="markupPrice" aria-live="polite"></div></details>
-            <details class="filters-sidebar__section filters-sidebar__disclosure" data-analog-filter-section="deliveryDate" hidden><summary>Дата доставки</summary><div class="filters-sidebar__values" data-analog-filter-values="deliveryDate" aria-live="polite"></div></details>
-          </div>
-          <button type="button" class="filters-sidebar__reset" id="analogs-filters-reset" hidden>Сбросить фильтры</button>
-        </details>
-
-        <div class="analogs-search-status" id="analogs-search-status" role="status" aria-live="polite"></div>
-        <div class="analogs-results" id="analogs-results">
-          <table class="table table-hover align-middle mb-0">
-            <thead><tr>
-              <th><button type="button" class="analogs-sort" data-analog-sort-key="supplier">Поставщик<span aria-hidden="true"></span></button></th>
-              <th><button type="button" class="analogs-sort" data-analog-sort-key="brand">Бренд<span aria-hidden="true"></span></button></th>
-              <th><button type="button" class="analogs-sort" data-analog-sort-key="article">Артикул<span aria-hidden="true"></span></button></th>
-              <th><button type="button" class="analogs-sort" data-analog-sort-key="title">Наименование<span aria-hidden="true"></span></button></th>
-              <th><button type="button" class="analogs-sort" data-analog-sort-key="quantity">Количество<span aria-hidden="true"></span></button></th>
-              <th><button type="button" class="analogs-sort" data-analog-sort-key="warehouse">Склад<span aria-hidden="true"></span></button></th>
-              <th data-analog-column="purchasePrice" hidden><button type="button" class="analogs-sort is-active" data-analog-sort-key="price">Закупочная цена<span aria-hidden="true"></span></button></th>
-              <th><button type="button" class="analogs-sort" data-analog-sort-key="markupPrice">Цена<span aria-hidden="true"></span></button></th>
-              <th><button type="button" class="analogs-sort" data-analog-sort-key="deliveryDate">Доставка<span aria-hidden="true"></span></button></th>
-            </tr></thead>
-            <tbody id="analogs-results-body"></tbody>
-          </table>
-        </div>
-        <footer class="analogs-modal__footer">
-          <button type="button" class="analogs-show-more btn btn-light" id="analogs-show-more" hidden></button>
-        </footer>
       </section>
     </div>
 

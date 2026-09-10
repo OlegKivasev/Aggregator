@@ -233,7 +233,8 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(html, /id="analogs-table-search"/);
   assert.match(html, /id="analogs-markup-percent"/);
   assert.match(html, /id="analogs-purchase-price-toggle"[^>]*aria-pressed="false"/);
-  assert.match(html, /id="analogs-filters"/);
+  assert.match(html, /id="analogs-filters-toggle"[^>]*aria-controls="analogs-filters-sidebar"[^>]*aria-expanded="true"/);
+  assert.match(html, /id="analogs-filters-sidebar"/);
   assert.match(html, /data-analog-filter-section="supplier"[\s\S]*?data-analog-filter-section="brand"[\s\S]*?data-analog-filter-section="article"[\s\S]*?data-analog-filter-section="warehouse"[\s\S]*?data-analog-filter-section="markupPrice"[\s\S]*?data-analog-filter-section="deliveryDate"/);
   assert.match(html, /data-analog-sort-key="price"/);
   assert.match(html, /id="analogs-results-body"/);
@@ -243,6 +244,9 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.doesNotMatch(html, /id="results-view-toggle"/);
   assert.match(app, /registerResultContextMenu\(resultsBody/);
   assert.match(app, /registerResultContextMenu\(analogsResultsBody/);
+  assert.match(app, /const setAnalogFiltersSidebarOpen = \(open\) =>/);
+  assert.match(app, /analogFiltersToggle\.addEventListener\("click", \(\) => setAnalogFiltersSidebarOpen\(analogFiltersSidebar\.hidden\)\)/);
+  assert.match(app, /data-analog-column="purchasePrice"\$\{showPurchasePrices \? "" : " hidden"\}/);
   assert.doesNotMatch(app, /data-show-row-analogs/);
   assert.match(app, /openResultButton\.addEventListener/);
   assert.match(app, /analogsTableSearch\.addEventListener\("input"/);
@@ -421,8 +425,9 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(styles, /\.warehouse-code\s*\{[^}]*max-width: 100%;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/s);
   assert.match(styles, /\.results-table\s*\{[^}]*overflow: auto;/s);
   assert.match(styles, /height: max\(420px, calc\(100dvh - 300px\)\)/);
-  assert.match(styles, /width: min\(1600px, calc\(100vw - 24px\)\)/);
-  assert.match(styles, /height: min\(960px, calc\(100dvh - 24px\)\)/);
+  assert.match(styles, /width: min\(2400px, calc\(100vw - 24px\)\)/);
+  assert.match(styles, /height: min\(1440px, calc\(100dvh - 24px\)\)/);
+  assert.match(styles, /\.analogs-workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
 });
 
 test("search shows authorization progress before waiting for session validation", async () => {

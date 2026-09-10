@@ -66,6 +66,8 @@ const analogFilterSections = Object.fromEntries(
   [...document.querySelectorAll("[data-analog-filter-section]")].map((section) => [section.dataset.analogFilterSection, section]),
 );
 const analogFiltersReset = document.querySelector("#analogs-filters-reset");
+const analogFiltersToggle = document.querySelector("#analogs-filters-toggle");
+const analogFiltersSidebar = document.querySelector("#analogs-filters-sidebar");
 const settingsDrawer = document.querySelector("#settings-drawer");
 const settingsClose = document.querySelector("#settings-close");
 const settingsBackdrop = document.querySelector("#settings-backdrop");
@@ -1259,6 +1261,13 @@ const setPurchasePricesVisible = (visible) => {
   }
 };
 
+const setAnalogFiltersSidebarOpen = (open) => {
+  analogFiltersSidebar.hidden = !open;
+  analogFiltersToggle.setAttribute("aria-expanded", String(open));
+  analogFiltersToggle.setAttribute("aria-label", open ? "Скрыть фильтры" : "Открыть фильтры");
+  analogFiltersToggle.title = open ? "Скрыть фильтры" : "Открыть фильтры";
+};
+
 const resetSearchState = () => {
   results = [];
   selectedFilterValuesByColumn.clear();
@@ -1587,6 +1596,7 @@ settingsToggle.addEventListener("click", openSettings);
 settingsClose.addEventListener("click", closeSettings);
 settingsBackdrop.addEventListener("click", closeSettings);
 filtersToggle.addEventListener("click", () => setFiltersSidebarOpen(filtersSidebar.hidden));
+analogFiltersToggle.addEventListener("click", () => setAnalogFiltersSidebarOpen(analogFiltersSidebar.hidden));
 passwordFields.forEach((passwordField) => {
   const input = passwordField.querySelector("input");
   const toggle = passwordField.querySelector(".password-toggle");
@@ -2205,7 +2215,7 @@ const renderAnalogRows = () => {
         <td class="analogs-result-title" title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</td>
         <td>${escapeHtml(formatQuantity(result.quantity))}</td>
         <td>${renderWarehouse(result)}</td>
-        <td data-analog-column="purchasePrice" hidden><span class="analogs-result-price">${escapeHtml(formatPrice(result.price))}</span></td>
+        <td data-analog-column="purchasePrice"${showPurchasePrices ? "" : " hidden"}><span class="analogs-result-price">${escapeHtml(formatPrice(result.price))}</span></td>
         <td><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
         <td>${escapeHtml(deliveryDate)}</td>
       </tr>`;

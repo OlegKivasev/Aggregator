@@ -1389,8 +1389,8 @@ table tbody tr:hover td {
 .analogs-modal__card {
   position: relative;
   display: flex;
-  width: min(1600px, calc(100vw - 24px));
-  height: min(960px, calc(100dvh - 24px));
+  width: min(2400px, calc(100vw - 24px));
+  height: min(1440px, calc(100dvh - 24px));
   max-height: calc(100dvh - 24px);
   flex-direction: column;
   overflow: hidden;
@@ -1578,46 +1578,31 @@ table tbody tr:hover td {
   gap: 12px;
 }
 
-.analogs-filters {
-  flex: 0 0 auto;
-  padding: 0 22px 10px;
-  border-bottom: 1px solid var(--line);
-  background: #fff;
-}
-
-.analogs-filters > summary {
-  cursor: pointer;
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.analogs-filters__grid {
+.analogs-workspace {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0 16px;
+  grid-template-columns: auto minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 10px;
 }
 
-.analogs-filters .filters-sidebar__section {
-  margin-top: 10px;
-  padding-top: 10px;
+.analogs-filters-control {
+  height: 100%;
+  min-height: 0;
 }
 
-@media (max-width: 900px) {
-  .analogs-filters__grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.analogs-filters-sidebar {
+  position: static;
+  height: 100%;
+  max-height: 100%;
+  overflow-y: auto;
 }
 
-@media (max-width: 575.98px) {
-  .analogs-filters {
-    padding-right: 12px;
-    padding-left: 12px;
-  }
-
-  .analogs-filters__grid {
-    grid-template-columns: 1fr;
-  }
+.analogs-shell {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .analogs-search {
