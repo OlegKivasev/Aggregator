@@ -365,7 +365,7 @@ input {
 }
 
 .filters-control:has(.filters-sidebar:not([hidden])) .filters-toggle {
-  order: 2;
+  display: none;
 }
 
 .filters-sidebar[hidden] {
@@ -517,13 +517,27 @@ input {
 .filters-sidebar__resize {
   position: absolute;
   z-index: 2;
-  top: 14px;
-  right: -6px;
-  bottom: 14px;
-  width: 12px;
+  top: 0;
+  right: -10px;
+  bottom: 0;
+  display: grid;
+  width: 20px;
+  place-items: center;
   border-radius: 6px;
   cursor: col-resize;
   touch-action: none;
+}
+
+.filters-sidebar__resize::before {
+  width: 4px;
+  height: 72px;
+  border-right: 1px solid #c5d0da;
+  border-left: 1px solid #c5d0da;
+  border-radius: 2px;
+  background: repeating-linear-gradient(to bottom, #c5d0da 0 3px, transparent 3px 7px);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.94);
+  content: "";
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
 }
 
 .filters-sidebar__resize:focus-visible {
@@ -533,6 +547,13 @@ input {
 
 .filters-sidebar__resize:hover {
   outline: 0;
+}
+
+.filters-sidebar__resize:hover::before,
+.filters-sidebar__resize:focus-visible::before {
+  border-color: var(--accent);
+  background: repeating-linear-gradient(to bottom, var(--accent) 0 3px, transparent 3px 7px);
+  transform: scaleY(1.08);
 }
 
 #submit-button {

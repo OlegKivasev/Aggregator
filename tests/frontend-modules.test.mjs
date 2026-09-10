@@ -246,6 +246,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /registerResultContextMenu\(analogsResultsBody/);
   assert.match(app, /const setAnalogFiltersSidebarOpen = \(open\) =>/);
   assert.match(app, /analogFiltersToggle\.addEventListener\("click", \(\) => setAnalogFiltersSidebarOpen\(analogFiltersSidebar\.hidden\)\)/);
+  assert.match(app, /analogFiltersResize\.releasePointerCapture\(event\.pointerId\);\s+setAnalogFiltersSidebarOpen\(false\);/s);
   assert.match(app, /data-analog-column="purchasePrice"\$\{showPurchasePrices \? "" : " hidden"\}/);
   assert.doesNotMatch(app, /data-show-row-analogs/);
   assert.match(app, /openResultButton\.addEventListener/);
@@ -342,7 +343,6 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.doesNotMatch(html, /Уточнить результаты/);
   assert.match(app, /filtersResize\.addEventListener\("pointerdown"/);
   assert.match(app, /filtersToggle\.setAttribute\("aria-label", open \? "Скрыть фильтры" : "Открыть фильтры"\)/);
-  assert.doesNotMatch(app, /filtersClose/);
   assert.match(app, /button\.setAttribute\("aria-pressed", String\(selected\)\)/);
   assert.match(app, /const candidateResults = getFilteredResults\(visibleExactResults, tableSearchTerm, markupPercent, column\);/);
   assert.match(app, /section\.hidden = !visibleTableColumns\.has\(column\) \|\| values\.length === 0;/);
@@ -356,13 +356,16 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-items: center;/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-self: stretch;/s);
   assert.match(styles, /\.filters-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
-  assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\) \.filters-toggle\s*\{[^}]*order: 2;/s);
+  assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\) \.filters-toggle\s*\{[^}]*display: none;/s);
   assert.match(styles, /\.filters-sidebar\s*\{[^}]*--filters-sidebar-width: 200px;[^}]*min-width: 180px;/s);
   assert.match(styles, /\.filters-sidebar\s*\{[^}]*height: 100%;[^}]*overflow-y: auto;/s);
   assert.match(styles, /@media \(max-width: 575\.98px\)\s*\{\s*\.workspace/);
   assert.match(styles, /\.filters-suppliers\s*\{[^}]*margin-top: 0;/s);
   assert.match(styles, /\.filters-sidebar__disclosure summary\s*\{[^}]*cursor: pointer;/s);
   assert.match(styles, /\.filters-sidebar__resize\s*\{[^}]*cursor: col-resize;/s);
+  assert.match(styles, /\.filters-sidebar__resize::before\s*\{[^}]*height: 72px;/s);
+  assert.match(app, /const filtersCloseWidth = 170;/);
+  assert.match(app, /filtersResize\.releasePointerCapture\(event\.pointerId\);\s+setFiltersSidebarOpen\(false\);/s);
   assert.match(styles, /\.supplier-search-toggle \.supplier-enabled-input\s*\{[^}]*clip-path: inset\(50%\);/s);
 });
 

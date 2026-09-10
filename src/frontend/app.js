@@ -1776,6 +1776,7 @@ filtersSidebar.addEventListener("change", (event) => {
 });
 
 let filtersResizeStart = null;
+const filtersCloseWidth = 170;
 
 filtersResize.addEventListener("pointerdown", (event) => {
   event.preventDefault();
@@ -1791,7 +1792,14 @@ filtersResize.addEventListener("pointermove", (event) => {
   if (!filtersResizeStart || event.pointerId !== filtersResizeStart.pointerId) {
     return;
   }
-  setFiltersSidebarWidth(filtersResizeStart.startWidth + event.clientX - filtersResizeStart.startX);
+  const width = filtersResizeStart.startWidth + event.clientX - filtersResizeStart.startX;
+  if (width <= filtersCloseWidth) {
+    filtersResizeStart = null;
+    filtersResize.releasePointerCapture(event.pointerId);
+    setFiltersSidebarOpen(false);
+    return;
+  }
+  setFiltersSidebarWidth(width);
 });
 
 filtersResize.addEventListener("pointerup", (event) => {
@@ -1806,6 +1814,10 @@ filtersResize.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
   const width = filtersSidebar.getBoundingClientRect().width;
+  if (event.key === "ArrowLeft" && width <= 180) {
+    setFiltersSidebarOpen(false);
+    return;
+  }
   setFiltersSidebarWidth(width + (event.key === "ArrowRight" ? 10 : -10));
 });
 
@@ -1831,7 +1843,14 @@ analogFiltersResize.addEventListener("pointermove", (event) => {
   if (!analogFiltersResizeStart || event.pointerId !== analogFiltersResizeStart.pointerId) {
     return;
   }
-  setAnalogFiltersSidebarWidth(analogFiltersResizeStart.startWidth + event.clientX - analogFiltersResizeStart.startX);
+  const width = analogFiltersResizeStart.startWidth + event.clientX - analogFiltersResizeStart.startX;
+  if (width <= filtersCloseWidth) {
+    analogFiltersResizeStart = null;
+    analogFiltersResize.releasePointerCapture(event.pointerId);
+    setAnalogFiltersSidebarOpen(false);
+    return;
+  }
+  setAnalogFiltersSidebarWidth(width);
 });
 
 analogFiltersResize.addEventListener("pointerup", (event) => {
@@ -1846,6 +1865,10 @@ analogFiltersResize.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
   const width = analogFiltersSidebar.getBoundingClientRect().width;
+  if (event.key === "ArrowLeft" && width <= 180) {
+    setAnalogFiltersSidebarOpen(false);
+    return;
+  }
   setAnalogFiltersSidebarWidth(width + (event.key === "ArrowRight" ? 10 : -10));
 });
 
