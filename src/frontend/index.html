@@ -187,9 +187,9 @@
         </aside>
       </div>
       <section class="garage-view card border-0 shadow-sm" id="garage-view" hidden>
-        <header class="garage-view__header"><button type="button" class="btn btn-light" id="garage-back">← Поиск</button><h2 id="garage-vehicle-name"></h2><button type="button" class="btn btn-primary" id="garage-refresh">Актуализировать предложения</button></header>
+        <header class="garage-view__header"><button type="button" class="btn btn-light" id="garage-back">← Поиск</button><h2 id="garage-vehicle-name"></h2><button type="button" class="purchase-price-toggle" id="garage-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены" title="Показать закупочные цены"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.8" /><path d="m3 3 18 18" /></svg></button><button type="button" class="btn btn-primary" id="garage-refresh">Актуализировать предложения</button></header>
         <p id="garage-status" role="status"></p>
-        <div class="garage-view__table"><table class="table align-middle"><thead><tr><th>Поставщик</th><th>Бренд</th><th>Артикул</th><th>Наименование</th><th>Наличие</th><th>Количество</th><th>Цена</th><th>Сумма</th><th></th></tr></thead><tbody id="garage-items"></tbody></table></div>
+        <div class="garage-view__table"><table class="table align-middle"><thead><tr><th>Поставщик</th><th>Бренд</th><th>Артикул</th><th>Наименование</th><th>Наличие</th><th>Количество</th><th>Цена</th><th id="garage-purchase-price-heading" hidden>Закупочная цена</th><th>Сумма</th><th></th></tr></thead><tbody id="garage-items"></tbody></table></div>
       </section>
     </main>
 

@@ -419,9 +419,11 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(html, /form class="garage-search-form search-row" id="garage-search-form"[\s\S]*?class="search-input" id="garage-search"/);
   assert.match(html, /id="garage-context-menu" role="menu"[\s\S]*?id="garage-rename-button"[\s\S]*?id="garage-delete-button"/);
   assert.match(html, /id="garage-add-duplicate" hidden/);
-  assert.doesNotMatch(html, /id="garage-price-toggle"/);
-  assert.doesNotMatch(garage, /showPurchase|garage-price-toggle/);
-  assert.match(html, /<th>Наличие<\/th><th>Количество<\/th><th>Цена<\/th><th>Сумма<\/th>/);
+  assert.match(html, /id="garage-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены"[\s\S]*?<svg/);
+  assert.match(html, /id="garage-purchase-price-heading" hidden>Закупочная цена/);
+  assert.match(garage, /const setPurchasePricesVisible = \(visible\) =>/);
+  assert.match(garage, /priceToggle\.addEventListener\("click", \(\) => setPurchasePricesVisible\(!showPurchase\)\)/);
+  assert.match(html, /<th>Наличие<\/th><th>Количество<\/th><th>Цена<\/th><th id="garage-purchase-price-heading" hidden>Закупочная цена<\/th><th>Сумма<\/th>/);
   assert.doesNotMatch(html, /<th>Комментарий<\/th>|<th>Нужно<\/th>|<th>Итог<\/th>/);
   assert.doesNotMatch(garage, /const comment = document\.createElement/);
   assert.match(styles, /\.garage-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);

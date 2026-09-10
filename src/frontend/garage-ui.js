@@ -31,6 +31,8 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const status = document.querySelector("#garage-status");
   const back = document.querySelector("#garage-back");
   const refresh = document.querySelector("#garage-refresh");
+  const priceToggle = document.querySelector("#garage-price-toggle");
+  const purchasePriceHeading = document.querySelector("#garage-purchase-price-heading");
   const resize = document.querySelector("#garage-resize");
   const modal = document.querySelector("#garage-add-modal");
   const modalSearch = document.querySelector("#garage-add-search");
@@ -47,6 +49,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   let selectedVehicle = null;
   let selectedAddVehicleId = null;
   let pendingOfferId = null;
+  let showPurchase = false;
   let resizeStart = null;
   let editingVehicle = null;
   let deletingVehicleId = null;
@@ -56,6 +59,14 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const closeThresholdRatio = 0.02;
 
   const setStatus = (message) => { status.textContent = message; };
+  const setPurchasePricesVisible = (visible) => {
+    showPurchase = visible;
+    priceToggle.setAttribute("aria-pressed", String(visible));
+    priceToggle.setAttribute("aria-label", visible ? "Скрыть закупочные цены" : "Показать закупочные цены");
+    priceToggle.title = visible ? "Скрыть закупочные цены" : "Показать закупочные цены";
+    purchasePriceHeading.hidden = !visible;
+    renderItems();
+  };
   const setSidebarOpen = (open) => {
     sidebar.hidden = !open;
     toggle.setAttribute("aria-expanded", String(open));
@@ -275,6 +286,9 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       const required = document.createElement("input"); required.type = "number"; required.min = "0.001"; required.step = "0.001"; required.value = String(item.requiredQuantity);
       const requiredCell = document.createElement("td"); requiredCell.append(required); row.append(requiredCell);
       row.append(element("td", price(item.regularPrice)));
+      const purchasePriceCell = element("td", price(item.purchasePrice));
+      purchasePriceCell.hidden = !showPurchase;
+      row.append(purchasePriceCell);
       row.append(element("td", price(item.regularPrice * item.requiredQuantity)));
       const actions = document.createElement("td");
       const save = element("button", "Сохранить", "btn btn-light"); save.type = "button";
@@ -375,6 +389,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   });
   back.addEventListener("click", showSearch);
   refresh.addEventListener("click", async () => { refresh.disabled = true; setStatus("Актуализируем предложения…"); try { const { payload } = await api(`/api/garage/vehicles/${selectedVehicle.id}/refresh`, { method: "POST", body: JSON.stringify({ revision: selectedVehicle.revision }) }); selectedVehicle = payload.vehicle; renderItems(); setStatus("Предложения актуализированы"); await loadVehicles(); } catch (error) { setStatus(error.message); } finally { refresh.disabled = false; } });
+  priceToggle.addEventListener("click", () => setPurchasePricesVisible(!showPurchase));
   modal.querySelectorAll("[data-garage-close]").forEach((button) => button.addEventListener("click", closeModal));
   const addOfferToVehicle = async (duplicateStrategy) => {
     const vehicle = vehicles.find((item) => item.id === selectedAddVehicleId);
