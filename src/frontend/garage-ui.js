@@ -28,6 +28,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const back = document.querySelector("#garage-back");
   const refresh = document.querySelector("#garage-refresh");
   const priceToggle = document.querySelector("#garage-price-toggle");
+  const resize = document.querySelector("#garage-resize");
   const modal = document.querySelector("#garage-add-modal");
   const modalSearch = document.querySelector("#garage-add-search");
   const modalVehicles = document.querySelector("#garage-add-vehicles");
@@ -40,8 +41,36 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   let selectedAddVehicleId = null;
   let pendingOfferId = null;
   let showPurchase = false;
+  let resizeStart = null;
+  const widthStorageKey = "autoservice-garage-sidebar-width-v1";
+  const closeThresholdRatio = 0.02;
 
   const setStatus = (message) => { status.textContent = message; };
+  const setSidebarOpen = (open) => {
+    sidebar.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.setAttribute("aria-label", open ? "Скрыть гараж" : "Открыть гараж");
+    toggle.title = open ? "Скрыть гараж" : "Открыть гараж";
+  };
+  const setSidebarWidth = (value) => {
+    const width = Number(value);
+    if (!Number.isFinite(width)) return;
+    const normalizedWidth = Math.min(420, Math.max(180, Math.round(width / 10) * 10));
+    sidebar.style.setProperty("--garage-sidebar-width", `${normalizedWidth}px`);
+    try {
+      localStorage.setItem(widthStorageKey, String(normalizedWidth));
+    } catch {
+      // The panel remains resizable for this session when storage is unavailable.
+    }
+  };
+  const restoreSidebarWidth = () => {
+    try {
+      setSidebarWidth(localStorage.getItem(widthStorageKey) ?? 260);
+    } catch {
+      setSidebarWidth(260);
+    }
+  };
+  const getCloseWidth = () => (sidebar.closest(".workspace")?.getBoundingClientRect().width ?? 0) * closeThresholdRatio;
   const showSearch = () => { view.hidden = true; searchShell.hidden = false; searchTabs.hidden = false; };
   const showVehicle = async (id) => {
     const { payload } = await api(`/api/garage/vehicles/${encodeURIComponent(id)}`);
@@ -121,7 +150,39 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     pendingOfferId = offerId; selectedAddVehicleId = vehicleId; modalConfirm.disabled = !vehicleId; modal.hidden = false; modalSearch.value = ""; renderModalVehicles();
   };
   const closeModal = () => { modal.hidden = true; pendingOfferId = null; selectedAddVehicleId = null; };
-  toggle.addEventListener("click", () => { sidebar.hidden = !sidebar.hidden; toggle.setAttribute("aria-expanded", String(!sidebar.hidden)); });
+  toggle.addEventListener("click", () => setSidebarOpen(sidebar.hidden));
+  resize.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    resizeStart = { pointerId: event.pointerId, startX: event.clientX, startWidth: sidebar.getBoundingClientRect().width };
+    resize.setPointerCapture(event.pointerId);
+  });
+  resize.addEventListener("pointermove", (event) => {
+    if (!resizeStart || event.pointerId !== resizeStart.pointerId) return;
+    const width = resizeStart.startWidth + resizeStart.startX - event.clientX;
+    if (width <= getCloseWidth()) {
+      resizeStart = null;
+      resize.releasePointerCapture(event.pointerId);
+      setSidebarOpen(false);
+      return;
+    }
+    setSidebarWidth(width);
+  });
+  const stopResize = (event) => {
+    if (resizeStart && event.pointerId === resizeStart.pointerId) resizeStart = null;
+  };
+  resize.addEventListener("pointerup", stopResize);
+  resize.addEventListener("pointercancel", stopResize);
+  resize.addEventListener("lostpointercapture", () => { resizeStart = null; });
+  resize.addEventListener("keydown", (event) => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    const width = sidebar.getBoundingClientRect().width;
+    if (event.key === "ArrowRight" && width <= 180) {
+      setSidebarOpen(false);
+      return;
+    }
+    setSidebarWidth(width + (event.key === "ArrowLeft" ? 10 : -10));
+  });
   search.addEventListener("input", () => loadVehicles().catch((error) => setStatus(error.message)));
   modalSearch.addEventListener("input", renderModalVehicles);
   create.addEventListener("click", async () => { const name = window.prompt("Название автомобиля"); if (name) { await api("/api/garage/vehicles", { method: "POST", body: JSON.stringify({ name }) }); await loadVehicles(); } });
@@ -137,5 +198,6 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   document.addEventListener("click", (event) => { const button = event.target.closest(".garage-offer-button"); if (button) openAdd(button.dataset.garageOfferId); });
   document.addEventListener("dragstart", (event) => { const row = event.target.closest(".main-result-row"); const button = row?.querySelector(".garage-offer-button"); if (button?.dataset.garageOfferId) event.dataTransfer?.setData("application/x-garage-offer", button.dataset.garageOfferId); });
   priceToggle.addEventListener("click", () => { showPurchase = !showPurchase; renderItems(); });
+  restoreSidebarWidth();
   loadVehicles().catch((error) => setStatus(error.message));
 };

@@ -404,6 +404,25 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(styles, /\.supplier-search-toggle \.supplier-enabled-input\s*\{[^}]*clip-path: inset\(50%\);/s);
 });
 
+test("garage uses a centered car icon and mirrors the filter resize control", async () => {
+  const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
+  const garage = await readFile(new URL("../src/frontend/garage-ui.js", import.meta.url), "utf8");
+
+  assert.match(html, /class="filters-toggle garage-toggle" id="garage-toggle" aria-controls="garage-sidebar" aria-expanded="false" aria-label="Открыть гараж"/);
+  assert.match(html, /id="garage-toggle"[\s\S]*?<svg[^>]*viewBox="0 0 24 24"/);
+  assert.doesNotMatch(html, /id="garage-toggle"[\s\S]*?>▣<\/button>/);
+  assert.match(html, /id="garage-resize" role="separator"[^>]*aria-label="Изменить ширину гаража"/);
+  assert.match(styles, /\.garage-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
+  assert.match(styles, /\.garage-sidebar\s*\{[^}]*--garage-sidebar-width: 260px;[^}]*min-width: 180px;[^}]*max-width: 420px;/s);
+  assert.match(styles, /\.garage-sidebar__resize\s*\{[^}]*left: -10px;[^}]*cursor: col-resize;/s);
+  assert.match(styles, /\.garage-sidebar__resize::before\s*\{[^}]*height: 72px;/s);
+  assert.match(garage, /const widthStorageKey = "autoservice-garage-sidebar-width-v1";/);
+  assert.match(garage, /resize\.addEventListener\("pointerdown"/);
+  assert.match(garage, /resizeStart\.startWidth \+ resizeStart\.startX - event\.clientX/);
+  assert.match(garage, /event\.key === "ArrowLeft" \? 10 : -10/);
+});
+
 test("main application frame uses the expanded shared width", async () => {
   const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
 
