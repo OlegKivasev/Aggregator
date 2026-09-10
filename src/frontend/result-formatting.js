@@ -140,3 +140,21 @@ export const compareDeliveryDates = (left, right) => {
     || Number(left.deliveryDateApproximate === true) - Number(right.deliveryDateApproximate === true)
     || (effectiveLeftTo ?? leftFrom) - (effectiveRightTo ?? rightFrom);
 };
+
+export const compareDeliveryDatesThenPrice = (left, right) => {
+  const deliveryComparison = compareDeliveryDates(left, right);
+  if (deliveryComparison !== 0) {
+    return deliveryComparison;
+  }
+
+  const leftPrice = Number(left.price);
+  const rightPrice = Number(right.price);
+  const leftPriceMissing = !Number.isFinite(leftPrice) || leftPrice <= 0;
+  const rightPriceMissing = !Number.isFinite(rightPrice) || rightPrice <= 0;
+
+  if (leftPriceMissing || rightPriceMissing) {
+    return leftPriceMissing === rightPriceMissing ? 0 : leftPriceMissing ? 1 : -1;
+  }
+
+  return leftPrice - rightPrice;
+};

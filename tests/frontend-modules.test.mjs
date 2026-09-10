@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   compareDeliveryDates,
+  compareDeliveryDatesThenPrice,
   escapeHtml,
   formatArticle,
   formatBrand,
@@ -220,6 +221,22 @@ test("delivery date sorting places an interval starting on the 29th above the 30
   ]);
 });
 
+test("delivery date sorting uses the lowest price for otherwise identical deliveries", () => {
+  const today = new Date();
+  const deliveryDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, 12).toISOString();
+  const results = [
+    { label: "more expensive", deliveryDate, price: 4500 },
+    { label: "lowest price", deliveryDate, price: 1200 },
+    { label: "middle price", deliveryDate, price: 2800 },
+  ];
+
+  assert.deepEqual(results.sort(compareDeliveryDatesThenPrice).map((result) => result.label), [
+    "lowest price",
+    "middle price",
+    "more expensive",
+  ]);
+});
+
 test("frontend opens on-demand analog search for a selected result", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
@@ -285,6 +302,7 @@ test("frontend keeps retail price as the configurable column and discovers brand
   assert.match(app, /let sortState = \{ key: "markupPrice", direction: "ascending" \}/);
   assert.match(app, /state\.key === "markupPrice" && comparison === 0/);
   assert.match(app, /compareDeliveryDates\(left, right\)/);
+  assert.match(app, /compareDeliveryDatesThenPrice\(left, right\)/);
   assert.match(html, /id="article-analogs-modal"/);
   assert.match(html, /id="article-analogs-modal-brands"/);
   assert.match(html, /Выберите один или несколько брендов/);

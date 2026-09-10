@@ -1,6 +1,7 @@
 import { buildIncompleteSearchWarnings, buildSupplierResultTooltip, formatDeliveryDate } from "./supplier-search-summary.js";
 import {
   compareDeliveryDates,
+  compareDeliveryDatesThenPrice,
   escapeHtml,
   formatArticle,
   formatBrand,
@@ -863,7 +864,7 @@ const compareSortValues = (leftValue, rightValue) => {
 
 const compareResults = (left, right, state = sortState, percent = markupPercent) => {
   const comparison = state.key === "deliveryDate"
-    ? compareDeliveryDates(left, right)
+    ? compareDeliveryDatesThenPrice(left, right)
     : compareSortValues(getSortValue(left, state.key, percent), getSortValue(right, state.key, percent));
 
   if (state.key === "markupPrice" && comparison === 0) {
