@@ -413,14 +413,22 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(html, /id="garage-toggle"[\s\S]*?<svg[^>]*viewBox="0 0 24 24"/);
   assert.doesNotMatch(html, /id="garage-toggle"[\s\S]*?>▣<\/button>/);
   assert.match(html, /id="garage-resize" role="separator"[^>]*aria-label="Изменить ширину гаража"/);
+  assert.match(html, /class="new-tab-button btn btn-light garage-create" id="garage-create"/);
+  assert.match(html, /form class="garage-search-form search-row" id="garage-search-form"[\s\S]*?class="search-input" id="garage-search"/);
+  assert.match(html, /id="garage-context-menu" role="menu"[\s\S]*?id="garage-rename-button"[\s\S]*?id="garage-delete-button"/);
+  assert.match(html, /id="garage-add-duplicate" hidden/);
   assert.match(styles, /\.garage-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
   assert.match(styles, /\.garage-sidebar\s*\{[^}]*--garage-sidebar-width: 260px;[^}]*min-width: 180px;[^}]*max-width: 420px;/s);
+  assert.match(styles, /\.garage-search-form\s*\{[^}]*min-height: 40px;/s);
   assert.match(styles, /\.garage-sidebar__resize\s*\{[^}]*left: -10px;[^}]*cursor: col-resize;/s);
   assert.match(styles, /\.garage-sidebar__resize::before\s*\{[^}]*height: 72px;/s);
   assert.match(garage, /const widthStorageKey = "autoservice-garage-sidebar-width-v1";/);
   assert.match(garage, /resize\.addEventListener\("pointerdown"/);
   assert.match(garage, /resizeStart\.startWidth \+ resizeStart\.startX - event\.clientX/);
   assert.match(garage, /event\.key === "ArrowLeft" \? 10 : -10/);
+  assert.match(garage, /const renderVehicleEditor =/);
+  assert.match(garage, /const showContextMenu =/);
+  assert.doesNotMatch(garage, /window\.(?:prompt|confirm)/);
 });
 
 test("main application frame uses the expanded shared width", async () => {

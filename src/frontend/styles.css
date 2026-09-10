@@ -11,14 +11,29 @@
 .garage-control { display: flex; align-self: stretch; align-items: center; }
 .garage-sidebar { --garage-sidebar-width: 260px; position: relative; width: var(--garage-sidebar-width); min-width: 180px; max-width: 420px; padding: .75rem; overflow-y: auto; overscroll-behavior: contain; }
 .garage-sidebar header, .garage-view__header, .garage-add-modal__card header { display: flex; gap: .75rem; align-items: center; justify-content: space-between; }
-.garage-sidebar input { width: 100%; margin: .65rem 0; }
+.garage-sidebar__header { min-height: 34px; }
+.garage-create { align-self: auto; width: 34px; min-width: 34px; flex-basis: 34px; margin: 0; }
+.garage-search-form { width: 100%; min-height: 40px; margin: 12px 0; }
+.garage-search-form .search-input { min-height: 36px; }
 .garage-vehicles { list-style: none; padding: 0; margin: 0; max-height: 55vh; overflow: auto; }
-.garage-vehicles__item { padding: .55rem .4rem; border-radius: .35rem; cursor: pointer; }
-.garage-vehicles__item:hover, .garage-vehicles__item:focus, .garage-add-modal__vehicle.is-selected { background: #e7f0ff; outline: 0; }
+.garage-vehicles__item { margin: 2px 0; }
+.garage-vehicles__button { width: 100%; padding: 9px 10px; border: 0; border-radius: 7px; color: var(--ink); background: transparent; text-align: left; font-weight: 700; cursor: context-menu; }
+.garage-vehicles__button:hover, .garage-vehicles__button:focus-visible, .garage-add-modal__vehicle.is-selected { color: var(--accent-dark); background: #fff3ed; outline: 0; }
+.garage-vehicle-editor, .garage-vehicle-delete { display: grid; gap: 8px; margin: 6px 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; }
+.garage-vehicle-editor__form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.garage-vehicle-delete__actions { display: flex; gap: 6px; }
+.garage-vehicle-editor__input { grid-column: 1 / -1; min-width: 0; padding: 7px 9px; border: 1px solid #d7dfe7; border-radius: 6px; color: var(--ink); background: #fff; }
+.garage-vehicle-editor__input:focus { border-color: var(--accent); outline: 2px solid rgba(255, 75, 19, 0.12); }
+.garage-vehicle-delete__actions button { flex: 0 0 auto; }
+.garage-vehicle-delete { color: #7a271a; font-size: 12px; font-weight: 700; }
+.garage-vehicle-delete__confirm { color: #fff; border-color: #b42318; background: #b42318; }
+.garage-vehicle-delete__confirm:hover, .garage-vehicle-delete__confirm:focus-visible { border-color: #8f1c13; background: #8f1c13; }
 .garage-view { margin-top: 1rem; padding: 1rem; }
 .garage-view__table { overflow: auto; }
 .garage-view td input { min-width: 7rem; width: 100%; }
 .garage-item--problem { background: #fff0f0; }
+.garage-item-remove__confirm { color: #fff; border-color: #b42318; background: #b42318; }
+.garage-item-remove__confirm:hover, .garage-item-remove__confirm:focus-visible { border-color: #8f1c13; background: #8f1c13; }
 .garage-add-cell { width: 2.5rem; text-align: center; }
 .garage-offer-button { border: 0; background: transparent; font-size: 1.1rem; }
 .garage-add-modal { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; }
@@ -27,6 +42,9 @@
 .garage-add-modal__card label { display: grid; gap: .35rem; }
 .garage-add-modal__card footer { display: flex; justify-content: flex-end; gap: .5rem; }
 .garage-add-modal__vehicle { display: block; width: 100%; text-align: left; margin: .2rem 0; }
+.garage-add-modal__duplicate { padding: 10px; border: 1px solid #f4c7b8; border-radius: 8px; color: var(--accent-dark); background: #fff3ed; font-weight: 700; }
+.garage-add-modal__duplicate p { margin: 0 0 8px; }
+.garage-add-modal__duplicate div { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .garage-toggle { display: inline-grid; place-items: center; }
 .garage-toggle svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; }
@@ -1444,7 +1462,8 @@ table tbody tr:hover td {
 }
 
 .result-context-menu,
-.tab-context-menu {
+.tab-context-menu,
+.garage-context-menu {
   position: fixed;
   z-index: 1200;
   min-width: 190px;
@@ -1453,7 +1472,8 @@ table tbody tr:hover td {
 }
 
 .result-context-menu button,
-.tab-context-menu button {
+.tab-context-menu button,
+.garage-context-menu button {
   width: 100%;
   padding: 9px 12px;
   border: 0;
@@ -1467,11 +1487,17 @@ table tbody tr:hover td {
 .result-context-menu button:hover,
 .result-context-menu button:focus-visible,
 .tab-context-menu button:hover,
-.tab-context-menu button:focus-visible {
+.tab-context-menu button:focus-visible,
+.garage-context-menu button:hover,
+.garage-context-menu button:focus-visible {
   color: var(--accent-dark);
   background: #fff3ed;
   outline: 0;
 }
+
+.garage-context-menu__delete { color: #b42318 !important; }
+.garage-context-menu__delete:hover,
+.garage-context-menu__delete:focus-visible { color: #8f1c13 !important; background: #ffe8e3 !important; }
 
 .analogs-modal {
   position: fixed;
