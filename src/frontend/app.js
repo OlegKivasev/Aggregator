@@ -329,7 +329,7 @@ const analogTableColumnWidths = {
 };
 const analogTableColumnIds = Object.keys(analogTableColumnWidths);
 
-const renderAveragePrices = (container, items, includePurchasePrice = true) => {
+const renderAveragePrices = (container, items) => {
   const averages = document.createElement("div");
   averages.className = "filters-sidebar__averages";
   const appendAverage = (label, price) => {
@@ -339,9 +339,7 @@ const renderAveragePrices = (container, items, includePurchasePrice = true) => {
     line.append(`${label}: `, value);
     averages.append(line);
   };
-  if (includePurchasePrice) {
-    appendAverage("Средняя закуп. цена", getAveragePrice(items, (result) => result.price));
-  }
+  appendAverage("Средняя закуп. цена", getAveragePrice(items, (result) => result.price));
   appendAverage("Средняя цена", getAveragePrice(items, (result) => getMarkupPrice(result)));
   container.append(averages);
 };
@@ -531,7 +529,7 @@ const renderAnalogFilterValues = () => {
       };
       container.replaceChildren(createRangeInput("from", "От"), createRangeInput("to", "До"));
       if (column === "markupPrice") {
-        renderAveragePrices(container, getFilteredAnalogResults(visibleResults), showPurchasePrices);
+        renderAveragePrices(container, getFilteredAnalogResults(visibleResults));
       }
       return;
     }
