@@ -31,7 +31,6 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const status = document.querySelector("#garage-status");
   const back = document.querySelector("#garage-back");
   const refresh = document.querySelector("#garage-refresh");
-  const priceToggle = document.querySelector("#garage-price-toggle");
   const resize = document.querySelector("#garage-resize");
   const modal = document.querySelector("#garage-add-modal");
   const modalSearch = document.querySelector("#garage-add-search");
@@ -43,11 +42,11 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const modalDuplicateNew = document.querySelector("#garage-add-duplicate-new");
   const searchShell = document.querySelector(".search-shell");
   const searchTabs = document.querySelector("#search-tabs");
+  const workspace = document.querySelector(".workspace");
   let vehicles = [];
   let selectedVehicle = null;
   let selectedAddVehicleId = null;
   let pendingOfferId = null;
-  let showPurchase = false;
   let resizeStart = null;
   let editingVehicle = null;
   let deletingVehicleId = null;
@@ -84,11 +83,12 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const getCloseWidth = () => (sidebar.closest(".workspace")?.getBoundingClientRect().width ?? 0) * closeThresholdRatio;
   const findVehicle = (id) => vehicles.find((vehicle) => vehicle.id === id) ?? null;
   const focusVehicleEditor = () => requestAnimationFrame(() => vehiclesList.querySelector(".garage-vehicle-editor__input")?.focus());
-  const showSearch = () => { view.hidden = true; searchShell.hidden = false; searchTabs.hidden = false; };
+  const showSearch = () => { view.hidden = true; workspace.hidden = false; searchShell.hidden = false; searchTabs.hidden = false; };
   const showVehicle = async (id) => {
     const { payload } = await api(`/api/garage/vehicles/${encodeURIComponent(id)}`);
     selectedVehicle = payload.vehicle;
     viewName.textContent = selectedVehicle.name;
+    workspace.hidden = true;
     searchShell.hidden = true;
     searchTabs.hidden = true;
     view.hidden = false;
@@ -150,9 +150,10 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     input.placeholder = "Наименование автомобиля";
     input.value = vehicle?.name ?? "";
     input.setAttribute("aria-label", "Наименование автомобиля");
-    const save = element("button", "Сохранить", "btn btn-primary");
+    const isCreating = vehicle === null;
+    const save = element("button", "Сохранить", "btn btn-primary garage-inline-action garage-vehicle-editor__save");
     save.type = "submit";
-    const cancel = element("button", "Отмена", "btn btn-light");
+    const cancel = element("button", "Отмена", "btn btn-light garage-inline-action");
     cancel.type = "button";
     cancel.addEventListener("click", () => {
       editingVehicle = null;
@@ -162,7 +163,12 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       event.preventDefault();
       const name = input.value.trim();
       if (!name) {
-        input.focus();
+        if (isCreating) {
+          editingVehicle = null;
+          renderVehicles();
+        } else {
+          input.focus();
+        }
         return;
       }
       save.disabled = true;
@@ -186,7 +192,19 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
         input.focus();
       }
     });
-    form.append(input, save, cancel);
+    if (isCreating) {
+      form.addEventListener("focusout", () => {
+        queueMicrotask(() => {
+          if (editingVehicle?.mode === "create" && !input.value.trim() && !form.contains(document.activeElement)) {
+            editingVehicle = null;
+            renderVehicles();
+          }
+        });
+      });
+      form.append(input);
+    } else {
+      form.append(input, save, cancel);
+    }
     item.append(form);
     return item;
   };
@@ -194,9 +212,9 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     const item = element("li", undefined, "garage-vehicle-delete");
     item.append(element("span", `Удалить «${vehicle.name}» и все позиции?`));
     const actions = element("div", undefined, "garage-vehicle-delete__actions");
-    const confirm = element("button", "Удалить", "btn garage-vehicle-delete__confirm");
+    const confirm = element("button", "Удалить", "btn garage-inline-action garage-vehicle-delete__confirm");
     confirm.type = "button";
-    const cancel = element("button", "Отмена", "btn btn-light");
+    const cancel = element("button", "Отмена", "btn btn-light garage-inline-action");
     cancel.type = "button";
     cancel.addEventListener("click", () => {
       deletingVehicleId = null;
@@ -256,13 +274,11 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       for (const value of cells) row.append(element("td", value));
       const required = document.createElement("input"); required.type = "number"; required.min = "0.001"; required.step = "0.001"; required.value = String(item.requiredQuantity);
       const requiredCell = document.createElement("td"); requiredCell.append(required); row.append(requiredCell);
-      const comment = document.createElement("input"); comment.value = item.comment; comment.maxLength = 1000;
-      const commentCell = document.createElement("td"); commentCell.append(comment); row.append(commentCell);
-      row.append(element("td", price(showPurchase ? item.purchasePrice : item.regularPrice)));
-      row.append(element("td", price((showPurchase ? item.purchasePrice : item.regularPrice) * item.requiredQuantity)));
+      row.append(element("td", price(item.regularPrice)));
+      row.append(element("td", price(item.regularPrice * item.requiredQuantity)));
       const actions = document.createElement("td");
       const save = element("button", "Сохранить", "btn btn-light"); save.type = "button";
-      save.addEventListener("click", async () => { await api(`/api/garage/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, requiredQuantity: Number(required.value), comment: comment.value }) }); await showVehicle(selectedVehicle.id); });
+      save.addEventListener("click", async () => { await api(`/api/garage/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, requiredQuantity: Number(required.value), comment: item.comment }) }); await showVehicle(selectedVehicle.id); });
       const remove = element("button", "Удалить", "btn btn-light"); remove.type = "button";
       const confirmRemove = element("button", "Удалить", "btn garage-item-remove__confirm"); confirmRemove.type = "button"; confirmRemove.hidden = true;
       const cancelRemove = element("button", "Отмена", "btn btn-light"); cancelRemove.type = "button"; cancelRemove.hidden = true;
@@ -392,7 +408,6 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   window.addEventListener("resize", () => hideContextMenu(true));
   window.addEventListener("scroll", () => hideContextMenu(true), true);
   document.addEventListener("dragstart", (event) => { const row = event.target.closest(".main-result-row"); const button = row?.querySelector(".garage-offer-button"); if (button?.dataset.garageOfferId) event.dataTransfer?.setData("application/x-garage-offer", button.dataset.garageOfferId); });
-  priceToggle.addEventListener("click", () => { showPurchase = !showPurchase; renderItems(); });
   restoreSidebarWidth();
   loadVehicles().catch((error) => setStatus(error.message));
 };

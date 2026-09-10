@@ -406,20 +406,32 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
 
 test("garage uses a centered car icon and mirrors the filter resize control", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
   const garage = await readFile(new URL("../src/frontend/garage-ui.js", import.meta.url), "utf8");
 
   assert.match(html, /class="filters-toggle garage-toggle" id="garage-toggle" aria-controls="garage-sidebar" aria-expanded="false" aria-label="Открыть гараж"/);
   assert.match(html, /id="garage-toggle"[\s\S]*?<svg[^>]*viewBox="0 0 24 24"/);
   assert.doesNotMatch(html, /id="garage-toggle"[\s\S]*?>▣<\/button>/);
+  assert.doesNotMatch(app, /garage-offer-button"[^>]*>▣<\/button>/);
   assert.match(html, /id="garage-resize" role="separator"[^>]*aria-label="Изменить ширину гаража"/);
   assert.match(html, /class="new-tab-button btn btn-light garage-create" id="garage-create"/);
   assert.match(html, /form class="garage-search-form search-row" id="garage-search-form"[\s\S]*?class="search-input" id="garage-search"/);
   assert.match(html, /id="garage-context-menu" role="menu"[\s\S]*?id="garage-rename-button"[\s\S]*?id="garage-delete-button"/);
   assert.match(html, /id="garage-add-duplicate" hidden/);
+  assert.doesNotMatch(html, /id="garage-price-toggle"/);
+  assert.doesNotMatch(garage, /showPurchase|garage-price-toggle/);
+  assert.match(html, /<th>Наличие<\/th><th>Количество<\/th><th>Цена<\/th><th>Сумма<\/th>/);
+  assert.doesNotMatch(html, /<th>Комментарий<\/th>|<th>Нужно<\/th>|<th>Итог<\/th>/);
+  assert.doesNotMatch(garage, /const comment = document\.createElement/);
   assert.match(styles, /\.garage-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
   assert.match(styles, /\.garage-sidebar\s*\{[^}]*--garage-sidebar-width: 260px;[^}]*min-width: 180px;[^}]*max-width: 420px;/s);
   assert.match(styles, /\.garage-search-form\s*\{[^}]*min-height: 40px;/s);
+  assert.match(styles, /\.garage-add-column, \.garage-add-cell\s*\{[^}]*width: 40px;/s);
+  assert.match(styles, /\.garage-offer-button svg\s*\{[^}]*stroke: currentColor;/s);
+  assert.match(garage, /const workspace = document\.querySelector\("\.workspace"\);/);
+  assert.match(garage, /workspace\.hidden = true;/);
+  assert.match(garage, /if \(isCreating\) \{[\s\S]*?form\.append\(input\);/);
   assert.match(styles, /\.garage-sidebar__resize\s*\{[^}]*left: -10px;[^}]*cursor: col-resize;/s);
   assert.match(styles, /\.garage-sidebar__resize::before\s*\{[^}]*height: 72px;/s);
   assert.match(garage, /const widthStorageKey = "autoservice-garage-sidebar-width-v1";/);
