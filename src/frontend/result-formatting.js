@@ -150,16 +150,11 @@ export const compareDeliveryDatesThenPrice = (left, right) => {
   const deliveryComparison = compareDeliveryDates(left, right);
   const leftFrom = getDeliveryTimestamp(left.deliveryDate);
   const rightFrom = getDeliveryTimestamp(right.deliveryDate);
-  const leftTo = leftFrom === null ? null : getEffectiveDeliveryTo(leftFrom, getDeliveryTimestamp(left.deliveryDateTo));
-  const rightTo = rightFrom === null ? null : getEffectiveDeliveryTo(rightFrom, getDeliveryTimestamp(right.deliveryDateTo));
-  const hasSameDisplayedDelivery = leftFrom === null || rightFrom === null
+  const hasSameDeliveryStartDay = leftFrom === null || rightFrom === null
     ? leftFrom === rightFrom
-    : getCalendarDayTimestamp(leftFrom) === getCalendarDayTimestamp(rightFrom)
-      && (leftTo === null) === (rightTo === null)
-      && (leftTo === null || getCalendarDayTimestamp(leftTo) === getCalendarDayTimestamp(rightTo))
-      && (leftTo !== null || Boolean(left.deliveryDateApproximate) === Boolean(right.deliveryDateApproximate));
+    : getCalendarDayTimestamp(leftFrom) === getCalendarDayTimestamp(rightFrom);
 
-  if (deliveryComparison !== 0 && !hasSameDisplayedDelivery) {
+  if (deliveryComparison !== 0 && !hasSameDeliveryStartDay) {
     return deliveryComparison;
   }
 
