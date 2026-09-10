@@ -353,7 +353,7 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(app, /Math\.max\(180, Math\.round\(width \/ 10\) \* 10\)/);
   assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-items: center;/s);
-  assert.match(styles, /\.filters-control\s*\{[^}]*align-self: start;/s);
+  assert.match(styles, /\.filters-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\) \.filters-toggle\s*\{[^}]*order: 2;/s);
   assert.match(styles, /\.filters-sidebar\s*\{[^}]*--filters-sidebar-width: 200px;[^}]*min-width: 180px;/s);
   assert.match(styles, /@media \(max-width: 575\.98px\)\s*\{\s*\.workspace/);
@@ -405,6 +405,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(html, /class="table table-hover align-middle mb-0 results-data-table"/);
   assert.match(html, /class="results-panel__footer" aria-hidden="true"><\/footer>/);
   assert.match(html, /class="analogs-modal__footer">\s*<button[^>]*id="analogs-show-more"/s);
+  assert.match(html, /id="analogs-filters-resize" role="separator"/);
   assert.doesNotMatch(html, /Нажмите на строку/);
   assert.match(html, /id="warehouse-tooltip"/);
   assert.match(html, /data-column="quantity"[^>]*[\s\S]*?Количество[\s\S]*?data-column="warehouse"/);
@@ -415,6 +416,10 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(app, /const tableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 150,\s+title: 325,\s+quantity: 120,\s+warehouse: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 120,/s);
   assert.match(app, /--results-table-min-width/);
   assert.match(app, /tableColumnWidths\[header\.dataset\.column\] \/ minimumWidth \* 100/);
+  assert.match(app, /const analogTableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 150,\s+title: 325,\s+quantity: 120,\s+warehouse: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 120,/s);
+  assert.match(app, /const applyAnalogTableColumns = \(\) =>/);
+  assert.match(app, /--analogs-results-table-min-width/);
+  assert.match(app, /analogFiltersResize\.addEventListener\("pointerdown"/);
   assert.match(app, /showWarehouseTooltip/);
   assert.match(styles, /\.results-data-table thead\s*\{[^}]*position: sticky;/s);
   assert.match(styles, /\.results-data-table\s*\{[^}]*width: max\(100%, var\(--results-table-min-width,/s);
@@ -428,6 +433,9 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(styles, /width: min\(2400px, calc\(100vw - 24px\)\)/);
   assert.match(styles, /height: min\(1440px, calc\(100dvh - 24px\)\)/);
   assert.match(styles, /\.analogs-workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
+  assert.match(styles, /\.analogs-results table\s*\{[^}]*width: max\(100%, var\(--analogs-results-table-min-width,/s);
+  assert.match(styles, /\.analogs-results \[data-analog-column="markupPrice"\]/);
+  assert.doesNotMatch(styles, /\.analogs-results th:nth-child/);
 });
 
 test("search shows authorization progress before waiting for session validation", async () => {

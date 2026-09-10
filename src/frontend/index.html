@@ -498,6 +498,7 @@
               <details class="filters-sidebar__section filters-sidebar__disclosure" data-analog-filter-section="markupPrice" hidden><summary>Цена</summary><div class="filters-sidebar__values" data-analog-filter-values="markupPrice" aria-live="polite"></div></details>
               <details class="filters-sidebar__section filters-sidebar__disclosure" data-analog-filter-section="deliveryDate" hidden><summary>Дата доставки</summary><div class="filters-sidebar__values" data-analog-filter-values="deliveryDate" aria-live="polite"></div></details>
               <button type="button" class="filters-sidebar__reset" id="analogs-filters-reset" hidden>Сбросить фильтры</button>
+              <div class="filters-sidebar__resize" id="analogs-filters-resize" role="separator" aria-label="Изменить ширину фильтров аналогов" aria-orientation="vertical" tabindex="0"></div>
             </aside>
           </div>
           <div class="analogs-shell">
@@ -523,15 +524,15 @@
             <div class="analogs-results" id="analogs-results">
               <table class="table table-hover align-middle mb-0">
                 <thead><tr>
-                  <th><button type="button" class="analogs-sort" data-analog-sort-key="supplier">Поставщик<span aria-hidden="true"></span></button></th>
-                  <th><button type="button" class="analogs-sort" data-analog-sort-key="brand">Бренд<span aria-hidden="true"></span></button></th>
-                  <th><button type="button" class="analogs-sort" data-analog-sort-key="article">Артикул<span aria-hidden="true"></span></button></th>
-                  <th><button type="button" class="analogs-sort" data-analog-sort-key="title">Наименование<span aria-hidden="true"></span></button></th>
-                  <th><button type="button" class="analogs-sort" data-analog-sort-key="quantity">Количество<span aria-hidden="true"></span></button></th>
-                  <th><button type="button" class="analogs-sort" data-analog-sort-key="warehouse">Склад<span aria-hidden="true"></span></button></th>
+                  <th data-analog-column="supplier"><button type="button" class="analogs-sort" data-analog-sort-key="supplier">Поставщик<span aria-hidden="true"></span></button></th>
+                  <th data-analog-column="brand"><button type="button" class="analogs-sort" data-analog-sort-key="brand">Бренд<span aria-hidden="true"></span></button></th>
+                  <th data-analog-column="article"><button type="button" class="analogs-sort" data-analog-sort-key="article">Артикул<span aria-hidden="true"></span></button></th>
+                  <th data-analog-column="title"><button type="button" class="analogs-sort" data-analog-sort-key="title">Наименование<span aria-hidden="true"></span></button></th>
+                  <th data-analog-column="quantity"><button type="button" class="analogs-sort" data-analog-sort-key="quantity">Количество<span aria-hidden="true"></span></button></th>
+                  <th data-analog-column="warehouse"><button type="button" class="analogs-sort" data-analog-sort-key="warehouse">Склад<span aria-hidden="true"></span></button></th>
                   <th data-analog-column="purchasePrice" hidden><button type="button" class="analogs-sort is-active" data-analog-sort-key="price">Закупочная цена<span aria-hidden="true"></span></button></th>
-                  <th><button type="button" class="analogs-sort" data-analog-sort-key="markupPrice">Цена<span aria-hidden="true"></span></button></th>
-                  <th><button type="button" class="analogs-sort" data-analog-sort-key="deliveryDate">Доставка<span aria-hidden="true"></span></button></th>
+                  <th data-analog-column="markupPrice"><button type="button" class="analogs-sort" data-analog-sort-key="markupPrice">Цена<span aria-hidden="true"></span></button></th>
+                  <th data-analog-column="deliveryDate"><button type="button" class="analogs-sort" data-analog-sort-key="deliveryDate">Доставка<span aria-hidden="true"></span></button></th>
                 </tr></thead>
                 <tbody id="analogs-results-body"></tbody>
               </table>

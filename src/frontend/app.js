@@ -68,6 +68,7 @@ const analogFilterSections = Object.fromEntries(
 const analogFiltersReset = document.querySelector("#analogs-filters-reset");
 const analogFiltersToggle = document.querySelector("#analogs-filters-toggle");
 const analogFiltersSidebar = document.querySelector("#analogs-filters-sidebar");
+const analogFiltersResize = document.querySelector("#analogs-filters-resize");
 const settingsDrawer = document.querySelector("#settings-drawer");
 const settingsClose = document.querySelector("#settings-close");
 const settingsBackdrop = document.querySelector("#settings-backdrop");
@@ -211,6 +212,7 @@ const partKomNonReturnableStorageKey = "autoservice.partKomNonReturnable";
 const forumAutoNonReturnableStorageKey = "autoservice.forumAutoNonReturnable";
 const supplierVisibilityStorageKey = "autoservice.supplierVisibility";
 const filtersWidthStorageKey = "autoservice.filtersWidth.v2";
+const analogFiltersWidthStorageKey = "autoservice.analogFiltersWidth.v1";
 const lastSearchStorageKey = "autoservice.lastSearchStartedAt";
 const supplierCheckIntervalMs = 2 * 60 * 60 * 1000;
 
@@ -314,6 +316,18 @@ const getAveragePrice = (items, getPrice) => {
   const prices = items.map(getPrice).filter((price) => Number.isFinite(price) && price > 0);
   return prices.length ? prices.reduce((total, price) => total + price, 0) / prices.length : null;
 };
+const analogTableColumnWidths = {
+  supplier: 100,
+  brand: 125,
+  article: 150,
+  title: 325,
+  quantity: 120,
+  warehouse: 120,
+  purchasePrice: 120,
+  markupPrice: 120,
+  deliveryDate: 120,
+};
+const analogTableColumnIds = Object.keys(analogTableColumnWidths);
 
 const renderAveragePrices = (container, items, includePurchasePrice = true) => {
   const averages = document.createElement("div");
@@ -1261,6 +1275,28 @@ const setPurchasePricesVisible = (visible) => {
   }
 };
 
+const setAnalogFiltersSidebarWidth = (value) => {
+  const width = Number(value);
+  if (!Number.isFinite(width)) {
+    return;
+  }
+  const normalizedWidth = Math.min(420, Math.max(180, Math.round(width / 10) * 10));
+  analogFiltersSidebar.style.setProperty("--filters-sidebar-width", `${normalizedWidth}px`);
+  try {
+    localStorage.setItem(analogFiltersWidthStorageKey, String(normalizedWidth));
+  } catch {
+    // The panel remains resizable for this session when storage is unavailable.
+  }
+};
+
+const restoreAnalogFiltersSidebarWidth = () => {
+  try {
+    setAnalogFiltersSidebarWidth(localStorage.getItem(analogFiltersWidthStorageKey) ?? 200);
+  } catch {
+    setAnalogFiltersSidebarWidth(200);
+  }
+};
+
 const setAnalogFiltersSidebarOpen = (open) => {
   analogFiltersSidebar.hidden = !open;
   analogFiltersToggle.setAttribute("aria-expanded", String(open));
@@ -1779,6 +1815,40 @@ filtersReset.addEventListener("click", () => {
   renderResults();
 });
 
+let analogFiltersResizeStart = null;
+
+analogFiltersResize.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  analogFiltersResizeStart = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startWidth: analogFiltersSidebar.getBoundingClientRect().width,
+  };
+  analogFiltersResize.setPointerCapture(event.pointerId);
+});
+
+analogFiltersResize.addEventListener("pointermove", (event) => {
+  if (!analogFiltersResizeStart || event.pointerId !== analogFiltersResizeStart.pointerId) {
+    return;
+  }
+  setAnalogFiltersSidebarWidth(analogFiltersResizeStart.startWidth + event.clientX - analogFiltersResizeStart.startX);
+});
+
+analogFiltersResize.addEventListener("pointerup", (event) => {
+  if (analogFiltersResizeStart && event.pointerId === analogFiltersResizeStart.pointerId) {
+    analogFiltersResizeStart = null;
+  }
+});
+
+analogFiltersResize.addEventListener("keydown", (event) => {
+  if (!["ArrowLeft", "ArrowRight"].includes(event.key)) {
+    return;
+  }
+  event.preventDefault();
+  const width = analogFiltersSidebar.getBoundingClientRect().width;
+  setAnalogFiltersSidebarWidth(width + (event.key === "ArrowRight" ? 10 : -10));
+});
+
 analogsModal.addEventListener("click", (event) => {
   const button = event.target.closest("[data-analog-filter-column][data-analog-filter-value]");
   if (!button) {
@@ -2158,7 +2228,18 @@ const updateAnalogSortHeaders = () => {
   });
 };
 
-const applyAnalogPurchasePriceVisibility = () => {
+const getVisibleAnalogTableColumns = () => analogTableColumnIds.filter((column) => column !== "purchasePrice" || showPurchasePrices);
+
+const applyAnalogTableColumns = () => {
+  const visibleColumns = getVisibleAnalogTableColumns();
+  const minimumWidth = visibleColumns.reduce((width, column) => width + analogTableColumnWidths[column], 0);
+  const analogsTable = analogsResultsBody.closest("table");
+  analogsTable.style.setProperty("--analogs-results-table-min-width", `${minimumWidth}px`);
+  analogsTable.querySelectorAll("th[data-analog-column]").forEach((header) => {
+    header.style.width = visibleColumns.includes(header.dataset.analogColumn)
+      ? `${analogTableColumnWidths[header.dataset.analogColumn] / minimumWidth * 100}%`
+      : "";
+  });
   analogsModal.querySelectorAll('[data-analog-column="purchasePrice"]').forEach((element) => {
     element.hidden = !showPurchasePrices;
   });
@@ -2166,7 +2247,7 @@ const applyAnalogPurchasePriceVisibility = () => {
 
 const renderAnalogRows = () => {
   hideWarehouseTooltip();
-  applyAnalogPurchasePriceVisibility();
+  applyAnalogTableColumns();
   const focusedResultIndex = analogsResultsBody.contains(document.activeElement)
     ? document.activeElement.closest("[data-analog-result-index]")?.dataset.analogResultIndex
     : null;
@@ -2209,17 +2290,18 @@ const renderAnalogRows = () => {
     const isBestPrice = result === bestPrice;
     return `
       <tr class="results-table__row analogs-result-row${isBestPrice ? " is-best-price" : ""}" data-analog-result-index="${analogSearchResults.indexOf(result)}" tabindex="0" aria-label="Действия для ${escapeHtml(result.title)}">
-        <td>${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}</td>
-        <td>${escapeHtml(formatBrand(result.brand))}</td>
-        <td>${escapeHtml(formatArticle(result.article))}</td>
-        <td class="analogs-result-title" title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</td>
-        <td>${escapeHtml(formatQuantity(result.quantity))}</td>
-        <td>${renderWarehouse(result)}</td>
+        <td data-analog-column="supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}</td>
+        <td data-analog-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
+        <td data-analog-column="article">${escapeHtml(formatArticle(result.article))}</td>
+        <td class="analogs-result-title" data-analog-column="title" title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</td>
+        <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
+        <td data-analog-column="warehouse">${renderWarehouse(result)}</td>
         <td data-analog-column="purchasePrice"${showPurchasePrices ? "" : " hidden"}><span class="analogs-result-price">${escapeHtml(formatPrice(result.price))}</span></td>
-        <td><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
-        <td>${escapeHtml(deliveryDate)}</td>
+        <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
+        <td data-analog-column="deliveryDate">${escapeHtml(deliveryDate)}</td>
       </tr>`;
   }).join("");
+  applyAnalogTableColumns();
   if (focusedResultIndex !== null) {
     analogsResultsBody.querySelector(`[data-analog-result-index="${focusedResultIndex}"]`)?.focus();
   }
@@ -2955,6 +3037,7 @@ form.addEventListener("submit", async (event) => {
 
 restoreSearchState();
 restoreFiltersSidebarWidth();
+restoreAnalogFiltersSidebarWidth();
 restoreTableColumns();
 restoreStpartsWarehouses();
 restoreArmtekNonReturnable();

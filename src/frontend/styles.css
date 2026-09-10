@@ -256,10 +256,12 @@ input {
 .filters-control {
   display: flex;
   grid-column: 1;
-  align-self: start;
+  align-self: stretch;
+  align-items: center;
 }
 
 .filters-control:has(.filters-sidebar:not([hidden])) {
+  align-self: start;
   align-items: center;
   gap: 10px;
 }
@@ -1587,13 +1589,14 @@ table tbody tr:hover td {
 }
 
 .analogs-filters-control {
-  height: 100%;
+  align-self: stretch;
+  height: auto;
   min-height: 0;
 }
 
 .analogs-filters-sidebar {
   position: static;
-  height: 100%;
+  height: auto;
   max-height: 100%;
   overflow-y: auto;
 }
@@ -1726,8 +1729,8 @@ table tbody tr:hover td {
 }
 
 .analogs-results table {
-  width: 100%;
-  min-width: 1315px;
+  width: max(100%, var(--analogs-results-table-min-width, 1315px));
+  min-width: var(--analogs-results-table-min-width, 1315px);
   table-layout: fixed;
 }
 
@@ -1742,39 +1745,25 @@ table tbody tr:hover td {
   background: #f4f6f8;
 }
 
-.analogs-results th:nth-child(1) { width: 90px; }
-.analogs-results th:nth-child(2) { width: 115px; }
-.analogs-results th:nth-child(3) { width: 125px; }
-.analogs-results th:nth-child(4) { width: 350px; }
-.analogs-results th:nth-child(5) { width: 105px; }
-.analogs-results th:nth-child(6) { width: 130px; }
-.analogs-results th:nth-child(7) { width: 120px; }
-.analogs-results th:nth-child(8) { width: 125px; }
-.analogs-results th:nth-child(9) { width: 145px; }
-
-.analogs-results th:nth-child(7),
-.analogs-results td:nth-child(7),
-.analogs-results th:nth-child(8),
-.analogs-results td:nth-child(8) {
+.analogs-results [data-analog-column="purchasePrice"],
+.analogs-results [data-analog-column="markupPrice"] {
   text-align: right;
   font-weight: 800;
   white-space: nowrap;
 }
 
-.analogs-results th:nth-child(5),
-.analogs-results td:nth-child(5) {
+.analogs-results [data-analog-column="quantity"] {
   text-align: center;
   font-weight: 800;
   white-space: nowrap;
 }
 
-.analogs-results th:nth-child(9),
-.analogs-results td:nth-child(9) {
+.analogs-results [data-analog-column="deliveryDate"] {
   text-align: center;
   white-space: nowrap;
 }
 
-.analogs-results td:nth-child(3) {
+.analogs-results td[data-analog-column="article"] {
   color: #0666d6;
   font-weight: 700;
 }
