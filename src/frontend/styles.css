@@ -350,7 +350,7 @@ input {
   top: auto;
   width: var(--filters-sidebar-width);
   height: 100%;
-  min-width: 50px;
+  min-width: 180px;
   min-height: 0;
   max-width: 420px;
   padding: 16px;

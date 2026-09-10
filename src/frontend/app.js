@@ -592,7 +592,7 @@ const setFiltersSidebarWidth = (value) => {
   if (!Number.isFinite(width)) {
     return;
   }
-  const normalizedWidth = Math.min(420, Math.max(50, Math.round(width / 10) * 10));
+  const normalizedWidth = Math.min(420, Math.max(180, Math.round(width / 10) * 10));
   filtersSidebar.style.setProperty("--filters-sidebar-width", `${normalizedWidth}px`);
   try {
     localStorage.setItem(filtersWidthStorageKey, String(normalizedWidth));
@@ -1280,7 +1280,7 @@ const setAnalogFiltersSidebarWidth = (value) => {
   if (!Number.isFinite(width)) {
     return;
   }
-  const normalizedWidth = Math.min(420, Math.max(50, Math.round(width / 10) * 10));
+  const normalizedWidth = Math.min(420, Math.max(180, Math.round(width / 10) * 10));
   analogFiltersSidebar.style.setProperty("--filters-sidebar-width", `${normalizedWidth}px`);
   try {
     localStorage.setItem(analogFiltersWidthStorageKey, String(normalizedWidth));
@@ -1776,7 +1776,7 @@ filtersSidebar.addEventListener("change", (event) => {
 });
 
 let filtersResizeStart = null;
-const filtersCloseThresholdRatio = 0.05;
+const filtersCloseThresholdRatio = 0.02;
 
 const getFiltersCloseWidth = (sidebar) => {
   const workspace = sidebar.closest(".workspace, .analogs-workspace");
@@ -1819,7 +1819,7 @@ filtersResize.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
   const width = filtersSidebar.getBoundingClientRect().width;
-  if (event.key === "ArrowLeft" && width <= 50) {
+  if (event.key === "ArrowLeft" && width <= 180) {
     setFiltersSidebarOpen(false);
     return;
   }
@@ -1870,7 +1870,7 @@ analogFiltersResize.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
   const width = analogFiltersSidebar.getBoundingClientRect().width;
-  if (event.key === "ArrowLeft" && width <= 50) {
+  if (event.key === "ArrowLeft" && width <= 180) {
     setAnalogFiltersSidebarOpen(false);
     return;
   }
