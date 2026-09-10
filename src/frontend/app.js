@@ -2240,7 +2240,12 @@ const applyAnalogTableColumns = () => {
       ? `${analogTableColumnWidths[header.dataset.analogColumn] / minimumWidth * 100}%`
       : "";
   });
-  analogsModal.querySelectorAll('[data-analog-column="purchasePrice"]').forEach((element) => {
+  analogsTable.querySelectorAll("[data-analog-column]").forEach((element) => {
+    const visible = visibleColumns.includes(element.dataset.analogColumn);
+    element.hidden = !visible;
+    element.style.display = visible ? "" : "none";
+  });
+  analogsModal.querySelectorAll('.analogs-source [data-analog-column="purchasePrice"]').forEach((element) => {
     element.hidden = !showPurchasePrices;
   });
 };

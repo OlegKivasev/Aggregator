@@ -352,10 +352,13 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(app, /Средняя цена/);
   assert.match(app, /Math\.max\(180, Math\.round\(width \/ 10\) \* 10\)/);
   assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
+  assert.match(styles, /\.workspace\s*\{[^}]*height: calc\(100dvh - 52px\);[^}]*overflow: hidden;/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-items: center;/s);
+  assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-self: stretch;/s);
   assert.match(styles, /\.filters-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\) \.filters-toggle\s*\{[^}]*order: 2;/s);
   assert.match(styles, /\.filters-sidebar\s*\{[^}]*--filters-sidebar-width: 200px;[^}]*min-width: 180px;/s);
+  assert.match(styles, /\.filters-sidebar\s*\{[^}]*height: 100%;[^}]*overflow-y: auto;/s);
   assert.match(styles, /@media \(max-width: 575\.98px\)\s*\{\s*\.workspace/);
   assert.match(styles, /\.filters-suppliers\s*\{[^}]*margin-top: 0;/s);
   assert.match(styles, /\.filters-sidebar__disclosure summary\s*\{[^}]*cursor: pointer;/s);
@@ -429,12 +432,15 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.doesNotMatch(styles, /\.results-data-table th:nth-child/);
   assert.match(styles, /\.warehouse-code\s*\{[^}]*max-width: 100%;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/s);
   assert.match(styles, /\.results-table\s*\{[^}]*overflow: auto;/s);
-  assert.match(styles, /height: max\(420px, calc\(100dvh - 300px\)\)/);
+  assert.match(styles, /\.results-table\s*\{[^}]*flex: 1 1 auto;[^}]*overflow: auto;/s);
   assert.match(styles, /width: min\(2400px, calc\(100vw - 24px\)\)/);
   assert.match(styles, /height: min\(1440px, calc\(100dvh - 24px\)\)/);
   assert.match(styles, /\.analogs-workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
+  assert.match(styles, /\.analogs-workspace\s*\{[^}]*height: 100%;[^}]*overflow: hidden;/s);
+  assert.match(styles, /\.analogs-filters-sidebar\s*\{[^}]*height: 100%;[^}]*overflow-y: auto;/s);
   assert.match(styles, /\.analogs-results table\s*\{[^}]*width: max\(100%, var\(--analogs-results-table-min-width,/s);
   assert.match(styles, /\.analogs-results \[data-analog-column="markupPrice"\]/);
+  assert.match(styles, /\.analogs-results \[data-analog-column="markupPrice"\],\s*\.analogs-results \[data-analog-column="warehouse"\]\s*\{[^}]*text-align: center;/s);
   assert.doesNotMatch(styles, /\.analogs-results th:nth-child/);
 });
 

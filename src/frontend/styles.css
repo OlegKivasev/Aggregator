@@ -249,19 +249,24 @@ input {
 .workspace {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  height: calc(100dvh - 52px);
+  min-height: 420px;
   align-items: start;
+  overflow: hidden;
   gap: 10px;
 }
 
 .filters-control {
   display: flex;
   grid-column: 1;
+  height: 100%;
+  min-height: 0;
   align-self: stretch;
   align-items: center;
 }
 
 .filters-control:has(.filters-sidebar:not([hidden])) {
-  align-self: start;
+  align-self: stretch;
   align-items: center;
   gap: 10px;
 }
@@ -270,7 +275,9 @@ input {
   display: flex;
   grid-column: 2;
   width: 100%;
+  height: 100%;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   gap: 18px;
 }
@@ -339,14 +346,18 @@ input {
 
 .filters-sidebar {
   --filters-sidebar-width: 200px;
-  position: sticky;
-  top: 16px;
+  position: relative;
+  top: auto;
   width: var(--filters-sidebar-width);
+  height: 100%;
   min-width: 180px;
+  min-height: 0;
   max-width: 420px;
   padding: 16px;
   border-radius: 14px;
   background: var(--surface);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .filters-control:has(.filters-sidebar:not([hidden])) .filters-sidebar {
@@ -593,6 +604,10 @@ input {
 
 .results-panel {
   position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
   overflow: hidden !important;
   border-radius: 14px;
 }
@@ -921,7 +936,8 @@ input {
 
 .results-table {
   position: relative;
-  height: max(420px, calc(100dvh - 300px));
+  min-height: 0;
+  flex: 1 1 auto;
   overflow: auto;
   background: #fff;
 }
@@ -1584,21 +1600,24 @@ table tbody tr:hover td {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   flex: 1 1 auto;
+  height: 100%;
   min-height: 0;
+  overflow: hidden;
   gap: 10px;
 }
 
 .analogs-filters-control {
   align-self: stretch;
-  height: auto;
+  height: 100%;
   min-height: 0;
 }
 
 .analogs-filters-sidebar {
-  position: static;
-  height: auto;
-  max-height: 100%;
+  position: relative;
+  height: 100%;
+  max-height: none;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .analogs-shell {
@@ -1730,7 +1749,7 @@ table tbody tr:hover td {
 
 .analogs-results table {
   width: max(100%, var(--analogs-results-table-min-width, 1315px));
-  min-width: var(--analogs-results-table-min-width, 1315px);
+  min-width: max(100%, var(--analogs-results-table-min-width, 1315px));
   table-layout: fixed;
 }
 
@@ -1745,17 +1764,38 @@ table tbody tr:hover td {
   background: #f4f6f8;
 }
 
-.analogs-results [data-analog-column="purchasePrice"],
-.analogs-results [data-analog-column="markupPrice"] {
-  text-align: right;
+.analogs-results [data-analog-column="purchasePrice"] {
+  text-align: center;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.analogs-results [data-analog-column="markupPrice"],
+.analogs-results [data-analog-column="warehouse"] {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.analogs-results [data-analog-column="markupPrice"] {
+  font-weight: 800;
+}
+
+.analogs-results th[data-analog-column="markupPrice"] .analogs-sort,
+.analogs-results th[data-analog-column="warehouse"] .analogs-sort {
+  justify-content: center;
+  width: 100%;
 }
 
 .analogs-results [data-analog-column="quantity"] {
   text-align: center;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.analogs-results th[data-analog-column="quantity"] .analogs-sort,
+.analogs-results th[data-analog-column="deliveryDate"] .analogs-sort {
+  justify-content: center;
+  width: 100%;
 }
 
 .analogs-results [data-analog-column="deliveryDate"] {
