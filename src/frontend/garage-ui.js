@@ -42,6 +42,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const modalDuplicate = document.querySelector("#garage-add-duplicate");
   const modalDuplicateIncrement = document.querySelector("#garage-add-duplicate-increment");
   const modalDuplicateNew = document.querySelector("#garage-add-duplicate-new");
+  const toast = document.querySelector("#garage-toast");
   const searchShell = document.querySelector(".search-shell");
   const searchTabs = document.querySelector("#search-tabs");
   const workspace = document.querySelector(".workspace");
@@ -55,10 +56,18 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   let deletingVehicleId = null;
   let contextVehicleId = null;
   let contextMenuAnchor = null;
+  let toastTimer = null;
   const widthStorageKey = "autoservice-garage-sidebar-width-v1";
   const closeThresholdRatio = 0.02;
 
   const setStatus = (message) => { status.textContent = message; };
+  const showToast = (message, tone = "info") => {
+    if (toastTimer !== null) window.clearTimeout(toastTimer);
+    toast.textContent = message;
+    toast.dataset.tone = tone;
+    toast.hidden = false;
+    toastTimer = window.setTimeout(() => { toast.hidden = true; toastTimer = null; }, 4_000);
+  };
   const setPurchasePricesVisible = (visible) => {
     showPurchase = visible;
     priceToggle.setAttribute("aria-pressed", String(visible));
@@ -97,6 +106,10 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const showSearch = () => { view.hidden = true; workspace.hidden = false; searchShell.hidden = false; searchTabs.hidden = false; };
   const showVehicle = async (id) => {
     const { payload } = await api(`/api/garage/vehicles/${encodeURIComponent(id)}`);
+    if (!payload.vehicle.items.length) {
+      showToast(`В «${payload.vehicle.name}» пока нет товаров. Добавьте позицию из результатов поиска.`);
+      return;
+    }
     selectedVehicle = payload.vehicle;
     viewName.textContent = selectedVehicle.name;
     workspace.hidden = true;
@@ -143,8 +156,10 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
           showContextMenu(vehicle, bounds.left + 16, bounds.top + 16, button);
         }
       });
-      item.addEventListener("dragover", (event) => event.preventDefault());
-      item.addEventListener("drop", (event) => { event.preventDefault(); openAdd(event.dataTransfer?.getData("application/x-garage-offer"), vehicle.id); });
+      item.addEventListener("dragenter", (event) => { event.preventDefault(); item.classList.add("is-drop-target"); });
+      item.addEventListener("dragover", (event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; });
+      item.addEventListener("dragleave", (event) => { if (!item.contains(event.relatedTarget)) item.classList.remove("is-drop-target"); });
+      item.addEventListener("drop", (event) => { event.preventDefault(); event.stopPropagation(); item.classList.remove("is-drop-target"); openAdd(event.dataTransfer?.getData("application/x-garage-offer"), vehicle.id); });
       item.append(button);
       vehiclesList.append(item);
     }
@@ -273,6 +288,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     for (const vehicle of vehicles.filter((candidate) => candidate.name.toLocaleLowerCase("ru-RU").includes(term))) {
       const button = element("button", vehicle.name, "btn btn-light garage-add-modal__vehicle");
       button.type = "button";
+      if (vehicle.id === selectedAddVehicleId) button.classList.add("is-selected");
       button.addEventListener("click", () => { selectedAddVehicleId = vehicle.id; modalConfirm.disabled = false; modalVehicles.querySelectorAll("button").forEach((item) => item.classList.remove("is-selected")); button.classList.add("is-selected"); });
       modalVehicles.append(button);
     }
@@ -324,11 +340,22 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     }
   };
   const openAdd = (offerId, vehicleId = null) => {
-    if (!offerId) return;
+    if (!offerId) {
+      showToast("Позиция устарела. Повторите поиск, чтобы добавить её в гараж.", "error");
+      return;
+    }
+    if (!vehicles.length) {
+      showToast("Сначала создайте автомобиль, затем добавьте в него товар.");
+      return;
+    }
     pendingOfferId = offerId; selectedAddVehicleId = vehicleId; modalConfirm.disabled = !vehicleId; modalConfirm.hidden = false; modalDuplicate.hidden = true; modal.hidden = false; modalSearch.value = ""; renderModalVehicles();
   };
   const closeModal = () => { modal.hidden = true; modalConfirm.hidden = false; modalDuplicate.hidden = true; pendingOfferId = null; selectedAddVehicleId = null; };
   toggle.addEventListener("click", () => setSidebarOpen(sidebar.hidden));
+  sidebar.addEventListener("dragenter", (event) => { event.preventDefault(); sidebar.classList.add("is-drop-target"); });
+  sidebar.addEventListener("dragover", (event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; });
+  sidebar.addEventListener("dragleave", (event) => { if (!sidebar.contains(event.relatedTarget)) sidebar.classList.remove("is-drop-target"); });
+  sidebar.addEventListener("drop", (event) => { event.preventDefault(); sidebar.classList.remove("is-drop-target"); openAdd(event.dataTransfer?.getData("application/x-garage-offer")); });
   resize.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     resizeStart = { pointerId: event.pointerId, startX: event.clientX, startWidth: sidebar.getBoundingClientRect().width };
@@ -405,8 +432,10 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       closeModal();
       await loadVehicles();
       if (selectedVehicle?.id === vehicle.id) await showVehicle(vehicle.id);
+      showToast(`Товар добавлен в «${vehicle.name}».`);
     } catch (error) {
       setStatus(error.message);
+      showToast(error.message, "error");
     }
   };
   modalConfirm.addEventListener("click", () => addOfferToVehicle());
@@ -422,7 +451,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   });
   window.addEventListener("resize", () => hideContextMenu(true));
   window.addEventListener("scroll", () => hideContextMenu(true), true);
-  document.addEventListener("dragstart", (event) => { const row = event.target.closest(".main-result-row"); const button = row?.querySelector(".garage-offer-button"); if (button?.dataset.garageOfferId) event.dataTransfer?.setData("application/x-garage-offer", button.dataset.garageOfferId); });
+  document.addEventListener("dragstart", (event) => { const row = event.target.closest(".main-result-row, .analogs-result-row"); const button = row?.querySelector(".garage-offer-button"); if (button?.dataset.garageOfferId) { event.dataTransfer.effectAllowed = "copy"; event.dataTransfer.setData("application/x-garage-offer", button.dataset.garageOfferId); setSidebarOpen(true); } });
   restoreSidebarWidth();
   loadVehicles().catch((error) => setStatus(error.message));
 };

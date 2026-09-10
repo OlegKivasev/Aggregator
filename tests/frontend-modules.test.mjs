@@ -429,7 +429,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(styles, /\.garage-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
   assert.match(styles, /\.garage-sidebar\s*\{[^}]*--garage-sidebar-width: 260px;[^}]*min-width: 180px;[^}]*max-width: 420px;/s);
   assert.match(styles, /\.garage-search-form\s*\{[^}]*min-height: 40px;/s);
-  assert.match(styles, /\.garage-add-column, \.garage-add-cell\s*\{[^}]*width: 40px;/s);
+  assert.match(styles, /\.garage-add-column, \.garage-add-cell\s*\{[^}]*width: 52px;/s);
   assert.match(styles, /\.garage-offer-button svg\s*\{[^}]*stroke: currentColor;/s);
   assert.match(garage, /const workspace = document\.querySelector\("\.workspace"\);/);
   assert.match(garage, /workspace\.hidden = true;/);
@@ -442,6 +442,13 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /event\.key === "ArrowLeft" \? 10 : -10/);
   assert.match(garage, /const renderVehicleEditor =/);
   assert.match(garage, /const showContextMenu =/);
+  assert.match(html, /id="garage-toast" role="status" aria-live="polite" hidden/);
+  assert.match(garage, /showToast\(`В «\$\{payload\.vehicle\.name\}» пока нет товаров/);
+  assert.match(garage, /showToast\(`Товар добавлен в «\$\{vehicle\.name\}»\.`\)/);
+  assert.match(garage, /\.main-result-row, \.analogs-result-row/);
+  assert.match(garage, /sidebar\.addEventListener\("drop"/);
+  assert.match(app, /const garageActionColumnWidth = 52;/);
+  assert.match(app, /draggable="\$\{Boolean\(result\.offerId\)\}"/);
   assert.doesNotMatch(garage, /window\.(?:prompt|confirm)/);
 });
 
@@ -495,10 +502,10 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(app, /formatQuantity\(result\.quantity\)/);
   assert.match(app, /main-result-row\$\{isBestPrice \? " is-best-price" : ""\}/);
   assert.match(app, /main-best-price/);
-  assert.match(app, /const tableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 150,\s+title: 325,\s+quantity: 120,\s+warehouse: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 120,/s);
+  assert.match(app, /const tableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+quantity: 120,\s+warehouse: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 120,/s);
   assert.match(app, /--results-table-min-width/);
   assert.match(app, /tableColumnWidths\[header\.dataset\.column\] \/ minimumWidth \* 100/);
-  assert.match(app, /const analogTableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 150,\s+title: 325,\s+quantity: 120,\s+warehouse: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 120,/s);
+  assert.match(app, /const analogTableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+quantity: 120,\s+warehouse: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 120,/s);
   assert.match(app, /const applyAnalogTableColumns = \(\) =>/);
   assert.match(app, /--analogs-results-table-min-width/);
   assert.match(app, /analogFiltersResize\.addEventListener\("pointerdown"/);
