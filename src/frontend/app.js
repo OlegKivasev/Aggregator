@@ -151,6 +151,8 @@ const analogsSourcePrice = document.querySelector("#analogs-source-price");
 const analogsSourceMarkupPrice = document.querySelector("#analogs-source-markup-price");
 const analogsSourceDelivery = document.querySelector("#analogs-source-delivery");
 const analogsSourceWarehouse = document.querySelector("#analogs-source-warehouse");
+const analogsSearchLoading = document.querySelector("#analogs-search-loading");
+const analogsResults = document.querySelector("#analogs-results");
 const analogsResultsBody = document.querySelector("#analogs-results-body");
 const analogsCount = document.querySelector("#analogs-count");
 const analogsTableSearch = document.querySelector("#analogs-table-search");
@@ -2038,6 +2040,7 @@ supplierVisibilityInputs.forEach((input) => {
         analogSearchSources.forEach((source) => source.close());
         analogSearchSources = new Set();
         analogSearchCompleted = true;
+        setAnalogSearchUiState(false);
       }
     }
   });
@@ -2124,6 +2127,12 @@ const showResultContextMenu = (result, clientX, clientY, anchor, canShowAnalogs,
   openResultButton.focus();
 };
 
+const setAnalogSearchUiState = (isSearching) => {
+  analogsSearchLoading.hidden = !isSearching;
+  analogsResults.hidden = isSearching;
+  analogsShowMore.hidden = isSearching;
+};
+
 const scheduleAnalogRowsRender = () => {
   if (analogRenderFrame !== null) {
     return;
@@ -2145,6 +2154,7 @@ const renderAnalogRowsNow = () => {
 const closeAnalogsModal = () => {
   analogSearchSources.forEach((source) => source.close());
   analogSearchSources = new Set();
+  setAnalogSearchUiState(false);
   if (analogRenderFrame !== null) {
     cancelAnimationFrame(analogRenderFrame);
     analogRenderFrame = null;
@@ -2280,6 +2290,7 @@ const finishAnalogSearch = () => {
     return;
   }
   analogSearchCompleted = true;
+  setAnalogSearchUiState(false);
   renderAnalogRowsNow();
   setAnalogFiltersSidebarOpen(true);
 };
@@ -2318,6 +2329,7 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
   analogSearchSuppliers = analogSupplierIds.filter(isSupplierVisible);
   analogVisibleLimit = 200;
   analogSearchCompleted = false;
+  setAnalogSearchUiState(false);
   setAnalogFiltersSidebarOpen(false);
   analogsTableSearch.value = "";
   analogsMarkupPercent.value = String(markupPercent);
@@ -2332,6 +2344,7 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
     renderAnalogRowsNow();
     return;
   }
+  setAnalogSearchUiState(true);
   selectedBrands.forEach((brand) => {
     const searchParams = new URLSearchParams({ stream: "once", mode: "analogs", article, brand });
     analogSearchSuppliers.forEach((supplier) => searchParams.append("supplier", supplier));

@@ -258,6 +258,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(html, /data-analog-filter-section="supplier"[\s\S]*?data-analog-filter-section="brand"[\s\S]*?data-analog-filter-section="article"[\s\S]*?data-analog-filter-section="warehouse"[\s\S]*?data-analog-filter-section="markupPrice"[\s\S]*?data-analog-filter-section="deliveryDate"/);
   assert.match(html, /data-analog-sort-key="price"/);
   assert.match(html, /id="analogs-results-body"/);
+  assert.match(html, /id="analogs-search-loading"[^>]*role="status"[^>]*hidden/);
   assert.match(html, /id="analogs-show-more"/);
   assert.match(html, /id="analogs-count" tabindex="0"/);
   assert.equal((html.match(/id="results-body"/g) ?? []).length, 1);
@@ -265,8 +266,13 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /registerResultContextMenu\(resultsBody/);
   assert.match(app, /registerResultContextMenu\(analogsResultsBody/);
   assert.match(app, /const setAnalogFiltersSidebarOpen = \(open\) =>/);
-  assert.match(app, /analogSearchCompleted = false;\s+setAnalogFiltersSidebarOpen\(false\);/s);
-  assert.match(app, /analogSearchCompleted = true;\s+renderAnalogRowsNow\(\);\s+setAnalogFiltersSidebarOpen\(true\);/s);
+  assert.match(app, /const setAnalogSearchUiState = \(isSearching\) =>/);
+  assert.match(app, /analogsSearchLoading\.hidden = !isSearching;/);
+  assert.match(app, /analogsResults\.hidden = isSearching;/);
+  assert.match(app, /setAnalogSearchUiState\(true\);/);
+  assert.match(app, /setAnalogSearchUiState\(false\);/);
+  assert.match(app, /analogSearchCompleted = false;\s+setAnalogSearchUiState\(false\);\s+setAnalogFiltersSidebarOpen\(false\);/s);
+  assert.match(app, /analogSearchCompleted = true;\s+setAnalogSearchUiState\(false\);\s+renderAnalogRowsNow\(\);\s+setAnalogFiltersSidebarOpen\(true\);/s);
   assert.match(app, /renderAveragePrices\(container, getFilteredAnalogResults\(visibleResults\)\);/);
   assert.doesNotMatch(app, /renderAveragePrices\(container, getFilteredAnalogResults\(visibleResults\), showPurchasePrices\)/);
   assert.match(app, /analogFiltersToggle\.addEventListener\("click", \(\) => setAnalogFiltersSidebarOpen\(analogFiltersSidebar\.hidden\)\)/);
