@@ -106,7 +106,7 @@ test("PartKOM return preference is rendered and applied only to regular results"
   assert.match(html, /id="part-kom-non-returnable"/);
   assert.match(app, /autoservice\.partKomNonReturnable/);
   assert.match(app, /filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
-  assert.match(app, /const visibleResults = analogSearchResults;/);
+  assert.match(app, /const getVisibleAnalogResults = \(items\) => filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses/);
 });
 
 test("Forum-Auto return preference is rendered and applied only to regular results", async () => {
@@ -116,7 +116,7 @@ test("Forum-Auto return preference is rendered and applied only to regular resul
   assert.match(html, /id="forum-auto-non-returnable"/);
   assert.match(app, /autoservice\.forumAutoNonReturnable/);
   assert.match(app, /filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
-  assert.match(app, /const visibleResults = analogSearchResults;/);
+  assert.match(app, /const getVisibleAnalogResults = \(items\) => filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses/);
 });
 
 test("Armtek return preference is rendered and applied only to regular results", async () => {
@@ -126,7 +126,7 @@ test("Armtek return preference is rendered and applied only to regular results",
   assert.match(html, /id="armtek-non-returnable"/);
   assert.match(app, /autoservice\.armtekNonReturnable/);
   assert.match(app, /filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
-  assert.match(app, /const visibleResults = analogSearchResults;/);
+  assert.match(app, /const getVisibleAnalogResults = \(items\) => filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses/);
 });
 
 test("delivery date sorting moves intervals above dates they finish before", () => {
@@ -232,6 +232,9 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(html, /id="analogs-source-markup-price"/);
   assert.match(html, /id="analogs-table-search"/);
   assert.match(html, /id="analogs-markup-percent"/);
+  assert.match(html, /id="analogs-purchase-price-toggle"[^>]*aria-pressed="false"/);
+  assert.match(html, /id="analogs-filters"/);
+  assert.match(html, /data-analog-filter-section="supplier"[\s\S]*?data-analog-filter-section="brand"[\s\S]*?data-analog-filter-section="article"[\s\S]*?data-analog-filter-section="warehouse"[\s\S]*?data-analog-filter-section="markupPrice"[\s\S]*?data-analog-filter-section="deliveryDate"/);
   assert.match(html, /data-analog-sort-key="price"/);
   assert.match(html, /id="analogs-results-body"/);
   assert.match(html, /id="analogs-show-more"/);
@@ -285,7 +288,7 @@ test("frontend keeps retail price as the configurable column and discovers brand
   assert.match(app, /input\.type = "checkbox"/);
   assert.match(app, /selectedBrands\.forEach\(\(brand\) =>/);
   assert.match(app, /let analogSearchSources = new Set\(\);/);
-  assert.match(app, /const visibleResults = analogSearchResults;/);
+  assert.match(app, /const getVisibleAnalogResults = \(items\) =>/);
   assert.match(app, /const getMainTableResults = \(items\) =>/);
   assert.match(app, /getMainTableResults\(tab\.results\)\.filteredResults\.length === 0/);
   assert.match(app, /if \(!brands\.length\) \{\s+closeArticleAnalogsModal\(\);\s+return;/);
@@ -341,6 +344,8 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(app, /section\.hidden = !visibleTableColumns\.has\(column\) \|\| values\.length === 0;/);
   assert.match(app, /section\.hidden = !visibleTableColumns\.has\(column\) \|\| !hasValues;/);
   assert.match(app, /const filtersWidthStorageKey = "autoservice\.filtersWidth\.v2"/);
+  assert.match(app, /Средняя закуп\. цена/);
+  assert.match(app, /Средняя цена/);
   assert.match(app, /Math\.max\(180, Math\.round\(width \/ 10\) \* 10\)/);
   assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-items: center;/s);

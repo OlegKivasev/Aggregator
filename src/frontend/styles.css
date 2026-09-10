@@ -450,6 +450,18 @@ input {
   color: var(--ink);
 }
 
+.filters-sidebar__averages {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.filters-sidebar__averages strong {
+  color: var(--ink);
+}
+
 .filters-sidebar__reset {
   width: 100%;
   margin-top: 9px;
@@ -1564,6 +1576,48 @@ table tbody tr:hover td {
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
+}
+
+.analogs-filters {
+  flex: 0 0 auto;
+  padding: 0 22px 10px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.analogs-filters > summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.analogs-filters__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.analogs-filters .filters-sidebar__section {
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+@media (max-width: 900px) {
+  .analogs-filters__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 575.98px) {
+  .analogs-filters {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .analogs-filters__grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .analogs-search {
