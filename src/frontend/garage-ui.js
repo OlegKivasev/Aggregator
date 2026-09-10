@@ -67,6 +67,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   let selectedVehicle = null;
   let selectedAddVehicleId = null;
   let pendingOfferId = null;
+  let pendingOfferQuantity = null;
   let showPurchase = false;
   let garageTableSearchTerm = "";
   let garageSortState = { key: "price", direction: "ascending" };
@@ -85,12 +86,20 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const garageActionColumnWidth = 52;
 
   const setStatus = (message) => { status.textContent = message; };
-  const showToast = (message, tone = "info") => {
+  const showToast = (message, tone = "notice") => {
     if (toastTimer !== null) window.clearTimeout(toastTimer);
     toast.textContent = message;
     toast.dataset.tone = tone;
     toast.hidden = false;
     toastTimer = window.setTimeout(() => { toast.hidden = true; toastTimer = null; }, 4_000);
+  };
+  const setModalQuantityMaximum = (value) => {
+    const quantity = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+    if (Number.isFinite(quantity) && quantity >= 0) {
+      modalQuantity.max = String(quantity);
+      return;
+    }
+    modalQuantity.removeAttribute("max");
   };
   const setPurchasePricesVisible = (visible) => {
     showPurchase = visible;
@@ -211,7 +220,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       item.addEventListener("dragenter", (event) => { event.preventDefault(); item.classList.add("is-drop-target"); });
       item.addEventListener("dragover", (event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; });
       item.addEventListener("dragleave", (event) => { if (!item.contains(event.relatedTarget)) item.classList.remove("is-drop-target"); });
-      item.addEventListener("drop", (event) => { event.preventDefault(); event.stopPropagation(); item.classList.remove("is-drop-target"); openAdd(event.dataTransfer?.getData("application/x-garage-offer"), vehicle.id); });
+      item.addEventListener("drop", (event) => { event.preventDefault(); event.stopPropagation(); item.classList.remove("is-drop-target"); openAdd(event.dataTransfer?.getData("application/x-garage-offer"), vehicle.id, event.dataTransfer?.getData("application/x-garage-offer-quantity")); });
       item.append(button);
       vehiclesList.append(item);
     }
@@ -447,7 +456,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       const requiredDisplay = element("button", formatQuantity(item.requiredQuantity), "garage-quantity-display"); requiredDisplay.type = "button"; requiredDisplay.setAttribute("aria-label", `Изменить количество: ${item.title}`);
       const restoreQuantityDisplay = () => requiredCell.replaceChildren(requiredDisplay);
       requiredDisplay.addEventListener("click", () => {
-        const required = document.createElement("input"); required.className = "garage-quantity-input"; required.type = "number"; required.min = "0.001"; required.step = "0.001"; required.value = String(item.requiredQuantity); required.setAttribute("aria-label", `Количество: ${item.title}`);
+        const required = document.createElement("input"); required.className = "garage-quantity-input"; required.type = "number"; required.min = "0.001"; required.step = "0.001"; if (typeof item.supplierQuantity === "number" && item.supplierQuantity >= 0) required.max = String(item.supplierQuantity); required.value = String(item.requiredQuantity); required.setAttribute("aria-label", `Количество: ${item.title}`);
         required.addEventListener("change", async () => {
           const requiredQuantity = Number(required.value);
           if (!Number.isFinite(requiredQuantity) || requiredQuantity <= 0) {
@@ -496,7 +505,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       actions.append(remove); row.append(actions); itemsBody.append(row);
     }
   };
-  const openAdd = (offerId, vehicleId = null) => {
+  const openAdd = (offerId, vehicleId = null, supplierQuantity = null) => {
     if (!offerId) {
       showToast("Позиция устарела. Повторите поиск, чтобы добавить её в гараж.", "error");
       return;
@@ -507,6 +516,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     }
     const vehicle = vehicleId ? findVehicle(vehicleId) : null;
     pendingOfferId = offerId;
+    pendingOfferQuantity = supplierQuantity;
     selectedAddVehicleId = vehicle?.id ?? null;
     const hasSelectedVehicle = Boolean(vehicle);
     modal.dataset.vehicleSelected = String(hasSelectedVehicle);
@@ -519,6 +529,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     modal.hidden = false;
     modalSearch.value = "";
     modalQuantity.value = "1";
+    setModalQuantityMaximum(pendingOfferQuantity);
     renderModalVehicles();
     requestAnimationFrame(() => (hasSelectedVehicle ? modalQuantity : modalSearch).focus());
   };
@@ -531,13 +542,15 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     modalConfirm.hidden = false;
     modalDuplicate.hidden = true;
     pendingOfferId = null;
+    pendingOfferQuantity = null;
+    setModalQuantityMaximum(null);
     selectedAddVehicleId = null;
   };
   toggle.addEventListener("click", () => setSidebarOpen(sidebar.hidden));
   sidebar.addEventListener("dragenter", (event) => { event.preventDefault(); sidebar.classList.add("is-drop-target"); });
   sidebar.addEventListener("dragover", (event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; });
   sidebar.addEventListener("dragleave", (event) => { if (!sidebar.contains(event.relatedTarget)) sidebar.classList.remove("is-drop-target"); });
-  sidebar.addEventListener("drop", (event) => { event.preventDefault(); sidebar.classList.remove("is-drop-target"); openAdd(event.dataTransfer?.getData("application/x-garage-offer")); });
+  sidebar.addEventListener("drop", (event) => { event.preventDefault(); sidebar.classList.remove("is-drop-target"); openAdd(event.dataTransfer?.getData("application/x-garage-offer"), null, event.dataTransfer?.getData("application/x-garage-offer-quantity")); });
   resize.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     resizeStart = { pointerId: event.pointerId, startX: event.clientX, startWidth: sidebar.getBoundingClientRect().width };
@@ -649,9 +662,27 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const addOfferToVehicle = async (duplicateStrategy) => {
     const vehicle = vehicles.find((item) => item.id === selectedAddVehicleId);
     if (!vehicle || !pendingOfferId) return;
+    const requiredQuantity = Number(modalQuantity.value);
+    const maximumQuantity = modalQuantity.max === "" ? null : Number(modalQuantity.max);
+    if (maximumQuantity !== null && requiredQuantity > maximumQuantity) {
+      modalQuantity.value = String(maximumQuantity);
+      modalQuantity.focus();
+      return;
+    }
     try {
-      const result = await api(`/api/garage/vehicles/${vehicle.id}/items`, { method: "POST", body: JSON.stringify({ vehicleRevision: vehicle.revision, offerId: pendingOfferId, markupPercent: getMarkupPercent(), requiredQuantity: Number(modalQuantity.value), ...(duplicateStrategy ? { duplicateStrategy } : {}) }) });
+      const result = await api(`/api/garage/vehicles/${vehicle.id}/items`, { method: "POST", body: JSON.stringify({ vehicleRevision: vehicle.revision, offerId: pendingOfferId, markupPercent: getMarkupPercent(), requiredQuantity, ...(duplicateStrategy ? { duplicateStrategy } : {}) }) });
       if (result.response.status === 409 && result.payload?.duplicate && !duplicateStrategy) {
+        const supplierQuantity = result.payload.duplicate.supplierQuantity;
+        if (typeof supplierQuantity === "number" && supplierQuantity >= 0) {
+          const remainingQuantity = Math.max(0, supplierQuantity - result.payload.duplicate.requiredQuantity);
+          if (remainingQuantity < 0.001) {
+            closeModal();
+            showToast("Всё доступное количество уже добавлено в автомобиль.");
+            return;
+          }
+          setModalQuantityMaximum(remainingQuantity);
+          if (Number(modalQuantity.value) > remainingQuantity) modalQuantity.value = String(remainingQuantity);
+        }
         modalConfirm.hidden = true;
         modalDuplicate.hidden = false;
         modalDuplicateIncrement.focus();
@@ -660,7 +691,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       closeModal();
       await loadVehicles();
       if (selectedVehicle?.id === vehicle.id) await showVehicle(vehicle.id);
-      showToast(`Товар добавлен в «${vehicle.name}».`);
+      showToast(`Товар добавлен в «${vehicle.name}».`, "success");
     } catch (error) {
       setStatus(error.message);
       showToast(error.message, "error");
@@ -675,14 +706,14 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   document.addEventListener("click", (event) => {
     if (!contextMenu.hidden && !contextMenu.contains(event.target)) hideContextMenu();
     const button = event.target.closest(".garage-offer-button");
-    if (button) openAdd(button.dataset.garageOfferId);
+    if (button) openAdd(button.dataset.garageOfferId, null, button.dataset.garageOfferQuantity);
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !contextMenu.hidden) hideContextMenu(true);
   });
   window.addEventListener("resize", () => hideContextMenu(true));
   window.addEventListener("scroll", () => hideContextMenu(true), true);
-  document.addEventListener("dragstart", (event) => { const button = event.target.closest(".garage-offer-button"); if (button?.dataset.garageOfferId) { event.dataTransfer.effectAllowed = "copy"; event.dataTransfer.setData("application/x-garage-offer", button.dataset.garageOfferId); setSidebarOpen(true); } });
+  document.addEventListener("dragstart", (event) => { const button = event.target.closest(".garage-offer-button"); if (button?.dataset.garageOfferId) { event.dataTransfer.effectAllowed = "copy"; event.dataTransfer.setData("application/x-garage-offer", button.dataset.garageOfferId); event.dataTransfer.setData("application/x-garage-offer-quantity", button.dataset.garageOfferQuantity ?? ""); setSidebarOpen(true); } });
   restoreSidebarWidth();
   restoreFiltersSidebarWidth();
   loadVehicles().catch((error) => setStatus(error.message));

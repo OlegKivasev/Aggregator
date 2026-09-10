@@ -94,7 +94,8 @@ body:has(.garage-add-modal:not([hidden])) { overflow: hidden; }
 .garage-add-modal__duplicate p { margin: 0 0 8px; }
 .garage-add-modal__duplicate div, .garage-add-modal__footer { display: flex; flex-wrap: wrap; gap: 6px; }
 .garage-add-modal__footer { justify-content: flex-end; padding-top: 10px; border-top: 1px solid var(--line); }
-.garage-toast { position: fixed; z-index: 1200; top: 24px; right: 24px; max-width: min(360px, calc(100vw - 32px)); padding: 11px 14px; border: 1px solid #f4c7b8; border-radius: 8px; color: var(--accent-dark); background: #fff; box-shadow: 0 10px 30px rgba(23, 32, 42, .16); font-size: 13px; font-weight: 700; }
+.garage-toast { position: fixed; z-index: 1200; top: 24px; right: 24px; max-width: min(360px, calc(100vw - 32px)); padding: 11px 14px; border: 1px solid #f1c453; border-radius: 8px; color: #7b5600; background: #fff8e5; box-shadow: 0 10px 30px rgba(23, 32, 42, .16); font-size: 13px; font-weight: 700; }
+.garage-toast[data-tone="success"] { border-color: #a9d6b7; color: #146c43; background: #f4fbf6; }
 .garage-toast[data-tone="error"] { border-color: #f1b6b2; color: #9d241c; background: #fff5f4; }
 
 .garage-toggle { display: inline-grid; place-items: center; }

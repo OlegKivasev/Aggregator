@@ -453,7 +453,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /const showContextMenu =/);
   assert.match(html, /id="garage-toast" role="status" aria-live="polite" hidden/);
   assert.match(garage, /showToast\(`В «\$\{payload\.vehicle\.name\}» пока нет товаров/);
-  assert.match(garage, /showToast\(`Товар добавлен в «\$\{vehicle\.name\}»\.`\)/);
+  assert.match(garage, /showToast\(`Товар добавлен в «\$\{vehicle\.name\}»\.`, "success"\)/);
   assert.match(html, /id="garage-titlebar" hidden>[\s\S]*?class="garage-titlebar__heading">\s*<span>Товары для автомобиля<\/span>\s*<h1 id="garage-vehicle-name"/);
   assert.match(html, /class="garage-view results-panel card border-0 shadow-sm overflow-hidden" id="garage-view"/);
   assert.match(html, /id="garage-titlebar" hidden>[\s\S]*?id="garage-back"[\s\S]*?id="garage-vehicle-name"[\s\S]*?id="garage-refresh"/);
@@ -486,7 +486,15 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /modalConfirm\.hidden = hasSelectedVehicle;/);
   assert.match(garage, /modalForm\.addEventListener\("submit"/);
   assert.doesNotMatch(garage, /setStatus\("Предложения актуализированы"\)/);
+  assert.match(garage, /const setModalQuantityMaximum = \(value\) =>/);
+  assert.match(garage, /modalQuantity\.max = String\(quantity\);/);
+  assert.match(garage, /required\.max = String\(item\.supplierQuantity\);/);
+  assert.match(garage, /const remainingQuantity = Math\.max\(0, supplierQuantity - result\.payload\.duplicate\.requiredQuantity\);/);
+  assert.match(garage, /application\/x-garage-offer-quantity/);
+  assert.match(app, /data-garage-offer-quantity="\$\{Number\.isFinite\(result\.quantity\)/);
   assert.match(styles, /\.garage-toast\s*\{[^}]*top: 24px;[^}]*right: 24px;/s);
+  assert.match(styles, /\.garage-toast\[data-tone="success"\]\s*\{[^}]*background: #f4fbf6;/s);
+  assert.match(styles, /\.garage-toast\[data-tone="error"\]\s*\{[^}]*background: #fff5f4;/s);
   assert.doesNotMatch(app, /main-result-row[\s\S]{0,250}draggable=|analogs-result-row[\s\S]{0,250}draggable=/);
   assert.doesNotMatch(garage, /window\.(?:prompt|confirm)/);
 });

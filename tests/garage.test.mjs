@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { GarageApplicationService, GarageConflictError, GarageOfferExpiredError } from "../src/backend/garage/garage-application-service.ts";
+import { GarageApplicationService, GarageConflictError, GarageOfferExpiredError, GarageValidationError } from "../src/backend/garage/garage-application-service.ts";
 import { SqliteGarageRepository } from "../src/backend/garage/sqlite-garage-repository.ts";
 
 const offer = {
@@ -23,6 +23,7 @@ test("garage persists vehicles, guards revisions, merges known duplicates, and r
     const vehicle = service.createVehicle("Toyota Camry");
     assert.throws(() => service.addOffer(vehicle.id, vehicle.revision, "expired-offer", 35, 1), GarageOfferExpiredError);
     const offerId = service.registerSearchOffer(offer);
+    assert.throws(() => service.addOffer(vehicle.id, vehicle.revision, offerId, 35, 5), GarageValidationError);
     const item = service.addOffer(vehicle.id, vehicle.revision, offerId, 35, 2);
     assert.equal(item.purchasePrice, 100);
     const details = service.getVehicle(vehicle.id);

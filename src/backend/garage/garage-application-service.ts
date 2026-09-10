@@ -104,10 +104,16 @@ export class GarageApplicationService {
     const quantity = normalizeQuantity(requiredQuantity);
     const markup = normalizeMarkup(markupPercent);
     const snapshot = offer.result;
+    if (typeof snapshot.quantity === "number" && Number.isFinite(snapshot.quantity) && snapshot.quantity >= 0 && quantity > snapshot.quantity) {
+      throw new GarageValidationError("requiredQuantity exceeds supplier quantity");
+    }
     const duplicate = this.repository.findDuplicate(vehicleId, snapshot.supplier, snapshot.brand, snapshot.article, snapshot.warehouse);
     if (duplicate && strategy === undefined) return { duplicate };
     if (strategy === "increment") {
       if (!duplicate) throw new GarageConflictError();
+      if (typeof snapshot.quantity === "number" && Number.isFinite(snapshot.quantity) && duplicate.requiredQuantity + quantity > snapshot.quantity) {
+        throw new GarageValidationError("requiredQuantity exceeds supplier quantity");
+      }
       const result = this.repository.incrementItem(duplicate.id, duplicate.revision, quantity, now());
       if (result === "conflict") throw new GarageConflictError();
       if (result === "missing") throw new GarageNotFoundError();
