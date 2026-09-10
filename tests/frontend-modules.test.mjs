@@ -489,6 +489,8 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /const setModalQuantityMaximum = \(value\) =>/);
   assert.match(garage, /const api = async \(path, options = \{\}, allowConflict = false\) =>/);
   assert.match(garage, /\(!allowConflict \|\| response\.status !== 409\)/);
+  assert.match(garage, /const \{ payload: currentVehiclePayload \} = await api\(`\/api\/garage\/vehicles\/\$\{vehicle\.id\}`\);/);
+  assert.match(garage, /vehicleRevision: currentVehicleRevision/);
   assert.match(garage, /duplicateStrategy \? \{ duplicateStrategy \} : \{\}\) \}\) \}, true\);/);
   assert.match(garage, /modalQuantity\.max = String\(quantity\);/);
   assert.match(garage, /required\.max = String\(item\.supplierQuantity\);/);

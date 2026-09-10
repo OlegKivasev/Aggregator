@@ -670,7 +670,10 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       return;
     }
     try {
-      const result = await api(`/api/garage/vehicles/${vehicle.id}/items`, { method: "POST", body: JSON.stringify({ vehicleRevision: vehicle.revision, offerId: pendingOfferId, markupPercent: getMarkupPercent(), requiredQuantity, ...(duplicateStrategy ? { duplicateStrategy } : {}) }) }, true);
+      const { payload: currentVehiclePayload } = await api(`/api/garage/vehicles/${vehicle.id}`);
+      const currentVehicleRevision = currentVehiclePayload?.vehicle?.revision;
+      if (!Number.isInteger(currentVehicleRevision)) throw new Error("Не удалось обновить данные автомобиля.");
+      const result = await api(`/api/garage/vehicles/${vehicle.id}/items`, { method: "POST", body: JSON.stringify({ vehicleRevision: currentVehicleRevision, offerId: pendingOfferId, markupPercent: getMarkupPercent(), requiredQuantity, ...(duplicateStrategy ? { duplicateStrategy } : {}) }) }, true);
       if (result.response.status === 409 && result.payload?.duplicate && !duplicateStrategy) {
         const supplierQuantity = result.payload.duplicate.supplierQuantity;
         if (typeof supplierQuantity === "number" && supplierQuantity >= 0) {
