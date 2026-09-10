@@ -104,6 +104,11 @@ const isSameCalendarDay = (leftValue, rightValue) => {
 
 const getEffectiveDeliveryTo = (from, to) => (to !== null && !isSameCalendarDay(from, to) ? to : null);
 
+const getCalendarDayTimestamp = (value) => {
+  const date = new Date(value);
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+};
+
 const getDeliverySortGroup = (result, from, to) => {
   const dayOffset = getCalendarDayOffset(from);
   if (to === null && dayOffset >= 0 && dayOffset <= 2) {
@@ -143,7 +148,18 @@ export const compareDeliveryDates = (left, right) => {
 
 export const compareDeliveryDatesThenPrice = (left, right) => {
   const deliveryComparison = compareDeliveryDates(left, right);
-  if (deliveryComparison !== 0) {
+  const leftFrom = getDeliveryTimestamp(left.deliveryDate);
+  const rightFrom = getDeliveryTimestamp(right.deliveryDate);
+  const leftTo = leftFrom === null ? null : getEffectiveDeliveryTo(leftFrom, getDeliveryTimestamp(left.deliveryDateTo));
+  const rightTo = rightFrom === null ? null : getEffectiveDeliveryTo(rightFrom, getDeliveryTimestamp(right.deliveryDateTo));
+  const hasSameDisplayedDelivery = leftFrom === null || rightFrom === null
+    ? leftFrom === rightFrom
+    : getCalendarDayTimestamp(leftFrom) === getCalendarDayTimestamp(rightFrom)
+      && (leftTo === null) === (rightTo === null)
+      && (leftTo === null || getCalendarDayTimestamp(leftTo) === getCalendarDayTimestamp(rightTo))
+      && (leftTo !== null || Boolean(left.deliveryDateApproximate) === Boolean(right.deliveryDateApproximate));
+
+  if (deliveryComparison !== 0 && !hasSameDisplayedDelivery) {
     return deliveryComparison;
   }
 

@@ -221,13 +221,13 @@ test("delivery date sorting places an interval starting on the 29th above the 30
   ]);
 });
 
-test("delivery date sorting uses the lowest price for otherwise identical deliveries", () => {
+test("delivery date sorting uses the lowest price for deliveries shown as the same date", () => {
   const today = new Date();
-  const deliveryDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, 12).toISOString();
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
   const results = [
-    { label: "more expensive", deliveryDate, price: 4500 },
-    { label: "lowest price", deliveryDate, price: 1200 },
-    { label: "middle price", deliveryDate, price: 2800 },
+    { label: "more expensive", deliveryDate: new Date(tomorrow.getTime() + 20 * 60 * 60 * 1_000).toISOString(), price: 4500 },
+    { label: "lowest price", deliveryDate: new Date(tomorrow.getTime() + 8 * 60 * 60 * 1_000).toISOString(), price: 1200 },
+    { label: "middle price", deliveryDate: new Date(tomorrow.getTime() + 14 * 60 * 60 * 1_000).toISOString(), price: 2800 },
   ];
 
   assert.deepEqual(results.sort(compareDeliveryDatesThenPrice).map((result) => result.label), [
