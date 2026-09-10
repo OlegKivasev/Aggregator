@@ -419,6 +419,12 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(html, /form class="garage-search-form search-row" id="garage-search-form"[\s\S]*?class="search-input" id="garage-search"/);
   assert.match(html, /id="garage-context-menu" role="menu"[\s\S]*?id="garage-rename-button"[\s\S]*?id="garage-delete-button"/);
   assert.match(html, /id="garage-add-duplicate" hidden/);
+  assert.match(html, /class="garage-add-modal__header"/);
+  assert.match(html, /class="garage-add-modal__input garage-add-modal__search" id="garage-add-search"/);
+  assert.match(html, /class="garage-add-modal__footer"/);
+  assert.match(styles, /\.garage-add-modal__header h2\s*\{[^}]*font-size: 17px;/s);
+  assert.match(styles, /\.garage-add-modal__search\s*\{[^}]*border: 2px solid var\(--accent\);/s);
+  assert.match(styles, /\.garage-add-modal__vehicle\s*\{[^}]*background: transparent;/s);
   assert.match(html, /id="garage-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены"[\s\S]*?<svg/);
   assert.match(html, /id="garage-purchase-price-heading" hidden>Закупочная цена/);
   assert.match(garage, /const setPurchasePricesVisible = \(visible\) =>/);
