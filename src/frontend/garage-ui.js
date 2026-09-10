@@ -1,3 +1,5 @@
+import { formatArticle, formatBrand, formatPrice, formatQuantity } from "./result-formatting.js";
+
 const api = async (path, options = {}) => {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
   const payload = response.status === 204 ? null : await response.json().catch(() => null);
@@ -11,9 +13,6 @@ const element = (tag, text, className) => {
   if (className) node.className = className;
   return node;
 };
-
-const price = (value) => Number.isFinite(value) ? `${value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽` : "—";
-const quantity = (value) => Number.isFinite(value) ? value.toLocaleString("ru-RU", { maximumFractionDigits: 3 }) : "—";
 
 export const bootstrapGarage = ({ getMarkupPercent }) => {
   const sidebar = document.querySelector("#garage-sidebar");
@@ -32,6 +31,15 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const status = document.querySelector("#garage-status");
   const resultCount = document.querySelector("#garage-result-count");
   const tableSearch = document.querySelector("#garage-table-search");
+  const filtersToggle = document.querySelector("#garage-filters-toggle");
+  const filtersSidebar = document.querySelector("#garage-filters-sidebar");
+  const filtersReset = document.querySelector("#garage-filters-reset");
+  const filterContainers = {
+    supplier: document.querySelector("#garage-filter-supplier"),
+    brand: document.querySelector("#garage-filter-brand"),
+    article: document.querySelector("#garage-filter-article"),
+    availability: document.querySelector("#garage-filter-availability"),
+  };
   const back = document.querySelector("#garage-back");
   const refresh = document.querySelector("#garage-refresh");
   const priceToggle = document.querySelector("#garage-price-toggle");
@@ -57,6 +65,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   let showPurchase = false;
   let garageTableSearchTerm = "";
   let garageSortState = { key: "price", direction: "ascending" };
+  const selectedFilterValues = new Map(["supplier", "brand", "article", "availability"].map((column) => [column, new Set()]));
   let resizeStart = null;
   let editingVehicle = null;
   let deletingVehicleId = null;
@@ -65,6 +74,8 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   let toastTimer = null;
   const widthStorageKey = "autoservice-garage-sidebar-width-v1";
   const closeThresholdRatio = 0.02;
+  const garageColumnWidths = { supplier: 100, brand: 125, article: 140, title: 323, availability: 120, quantity: 120, purchasePrice: 120, price: 120, sum: 120 };
+  const garageActionColumnWidth = 52;
 
   const setStatus = (message) => { status.textContent = message; };
   const showToast = (message, tone = "info") => {
@@ -81,6 +92,12 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     priceToggle.title = visible ? "Скрыть закупочные цены" : "Показать закупочные цены";
     purchasePriceHeading.hidden = !visible;
     if (selectedVehicle) renderItems();
+  };
+  const setFiltersOpen = (open) => {
+    filtersSidebar.hidden = !open;
+    filtersToggle.setAttribute("aria-expanded", String(open));
+    filtersToggle.setAttribute("aria-label", open ? "Скрыть фильтры" : "Показать фильтры");
+    filtersToggle.title = open ? "Скрыть фильтры" : "Показать фильтры";
   };
   const setSidebarOpen = (open) => {
     sidebar.hidden = !open;
@@ -213,7 +230,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
           const { payload } = await api(`/api/garage/vehicles/${vehicle.id}`, { method: "PATCH", body: JSON.stringify({ revision: vehicle.revision, name }) });
           if (selectedVehicle?.id === vehicle.id) {
             selectedVehicle = { ...selectedVehicle, ...payload.vehicle };
-            viewName.textContent = selectedVehicle.name;
+            viewName.textContent = `Товары для автомобиля: ${selectedVehicle.name}`;
           }
         } else {
           await api("/api/garage/vehicles", { method: "POST", body: JSON.stringify({ name }) });
@@ -335,59 +352,109 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     resultCount.title = `Показано предложений: ${items.length}`;
     resultCount.setAttribute("aria-label", breakdown ? `По поставщикам:\n${breakdown}` : "Нет предложений");
   };
+  const getGarageFilterValue = (item, column) => {
+    if (column === "supplier") return item.supplier;
+    if (column === "brand") return formatBrand(item.brand);
+    if (column === "article") return formatArticle(item.article);
+    return formatQuantity(item.supplierQuantity);
+  };
+  const renderGarageFilters = () => {
+    for (const [column, container] of Object.entries(filterContainers)) {
+      const values = [...new Set(selectedVehicle.items.map((item) => getGarageFilterValue(item, column)))].sort((left, right) => left.localeCompare(right, "ru-RU", { numeric: true, sensitivity: "base" }));
+      const selected = selectedFilterValues.get(column);
+      container.replaceChildren(...values.map((value) => {
+        const button = element("button", value, "filters-sidebar__value");
+        button.type = "button";
+        button.dataset.garageFilterColumn = column;
+        button.dataset.garageFilterValue = value;
+        button.setAttribute("aria-pressed", String(selected.has(value)));
+        button.addEventListener("click", () => {
+          if (selected.has(value)) selected.delete(value); else selected.add(value);
+          renderItems();
+        });
+        return button;
+      }));
+    }
+    filtersReset.hidden = ![...selectedFilterValues.values()].some((values) => values.size > 0);
+  };
+  const getGarageVisibleColumns = () => [
+    ...(showPurchase ? ["purchasePrice"] : []),
+    "supplier", "brand", "article", "title", "availability", "quantity", "price", "sum",
+  ];
+  const applyGarageTableColumns = () => {
+    const columns = getGarageVisibleColumns();
+    const minimumWidth = columns.reduce((width, column) => width + garageColumnWidths[column], garageActionColumnWidth);
+    view.style.setProperty("--results-table-min-width", `${minimumWidth}px`);
+    view.querySelectorAll("th[data-garage-column]").forEach((header) => {
+      const width = garageColumnWidths[header.dataset.garageColumn === "purchase-price" ? "purchasePrice" : header.dataset.garageColumn];
+      header.style.width = !header.hidden && width ? `${width / minimumWidth * 100}%` : "";
+    });
+  };
   const renderItems = () => {
     itemsBody.replaceChildren();
     updateGarageSortHeaders();
     updateGarageResultCount(selectedVehicle.items);
+    renderGarageFilters();
+    applyGarageTableColumns();
     const term = garageTableSearchTerm.toLocaleLowerCase("ru-RU");
-    const visibleItems = selectedVehicle.items.filter((item) => [item.brand, item.article, item.title]
-      .some((value) => value.toLocaleLowerCase("ru-RU").includes(term)));
+    const visibleItems = selectedVehicle.items.filter((item) => [formatBrand(item.brand), formatArticle(item.article), item.title]
+      .some((value) => value.toLocaleLowerCase("ru-RU").includes(term))
+      && [...selectedFilterValues].every(([column, values]) => values.size === 0 || values.has(getGarageFilterValue(item, column))));
     if (!visibleItems.length) {
       const empty = element("tr", undefined, "results-table__empty");
       const emptyCell = element("td", "Нет позиций с выбранным условием.");
-      emptyCell.colSpan = 10;
+      emptyCell.colSpan = getGarageVisibleColumns().length + 1;
       empty.append(emptyCell);
       itemsBody.append(empty);
       return;
     }
     for (const item of [...visibleItems].sort(compareGarageItems)) {
       const row = element("tr", undefined, item.availabilityStatus === "available" || item.availabilityStatus === "unknown" ? "" : "garage-item--problem");
-      const cells = [["supplier", item.supplier], ["brand", item.brand], ["article", item.article], ["title", item.title], ["availability", `${quantity(item.supplierQuantity)} (${item.availabilityStatus})`]];
+      const purchasePriceCell = element("td", formatPrice(item.purchasePrice));
+      purchasePriceCell.dataset.garageColumn = "purchase-price";
+      purchasePriceCell.hidden = !showPurchase;
+      row.append(purchasePriceCell);
+      const cells = [["supplier", item.supplier], ["brand", formatBrand(item.brand)], ["article", formatArticle(item.article)], ["title", item.title], ["availability", formatQuantity(item.supplierQuantity)]];
       for (const [column, value] of cells) {
         const cell = element("td", value);
         cell.dataset.garageColumn = column;
         row.append(cell);
       }
-      const required = document.createElement("input"); required.className = "garage-quantity-input"; required.type = "number"; required.min = "0.001"; required.step = "0.001"; required.value = String(item.requiredQuantity); required.setAttribute("aria-label", `Количество: ${item.title}`);
-      const requiredCell = document.createElement("td"); requiredCell.dataset.garageColumn = "quantity"; requiredCell.append(required); row.append(requiredCell);
-      const regularPriceCell = element("td", price(item.regularPrice)); regularPriceCell.dataset.garageColumn = "price"; row.append(regularPriceCell);
-      const purchasePriceCell = element("td", price(item.purchasePrice));
-      purchasePriceCell.dataset.garageColumn = "purchase-price";
-      purchasePriceCell.hidden = !showPurchase;
-      row.append(purchasePriceCell);
-      const sumCell = element("td", price(item.regularPrice * item.requiredQuantity)); sumCell.dataset.garageColumn = "sum"; row.append(sumCell);
+      const requiredCell = document.createElement("td"); requiredCell.dataset.garageColumn = "quantity";
+      const requiredDisplay = element("button", formatQuantity(item.requiredQuantity), "garage-quantity-display"); requiredDisplay.type = "button"; requiredDisplay.setAttribute("aria-label", `Изменить количество: ${item.title}`);
+      const restoreQuantityDisplay = () => requiredCell.replaceChildren(requiredDisplay);
+      requiredDisplay.addEventListener("click", () => {
+        const required = document.createElement("input"); required.className = "garage-quantity-input"; required.type = "number"; required.min = "0.001"; required.step = "0.001"; required.value = String(item.requiredQuantity); required.setAttribute("aria-label", `Количество: ${item.title}`);
+        required.addEventListener("change", async () => {
+          const requiredQuantity = Number(required.value);
+          if (!Number.isFinite(requiredQuantity) || requiredQuantity <= 0) {
+            showToast("Укажите количество больше нуля.", "error");
+            restoreQuantityDisplay();
+            return;
+          }
+          required.disabled = true;
+          try {
+            await api(`/api/garage/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, requiredQuantity, comment: item.comment }) });
+            await showVehicle(selectedVehicle.id);
+          } catch (error) {
+            setStatus(error.message);
+            showToast(error.message, "error");
+            restoreQuantityDisplay();
+          }
+        });
+        required.addEventListener("blur", () => { if (!required.disabled) restoreQuantityDisplay(); });
+        requiredCell.replaceChildren(required);
+        required.focus();
+        required.select();
+      });
+      requiredCell.append(requiredDisplay); row.append(requiredCell);
+      const regularPriceCell = element("td", formatPrice(item.regularPrice)); regularPriceCell.dataset.garageColumn = "price"; row.append(regularPriceCell);
+      const sumCell = element("td", formatPrice(item.regularPrice * item.requiredQuantity)); sumCell.dataset.garageColumn = "sum"; row.append(sumCell);
       const actions = document.createElement("td"); actions.className = "garage-actions-cell";
       const remove = document.createElement("button"); remove.type = "button"; remove.className = "garage-item-remove"; remove.title = "Удалить товар"; remove.setAttribute("aria-label", `Удалить «${item.title}»`);
       const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg"); icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
       ["M4 7h16", "M10 11v6", "M14 11v6", "M6.5 7 7.5 20h9l1-13", "M9 7V4h6v3"].forEach((pathData) => { const path = document.createElementNS("http://www.w3.org/2000/svg", "path"); path.setAttribute("d", pathData); icon.append(path); });
       remove.append(icon);
-      required.addEventListener("change", async () => {
-        const requiredQuantity = Number(required.value);
-        if (!Number.isFinite(requiredQuantity) || requiredQuantity <= 0) {
-          required.value = String(item.requiredQuantity);
-          showToast("Укажите количество больше нуля.", "error");
-          return;
-        }
-        required.disabled = true;
-        try {
-          await api(`/api/garage/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, requiredQuantity, comment: item.comment }) });
-          await showVehicle(selectedVehicle.id);
-        } catch (error) {
-          setStatus(error.message);
-          showToast(error.message, "error");
-          required.disabled = false;
-        }
-      });
       remove.addEventListener("click", async () => {
         remove.disabled = true;
         try {
@@ -454,6 +521,11 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   searchForm.addEventListener("submit", (event) => event.preventDefault());
   search.addEventListener("input", () => loadVehicles().catch((error) => setStatus(error.message)));
   tableSearch.addEventListener("input", () => { garageTableSearchTerm = tableSearch.value.trim(); renderItems(); });
+  filtersToggle.addEventListener("click", () => setFiltersOpen(filtersSidebar.hidden));
+  filtersReset.addEventListener("click", () => {
+    selectedFilterValues.forEach((values) => values.clear());
+    renderItems();
+  });
   modalSearch.addEventListener("input", renderModalVehicles);
   create.addEventListener("click", () => {
     deletingVehicleId = null;

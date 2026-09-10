@@ -456,10 +456,15 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /showToast\(`Товар добавлен в «\$\{vehicle\.name\}»\.`\)/);
   assert.match(html, /id="garage-titlebar" hidden>[\s\S]*?id="garage-vehicle-name"/);
   assert.match(html, /class="garage-view results-panel card border-0 shadow-sm overflow-hidden" id="garage-view"/);
-  assert.match(html, /class="results-panel__header garage-view__header card-header bg-white border-0">[\s\S]*?id="garage-result-count"[\s\S]*?id="garage-table-search"[\s\S]*?id="garage-price-toggle"[\s\S]*?id="garage-refresh"/);
-  assert.doesNotMatch(html, /garage-table-search[\s\S]{0,400}Наценка/);
+  assert.match(html, /id="garage-titlebar" hidden>[\s\S]*?id="garage-back"[\s\S]*?id="garage-vehicle-name"[\s\S]*?id="garage-table-search"[\s\S]*?id="garage-price-toggle"[\s\S]*?id="garage-refresh"/);
+  assert.match(html, /class="results-panel__header garage-view__header card-header bg-white border-0">[\s\S]*?id="garage-result-count"[\s\S]*?id="garage-filters-toggle"/);
+  assert.match(html, /id="garage-filters-sidebar" hidden[\s\S]*?id="garage-filter-supplier"[\s\S]*?id="garage-filter-brand"[\s\S]*?id="garage-filter-article"/);
+  assert.match(html, /id="garage-purchase-price-heading" hidden[\s\S]*?<th scope="col" data-garage-column="supplier"/);
   assert.match(garage, /const garageSortButtons = \[\.\.\.document\.querySelectorAll\("\[data-garage-sort-key\]"\)\]/);
+  assert.match(garage, /import \{ formatArticle, formatBrand, formatPrice, formatQuantity \} from "\.\/result-formatting\.js"/);
   assert.match(garage, /const updateGarageResultCount = \(items\) =>/);
+  assert.match(garage, /const renderGarageFilters = \(\) =>/);
+  assert.match(garage, /const applyGarageTableColumns = \(\) =>/);
   assert.match(garage, /const tableSearch = document\.querySelector\("#garage-table-search"\)/);
   assert.match(garage, /tableSearch\.addEventListener\("input"/);
   assert.match(garage, /const compareGarageItems =/);
