@@ -47,13 +47,13 @@ export const getSafeResultLink = (value) => {
 export const renderWarehouse = (result) => {
   const warehouse = formatWarehouse(result.warehouse);
   const warehouseFull = formatWarehouseFull(result.warehouseFull);
-  const tooltip = warehouseFull !== "-" && warehouseFull !== warehouse
-    ? ` data-tooltip="${escapeHtml(warehouseFull)}" tabindex="0"`
-    : "";
 
   if (warehouse === "-") {
     return warehouse;
   }
+
+  const tooltipText = warehouseFull === "-" ? warehouse : warehouseFull;
+  const tooltip = ` data-tooltip="${escapeHtml(tooltipText)}" tabindex="0"`;
 
   if (result.supplier !== "stparts") {
     return `<span class="warehouse-code"${tooltip}>${escapeHtml(warehouse)}</span>`;
@@ -66,6 +66,11 @@ export const renderWarehouse = (result) => {
   const ratingMarkup = rating ? `<span class="warehouse-rating">${rating}<span class="warehouse-rating__star" aria-hidden="true">★</span></span>` : "";
 
   return `<span class="warehouse-code${color ? ` warehouse-code--${color}` : ""}"${tooltip}>${escapeHtml(warehouse)}</span>${ratingMarkup}`;
+};
+
+export const renderDeliveryWarehouse = (result) => {
+  const warehouse = renderWarehouse(result);
+  return warehouse === "-" ? "" : `<span class="delivery-warehouse">${warehouse}</span>`;
 };
 
 export const formatPrice = (value) => {

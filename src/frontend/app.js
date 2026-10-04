@@ -9,7 +9,7 @@ import {
   formatQuantity,
   formatWarehouse,
   getSafeResultLink,
-  renderWarehouse,
+  renderDeliveryWarehouse,
 } from "./result-formatting.js";
 import { openSearchStream } from "./search-stream.js";
 import {
@@ -231,10 +231,9 @@ const tableColumnWidths = {
   article: 140,
   title: 323,
   quantity: 120,
-  warehouse: 120,
   purchasePrice: 120,
   markupPrice: 120,
-  deliveryDate: 120,
+  deliveryDate: 180,
 };
 const garageActionColumnWidth = 52;
 let visibleTableColumns = new Set(tableColumnIds);
@@ -306,7 +305,9 @@ const hasActiveFilter = (column) => (rangeFilterColumns.has(column)
   ? isRangeFilterActive(column)
   : getSelectedFilterValues(column).size > 0);
 
-const hasAnyActiveFilters = () => tableColumnIds.some((column) => hasActiveFilter(column));
+const isFilterColumnVisible = (column) => column === "warehouse" || visibleTableColumns.has(column);
+
+const hasAnyActiveFilters = () => mainFilterColumns.some((column) => hasActiveFilter(column));
 
 const getAveragePrice = (items, getPrice) => {
   const prices = items.map(getPrice).filter((price) => Number.isFinite(price) && price > 0);
@@ -318,10 +319,9 @@ const analogTableColumnWidths = {
   article: 140,
   title: 323,
   quantity: 120,
-  warehouse: 120,
   purchasePrice: 120,
   markupPrice: 120,
-  deliveryDate: 120,
+  deliveryDate: 180,
 };
 const analogTableColumnIds = Object.keys(analogTableColumnWidths);
 
@@ -357,7 +357,7 @@ const getFilteredResults = (sourceResults, searchTerm, percent, ignoredFilterCol
       }
     }
 
-    return tableColumnIds.every((column) => {
+    return mainFilterColumns.every((column) => {
       if (column === ignoredFilterColumn) {
         return true;
       }
@@ -396,7 +396,7 @@ const renderFilterValues = () => {
 
     if (rangeFilterColumns.has(column)) {
       const hasValues = candidateResults.some((result) => Number.isFinite(getRangeFilterValue(result, column, markupPercent)));
-      section.hidden = !visibleTableColumns.has(column) || !hasValues;
+      section.hidden = !isFilterColumnVisible(column) || !hasValues;
       if (!hasValues) {
         return;
       }
@@ -429,7 +429,7 @@ const renderFilterValues = () => {
     }
 
     const values = [...new Set(candidateResults.map((result) => getFilterValue(result, column)))].sort(resultCollator.compare);
-    section.hidden = !visibleTableColumns.has(column) || values.length === 0;
+    section.hidden = !isFilterColumnVisible(column) || values.length === 0;
     container.replaceChildren(...values.map((value) => {
       const button = document.createElement("button");
       const selected = getSelectedFilterValues(column).has(value);
@@ -935,7 +935,7 @@ const applyTableColumns = () => {
     cell.colSpan = visibleColumns.length + 1;
   });
   Object.entries(filterSections).forEach(([column, section]) => {
-    section.hidden = !visibleTableColumns.has(column);
+    section.hidden = !isFilterColumnVisible(column);
   });
   tableColumnIds.filter((column) => !visibleTableColumns.has(column)).forEach((column) => {
     selectedFilterValuesByColumn.delete(column);
@@ -953,7 +953,9 @@ const restoreTableColumns = () => {
     if (savedColumns.includes("price")) {
       savedTableColumns.add("markupPrice");
     }
-    visibleTableColumns = savedTableColumns;
+    visibleTableColumns = savedColumns.includes("warehouse") && savedTableColumns.size === 0
+      ? new Set(tableColumnIds)
+      : savedTableColumns;
   } catch {
     localStorage.removeItem(tableColumnsStorageKey);
   }
@@ -1231,10 +1233,9 @@ const renderResults = () => {
         <td data-column="article">${escapeHtml(formatArticle(result.article))}</td>
         <td data-column="title"><div class="result-title-cell"><span title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</span></div></td>
         <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
-        <td data-column="warehouse">${renderWarehouse(result)}</td>
         <td data-column="purchasePrice">${escapeHtml(formatPrice(result.price))}</td>
         <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
-        <td data-column="deliveryDate">${escapeHtml(deliveryDate)}</td>
+        <td data-column="deliveryDate"><span class="delivery-date">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td class="garage-add-cell"><button type="button" class="garage-offer-button" draggable="${Boolean(result.offerId)}" data-garage-offer-id="${escapeHtml(result.offerId ?? "")}" data-garage-offer-quantity="${Number.isFinite(result.quantity) && result.quantity >= 0 ? result.quantity : ""}" aria-disabled="${!result.offerId}" aria-label="Добавить в гараж" title="Добавить в гараж"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5.1 9.75 1.25-3.2A2.25 2.25 0 0 1 8.45 5h7.1a2.25 2.25 0 0 1 2.1 1.55l1.25 3.2"/><path d="M4.5 10.25h15a1.5 1.5 0 0 1 1.5 1.5v4.75h-2.25V19H16.5v-2.5h-9V19H5.25v-2.5H3v-4.75a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="7.25" cy="13.5" r="1"/><circle cx="16.75" cy="13.5" r="1"/></svg></button></td>
       </tr>
     `;
@@ -2208,10 +2209,9 @@ const renderAnalogRows = () => {
         <td data-analog-column="article">${escapeHtml(formatArticle(result.article))}</td>
         <td class="analogs-result-title" data-analog-column="title" title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</td>
         <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
-        <td data-analog-column="warehouse">${renderWarehouse(result)}</td>
         <td data-analog-column="purchasePrice"${showPurchasePrices ? "" : " hidden"}><span class="analogs-result-price">${escapeHtml(formatPrice(result.price))}</span></td>
         <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
-        <td data-analog-column="deliveryDate">${escapeHtml(deliveryDate)}</td>
+        <td data-analog-column="deliveryDate"><span class="delivery-date">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td class="garage-add-cell"><button type="button" class="garage-offer-button" draggable="${Boolean(result.offerId)}" data-garage-offer-id="${escapeHtml(result.offerId ?? "")}" data-garage-offer-quantity="${Number.isFinite(result.quantity) && result.quantity >= 0 ? result.quantity : ""}" aria-disabled="${!result.offerId}" aria-label="Добавить в гараж" title="Добавить в гараж"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5.1 9.75 1.25-3.2A2.25 2.25 0 0 1 8.45 5h7.1a2.25 2.25 0 0 1 2.1 1.55l1.25 3.2"/><path d="M4.5 10.25h15a1.5 1.5 0 0 1 1.5 1.5v4.75h-2.25V19H16.5v-2.5h-9V19H5.25v-2.5H3v-4.75a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="7.25" cy="13.5" r="1"/><circle cx="16.75" cy="13.5" r="1"/></svg></button></td>
       </tr>`;
   }).join("");

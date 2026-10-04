@@ -1236,8 +1236,7 @@ table tbody tr:hover td {
   width: 100%;
 }
 
-.results-data-table [data-column="markupPrice"],
-.results-data-table [data-column="warehouse"] {
+.results-data-table [data-column="markupPrice"] {
   text-align: center;
   white-space: nowrap;
 }
@@ -1246,8 +1245,7 @@ table tbody tr:hover td {
   font-weight: 800;
 }
 
-.results-data-table th[data-column="markupPrice"] .table-sort,
-.results-data-table th[data-column="warehouse"] .table-sort {
+.results-data-table th[data-column="markupPrice"] .table-sort {
   justify-content: center;
   width: 100%;
 }
@@ -1264,23 +1262,18 @@ table tbody tr:hover td {
 }
 
 .results-data-table [data-column="deliveryDate"] {
-  text-align: center;
-  white-space: nowrap;
+  text-align: left;
+  white-space: normal;
 }
 
 .results-data-table th[data-column="deliveryDate"] .table-sort {
-  justify-content: center;
+  justify-content: flex-start;
   width: 100%;
 }
 
 .results-data-table td[data-column="article"] {
   color: #0666d6;
   font-weight: 700;
-}
-
-.results-data-table td[data-column="warehouse"],
-.analogs-results td:nth-child(6) {
-  overflow: hidden;
 }
 
 .warehouse-code {
@@ -1344,6 +1337,37 @@ table tbody tr:hover td {
 .warehouse-rating__star {
   margin-left: 3px;
   color: #ffb400;
+}
+
+.delivery-date {
+  display: block;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.delivery-warehouse {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.delivery-warehouse .warehouse-code {
+  min-width: 0;
+  color: var(--muted);
+  font-weight: inherit;
+}
+
+.delivery-warehouse .warehouse-rating,
+.delivery-warehouse .warehouse-rating__star {
+  margin-left: 0;
+  color: var(--muted);
 }
 
 .results-table__row {
@@ -1887,8 +1911,7 @@ table tbody tr:hover td {
   white-space: nowrap;
 }
 
-.analogs-results [data-analog-column="markupPrice"],
-.analogs-results [data-analog-column="warehouse"] {
+.analogs-results [data-analog-column="markupPrice"] {
   text-align: center;
   white-space: nowrap;
 }
@@ -1897,8 +1920,7 @@ table tbody tr:hover td {
   font-weight: 800;
 }
 
-.analogs-results th[data-analog-column="markupPrice"] .analogs-sort,
-.analogs-results th[data-analog-column="warehouse"] .analogs-sort {
+.analogs-results th[data-analog-column="markupPrice"] .analogs-sort {
   justify-content: center;
   width: 100%;
 }
@@ -1916,8 +1938,12 @@ table tbody tr:hover td {
 }
 
 .analogs-results [data-analog-column="deliveryDate"] {
-  text-align: center;
-  white-space: nowrap;
+  text-align: left;
+  white-space: normal;
+}
+
+.analogs-results th[data-analog-column="deliveryDate"] .analogs-sort {
+  justify-content: flex-start;
 }
 
 .analogs-results td[data-analog-column="article"] {

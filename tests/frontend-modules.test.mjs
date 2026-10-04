@@ -11,6 +11,7 @@ import {
   formatQuantity,
   formatWarehouse,
   getSafeResultLink,
+  renderDeliveryWarehouse,
   renderWarehouse,
 } from "../src/frontend/result-formatting.js";
 import { openSearchStream } from "../src/frontend/search-stream.js";
@@ -63,6 +64,9 @@ test("warehouse rendering escapes tooltip and validates supplier metadata", () =
   assert.match(markup, /data-tooltip="Основной &lt;склад&gt; &quot;A&quot;"/);
   assert.doesNotMatch(markup, /warehouse-code--purple/);
   assert.match(markup, /&lt;4\.5/);
+  assert.match(renderWarehouse({ supplier: "armtek", warehouse: "Основной склад" }), /data-tooltip="Основной склад"/);
+  assert.equal(renderDeliveryWarehouse({ supplier: "armtek", warehouse: "Упаковка поставщика" }), "");
+  assert.match(renderDeliveryWarehouse({ supplier: "armtek", warehouse: "Основной склад" }), /class="delivery-warehouse"/);
 });
 
 test("STParts warehouse settings default to green and always keep one color", () => {
@@ -379,8 +383,9 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(app, /filtersToggle\.setAttribute\("aria-label", open \? "Скрыть фильтры" : "Открыть фильтры"\)/);
   assert.match(app, /button\.setAttribute\("aria-pressed", String\(selected\)\)/);
   assert.match(app, /const candidateResults = getFilteredResults\(visibleExactResults, tableSearchTerm, markupPercent, column\);/);
-  assert.match(app, /section\.hidden = !visibleTableColumns\.has\(column\) \|\| values\.length === 0;/);
-  assert.match(app, /section\.hidden = !visibleTableColumns\.has\(column\) \|\| !hasValues;/);
+  assert.match(app, /const isFilterColumnVisible = \(column\) => column === "warehouse" \|\| visibleTableColumns\.has\(column\);/);
+  assert.match(app, /section\.hidden = !isFilterColumnVisible\(column\) \|\| values\.length === 0;/);
+  assert.match(app, /section\.hidden = !isFilterColumnVisible\(column\) \|\| !hasValues;/);
   assert.match(app, /const filtersWidthStorageKey = "autoservice\.filtersWidth\.v2"/);
   assert.match(app, /Средняя закуп\. цена/);
   assert.match(app, /Средняя цена/);
@@ -556,15 +561,17 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(html, /id="analogs-filters-resize" role="separator"/);
   assert.doesNotMatch(html, /Нажмите на строку/);
   assert.match(html, /id="warehouse-tooltip"/);
-  assert.match(html, /data-column="quantity"[^>]*[\s\S]*?Количество[\s\S]*?data-column="warehouse"/);
+  assert.doesNotMatch(html, /data-column="warehouse"/);
+  assert.doesNotMatch(html, /data-analog-column="warehouse"/);
+  assert.doesNotMatch(html, /table-column-input" type="checkbox" value="warehouse"/);
   assert.match(html, /data-analog-sort-key="quantity"[^>]*>Количество/);
   assert.match(app, /formatQuantity\(result\.quantity\)/);
   assert.match(app, /main-result-row\$\{isBestPrice \? " is-best-price" : ""\}/);
   assert.match(app, /main-best-price/);
-  assert.match(app, /const tableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+quantity: 120,\s+warehouse: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 120,/s);
+  assert.match(app, /const tableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+quantity: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 180,/s);
   assert.match(app, /--results-table-min-width/);
   assert.match(app, /tableColumnWidths\[header\.dataset\.column\] \/ minimumWidth \* 100/);
-  assert.match(app, /const analogTableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+quantity: 120,\s+warehouse: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 120,/s);
+  assert.match(app, /const analogTableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+quantity: 120,\s+purchasePrice: 120,\s+markupPrice: 120,\s+deliveryDate: 180,/s);
   assert.match(app, /const applyAnalogTableColumns = \(\) =>/);
   assert.match(app, /--analogs-results-table-min-width/);
   assert.match(app, /analogFiltersResize\.addEventListener\("pointerdown"/);
@@ -572,8 +579,8 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(styles, /\.results-data-table thead\s*\{[^}]*position: sticky;/s);
   assert.match(styles, /\.results-data-table\s*\{[^}]*width: max\(100%, var\(--results-table-min-width,/s);
   assert.match(styles, /\.results-data-table \[data-column="purchasePrice"\]\s*\{[^}]*text-align: center;/s);
-  assert.match(styles, /\.results-data-table \[data-column="markupPrice"\],\s*\.results-data-table \[data-column="warehouse"\]\s*\{[^}]*text-align: center;/s);
-  assert.match(styles, /\.results-data-table th\[data-column="markupPrice"\] \.table-sort,\s*\.results-data-table th\[data-column="warehouse"\] \.table-sort\s*\{[^}]*justify-content: center;/s);
+  assert.match(styles, /\.results-data-table \[data-column="markupPrice"\]\s*\{[^}]*text-align: center;/s);
+  assert.match(styles, /\.results-data-table th\[data-column="markupPrice"\] \.table-sort\s*\{[^}]*justify-content: center;/s);
   assert.doesNotMatch(styles, /\.results-data-table th:nth-child/);
   assert.match(styles, /\.warehouse-code\s*\{[^}]*max-width: 100%;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/s);
   assert.match(styles, /\.results-table\s*\{[^}]*overflow: auto;/s);
@@ -585,7 +592,9 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(styles, /\.analogs-filters-sidebar\s*\{[^}]*height: 100%;[^}]*overflow-y: auto;/s);
   assert.match(styles, /\.analogs-results table\s*\{[^}]*width: max\(100%, var\(--analogs-results-table-min-width,/s);
   assert.match(styles, /\.analogs-results \[data-analog-column="markupPrice"\]/);
-  assert.match(styles, /\.analogs-results \[data-analog-column="markupPrice"\],\s*\.analogs-results \[data-analog-column="warehouse"\]\s*\{[^}]*text-align: center;/s);
+  assert.match(styles, /\.delivery-warehouse\s*\{[^}]*color: var\(--muted\);/s);
+  assert.match(styles, /\.delivery-warehouse \.warehouse-code\s*\{[^}]*color: var\(--muted\);/s);
+  assert.match(styles, /\.analogs-results \[data-analog-column="markupPrice"\]\s*\{[^}]*text-align: center;/s);
   assert.doesNotMatch(styles, /\.analogs-results th:nth-child/);
 });
 
