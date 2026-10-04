@@ -343,6 +343,7 @@ test("Rossko parses top-level products and nested crosses without mixing them", 
   assert.equal(analogs.length, 1);
   assert.equal(analogs[0].brand, "MANN");
   assert.equal(analogs[0].isAnalog, true);
+  assert.equal(analogs[0].deliveryDateApproximate, true);
   assert.ok(analogs[0].deliveryDateTo);
 });
 

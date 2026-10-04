@@ -357,7 +357,7 @@ function normalizedResults(part: RosskoPart, requestedArticle: string, isAnalog:
       warehouseFull: stock.warehouse,
       deliveryDate: deliveryStart || deliveryEnd || derivedDelivery,
       ...(deliveryStart && deliveryEnd && deliveryStart !== deliveryEnd ? { deliveryDateTo: deliveryEnd } : {}),
-      deliveryDateApproximate: Boolean(derivedDelivery),
+      deliveryDateApproximate: Boolean(deliveryStart || deliveryEnd || derivedDelivery),
       link: portalLink(requestedArticle),
       ...(isAnalog ? { isAnalog: true } : {}),
     } satisfies NormalizedSearchResult;
