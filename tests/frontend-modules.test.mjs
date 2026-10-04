@@ -613,6 +613,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(styles, /\.analogs-results table\s*\{[^}]*width: max\(100%, var\(--analogs-results-table-min-width,/s);
   assert.match(styles, /\.analogs-results \[data-analog-column="markupPrice"\]/);
   assert.match(styles, /\.delivery-warehouse\s*\{[^}]*color: var\(--muted\);/s);
+  assert.match(styles, /\.delivery-warehouse\s*\{[^}]*justify-content: center;/s);
   assert.match(styles, /\.delivery-warehouse \.warehouse-code\s*\{[^}]*color: var\(--muted\);/s);
   assert.match(styles, /\.analogs-results \[data-analog-column="markupPrice"\]\s*\{[^}]*text-align: center;/s);
   assert.doesNotMatch(styles, /\.analogs-results th:nth-child/);

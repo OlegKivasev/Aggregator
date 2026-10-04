@@ -1359,6 +1359,7 @@ table tbody tr:hover td {
   display: flex;
   min-width: 0;
   align-items: baseline;
+  justify-content: center;
   gap: 6px;
   margin-top: 2px;
   color: var(--muted);
