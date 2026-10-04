@@ -51,12 +51,12 @@
 .garage-data-table [data-garage-column="quantity"],
 .garage-data-table [data-garage-column="price"],
 .garage-data-table [data-garage-column="sum"] { text-align: center; white-space: nowrap; }
-.garage-data-table [data-garage-column="deliveryDate"] { text-align: center; white-space: normal; }
+.garage-data-table [data-garage-column="deliveryDate"] { text-align: left; white-space: normal; }
 .garage-data-table th[data-garage-column="availability"] .table-sort,
 .garage-data-table th[data-garage-column="quantity"] .table-sort,
 .garage-data-table th[data-garage-column="price"] .table-sort,
 .garage-data-table th[data-garage-column="sum"] .table-sort { justify-content: center; width: 100%; }
-.garage-data-table th[data-garage-column="deliveryDate"] .table-sort { justify-content: center; width: 100%; }
+.garage-data-table th[data-garage-column="deliveryDate"] .table-sort { justify-content: flex-start; width: 100%; }
 .garage-data-table td[data-garage-column="article"] { color: #0666d6; font-weight: 700; }
 .garage-group-form { display: flex; min-width: min(100%, 310px); gap: 6px; }
 .garage-group-form__input { min-width: 0; flex: 1 1 auto; padding: 5px 8px; border: 1px solid #d7dfe7; border-radius: 6px; font: inherit; font-size: 12px; }
@@ -1260,12 +1260,12 @@ table tbody tr:hover td {
 }
 
 .results-data-table [data-column="deliveryDate"] {
-  text-align: center;
+  text-align: left;
   white-space: normal;
 }
 
 .results-data-table th[data-column="deliveryDate"] .table-sort {
-  justify-content: center;
+  justify-content: flex-start;
   width: 100%;
 }
 
@@ -1359,7 +1359,7 @@ table tbody tr:hover td {
   display: flex;
   min-width: 0;
   align-items: baseline;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 6px;
   margin-top: 2px;
   color: var(--muted);
@@ -1951,12 +1951,12 @@ table tbody tr:hover td {
 }
 
 .analogs-results [data-analog-column="deliveryDate"] {
-  text-align: center;
+  text-align: left;
   white-space: normal;
 }
 
 .analogs-results th[data-analog-column="deliveryDate"] .analogs-sort {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .analogs-results td[data-analog-column="article"] {
