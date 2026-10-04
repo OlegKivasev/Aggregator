@@ -38,6 +38,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const groupName = document.querySelector("#garage-group-name");
   const groupCreate = document.querySelector("#garage-group-create");
   const groupCancel = document.querySelector("#garage-group-cancel");
+  const groupSave = document.querySelector("#garage-group-save");
   const groupsToggle = document.querySelector("#garage-groups-toggle");
   const groupsSidebar = document.querySelector("#garage-groups-sidebar");
   const groupsList = document.querySelector("#garage-groups");
@@ -45,6 +46,9 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const itemMenu = document.querySelector("#garage-item-menu");
   const itemMenuGroups = document.querySelector("#garage-item-menu-groups");
   const itemDeleteButton = document.querySelector("#garage-item-delete-button");
+  const groupContextMenu = document.querySelector("#garage-group-context-menu");
+  const groupRenameButton = document.querySelector("#garage-group-rename-button");
+  const groupDeleteButton = document.querySelector("#garage-group-delete-button");
   const tableSearch = document.querySelector("#garage-table-search");
   const filtersToggle = document.querySelector("#garage-filters-toggle");
   const filtersSidebar = document.querySelector("#garage-filters-sidebar");
@@ -94,6 +98,9 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   let contextMenuAnchor = null;
   let itemMenuItemId = null;
   let itemMenuAnchor = null;
+  let editingGroupId = null;
+  let contextGroupId = null;
+  let groupContextMenuAnchor = null;
   let selectedGroupId;
   let toastTimer = null;
   const widthStorageKey = "autoservice-garage-sidebar-width-v1";
@@ -404,6 +411,34 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     if (restoreFocus && itemMenuAnchor?.isConnected) itemMenuAnchor.focus();
     itemMenuAnchor = null;
   };
+  const hideGroupContextMenu = (restoreFocus = false) => {
+    groupContextMenu.hidden = true;
+    contextGroupId = null;
+    if (restoreFocus && groupContextMenuAnchor?.isConnected) groupContextMenuAnchor.focus();
+    groupContextMenuAnchor = null;
+  };
+  const showGroupContextMenu = (group, clientX, clientY, anchor) => {
+    contextGroupId = group.id;
+    groupContextMenuAnchor = anchor;
+    groupContextMenu.hidden = false;
+    const bounds = groupContextMenu.getBoundingClientRect();
+    groupContextMenu.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - bounds.width - 8))}px`;
+    groupContextMenu.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - bounds.height - 8))}px`;
+    groupRenameButton.focus();
+  };
+  const openGroupEditor = (group = null) => {
+    editingGroupId = group?.id ?? null;
+    groupName.value = group?.name ?? "";
+    groupSave.textContent = group ? "Сохранить" : "Создать";
+    groupForm.hidden = false;
+    requestAnimationFrame(() => groupName.focus());
+  };
+  const closeGroupEditor = () => {
+    editingGroupId = null;
+    groupName.value = "";
+    groupSave.textContent = "Создать";
+    groupForm.hidden = true;
+  };
   const showItemMenu = (item, clientX, clientY, anchor) => {
     if (itemMenuItemId === item.id && !itemMenu.hidden) {
       hideItemMenu(true);
@@ -423,7 +458,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       });
       itemMenuGroups.append(button);
     };
-    appendMoveAction(null, "Без группы");
+    appendMoveAction(null, "Убрать из группы");
     for (const group of selectedVehicle.groups) appendMoveAction(group.id, group.name);
     itemMenu.hidden = false;
     const bounds = itemMenu.getBoundingClientRect();
@@ -497,8 +532,11 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     resultCount.setAttribute("aria-label", breakdown ? `По поставщикам:\n${breakdown}` : "Нет предложений");
   };
   const sumGarageItems = (items) => items.reduce((sum, item) => sum + item.regularPrice * item.requiredQuantity, 0);
+  const sumGaragePurchaseItems = (items) => items.reduce((sum, item) => sum + item.purchasePrice * item.requiredQuantity, 0);
   const renderGarageTotal = (items) => {
-    total.textContent = `Итого: ${formatPrice(sumGarageItems(items))}`;
+    const retail = element("strong", `Итого: ${formatPrice(sumGarageItems(items))}`);
+    const purchase = element("span", `Закуп: ${formatPrice(sumGaragePurchaseItems(items))}`, "garage-total__purchase");
+    total.replaceChildren(retail, purchase);
   };
   const groupItems = (items) => {
     const groups = selectedVehicle.groups.map((group) => ({ id: group.id, name: group.name }));
@@ -509,16 +547,16 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       if (group) group.push(item); else ungrouped.push(item);
     }
     const sections = groups.map((group) => ({ ...group, items: byId.get(group.id) ?? [] })).filter((group) => group.items.length);
-    if (ungrouped.length || !groups.length) sections.push({ id: null, name: groups.length ? "Без группы" : "Все товары", items: ungrouped });
+    if (ungrouped.length || !groups.length) sections.push({ id: null, name: groups.length ? "Другие товары" : "Все товары", items: ungrouped });
     return sections;
   };
   const appendGroupSummary = (name, items) => {
     const row = element("tr", undefined, "garage-group-summary");
     const cell = document.createElement("td");
     cell.colSpan = getGarageVisibleColumns().length + 1;
-    const label = element("strong", name);
-    const sum = element("span", formatPrice(sumGarageItems(items)));
-    cell.append(label, sum);
+    const content = element("div", undefined, "garage-group-summary__content");
+    content.append(element("strong", name), element("span", formatPrice(sumGarageItems(items))));
+    cell.append(content);
     row.append(cell);
     itemsBody.append(row);
   };
@@ -531,7 +569,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   };
   const renderGarageGroups = () => {
     groupsList.replaceChildren();
-    const appendGroup = (id, name, items, canDelete = false, canDrop = true) => {
+    const appendGroup = (id, name, items, canDrop = true) => {
       const listItem = element("li", undefined, "garage-vehicles__item garage-group-item");
       const button = element("button", undefined, "garage-vehicles__button garage-group-item__button");
       button.type = "button";
@@ -541,6 +579,21 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
         selectedGroupId = selectedGroupId === id ? undefined : id;
         renderItems();
       });
+      if (typeof id === "string") {
+        button.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          const group = selectedVehicle.groups.find((candidate) => candidate.id === id);
+          if (group) showGroupContextMenu(group, event.clientX, event.clientY, button);
+        });
+        button.addEventListener("keydown", (event) => {
+          if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+            event.preventDefault();
+            const group = selectedVehicle.groups.find((candidate) => candidate.id === id);
+            const bounds = button.getBoundingClientRect();
+            if (group) showGroupContextMenu(group, bounds.left + 16, bounds.top + 16, button);
+          }
+        });
+      }
       const hasDraggedItem = (event) => Array.from(event.dataTransfer?.types ?? []).includes("application/x-garage-item");
       listItem.addEventListener("dragenter", (event) => { if (canDrop && hasDraggedItem(event)) { event.preventDefault(); listItem.classList.add("is-drop-target"); } });
       listItem.addEventListener("dragover", (event) => { if (canDrop && hasDraggedItem(event)) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } });
@@ -553,32 +606,10 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
         moveItemToGroup(itemId, id).catch((error) => { setStatus(error.message); showToast(error.message, "error"); });
       });
       listItem.append(button);
-      if (canDelete) {
-        const remove = element("button", "×", "garage-item-remove garage-group-item__delete");
-        remove.type = "button";
-        remove.title = "Удалить группу";
-        remove.setAttribute("aria-label", `Удалить группу «${name}»`);
-        remove.addEventListener("click", async () => {
-          remove.disabled = true;
-          try {
-            const { payload } = await api(`/api/garage/vehicles/${selectedVehicle.id}`);
-            await api(`/api/garage/vehicles/${selectedVehicle.id}/groups/${id}`, { method: "DELETE", body: JSON.stringify({ vehicleRevision: payload.vehicle.revision }) });
-            if (selectedGroupId === id) selectedGroupId = undefined;
-            await showVehicle(selectedVehicle.id);
-            showToast(`Группа «${name}» удалена. Товары остались без группы.`, "success");
-          } catch (error) {
-            setStatus(error.message);
-            showToast(error.message, "error");
-            remove.disabled = false;
-          }
-        });
-        listItem.append(remove);
-      }
       groupsList.append(listItem);
     };
-    appendGroup(undefined, "Все группы", selectedVehicle.items, false, false);
-    appendGroup(null, "Без группы", selectedVehicle.items.filter((item) => item.groupId === null));
-    for (const group of selectedVehicle.groups) appendGroup(group.id, group.name, selectedVehicle.items.filter((item) => item.groupId === group.id), true);
+    appendGroup(undefined, "Все группы", selectedVehicle.items, false);
+    for (const group of selectedVehicle.groups) appendGroup(group.id, group.name, selectedVehicle.items.filter((item) => item.groupId === group.id));
   };
   const getGarageFilterValue = (item, column) => {
     if (column === "supplier") return item.supplier;
@@ -858,14 +889,8 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   tableSearch.addEventListener("input", () => { garageTableSearchTerm = tableSearch.value.trim(); renderItems(); });
   filtersToggle.addEventListener("click", () => setFiltersOpen(filtersSidebar.hidden));
   groupsToggle.addEventListener("click", () => setGroupsOpen(groupsSidebar.hidden));
-  groupCreate.addEventListener("click", () => {
-    groupForm.hidden = false;
-    groupName.focus();
-  });
-  groupCancel.addEventListener("click", () => {
-    groupForm.hidden = true;
-    groupName.value = "";
-  });
+  groupCreate.addEventListener("click", () => openGroupEditor());
+  groupCancel.addEventListener("click", closeGroupEditor);
   filtersReset.addEventListener("click", () => {
     selectedFilterValues.forEach((values) => values.clear());
     renderItems();
@@ -879,14 +904,41 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       const { payload: currentVehiclePayload } = await api(`/api/garage/vehicles/${selectedVehicle.id}`);
       const vehicleRevision = currentVehiclePayload?.vehicle?.revision;
       if (!Number.isInteger(vehicleRevision)) throw new Error("Не удалось обновить данные автомобиля.");
-      await api(`/api/garage/vehicles/${selectedVehicle.id}/groups`, { method: "POST", body: JSON.stringify({ vehicleRevision, name }) });
-      groupName.value = "";
-      groupForm.hidden = true;
+      if (editingGroupId) {
+        await api(`/api/garage/vehicles/${selectedVehicle.id}/groups/${editingGroupId}`, { method: "PATCH", body: JSON.stringify({ vehicleRevision, name }) });
+        showToast(`Группа переименована в «${name}».`, "success");
+      } else {
+        await api(`/api/garage/vehicles/${selectedVehicle.id}/groups`, { method: "POST", body: JSON.stringify({ vehicleRevision, name }) });
+        showToast(`Группа «${name}» создана.`, "success");
+      }
+      closeGroupEditor();
       await showVehicle(selectedVehicle.id);
-      showToast(`Группа «${name}» создана.`, "success");
     } catch (error) {
       setStatus(error.message);
       showToast(error.message, "error");
+    }
+  });
+  groupRenameButton.addEventListener("click", () => {
+    const group = selectedVehicle?.groups.find((candidate) => candidate.id === contextGroupId);
+    hideGroupContextMenu();
+    if (group) openGroupEditor(group);
+  });
+  groupDeleteButton.addEventListener("click", async () => {
+    const group = selectedVehicle?.groups.find((candidate) => candidate.id === contextGroupId);
+    hideGroupContextMenu();
+    if (!group) return;
+    groupDeleteButton.disabled = true;
+    try {
+      const { payload } = await api(`/api/garage/vehicles/${selectedVehicle.id}`);
+      await api(`/api/garage/vehicles/${selectedVehicle.id}/groups/${group.id}`, { method: "DELETE", body: JSON.stringify({ vehicleRevision: payload.vehicle.revision }) });
+      if (selectedGroupId === group.id) selectedGroupId = undefined;
+      await showVehicle(selectedVehicle.id);
+      showToast(`Группа «${group.name}» удалена. Товары остались без группы.`, "success");
+    } catch (error) {
+      setStatus(error.message);
+      showToast(error.message, "error");
+    } finally {
+      groupDeleteButton.disabled = false;
     }
   });
   itemDeleteButton.addEventListener("click", async () => {
@@ -990,15 +1042,17 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   document.addEventListener("click", (event) => {
     if (!contextMenu.hidden && !contextMenu.contains(event.target)) hideContextMenu();
     if (!itemMenu.hidden && !itemMenu.contains(event.target)) hideItemMenu();
+    if (!groupContextMenu.hidden && !groupContextMenu.contains(event.target)) hideGroupContextMenu();
     const button = event.target.closest(".garage-offer-button");
     if (button) openAdd(button.dataset.garageOfferId, null, button.dataset.garageOfferQuantity);
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !contextMenu.hidden) hideContextMenu(true);
     if (event.key === "Escape" && !itemMenu.hidden) hideItemMenu(true);
+    if (event.key === "Escape" && !groupContextMenu.hidden) hideGroupContextMenu(true);
   });
-  window.addEventListener("resize", () => { hideContextMenu(true); hideItemMenu(true); });
-  window.addEventListener("scroll", () => { hideContextMenu(true); hideItemMenu(true); }, true);
+  window.addEventListener("resize", () => { hideContextMenu(true); hideItemMenu(true); hideGroupContextMenu(true); });
+  window.addEventListener("scroll", () => { hideContextMenu(true); hideItemMenu(true); hideGroupContextMenu(true); }, true);
   document.addEventListener("dragstart", (event) => { const button = event.target.closest(".garage-offer-button"); if (button?.dataset.garageOfferId) { event.dataTransfer.effectAllowed = "copy"; event.dataTransfer.setData("application/x-garage-offer", button.dataset.garageOfferId); event.dataTransfer.setData("application/x-garage-offer-quantity", button.dataset.garageOfferQuantity ?? ""); setSidebarOpen(true); } });
   restoreSidebarWidth();
   restoreFiltersSidebarWidth();

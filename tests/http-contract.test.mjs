@@ -198,10 +198,21 @@ test("garage creates persisted groups for a vehicle", async () => {
   const detailsPayload = await details.json();
   assert.deepEqual(detailsPayload.vehicle.groups.map((group) => group.name), ["Стойки"]);
 
+  const renamedGroup = await fetch(`${baseUrl}/api/garage/vehicles/${vehicle.id}/groups/${group.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vehicleRevision: detailsPayload.vehicle.revision, name: "Передняя подвеска" }),
+  });
+  assert.equal(renamedGroup.status, 200);
+  assert.equal((await renamedGroup.json()).group.name, "Передняя подвеска");
+
+  const afterRename = await fetch(`${baseUrl}/api/garage/vehicles/${vehicle.id}`);
+  const afterRenamePayload = await afterRename.json();
+
   const deletedGroup = await fetch(`${baseUrl}/api/garage/vehicles/${vehicle.id}/groups/${group.id}`, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ vehicleRevision: detailsPayload.vehicle.revision }),
+    body: JSON.stringify({ vehicleRevision: afterRenamePayload.vehicle.revision }),
   });
   assert.equal(deletedGroup.status, 204);
 

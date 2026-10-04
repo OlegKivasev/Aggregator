@@ -41,7 +41,10 @@ test("garage persists vehicles, guards revisions, merges known duplicates, and r
     const current = service.getVehicle(vehicle.id);
     assert.deepEqual(current.groups.map(({ name }) => name), ["Стойки"]);
     assert.equal(current.items[0].groupId, group.id);
-    service.deleteGroup(vehicle.id, group.id, current.revision);
+    const renamed = service.renameGroup(vehicle.id, group.id, current.revision, "Передняя подвеска");
+    assert.equal(renamed.name, "Передняя подвеска");
+    const beforeDeletion = service.getVehicle(vehicle.id);
+    service.deleteGroup(vehicle.id, group.id, beforeDeletion.revision);
     const ungrouped = service.getVehicle(vehicle.id);
     assert.deepEqual(ungrouped.groups, []);
     assert.equal(ungrouped.items[0].groupId, null);

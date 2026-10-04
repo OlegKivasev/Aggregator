@@ -239,7 +239,7 @@
         <form class="garage-group-editor" id="garage-group-form" hidden>
           <label class="visually-hidden" for="garage-group-name">Название группы</label>
           <input class="garage-vehicle-editor__input" id="garage-group-name" type="text" maxlength="120" placeholder="Например: Стойки" autocomplete="off" required />
-          <div class="garage-vehicle-delete__actions"><button type="submit" class="btn btn-primary garage-inline-action garage-vehicle-editor__save">Создать</button><button type="button" class="btn btn-light garage-inline-action" id="garage-group-cancel">Отмена</button></div>
+          <div class="garage-vehicle-delete__actions"><button type="submit" class="btn btn-primary garage-inline-action garage-vehicle-editor__save" id="garage-group-save">Создать</button><button type="button" class="btn btn-light garage-inline-action" id="garage-group-cancel">Отмена</button></div>
         </form>
         <p class="garage-groups__hint">Перетащите товар за кнопку «⋮» в нужную группу.</p>
         <ul id="garage-groups" class="garage-vehicles garage-groups"></ul>
@@ -529,6 +529,10 @@
       <div class="garage-item-menu__heading">Переместить в группу</div>
       <div id="garage-item-menu-groups"></div>
       <button type="button" class="garage-context-menu__delete" id="garage-item-delete-button" role="menuitem">Удалить</button>
+    </div>
+    <div class="result-context-menu garage-context-menu card border-0 shadow" id="garage-group-context-menu" role="menu" hidden>
+      <button type="button" id="garage-group-rename-button" role="menuitem">Переименовать</button>
+      <button type="button" class="garage-context-menu__delete" id="garage-group-delete-button" role="menuitem">Удалить</button>
     </div>
     <div class="warehouse-tooltip" id="warehouse-tooltip" role="tooltip" hidden></div>
 

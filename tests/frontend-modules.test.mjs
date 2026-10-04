@@ -472,9 +472,12 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(html, /id="garage-toast" role="status" aria-live="polite" hidden/);
   assert.match(html, /id="garage-group-form"[\s\S]*?id="garage-group-name"/);
   assert.match(html, /id="garage-total"[\s\S]*?<\/footer>/);
+  assert.match(garage, /"garage-total__purchase"/);
+  assert.match(styles, /\.garage-total__purchase\s*\{[^}]*color: var\(--muted\);/s);
   assert.match(html, /id="garage-groups-toggle"[\s\S]*?aria-controls="garage-groups-sidebar"/);
   assert.match(html, /id="garage-groups-sidebar" hidden[\s\S]*?id="garage-groups"[\s\S]*?id="garage-groups-resize"/);
   assert.match(html, /id="garage-item-menu" role="menu"[\s\S]*?id="garage-item-menu-groups"[\s\S]*?id="garage-item-delete-button"/);
+  assert.match(html, /id="garage-group-context-menu" role="menu"[\s\S]*?id="garage-group-rename-button"[\s\S]*?id="garage-group-delete-button"/);
   assert.match(html, /id="garage-add-group"/);
   assert.match(garage, /const groupItems = \(items\) =>/);
   assert.match(garage, /const renderGarageTotal = \(items\) =>/);
@@ -484,6 +487,9 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /application\/x-garage-item/);
   assert.match(garage, /const renderGarageGroups = \(\) =>/);
   assert.match(garage, /const moveItemToGroup = async/);
+  assert.match(garage, /const showGroupContextMenu =/);
+  assert.match(garage, /method: "PATCH", body: JSON.stringify\(\{ vehicleRevision, name \}\)/);
+  assert.doesNotMatch(garage, /appendGroup\(null, "Без группы"/);
   assert.match(garage, /showToast\(`Товар добавлен в «\$\{vehicle\.name\}»\.`, "success"\)/);
   assert.match(html, /id="garage-titlebar" hidden>[\s\S]*?class="garage-titlebar__heading">\s*<span>Товары для автомобиля<\/span>\s*<h1 id="garage-vehicle-name"/);
   assert.match(html, /class="garage-view results-panel card border-0 shadow-sm overflow-hidden" id="garage-view"/);
@@ -510,7 +516,8 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(styles, /\.garage-filters-control:has\(\.garage-filters-sidebar:not\(\[hidden\]\)\) \.garage-filters-toggle\s*\{[^}]*display: none;/s);
   assert.match(garage, /const compareGarageItems =/);
   assert.match(garage, /const button = event\.target\.closest\("\.garage-offer-button"\)/);
-  assert.match(garage, /garage-item-remove garage-group-item__delete/);
+  assert.match(styles, /\.garage-group-summary td\s*\{[^}]*padding: 0 !important;/s);
+  assert.match(styles, /\.garage-group-summary__content\s*\{[^}]*display: flex;/s);
   assert.doesNotMatch(garage, /Сохранить", "btn btn-light"|confirmRemove|cancelRemove/);
   assert.match(garage, /sidebar\.addEventListener\("drop"/);
   assert.match(app, /const garageActionColumnWidth = 52;/);

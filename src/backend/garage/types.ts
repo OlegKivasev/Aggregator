@@ -58,6 +58,7 @@ export interface GarageRepository {
   renameVehicle(id: string, revision: number, name: string, updatedAt: string): GarageVehicle | "conflict" | null;
   deleteVehicle(id: string, revision: number): "deleted" | "conflict" | "missing";
   createGroup(group: GarageGroup, vehicleRevision: number, updatedAt: string): "created" | "conflict" | "missing";
+  renameGroup(vehicleId: string, groupId: string, vehicleRevision: number, name: string, updatedAt: string): GarageGroup | "conflict" | "missing";
   deleteGroup(vehicleId: string, groupId: string, vehicleRevision: number, updatedAt: string): "deleted" | "conflict" | "missing";
   createItem(item: GarageItem, vehicleRevision: number, updatedAt: string): "created" | "conflict" | "missing";
   findGroup(id: string): GarageGroup | null;

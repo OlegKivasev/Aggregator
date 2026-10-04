@@ -249,6 +249,13 @@ export function createAggregatorServer({
     }
 
     const groupMatch = /^\/api\/garage\/vehicles\/([0-9a-f-]{36})\/groups\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (groupMatch && request.method === "PATCH") {
+      try {
+        const payload = garagePayload(await readJsonBody(request));
+        serveJson(response, 200, { group: garage.renameGroup(groupMatch[1], groupMatch[2], payload.vehicleRevision, payload.name) });
+        return;
+      } catch (error) { serveGarageError(response, error, reportError, "garage-group"); return; }
+    }
     if (groupMatch && request.method === "DELETE") {
       try {
         const payload = garagePayload(await readJsonBody(request));

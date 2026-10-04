@@ -133,6 +133,22 @@ export class SqliteGarageRepository implements GarageRepository {
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
   }
 
+  renameGroup(vehicleId: string, groupId: string, vehicleRevision: number, name: string, updatedAt: string): GarageGroup | "conflict" | "missing" {
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const vehicle = this.database.prepare("SELECT revision FROM garage_vehicles WHERE id = ?").get(vehicleId) as { revision: number } | undefined;
+      if (!vehicle) { this.database.exec("ROLLBACK"); return "missing"; }
+      if (vehicle.revision !== vehicleRevision) { this.database.exec("ROLLBACK"); return "conflict"; }
+      const result = this.database.prepare("UPDATE garage_groups SET name = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND vehicle_id = ?")
+        .run(name, updatedAt, groupId, vehicleId);
+      if (!result.changes) { this.database.exec("ROLLBACK"); return "missing"; }
+      this.database.prepare("UPDATE garage_vehicles SET revision = revision + 1, updated_at = ? WHERE id = ?").run(updatedAt, vehicleId);
+      const group = this.findGroup(groupId);
+      this.database.exec("COMMIT");
+      return group!;
+    } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+  }
+
   deleteGroup(vehicleId: string, groupId: string, vehicleRevision: number, updatedAt: string): "deleted" | "conflict" | "missing" {
     this.database.exec("BEGIN IMMEDIATE");
     try {

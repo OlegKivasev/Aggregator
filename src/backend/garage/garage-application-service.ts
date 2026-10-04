@@ -148,6 +148,15 @@ export class GarageApplicationService {
     return group;
   }
 
+  renameGroup(vehicleId: string, groupId: string, vehicleRevision: unknown, name: unknown): GarageGroup {
+    const normalizedGroupId = normalizeGroupId(groupId);
+    if (normalizedGroupId === null) throw new GarageValidationError("groupId is invalid");
+    const result = this.repository.renameGroup(vehicleId, normalizedGroupId, normalizeRevision(vehicleRevision), normalizeText(name, "name", maxNameLength), now());
+    if (result === "conflict") throw new GarageConflictError();
+    if (result === "missing") throw new GarageNotFoundError();
+    return result;
+  }
+
   deleteGroup(vehicleId: string, groupId: string, vehicleRevision: unknown): void {
     const normalizedGroupId = normalizeGroupId(groupId);
     if (normalizedGroupId === null) throw new GarageValidationError("groupId is invalid");
