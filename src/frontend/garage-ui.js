@@ -16,7 +16,7 @@ const element = (tag, text, className) => {
   return node;
 };
 
-export const bootstrapGarage = ({ getMarkupPercent }) => {
+export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   const sidebar = document.querySelector("#garage-sidebar");
   const toggle = document.querySelector("#garage-toggle");
   const vehiclesList = document.querySelector("#garage-vehicles");
@@ -44,6 +44,9 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const groupsList = document.querySelector("#garage-groups");
   const groupsResize = document.querySelector("#garage-groups-resize");
   const itemMenu = document.querySelector("#garage-item-menu");
+  const itemSearchButton = document.querySelector("#garage-item-search-button");
+  const itemMenuGroupsControl = document.querySelector("#garage-item-menu-groups-control");
+  const itemMenuGroupsToggle = document.querySelector("#garage-item-menu-groups-toggle");
   const itemMenuGroups = document.querySelector("#garage-item-menu-groups");
   const itemDeleteButton = document.querySelector("#garage-item-delete-button");
   const groupContextMenu = document.querySelector("#garage-group-context-menu");
@@ -406,10 +409,19 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     renameButton.focus();
   };
   const hideItemMenu = (restoreFocus = false) => {
+    setItemMenuGroupsOpen(false);
     itemMenu.hidden = true;
     itemMenuItemId = null;
     if (restoreFocus && itemMenuAnchor?.isConnected) itemMenuAnchor.focus();
     itemMenuAnchor = null;
+  };
+  const setItemMenuGroupsOpen = (open) => {
+    itemMenuGroups.hidden = !open;
+    itemMenuGroupsToggle.setAttribute("aria-expanded", String(open));
+    itemMenuGroupsControl.classList.remove("garage-item-menu__groups-control--left");
+    if (!open) return;
+    const bounds = itemMenuGroups.getBoundingClientRect();
+    if (bounds.right > window.innerWidth - 8) itemMenuGroupsControl.classList.add("garage-item-menu__groups-control--left");
   };
   const hideGroupContextMenu = (restoreFocus = false) => {
     groupContextMenu.hidden = true;
@@ -447,6 +459,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     itemMenuItemId = item.id;
     itemMenuAnchor = anchor;
     itemMenuGroups.replaceChildren();
+    setItemMenuGroupsOpen(false);
     const appendMoveAction = (groupId, name) => {
       const button = element("button", name, "garage-item-menu__move");
       button.type = "button";
@@ -464,7 +477,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     const bounds = itemMenu.getBoundingClientRect();
     itemMenu.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - bounds.width - 8))}px`;
     itemMenu.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - bounds.height - 8))}px`;
-    itemMenu.querySelector("button:not(:disabled)")?.focus();
+    itemSearchButton.focus();
   };
   const renderModalVehicles = () => {
     modalVehicles.replaceChildren();
@@ -533,10 +546,19 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   };
   const sumGarageItems = (items) => items.reduce((sum, item) => sum + item.regularPrice * item.requiredQuantity, 0);
   const sumGaragePurchaseItems = (items) => items.reduce((sum, item) => sum + item.purchasePrice * item.requiredQuantity, 0);
+  const createGaragePriceStack = (items) => {
+    const prices = element("span", undefined, "garage-price-stack");
+    prices.append(
+      element("span", formatPrice(sumGarageItems(items)), "garage-price-stack__regular"),
+      element("span", formatPrice(sumGaragePurchaseItems(items)), "garage-price-stack__purchase"),
+    );
+    return prices;
+  };
   const renderGarageTotal = (items) => {
-    const retail = element("strong", `Итого: ${formatPrice(sumGarageItems(items))}`);
-    const purchase = element("span", `Закуп: ${formatPrice(sumGaragePurchaseItems(items))}`, "garage-total__purchase");
-    total.replaceChildren(retail, purchase);
+    const prices = createGaragePriceStack(items);
+    prices.classList.add("garage-total__prices");
+    prices.querySelector(".garage-price-stack__regular").textContent = `Итого: ${formatPrice(sumGarageItems(items))}`;
+    total.replaceChildren(prices);
   };
   const groupItems = (items) => {
     const groups = selectedVehicle.groups.map((group) => ({ id: group.id, name: group.name }));
@@ -555,7 +577,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     const cell = document.createElement("td");
     cell.colSpan = getGarageVisibleColumns().length + 1;
     const content = element("div", undefined, "garage-group-summary__content");
-    content.append(element("strong", name), element("span", formatPrice(sumGarageItems(items))));
+    content.append(element("strong", name), createGaragePriceStack(items));
     cell.append(content);
     row.append(cell);
     itemsBody.append(row);
@@ -574,7 +596,11 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       const button = element("button", undefined, "garage-vehicles__button garage-group-item__button");
       button.type = "button";
       button.setAttribute("aria-pressed", String(selectedGroupId === id));
-      button.append(element("span", name), element("span", `${items.length} · ${formatPrice(sumGarageItems(items))}`, "garage-group-item__meta"));
+      const meta = createGaragePriceStack(items);
+      meta.classList.add("garage-group-item__meta");
+      const regular = meta.querySelector(".garage-price-stack__regular");
+      regular.replaceChildren(element("span", `${items.length} · `, "garage-group-item__count"), document.createTextNode(formatPrice(sumGarageItems(items))));
+      button.append(element("span", name), meta);
       button.addEventListener("click", () => {
         selectedGroupId = selectedGroupId === id ? undefined : id;
         renderItems();
@@ -675,6 +701,18 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       appendGroupSummary(group.name, group.items);
       for (const item of [...group.items].sort(compareGarageItems)) {
       const row = element("tr", undefined, item.availabilityStatus === "available" || item.availabilityStatus === "unknown" ? "" : "garage-item--problem");
+      row.tabIndex = 0;
+      row.setAttribute("aria-label", `Действия с «${item.title}»`);
+      row.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        showItemMenu(item, event.clientX, event.clientY, row);
+      });
+      row.addEventListener("keydown", (event) => {
+        if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+        event.preventDefault();
+        const bounds = row.getBoundingClientRect();
+        showItemMenu(item, bounds.left + 16, bounds.top + 16, row);
+      });
       const cells = [["supplier", item.supplier], ["brand", formatBrand(item.brand)], ["article", formatArticle(item.article)], ["title", item.title], ["deliveryDate", formatDeliveryDate(item.deliveryDate)], ["availability", formatQuantity(item.supplierQuantity)]];
       for (const [column, value] of cells) {
         const cell = element("td");
@@ -940,6 +978,28 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     } finally {
       groupDeleteButton.disabled = false;
     }
+  });
+  itemSearchButton.addEventListener("click", () => {
+    const item = selectedVehicle?.items.find((candidate) => candidate.id === itemMenuItemId);
+    hideItemMenu();
+    if (!item) return;
+    showSearch();
+    startSearch(item.article);
+  });
+  itemMenuGroupsControl.addEventListener("mouseenter", () => setItemMenuGroupsOpen(true));
+  itemMenuGroupsControl.addEventListener("mouseleave", () => setItemMenuGroupsOpen(false));
+  itemMenuGroupsToggle.addEventListener("click", () => setItemMenuGroupsOpen(itemMenuGroups.hidden));
+  itemMenuGroupsToggle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    setItemMenuGroupsOpen(true);
+    itemMenuGroups.querySelector("button:not(:disabled)")?.focus();
+  });
+  itemMenuGroups.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" && event.key !== "ArrowLeft") return;
+    event.preventDefault();
+    setItemMenuGroupsOpen(false);
+    itemMenuGroupsToggle.focus();
   });
   itemDeleteButton.addEventListener("click", async () => {
     const item = selectedVehicle?.items.find((candidate) => candidate.id === itemMenuItemId);

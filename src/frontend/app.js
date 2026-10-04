@@ -2463,9 +2463,8 @@ const registerResultContextMenu = (body, resolveResult, canShowAnalogs) => {
 registerResultContextMenu(resultsBody, (row) => results[Number(row.dataset.resultIndex)], true);
 registerResultContextMenu(analogsResultsBody, (row) => analogSearchResults[Number(row.dataset.analogResultIndex)], false);
 
-searchResultButton.addEventListener("click", () => {
-  const article = typeof contextMenuResult?.article === "string" ? contextMenuResult.article.trim() : "";
-  hideResultContextMenu();
+const startSearchForArticle = (value) => {
+  const article = typeof value === "string" ? value.trim() : "";
   if (!article) {
     return;
   }
@@ -2477,6 +2476,12 @@ searchResultButton.addEventListener("click", () => {
   renderTabs();
   activateTab(tab.id);
   form.requestSubmit();
+};
+
+searchResultButton.addEventListener("click", () => {
+  const article = contextMenuResult?.article;
+  hideResultContextMenu();
+  startSearchForArticle(article);
 });
 
 showAnalogsButton.addEventListener("click", () => {
@@ -2937,7 +2942,7 @@ setSearchUiState(false);
 renderTabs();
 renderResults();
 loadSessions().catch(() => undefined);
-const garageUi = bootstrapGarage({ getMarkupPercent: () => markupPercent });
+const garageUi = bootstrapGarage({ getMarkupPercent: () => markupPercent, startSearch: startSearchForArticle });
 
 setupColumnResizing({
   table: resultsTable,

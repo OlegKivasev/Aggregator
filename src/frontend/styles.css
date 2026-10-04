@@ -68,14 +68,18 @@
 .garage-group-item { display: flex; align-items: center; gap: 2px; }
 .garage-group-item__button { display: flex; min-width: 0; flex: 1; align-items: center; justify-content: space-between; gap: 8px; }
 .garage-group-item__button[aria-pressed="true"] { color: var(--accent-dark); background: #fff3ed; }
-.garage-group-item__meta { overflow: hidden; color: var(--muted); font-size: 10px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
-.garage-total { display: inline-flex; align-items: baseline; gap: 10px; color: var(--ink); font-size: 13px; white-space: nowrap; }
-.garage-total strong { font-weight: 800; }
-.garage-total__purchase { color: var(--muted); font-size: 11px; font-weight: 700; }
+.garage-group-item__meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.garage-group-item__count { color: var(--muted); }
+.garage-price-stack { display: inline-grid; justify-items: end; gap: 1px; line-height: 1.2; white-space: nowrap; }
+.garage-price-stack__regular { color: var(--ink); font-weight: 800; }
+.garage-price-stack__purchase { color: var(--muted); font-size: 10px; font-weight: 700; }
+.garage-total { display: inline-flex; align-items: center; color: var(--ink); font-size: 13px; white-space: nowrap; }
+.garage-total__prices { font-size: 13px; }
+.garage-total__prices .garage-price-stack__purchase { font-size: 11px; }
 .garage-group-summary td { padding: 0 !important; background: transparent !important; }
 .garage-group-summary__content { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 10px; padding: 8px 14px; border-top: 1px solid #dce3ea; border-bottom: 1px solid #e8edf2; color: #455363; background: #f8fafc; font-size: 11px; }
 .garage-group-summary__content strong { color: var(--ink); font-weight: 800; }
-.garage-group-summary__content span { color: var(--muted); font-weight: 750; }
+.garage-group-summary__content .garage-price-stack { min-width: 92px; }
 .garage-item-menu-toggle { display: inline-grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font-size: 18px; font-weight: 800; line-height: 1; cursor: grab; }
 .garage-item-menu-toggle:active { cursor: grabbing; }
 .garage-item-menu-toggle:hover, .garage-item-menu-toggle:focus-visible { color: var(--accent-dark); background: #fff3ed; outline: 0; }
@@ -1617,15 +1621,12 @@ table tbody tr:hover td {
 .garage-context-menu__delete:hover,
 .garage-context-menu__delete:focus-visible { color: #8f1c13 !important; background: #ffe8e3 !important; }
 
-.garage-item-menu__heading {
-  padding: 7px 12px 4px;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
+.garage-item-menu__groups-control { position: relative; }
+.garage-item-menu__groups-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.garage-item-menu__groups-toggle > span { color: var(--muted); font-size: 18px; line-height: 1; }
+.garage-item-menu__groups { position: absolute; z-index: 1; top: -6px; left: calc(100% + 8px); min-width: 210px; padding: 6px; border-radius: 10px; background: var(--surface); }
+.garage-item-menu__groups[hidden] { display: none; }
+.garage-item-menu__groups-control--left .garage-item-menu__groups { right: calc(100% + 8px); left: auto; }
 .garage-item-menu__move:disabled {
   color: var(--muted) !important;
   background: transparent !important;

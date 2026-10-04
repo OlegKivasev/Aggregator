@@ -526,9 +526,12 @@
       <button type="button" class="garage-context-menu__delete" id="garage-delete-button" role="menuitem">Удалить</button>
     </div>
     <div class="result-context-menu garage-context-menu garage-item-menu card border-0 shadow" id="garage-item-menu" role="menu" hidden>
-      <div class="garage-item-menu__heading">Переместить в группу</div>
-      <div id="garage-item-menu-groups"></div>
-      <button type="button" class="garage-context-menu__delete" id="garage-item-delete-button" role="menuitem">Удалить</button>
+      <button type="button" id="garage-item-search-button" role="menuitem">Выполнить поиск</button>
+      <div class="garage-item-menu__groups-control" id="garage-item-menu-groups-control">
+        <button type="button" class="garage-item-menu__groups-toggle" id="garage-item-menu-groups-toggle" role="menuitem" aria-controls="garage-item-menu-groups" aria-expanded="false">Переместить в группу<span aria-hidden="true">›</span></button>
+        <div class="garage-item-menu__groups card border-0 shadow" id="garage-item-menu-groups" role="menu" hidden></div>
+      </div>
+      <button type="button" class="garage-context-menu__delete" id="garage-item-delete-button" role="menuitem">Удалить из гаража</button>
     </div>
     <div class="result-context-menu garage-context-menu card border-0 shadow" id="garage-group-context-menu" role="menu" hidden>
       <button type="button" id="garage-group-rename-button" role="menuitem">Переименовать</button>
