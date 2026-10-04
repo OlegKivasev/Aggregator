@@ -592,7 +592,13 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(app, /showWarehouseTooltip/);
   assert.match(styles, /\.results-data-table thead\s*\{[^}]*position: sticky;/s);
   assert.match(styles, /\.results-data-table\s*\{[^}]*width: max\(100%, var\(--results-table-min-width,/s);
-  assert.match(styles, /\.main-result-purchase-price\s*\{[^}]*font-size: 11px;/s);
+  assert.match(styles, /\.results-data-table tbody td\s*\{[^}]*font-size: 12px;/s);
+  assert.match(styles, /\.analogs-results td\s*\{[^}]*font-size: 12px;/s);
+  assert.match(styles, /\.main-result-purchase-price\s*\{[^}]*font-size: 12px;/s);
+  assert.match(styles, /\.garage-purchase-price\s*\{[^}]*font-size: 12px;/s);
+  assert.match(styles, /\.results-data-table \[data-column="deliveryDate"\]\s*\{[^}]*text-align: center;/s);
+  assert.match(styles, /\.analogs-results \[data-analog-column="deliveryDate"\]\s*\{[^}]*text-align: center;/s);
+  assert.match(styles, /\.garage-data-table \[data-garage-column="deliveryDate"\]\s*\{[^}]*text-align: center;/s);
   assert.match(styles, /\.results-data-table \[data-column="markupPrice"\]\s*\{[^}]*text-align: center;/s);
   assert.match(styles, /\.results-data-table th\[data-column="markupPrice"\] \.table-sort\s*\{[^}]*justify-content: center;/s);
   assert.doesNotMatch(styles, /\.results-data-table th:nth-child/);

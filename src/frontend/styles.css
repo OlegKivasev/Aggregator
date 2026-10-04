@@ -51,12 +51,12 @@
 .garage-data-table [data-garage-column="quantity"],
 .garage-data-table [data-garage-column="price"],
 .garage-data-table [data-garage-column="sum"] { text-align: center; white-space: nowrap; }
-.garage-data-table [data-garage-column="deliveryDate"] { text-align: left; white-space: normal; }
+.garage-data-table [data-garage-column="deliveryDate"] { text-align: center; white-space: normal; }
 .garage-data-table th[data-garage-column="availability"] .table-sort,
 .garage-data-table th[data-garage-column="quantity"] .table-sort,
 .garage-data-table th[data-garage-column="price"] .table-sort,
 .garage-data-table th[data-garage-column="sum"] .table-sort { justify-content: center; width: 100%; }
-.garage-data-table th[data-garage-column="deliveryDate"] .table-sort { justify-content: flex-start; width: 100%; }
+.garage-data-table th[data-garage-column="deliveryDate"] .table-sort { justify-content: center; width: 100%; }
 .garage-data-table td[data-garage-column="article"] { color: #0666d6; font-weight: 700; }
 .garage-group-form { display: flex; min-width: min(100%, 310px); gap: 6px; }
 .garage-group-form__input { min-width: 0; flex: 1 1 auto; padding: 5px 8px; border: 1px solid #d7dfe7; border-radius: 6px; font: inherit; font-size: 12px; }
@@ -73,7 +73,7 @@
 .garage-item-remove svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; }
 .garage-item-remove:hover, .garage-item-remove:focus-visible { color: #b42318; background: #fff0ee; outline: 0; }
 .garage-regular-price, .garage-purchase-price { display: block; }
-.garage-purchase-price { color: var(--muted); font-size: 11px; font-weight: 700; }
+.garage-purchase-price { color: var(--muted); font-size: 12px; font-weight: 700; }
 .garage-add-column, .garage-add-cell { width: 52px; min-width: 52px; padding-right: 8px !important; padding-left: 8px !important; text-align: center; }
 .garage-offer-button { display: inline-grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
 .garage-offer-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; }
@@ -1131,7 +1131,7 @@ body.is-resizing-table-column { cursor: col-resize; user-select: none; }
 
 .results-data-table tbody td {
   padding: 10px 12px;
-  font-size: 11px;
+  font-size: 12px;
   vertical-align: top;
 }
 
@@ -1260,12 +1260,12 @@ table tbody tr:hover td {
 }
 
 .results-data-table [data-column="deliveryDate"] {
-  text-align: left;
+  text-align: center;
   white-space: normal;
 }
 
 .results-data-table th[data-column="deliveryDate"] .table-sort {
-  justify-content: flex-start;
+  justify-content: center;
   width: 100%;
 }
 
@@ -1362,7 +1362,7 @@ table tbody tr:hover td {
   gap: 6px;
   margin-top: 2px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.35;
   white-space: nowrap;
@@ -1418,7 +1418,7 @@ table tbody tr:hover td {
 .main-result-purchase-price {
   display: block;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -1426,7 +1426,7 @@ table tbody tr:hover td {
   display: block;
   margin-top: 2px;
   color: #168052;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -1950,12 +1950,12 @@ table tbody tr:hover td {
 }
 
 .analogs-results [data-analog-column="deliveryDate"] {
-  text-align: left;
+  text-align: center;
   white-space: normal;
 }
 
 .analogs-results th[data-analog-column="deliveryDate"] .analogs-sort {
-  justify-content: flex-start;
+  justify-content: center;
 }
 
 .analogs-results td[data-analog-column="article"] {
@@ -1965,7 +1965,7 @@ table tbody tr:hover td {
 
 .analogs-results td {
   padding: 10px 12px;
-  font-size: 11px;
+  font-size: 12px;
   vertical-align: top;
 }
 
@@ -2021,7 +2021,7 @@ th[aria-sort="descending"] .analogs-sort span::after {
 .analogs-result-purchase-price {
   display: block;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -2029,7 +2029,7 @@ th[aria-sort="descending"] .analogs-sort span::after {
   display: block;
   margin-top: 2px;
   color: #168052;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.03em;
   text-transform: uppercase;
