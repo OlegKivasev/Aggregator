@@ -20,6 +20,13 @@ import { isPartKomReturnableVisible } from "./partkom-return-settings.js";
 import { isForumAutoReturnableVisible } from "./forum-auto-return-settings.js";
 import { isArmtekReturnableVisible } from "./armtek-return-settings.js";
 import { bootstrapGarage } from "./garage-ui.js";
+import {
+  applySavedColumnWidths,
+  loadSharedColumnWidths,
+  restoreLocalColumnWidths,
+  saveColumnWidths,
+  setupColumnResizing,
+} from "./table-column-widths.js";
 
 const form = document.querySelector("#search-form");
 const articleInput = document.querySelector("#article-input");
@@ -230,6 +237,7 @@ const tableColumnWidths = {
   quantity: 120,
   markupPrice: 120,
 };
+Object.assign(tableColumnWidths, restoreLocalColumnWidths("main", tableColumnWidths));
 const garageActionColumnWidth = 52;
 let visibleTableColumns = new Set(tableColumnIds);
 let visibleStpartsWarehouses = new Set(["green"]);
@@ -317,6 +325,7 @@ const analogTableColumnWidths = {
   quantity: 120,
   markupPrice: 120,
 };
+Object.assign(analogTableColumnWidths, restoreLocalColumnWidths("analogs", analogTableColumnWidths));
 const analogTableColumnIds = Object.keys(analogTableColumnWidths);
 
 const renderAveragePrices = (container, items) => {
@@ -2928,4 +2937,29 @@ setSearchUiState(false);
 renderTabs();
 renderResults();
 loadSessions().catch(() => undefined);
-bootstrapGarage({ getMarkupPercent: () => markupPercent });
+const garageUi = bootstrapGarage({ getMarkupPercent: () => markupPercent });
+
+setupColumnResizing({
+  table: resultsTable,
+  columnAttribute: "data-column",
+  widths: tableColumnWidths,
+  apply: applyTableColumns,
+  save: () => saveColumnWidths("main", tableColumnWidths),
+});
+setupColumnResizing({
+  table: analogsResultsBody.closest("table"),
+  columnAttribute: "data-analog-column",
+  widths: analogTableColumnWidths,
+  apply: applyAnalogTableColumns,
+  save: () => saveColumnWidths("analogs", analogTableColumnWidths),
+});
+
+loadSharedColumnWidths().then((savedWidths) => {
+  Object.assign(tableColumnWidths, applySavedColumnWidths(tableColumnWidths, savedWidths.main));
+  Object.assign(analogTableColumnWidths, applySavedColumnWidths(analogTableColumnWidths, savedWidths.analogs));
+  garageUi.applyColumnWidths(savedWidths.garage);
+  renderResults();
+  if (!analogsModal.hidden) renderAnalogRowsNow();
+}).catch(() => {
+  // The local copy remains available while the shared preference store is offline.
+});

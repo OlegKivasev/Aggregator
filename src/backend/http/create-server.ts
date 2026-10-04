@@ -179,6 +179,20 @@ export function createAggregatorServer({
       return;
     }
 
+    if (url.pathname === "/api/ui-preferences/table-column-widths") {
+      try {
+        if (request.method === "GET") {
+          serveJson(response, 200, { widths: garage.getTableColumnWidths() });
+          return;
+        }
+        if (request.method === "PUT") {
+          const payload = garagePayload(await readJsonBody(request));
+          serveJson(response, 200, { widths: garage.setTableColumnWidths(payload.widths) });
+          return;
+        }
+      } catch (error) { serveGarageError(response, error, reportError, "table-column-widths"); return; }
+    }
+
     if (request.method === "GET" && url.pathname === "/api/garage/vehicles") {
       try {
         serveJson(response, 200, { vehicles: garage.listVehicles(url.searchParams.get("search") ?? "") });

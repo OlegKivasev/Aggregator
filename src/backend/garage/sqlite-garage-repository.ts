@@ -72,6 +72,9 @@ export class SqliteGarageRepository implements GarageRepository {
         id TEXT PRIMARY KEY, vehicle_id TEXT NOT NULL REFERENCES garage_vehicles(id) ON DELETE CASCADE,
         revision INTEGER NOT NULL, name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       ) STRICT;
+      CREATE TABLE IF NOT EXISTS ui_preferences (
+        preference_key TEXT PRIMARY KEY, preference_value TEXT NOT NULL
+      ) STRICT;
       CREATE INDEX IF NOT EXISTS garage_items_vehicle_id ON garage_items(vehicle_id);
       CREATE INDEX IF NOT EXISTS garage_groups_vehicle_id ON garage_groups(vehicle_id);
     `);
@@ -204,6 +207,16 @@ export class SqliteGarageRepository implements GarageRepository {
       .run(item.supplier, item.brand, item.article, item.title, item.warehouse, item.deliveryDate, item.link, item.supplierQuantity,
         item.purchasePrice, item.markupPercent, item.regularPrice, item.lastCheckedAt, item.availabilityStatus, item.id);
     this.database.prepare("UPDATE garage_vehicles SET revision = revision + 1, updated_at = ? WHERE id = ?").run(updatedAt, item.vehicleId);
+  }
+
+  getUiPreference(key: string): string | null {
+    const row = this.database.prepare("SELECT preference_value FROM ui_preferences WHERE preference_key = ?").get(key) as SqlRow | undefined;
+    return row ? text(row, "preference_value") : null;
+  }
+
+  setUiPreference(key: string, value: string): void {
+    this.database.prepare(`INSERT INTO ui_preferences (preference_key, preference_value) VALUES (?, ?)
+      ON CONFLICT(preference_key) DO UPDATE SET preference_value = excluded.preference_value`).run(key, value);
   }
 
   close(): void { this.database.close(); }

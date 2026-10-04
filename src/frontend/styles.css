@@ -1095,9 +1095,39 @@ input {
 }
 
 .results-data-table thead th {
+  position: relative;
   padding: 9px 12px;
   background: #f4f6f8;
 }
+
+.table-column-resize {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: -4px;
+  width: 9px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.table-column-resize::after {
+  position: absolute;
+  top: 20%;
+  right: 3px;
+  width: 2px;
+  height: 60%;
+  border-radius: 2px;
+  background: transparent;
+  content: "";
+}
+
+th:hover > .table-column-resize::after,
+.table-column-resize:focus-visible::after,
+body.is-resizing-table-column .table-column-resize::after { background: var(--accent); }
+
+.table-column-resize:focus-visible { outline: 2px solid rgba(255, 75, 19, 0.45); outline-offset: -2px; }
+body.is-resizing-table-column { cursor: col-resize; user-select: none; }
 
 .results-data-table tbody td {
   padding: 10px 12px;

@@ -22,6 +22,7 @@ import {
 import { isPartKomReturnableVisible } from "../src/frontend/partkom-return-settings.js";
 import { isForumAutoReturnableVisible } from "../src/frontend/forum-auto-return-settings.js";
 import { isArmtekReturnableVisible } from "../src/frontend/armtek-return-settings.js";
+import { applySavedColumnWidths } from "../src/frontend/table-column-widths.js";
 
 test("result formatting escapes untrusted text and limits result links", () => {
   assert.equal(escapeHtml('<script data-value="x">'), "&lt;script data-value=&quot;x&quot;&gt;");
@@ -38,6 +39,13 @@ test("quantity formatting distinguishes real zero from missing data", () => {
   assert.equal(formatQuantity(0), "0");
   assert.equal(formatQuantity(null), "-");
   assert.equal(formatQuantity(Number.NaN), "-");
+});
+
+test("table column widths accept only bounded integer preferences", () => {
+  const defaults = { supplier: 100, title: 320 };
+
+  assert.deepEqual(applySavedColumnWidths(defaults, { supplier: 180, title: 700 }), { supplier: 180, title: 700 });
+  assert.deepEqual(applySavedColumnWidths(defaults, { supplier: 79, title: 801 }), defaults);
 });
 
 test("brand and article formatting normalizes case consistently", () => {

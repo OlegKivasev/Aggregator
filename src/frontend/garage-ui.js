@@ -1,5 +1,6 @@
 import { formatArticle, formatBrand, formatPrice, formatQuantity } from "./result-formatting.js";
 import { formatDeliveryDate } from "./supplier-search-summary.js";
+import { applySavedColumnWidths, restoreLocalColumnWidths, saveColumnWidths, setupColumnResizing } from "./table-column-widths.js";
 
 const api = async (path, options = {}, allowConflict = false) => {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
@@ -86,6 +87,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const filtersWidthStorageKey = "autoservice-garage-filters-width-v1";
   const closeThresholdRatio = 0.02;
   const garageColumnWidths = { supplier: 100, brand: 125, article: 140, title: 323, deliveryDate: 180, availability: 120, quantity: 120, price: 120, sum: 120 };
+  Object.assign(garageColumnWidths, restoreLocalColumnWidths("garage", garageColumnWidths));
   const garageActionColumnWidth = 52;
 
   const setStatus = (message) => { status.textContent = message; };
@@ -796,4 +798,17 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   restoreSidebarWidth();
   restoreFiltersSidebarWidth();
   loadVehicles().catch((error) => setStatus(error.message));
+  setupColumnResizing({
+    table: view.querySelector("table"),
+    columnAttribute: "data-garage-column",
+    widths: garageColumnWidths,
+    apply: applyGarageTableColumns,
+    save: () => saveColumnWidths("garage", garageColumnWidths),
+  });
+  return {
+    applyColumnWidths(savedWidths) {
+      Object.assign(garageColumnWidths, applySavedColumnWidths(garageColumnWidths, savedWidths));
+      applyGarageTableColumns();
+    },
+  };
 };

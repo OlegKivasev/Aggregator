@@ -5,6 +5,18 @@ import type { GarageAvailabilityStatus, GarageGroup, GarageItem, GarageOfferLook
 const maxNameLength = 120;
 const maxCommentLength = 1_000;
 const offerLifetimeMs = 5 * 60_000;
+const tableWidthPreferenceKey = "table-column-widths-v1";
+const tableColumns = {
+  main: ["supplier", "brand", "article", "title", "deliveryDate", "quantity", "markupPrice"],
+  analogs: ["supplier", "brand", "article", "title", "deliveryDate", "quantity", "markupPrice"],
+  garage: ["supplier", "brand", "article", "title", "deliveryDate", "availability", "quantity", "price", "sum"],
+} as const;
+const minimumColumnWidth = 80;
+const maximumColumnWidth = 800;
+
+type TableName = keyof typeof tableColumns;
+type TableColumnWidths = Partial<Record<(typeof tableColumns)[TableName][number], number>>;
+type TableWidthPreferences = Partial<Record<TableName, TableColumnWidths>>;
 
 export class GarageValidationError extends Error {}
 export class GarageConflictError extends Error {}
@@ -58,6 +70,26 @@ function availability(quantity: number | null, required: number): GarageAvailabi
   return quantity < required ? "insufficient" : "available";
 }
 function regularPrice(price: number, markup: number): number { return Math.round(price * (1 + markup / 100) * 100) / 100; }
+function isRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
+function normalizeTableColumnWidths(value: unknown): TableWidthPreferences {
+  if (!isRecord(value)) throw new GarageValidationError("table column widths are invalid");
+  const preferences: TableWidthPreferences = {};
+  for (const [table, columns] of Object.entries(tableColumns) as [TableName, readonly string[]][]) {
+    const savedWidths = value[table];
+    if (savedWidths === undefined) continue;
+    if (!isRecord(savedWidths)) throw new GarageValidationError("table column widths are invalid");
+    const widths: Record<string, number> = {};
+    for (const [column, width] of Object.entries(savedWidths)) {
+      if (typeof width !== "number" || !columns.includes(column) || !Number.isInteger(width) || width < minimumColumnWidth || width > maximumColumnWidth) {
+        throw new GarageValidationError("table column widths are invalid");
+      }
+      widths[column] = width;
+    }
+    preferences[table] = widths;
+  }
+  if (Object.keys(value).some((table) => !(table in tableColumns))) throw new GarageValidationError("table column widths are invalid");
+  return preferences;
+}
 
 export class GarageApplicationService {
   private readonly offers = new Map<string, GarageSearchOffer>();
@@ -176,6 +208,23 @@ export class GarageApplicationService {
     await Promise.all(workers);
     if (signal.aborted) throw signal.reason;
     return this.getVehicle(id);
+  }
+
+  getTableColumnWidths(): TableWidthPreferences {
+    const savedValue = this.repository.getUiPreference(tableWidthPreferenceKey);
+    if (savedValue === null) return {};
+    try {
+      return normalizeTableColumnWidths(JSON.parse(savedValue));
+    } catch {
+      // A corrupted optional preference must not block access to garage data.
+      return {};
+    }
+  }
+
+  setTableColumnWidths(value: unknown): TableWidthPreferences {
+    const preferences = normalizeTableColumnWidths(value);
+    this.repository.setUiPreference(tableWidthPreferenceKey, JSON.stringify(preferences));
+    return preferences;
   }
 
   close(): void { this.repository.close(); }

@@ -197,6 +197,37 @@ test("garage creates persisted groups for a vehicle", async () => {
   assert.deepEqual((await details.json()).vehicle.groups.map((group) => group.name), ["Стойки"]);
 });
 
+test("table column width preferences persist safely across clients", async () => {
+  const empty = await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`);
+  assert.equal(empty.status, 200);
+  assert.deepEqual(await empty.json(), { widths: {} });
+
+  const invalid = await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ widths: { main: { supplier: 79 } } }),
+  });
+  assert.equal(invalid.status, 400);
+  assert.deepEqual(await invalid.json(), { message: "Garage request is invalid" });
+
+  const savedWidths = {
+    main: { supplier: 180, title: 420 },
+    analogs: { quantity: 140 },
+    garage: { deliveryDate: 220, sum: 130 },
+  };
+  const save = await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ widths: savedWidths }),
+  });
+  assert.equal(save.status, 200);
+  assert.deepEqual(await save.json(), { widths: savedWidths });
+
+  const restored = await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`);
+  assert.equal(restored.status, 200);
+  assert.deepEqual(await restored.json(), { widths: savedWidths });
+});
+
 test("search endpoint preserves validation and non-stream behavior", async () => {
   const nonStream = await fetch(`${baseUrl}/api/search?article=ABC-123`);
   assert.equal(nonStream.status, 204);
