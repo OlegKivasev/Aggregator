@@ -248,8 +248,8 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
 
   assert.match(html, /id="result-context-menu"/);
-  assert.match(html, /id="open-result-button"/);
-  assert.match(html, /id="open-result-button"[\s\S]*?id="search-result-button"[\s\S]*?id="show-analogs-button"/);
+  assert.doesNotMatch(html, /id="open-result-button"/);
+  assert.match(html, /id="search-result-button"[\s\S]*?id="show-analogs-button"/);
   assert.match(html, /id="show-analogs-button"/);
   assert.match(html, /id="analogs-modal"/);
   assert.match(html, /id="analogs-source-title"/);
@@ -283,7 +283,8 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /analogFiltersResize\.releasePointerCapture\(event\.pointerId\);\s+setAnalogFiltersSidebarOpen\(false\);/s);
   assert.match(app, /data-analog-column="purchasePrice"\$\{showPurchasePrices \? "" : " hidden"\}/);
   assert.doesNotMatch(app, /data-show-row-analogs/);
-  assert.match(app, /openResultButton\.addEventListener/);
+  assert.match(app, /const renderOfferLink = \(result, text, title = text\) =>/);
+  assert.doesNotMatch(app, /openResultButton\.addEventListener/);
   assert.match(app, /analogsTableSearch\.addEventListener\("input"/);
   assert.match(app, /analogSortButtons\.forEach/);
   assert.match(app, /analogs-best-price/);
@@ -423,6 +424,8 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(html, /class="new-tab-button btn btn-light garage-create" id="garage-create"/);
   assert.match(html, /form class="garage-search-form search-row" id="garage-search-form"[\s\S]*?class="search-input" id="garage-search"/);
   assert.match(html, /id="garage-context-menu" role="menu"[\s\S]*?id="garage-rename-button"[\s\S]*?id="garage-delete-button"/);
+  assert.match(html, /data-garage-column="deliveryDate"[^>]*>[\s\S]*?data-garage-sort-key="deliveryDate">Дата доставки/);
+  assert.doesNotMatch(html, /id="open-result-button"|>Открыть предложение</);
   assert.match(html, /id="garage-add-duplicate" hidden/);
   assert.match(html, /class="garage-add-modal__header"/);
   assert.match(html, /class="garage-add-modal__input garage-add-modal__search" id="garage-add-search"/);
@@ -437,7 +440,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /const setPurchasePricesVisible = \(visible\) =>/);
   assert.match(garage, /priceToggle\.addEventListener\("click", \(\) => setPurchasePricesVisible\(!showPurchase\)\)/);
   assert.match(html, /class="table table-hover align-middle mb-0 results-data-table garage-data-table"/);
-  assert.match(html, /data-garage-sort-key="availability">Наличие[\s\S]*?data-garage-sort-key="quantity">Количество[\s\S]*?data-garage-sort-key="price">Цена[\s\S]*?data-garage-sort-key="sum">Сумма/);
+  assert.match(html, /data-garage-sort-key="deliveryDate">Дата доставки[\s\S]*?data-garage-sort-key="availability">Наличие[\s\S]*?data-garage-sort-key="quantity">Количество[\s\S]*?data-garage-sort-key="price">Цена[\s\S]*?data-garage-sort-key="sum">Сумма/);
   assert.doesNotMatch(html, /<th>Комментарий<\/th>|<th>Нужно<\/th>|<th>Итог<\/th>/);
   assert.doesNotMatch(garage, /const comment = document\.createElement/);
   assert.match(styles, /\.garage-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
@@ -475,6 +478,8 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(html, /data-garage-column="quantity"[\s\S]*?id="garage-purchase-price-heading" hidden[\s\S]*?data-garage-column="price"/);
   assert.match(garage, /const garageSortButtons = \[\.\.\.document\.querySelectorAll\("\[data-garage-sort-key\]"\)\]/);
   assert.match(garage, /import \{ formatArticle, formatBrand, formatPrice, formatQuantity \} from "\.\/result-formatting\.js"/);
+  assert.match(garage, /import \{ formatDeliveryDate \} from "\.\/supplier-search-summary\.js"/);
+  assert.match(garage, /\["deliveryDate", formatDeliveryDate\(item\.deliveryDate\)\]/);
   assert.match(garage, /const updateGarageResultCount = \(items\) =>/);
   assert.match(garage, /const renderGarageFilters = \(\) =>/);
   assert.match(garage, /const applyGarageTableColumns = \(\) =>/);
@@ -509,6 +514,9 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /const remainingQuantity = Math\.max\(0, supplierQuantity - result\.payload\.duplicate\.requiredQuantity\);/);
   assert.match(garage, /application\/x-garage-offer-quantity/);
   assert.match(app, /data-garage-offer-quantity="\$\{Number\.isFinite\(result\.quantity\)/);
+  assert.match(app, /const renderOfferLink = \(result, text, title = text\) =>/);
+  assert.match(app, /class="result-offer-link" href="\$\{escapeHtml\(link\)\}" target="_blank" rel="noreferrer"/);
+  assert.match(styles, /\.result-offer-link\s*\{[^}]*color: #0666d6;/s);
   assert.match(styles, /\.garage-toast\s*\{[^}]*top: 24px;[^}]*right: 24px;/s);
   assert.match(styles, /\.garage-toast\[data-tone="success"\]\s*\{[^}]*background: #f4fbf6;/s);
   assert.match(styles, /\.garage-toast\[data-tone="error"\]\s*\{[^}]*background: #fff5f4;/s);

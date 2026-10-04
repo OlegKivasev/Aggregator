@@ -133,7 +133,6 @@ const supplierNoticeSummary = document.querySelector("#supplier-notice-summary")
 const supplierNoticeList = document.querySelector("#supplier-notice-list");
 const passwordFields = [...document.querySelectorAll(".password-field")];
 const resultContextMenu = document.querySelector("#result-context-menu");
-const openResultButton = document.querySelector("#open-result-button");
 const searchResultButton = document.querySelector("#search-result-button");
 const tabContextMenu = document.querySelector("#tab-context-menu");
 const renameTabButton = document.querySelector("#rename-tab-button");
@@ -1205,6 +1204,14 @@ const getMainTableResults = (items) => {
   };
 };
 
+const renderOfferLink = (result, text, title = text) => {
+  const link = getSafeResultLink(result.link);
+  const safeText = escapeHtml(text);
+  return link
+    ? `<a class="result-offer-link" href="${escapeHtml(link)}" target="_blank" rel="noreferrer" title="${escapeHtml(title)}">${safeText}</a>`
+    : safeText;
+};
+
 const renderResults = () => {
   tableColumnIds.filter((column) => !visibleTableColumns.has(column)).forEach((column) => {
     selectedFilterValuesByColumn.delete(column);
@@ -1230,8 +1237,8 @@ const renderResults = () => {
       <tr class="results-table__row main-result-row${isBestPrice ? " is-best-price" : ""}" data-result-index="${results.indexOf(result)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Действия для ${escapeHtml(result.title)}">
         <td data-column="supplier">${escapeHtml(supplierName)}</td>
         <td data-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
-        <td data-column="article">${escapeHtml(formatArticle(result.article))}</td>
-        <td data-column="title"><div class="result-title-cell"><span title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</span></div></td>
+        <td data-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
+        <td data-column="title"><div class="result-title-cell">${renderOfferLink(result, result.title)}</div></td>
         <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-column="purchasePrice">${escapeHtml(formatPrice(result.price))}</td>
         <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
@@ -2206,8 +2213,8 @@ const renderAnalogRows = () => {
       <tr class="results-table__row analogs-result-row${isBestPrice ? " is-best-price" : ""}" data-analog-result-index="${analogSearchResults.indexOf(result)}" tabindex="0" aria-label="Действия для ${escapeHtml(result.title)}">
         <td data-analog-column="supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}</td>
         <td data-analog-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
-        <td data-analog-column="article">${escapeHtml(formatArticle(result.article))}</td>
-        <td class="analogs-result-title" data-analog-column="title" title="${escapeHtml(result.title)}">${escapeHtml(result.title)}</td>
+        <td data-analog-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
+        <td class="analogs-result-title" data-analog-column="title">${renderOfferLink(result, result.title)}</td>
         <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-analog-column="purchasePrice"${showPurchasePrices ? "" : " hidden"}><span class="analogs-result-price">${escapeHtml(formatPrice(result.price))}</span></td>
         <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
@@ -2472,14 +2479,6 @@ const registerResultContextMenu = (body, resolveResult, canShowAnalogs) => {
 
 registerResultContextMenu(resultsBody, (row) => results[Number(row.dataset.resultIndex)], true);
 registerResultContextMenu(analogsResultsBody, (row) => analogSearchResults[Number(row.dataset.analogResultIndex)], false);
-
-openResultButton.addEventListener("click", () => {
-  const link = getSafeResultLink(contextMenuResult?.link);
-  hideResultContextMenu();
-  if (link) {
-    window.open(link, "_blank", "noreferrer");
-  }
-});
 
 searchResultButton.addEventListener("click", () => {
   const article = typeof contextMenuResult?.article === "string" ? contextMenuResult.article.trim() : "";

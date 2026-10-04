@@ -52,11 +52,13 @@
 .garage-data-table [data-garage-column="price"],
 .garage-data-table [data-garage-column="purchase-price"],
 .garage-data-table [data-garage-column="sum"] { text-align: center; white-space: nowrap; }
+.garage-data-table [data-garage-column="deliveryDate"] { text-align: left; white-space: normal; }
 .garage-data-table th[data-garage-column="availability"] .table-sort,
 .garage-data-table th[data-garage-column="quantity"] .table-sort,
 .garage-data-table th[data-garage-column="price"] .table-sort,
 .garage-data-table th[data-garage-column="purchase-price"] .table-sort,
 .garage-data-table th[data-garage-column="sum"] .table-sort { justify-content: center; width: 100%; }
+.garage-data-table th[data-garage-column="deliveryDate"] .table-sort { justify-content: flex-start; width: 100%; }
 .garage-data-table td[data-garage-column="article"] { color: #0666d6; font-weight: 700; }
 .garage-group-form { display: flex; min-width: min(100%, 310px); gap: 6px; }
 .garage-group-form__input { min-width: 0; flex: 1 1 auto; padding: 5px 8px; border: 1px solid #d7dfe7; border-radius: 6px; font: inherit; font-size: 12px; }
@@ -1276,6 +1278,18 @@ table tbody tr:hover td {
   font-weight: 700;
 }
 
+.result-offer-link {
+  color: #0666d6;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.result-offer-link:hover,
+.result-offer-link:focus-visible {
+  color: #034ea2;
+  text-decoration: underline;
+}
+
 .warehouse-code {
   position: relative;
   display: inline-block;
@@ -1385,7 +1399,8 @@ table tbody tr:hover td {
   align-items: center;
 }
 
-.result-title-cell > span {
+.result-title-cell > .result-offer-link {
+  display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

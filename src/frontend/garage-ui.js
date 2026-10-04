@@ -1,4 +1,5 @@
 import { formatArticle, formatBrand, formatPrice, formatQuantity } from "./result-formatting.js";
+import { formatDeliveryDate } from "./supplier-search-summary.js";
 
 const api = async (path, options = {}, allowConflict = false) => {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
@@ -87,7 +88,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const widthStorageKey = "autoservice-garage-sidebar-width-v1";
   const filtersWidthStorageKey = "autoservice-garage-filters-width-v1";
   const closeThresholdRatio = 0.02;
-  const garageColumnWidths = { supplier: 100, brand: 125, article: 140, title: 323, availability: 120, quantity: 120, purchasePrice: 120, price: 120, sum: 120 };
+  const garageColumnWidths = { supplier: 100, brand: 125, article: 140, title: 323, deliveryDate: 180, availability: 120, quantity: 120, purchasePrice: 120, price: 120, sum: 120 };
   const garageActionColumnWidth = 52;
 
   const setStatus = (message) => { status.textContent = message; };
@@ -377,6 +378,10 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     if (key === "price") return item.regularPrice;
     if (key === "purchasePrice") return item.purchasePrice;
     if (key === "sum") return item.regularPrice * item.requiredQuantity;
+    if (key === "deliveryDate") {
+      const timestamp = item.deliveryDate ? new Date(item.deliveryDate).getTime() : Number.NaN;
+      return Number.isFinite(timestamp) ? timestamp : Number.POSITIVE_INFINITY;
+    }
     return item[key] ?? "";
   };
   const updateGarageSortHeaders = () => {
@@ -456,7 +461,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     filtersReset.hidden = ![...selectedFilterValues.values()].some((values) => values.size > 0);
   };
   const getGarageVisibleColumns = () => [
-    "supplier", "brand", "article", "title", "availability", "quantity",
+    "supplier", "brand", "article", "title", "deliveryDate", "availability", "quantity",
     ...(showPurchase ? ["purchasePrice"] : []),
     "price", "sum",
   ];
@@ -492,7 +497,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       appendGroupSummary(group.name, group.items);
       for (const item of [...group.items].sort(compareGarageItems)) {
       const row = element("tr", undefined, item.availabilityStatus === "available" || item.availabilityStatus === "unknown" ? "" : "garage-item--problem");
-      const cells = [["supplier", item.supplier], ["brand", formatBrand(item.brand)], ["article", formatArticle(item.article)], ["title", item.title], ["availability", formatQuantity(item.supplierQuantity)]];
+      const cells = [["supplier", item.supplier], ["brand", formatBrand(item.brand)], ["article", formatArticle(item.article)], ["title", item.title], ["deliveryDate", formatDeliveryDate(item.deliveryDate)], ["availability", formatQuantity(item.supplierQuantity)]];
       for (const [column, value] of cells) {
         const cell = element("td", value);
         cell.dataset.garageColumn = column;
