@@ -72,8 +72,6 @@
 .garage-item-remove { display: inline-grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
 .garage-item-remove svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; }
 .garage-item-remove:hover, .garage-item-remove:focus-visible { color: #b42318; background: #fff0ee; outline: 0; }
-.garage-regular-price, .garage-purchase-price { display: block; }
-.garage-purchase-price { color: var(--muted); font-size: 12px; font-weight: 700; }
 .garage-add-column, .garage-add-cell { width: 52px; min-width: 52px; padding-right: 8px !important; padding-left: 8px !important; text-align: center; }
 .garage-offer-button { display: inline-grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
 .garage-offer-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; }

@@ -1,4 +1,4 @@
-import { formatArticle, formatBrand, formatPrice, formatQuantity } from "./result-formatting.js";
+import { formatArticle, formatBrand, formatPrice, formatQuantity, getSafeResultLink } from "./result-formatting.js";
 import { formatDeliveryDate } from "./supplier-search-summary.js";
 import { applySavedColumnWidths, restoreLocalColumnWidths, saveColumnWidths, setupColumnResizing } from "./table-column-widths.js";
 
@@ -91,6 +91,28 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const garageActionColumnWidth = 52;
 
   const setStatus = (message) => { status.textContent = message; };
+  const appendOfferLink = (cell, item, text, isTitle = false) => {
+    const link = getSafeResultLink(item.link);
+    if (!link) {
+      cell.textContent = text;
+      return;
+    }
+    const anchor = document.createElement("a");
+    anchor.className = "result-offer-link";
+    anchor.href = link;
+    anchor.target = "_blank";
+    anchor.rel = "noreferrer";
+    anchor.title = text;
+    anchor.textContent = text;
+    if (isTitle) {
+      const title = document.createElement("div");
+      title.className = "result-title-cell";
+      title.append(anchor);
+      cell.append(title);
+      return;
+    }
+    cell.append(anchor);
+  };
   const showToast = (message, tone = "notice") => {
     if (toastTimer !== null) window.clearTimeout(toastTimer);
     toast.textContent = message;
@@ -168,6 +190,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     searchTabs.hidden = true;
     titlebar.hidden = false;
     garageWorkspace.hidden = false;
+    setFiltersOpen(true);
     setStatus("");
     renderItems();
     await loadVehicles();
@@ -487,8 +510,13 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       const row = element("tr", undefined, item.availabilityStatus === "available" || item.availabilityStatus === "unknown" ? "" : "garage-item--problem");
       const cells = [["supplier", item.supplier], ["brand", formatBrand(item.brand)], ["article", formatArticle(item.article)], ["title", item.title], ["deliveryDate", formatDeliveryDate(item.deliveryDate)], ["availability", formatQuantity(item.supplierQuantity)]];
       for (const [column, value] of cells) {
-        const cell = element("td", value);
+        const cell = element("td");
         cell.dataset.garageColumn = column;
+        if (column === "article" || column === "title") {
+          appendOfferLink(cell, item, value, column === "title");
+        } else {
+          cell.textContent = value;
+        }
         row.append(cell);
       }
       const requiredCell = document.createElement("td"); requiredCell.dataset.garageColumn = "quantity";
@@ -520,7 +548,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       });
       requiredCell.append(requiredDisplay); row.append(requiredCell);
       const regularPriceCell = document.createElement("td"); regularPriceCell.dataset.garageColumn = "price";
-      regularPriceCell.append(element("span", formatPrice(item.regularPrice), "garage-regular-price"), element("span", formatPrice(item.purchasePrice), "garage-purchase-price"));
+      regularPriceCell.append(element("span", formatPrice(item.regularPrice), "main-result-price"), element("span", formatPrice(item.purchasePrice), "main-result-purchase-price"));
       row.append(regularPriceCell);
       const sumCell = element("td", formatPrice(item.regularPrice * item.requiredQuantity)); sumCell.dataset.garageColumn = "sum"; row.append(sumCell);
       const actions = document.createElement("td"); actions.className = "garage-actions-cell";
