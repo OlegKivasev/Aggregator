@@ -50,13 +50,13 @@
 .garage-data-table [data-garage-column="availability"],
 .garage-data-table [data-garage-column="quantity"],
 .garage-data-table [data-garage-column="price"],
-.garage-data-table [data-garage-column="purchase-price"],
 .garage-data-table [data-garage-column="sum"] { text-align: center; white-space: nowrap; }
+.garage-data-table [data-garage-column="deliveryDate"] { text-align: left; white-space: normal; }
 .garage-data-table th[data-garage-column="availability"] .table-sort,
 .garage-data-table th[data-garage-column="quantity"] .table-sort,
 .garage-data-table th[data-garage-column="price"] .table-sort,
-.garage-data-table th[data-garage-column="purchase-price"] .table-sort,
 .garage-data-table th[data-garage-column="sum"] .table-sort { justify-content: center; width: 100%; }
+.garage-data-table th[data-garage-column="deliveryDate"] .table-sort { justify-content: flex-start; width: 100%; }
 .garage-data-table td[data-garage-column="article"] { color: #0666d6; font-weight: 700; }
 .garage-group-form { display: flex; min-width: min(100%, 310px); gap: 6px; }
 .garage-group-form__input { min-width: 0; flex: 1 1 auto; padding: 5px 8px; border: 1px solid #d7dfe7; border-radius: 6px; font: inherit; font-size: 12px; }
@@ -72,6 +72,8 @@
 .garage-item-remove { display: inline-grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
 .garage-item-remove svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; }
 .garage-item-remove:hover, .garage-item-remove:focus-visible { color: #b42318; background: #fff0ee; outline: 0; }
+.garage-regular-price, .garage-purchase-price { display: block; }
+.garage-purchase-price { color: var(--muted); font-size: 11px; font-weight: 700; }
 .garage-add-column, .garage-add-cell { width: 52px; min-width: 52px; padding-right: 8px !important; padding-left: 8px !important; text-align: center; }
 .garage-offer-button { display: inline-grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
 .garage-offer-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; }
@@ -1046,34 +1048,6 @@ input {
   min-height: 0;
 }
 
-.purchase-price-toggle {
-  display: inline-grid;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--muted);
-  background: #fff;
-}
-
-.purchase-price-toggle:hover,
-.purchase-price-toggle[aria-pressed="true"] {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.purchase-price-toggle svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.8;
-}
-
 .table-search-control {
   width: min(390px, 100%);
   min-width: 160px;
@@ -1219,12 +1193,6 @@ table tbody tr:hover td {
   background: #fff8f4;
 }
 
-.results-data-table [data-column="purchasePrice"] {
-  text-align: center;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
 .results-data-table [data-column="price"] {
   text-align: right;
   font-weight: 800;
@@ -1274,6 +1242,18 @@ table tbody tr:hover td {
 .results-data-table td[data-column="article"] {
   color: #0666d6;
   font-weight: 700;
+}
+
+.result-offer-link {
+  color: #0666d6;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.result-offer-link:hover,
+.result-offer-link:focus-visible {
+  color: #034ea2;
+  text-decoration: underline;
 }
 
 .warehouse-code {
@@ -1385,7 +1365,8 @@ table tbody tr:hover td {
   align-items: center;
 }
 
-.result-title-cell > span {
+.result-title-cell > .result-offer-link {
+  display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1402,6 +1383,13 @@ table tbody tr:hover td {
 
 .main-result-price {
   display: block;
+}
+
+.main-result-purchase-price {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .main-best-price {
@@ -1905,12 +1893,6 @@ table tbody tr:hover td {
   background: #f4f6f8;
 }
 
-.analogs-results [data-analog-column="purchasePrice"] {
-  text-align: center;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
 .analogs-results [data-analog-column="markupPrice"] {
   text-align: center;
   white-space: nowrap;
@@ -2004,6 +1986,13 @@ th[aria-sort="descending"] .analogs-sort span::after {
 
 .analogs-result-price {
   display: block;
+}
+
+.analogs-result-purchase-price {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .analogs-best-price {

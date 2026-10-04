@@ -132,9 +132,6 @@
                 <label class="markup-control" for="markup-percent">Наценка
                   <span><input id="markup-percent" type="number" min="0" max="1000" step="1" value="35" inputmode="decimal"><b>%</b></span>
                 </label>
-                <button type="button" class="purchase-price-toggle" id="purchase-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены" title="Показать закупочные цены">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.8" /><path d="m3 3 18 18" /></svg>
-                </button>
               </div>
             </div>
 
@@ -163,10 +160,9 @@
                     <th scope="col" data-column="brand" aria-sort="none"><button type="button" class="table-sort" data-sort-key="brand">Бренд<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" data-column="article" aria-sort="none"><button type="button" class="table-sort" data-sort-key="article">Артикул<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" data-column="title" aria-sort="none"><button type="button" class="table-sort" data-sort-key="title">Наименование<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                    <th scope="col" data-column="quantity" aria-sort="none"><button type="button" class="table-sort" data-sort-key="quantity">Количество<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                    <th scope="col" data-column="purchasePrice" hidden>Закупочная цена</th>
+                    <th scope="col" data-column="deliveryDate" aria-sort="none"><button type="button" class="table-sort" data-sort-key="deliveryDate">Доставка<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" data-column="quantity" aria-sort="none"><button type="button" class="table-sort" data-sort-key="quantity">Остаток<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" data-column="markupPrice" aria-sort="ascending"><button type="button" class="table-sort is-active" data-sort-key="markupPrice">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                    <th scope="col" data-column="deliveryDate" aria-sort="none"><button type="button" class="table-sort" data-sort-key="deliveryDate">Дата доставки<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" class="garage-add-column"><span class="visually-hidden">Добавить в гараж</span></th>
                   </tr>
                 </thead>
@@ -220,7 +216,6 @@
               <span class="visually-hidden">Поиск по таблице гаража</span>
               <input id="garage-table-search" type="search" placeholder="Бренд, артикул или название" autocomplete="off" />
             </label>
-            <button type="button" class="purchase-price-toggle" id="garage-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены" title="Показать закупочные цены"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.8" /><path d="m3 3 18 18" /></svg></button>
           </div>
         </header>
           <div class="results-table garage-view__table">
@@ -230,9 +225,9 @@
               <th scope="col" data-garage-column="brand" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="brand">Бренд<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="article" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="article">Артикул<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="title" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="title">Наименование<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-              <th scope="col" data-garage-column="availability" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="availability">Наличие<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              <th scope="col" data-garage-column="deliveryDate" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="deliveryDate">Доставка<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              <th scope="col" data-garage-column="availability" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="availability">Остаток<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="quantity" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="quantity">Количество<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-              <th scope="col" data-garage-column="purchase-price" id="garage-purchase-price-heading" hidden aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="purchasePrice">Закупочная цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="price" aria-sort="ascending"><button type="button" class="table-sort is-active" data-garage-sort-key="price">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="sum" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="sum">Сумма<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" class="garage-actions-column"><span class="visually-hidden">Удалить товар</span></th>
@@ -512,7 +507,6 @@
     </aside>
 
     <div class="result-context-menu card border-0 shadow" id="result-context-menu" role="menu" hidden>
-      <button type="button" id="open-result-button" role="menuitem">Открыть предложение</button>
       <button type="button" id="search-result-button" role="menuitem" hidden>Выполнить поиск</button>
       <button type="button" id="show-analogs-button" role="menuitem">Показать аналоги</button>
     </div>
@@ -580,9 +574,6 @@
                 <label class="analogs-markup" for="analogs-markup-percent">Наценка
                   <span><input id="analogs-markup-percent" type="number" min="0" max="1000" step="1" inputmode="decimal" /><b>%</b></span>
                 </label>
-                <button type="button" class="purchase-price-toggle" id="analogs-purchase-price-toggle" aria-pressed="false" aria-label="Показать закупочные цены" title="Показать закупочные цены">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.8" /><path d="m3 3 18 18" /></svg>
-                </button>
               </div>
             </div>
             <div class="search-loading analogs-search-loading" id="analogs-search-loading" role="status" aria-live="polite" hidden>
@@ -601,10 +592,9 @@
                   <th data-analog-column="brand"><button type="button" class="analogs-sort" data-analog-sort-key="brand">Бренд<span aria-hidden="true"></span></button></th>
                   <th data-analog-column="article"><button type="button" class="analogs-sort" data-analog-sort-key="article">Артикул<span aria-hidden="true"></span></button></th>
                   <th data-analog-column="title"><button type="button" class="analogs-sort" data-analog-sort-key="title">Наименование<span aria-hidden="true"></span></button></th>
-                  <th data-analog-column="quantity"><button type="button" class="analogs-sort" data-analog-sort-key="quantity">Количество<span aria-hidden="true"></span></button></th>
-                  <th data-analog-column="purchasePrice" hidden><button type="button" class="analogs-sort is-active" data-analog-sort-key="price">Закупочная цена<span aria-hidden="true"></span></button></th>
-                  <th data-analog-column="markupPrice"><button type="button" class="analogs-sort" data-analog-sort-key="markupPrice">Цена<span aria-hidden="true"></span></button></th>
                   <th data-analog-column="deliveryDate"><button type="button" class="analogs-sort" data-analog-sort-key="deliveryDate">Доставка<span aria-hidden="true"></span></button></th>
+                  <th data-analog-column="quantity"><button type="button" class="analogs-sort" data-analog-sort-key="quantity">Остаток<span aria-hidden="true"></span></button></th>
+                  <th data-analog-column="markupPrice"><button type="button" class="analogs-sort" data-analog-sort-key="markupPrice">Цена<span aria-hidden="true"></span></button></th>
                   <th class="garage-add-column"><span class="visually-hidden">Добавить в гараж</span></th>
                 </tr></thead>
                 <tbody id="analogs-results-body"></tbody>
