@@ -41,7 +41,13 @@ export type ForumAutoApiRequester = (
 ) => Promise<unknown>;
 
 const forumAutoApiBaseUrl = new URL("https://api.forum-auto.ru/v2/");
-const forumAutoSiteUrl = "https://forum-auto.ru/";
+const forumAutoSiteUrl = new URL("https://itrade.forum-auto.ru/shop/index.html");
+
+function forumAutoProductUrl(article: string): string {
+  const url = new URL(forumAutoSiteUrl);
+  url.searchParams.set("article", article);
+  return url.toString();
+}
 
 function normalizeArticle(value: string): string {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
@@ -188,7 +194,7 @@ function normalizeForumAutoOffer(offer: ForumAutoOffer, isAnalog: boolean): Norm
     deliveryDate: deliveryDateFromDuration(offer.d_deliv, offer.h_deliv),
     deliveryDateApproximate: true,
     ...(isReturnable === null ? {} : { isReturnable }),
-    link: forumAutoSiteUrl,
+    link: forumAutoProductUrl(article),
     ...(isAnalog ? { isAnalog: true } : {}),
   };
 }

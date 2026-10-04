@@ -211,6 +211,12 @@
             <span class="panel__meta results-count" id="garage-result-count" tabindex="0">0</span>
           </div>
           <div class="results-panel__controls">
+            <form class="garage-group-form" id="garage-group-form">
+              <label class="visually-hidden" for="garage-group-name">Название группы</label>
+              <input class="garage-group-form__input" id="garage-group-name" type="text" maxlength="120" placeholder="Новая группа, например: Стойки" autocomplete="off" required />
+              <button type="submit" class="btn btn-light garage-inline-action">Создать группу</button>
+            </form>
+            <span class="garage-total" id="garage-total" aria-live="polite"></span>
             <label class="table-search-control" for="garage-table-search">
               <span class="visually-hidden">Поиск по таблице гаража</span>
               <input id="garage-table-search" type="search" placeholder="Бренд, артикул или название" autocomplete="off" />
@@ -507,18 +513,6 @@
       </div>
     </aside>
 
-    <div class="supplier-check" id="supplier-check" role="dialog" aria-modal="true" aria-labelledby="supplier-check-title" tabindex="-1" hidden>
-      <div class="supplier-check__card card border-0 shadow-lg">
-        <span class="supplier-check__spinner" aria-hidden="true"></span>
-        <div class="supplier-check__body" aria-live="polite">
-          <h2 id="supplier-check-title">Необходимо проверить поставщиков</h2>
-          <p id="supplier-check-message">Пожалуйста, подождите.</p>
-          <ul class="supplier-check__list" id="supplier-check-list"></ul>
-          <button type="button" class="btn btn-primary supplier-check__ok" id="supplier-check-ok" hidden>OK</button>
-        </div>
-      </div>
-    </div>
-
     <div class="result-context-menu card border-0 shadow" id="result-context-menu" role="menu" hidden>
       <button type="button" id="open-result-button" role="menuitem">Открыть предложение</button>
       <button type="button" id="search-result-button" role="menuitem" hidden>Выполнить поиск</button>
@@ -654,6 +648,9 @@
         <form id="garage-add-form">
           <label class="garage-add-modal__field" id="garage-add-vehicle-picker">Автомобиль<input class="garage-add-modal__input garage-add-modal__search" id="garage-add-search" type="search" placeholder="Поиск автомобиля" autocomplete="off" /></label>
           <div class="garage-add-modal__vehicles" id="garage-add-vehicles"></div>
+          <label class="garage-add-modal__field" id="garage-add-group-field" hidden>Группа
+            <select class="garage-add-modal__input" id="garage-add-group"><option value="">Без группы</option></select>
+          </label>
           <label class="garage-add-modal__field">Количество<input class="garage-add-modal__input" id="garage-add-quantity" type="number" min="0.001" step="0.001" value="1" required /></label>
           <div class="garage-add-modal__duplicate" id="garage-add-duplicate" hidden>
             <p>Такая позиция уже добавлена в автомобиль.</p>

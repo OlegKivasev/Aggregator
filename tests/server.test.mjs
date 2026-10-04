@@ -450,7 +450,7 @@ test("Forum-Auto normalizes documented listGoods offers", () => {
   assert.equal(results[0].price, 194.04);
   assert.equal(results[0].deliveryDateApproximate, true);
   assert.ok(results[0].deliveryDate);
-  assert.equal(results[0].link, "https://forum-auto.ru/");
+  assert.equal(results[0].link, "https://itrade.forum-auto.ru/shop/index.html?article=OC+47");
   assert.equal(results[0].isReturnable, false);
   assert.equal(results[1].quantity, null);
   assert.equal(results[1].isReturnable, undefined);

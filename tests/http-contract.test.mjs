@@ -175,6 +175,28 @@ test("JSON endpoints reject malformed and incomplete requests", async () => {
   assert.deepEqual(await invalidValidation.json(), { message: "suppliers must contain supported supplier IDs" });
 });
 
+test("garage creates persisted groups for a vehicle", async () => {
+  const createdVehicle = await fetch(`${baseUrl}/api/garage/vehicles`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Toyota Camry" }),
+  });
+  assert.equal(createdVehicle.status, 201);
+  const { vehicle } = await createdVehicle.json();
+
+  const createdGroup = await fetch(`${baseUrl}/api/garage/vehicles/${vehicle.id}/groups`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vehicleRevision: vehicle.revision, name: "Стойки" }),
+  });
+  assert.equal(createdGroup.status, 201);
+  assert.equal((await createdGroup.json()).group.name, "Стойки");
+
+  const details = await fetch(`${baseUrl}/api/garage/vehicles/${vehicle.id}`);
+  assert.equal(details.status, 200);
+  assert.deepEqual((await details.json()).vehicle.groups.map((group) => group.name), ["Стойки"]);
+});
+
 test("search endpoint preserves validation and non-stream behavior", async () => {
   const nonStream = await fetch(`${baseUrl}/api/search?article=ABC-123`);
   assert.equal(nonStream.status, 204);

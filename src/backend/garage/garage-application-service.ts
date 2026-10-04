@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { NormalizedSearchResult } from "../types.ts";
-import type { GarageAvailabilityStatus, GarageItem, GarageOfferLookup, GarageRepository, GarageSearchOffer, GarageVehicle, GarageVehicleDetails } from "./types.ts";
+import type { GarageAvailabilityStatus, GarageGroup, GarageItem, GarageOfferLookup, GarageRepository, GarageSearchOffer, GarageVehicle, GarageVehicleDetails } from "./types.ts";
 
 const maxNameLength = 120;
 const maxCommentLength = 1_000;
@@ -35,6 +35,13 @@ function normalizeRevision(value: unknown): number {
 }
 function normalizeMarkup(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000) throw new GarageValidationError("markupPercent is invalid");
+  return value;
+}
+function normalizeGroupId(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    throw new GarageValidationError("groupId is invalid");
+  }
   return value;
 }
 function sameText(left: string, right: string): boolean { return left.trim().toLocaleLowerCase("ru-RU") === right.trim().toLocaleLowerCase("ru-RU"); }
@@ -98,16 +105,28 @@ export class GarageApplicationService {
     if (result === "missing") throw new GarageNotFoundError();
   }
 
-  addOffer(vehicleId: string, vehicleRevision: unknown, offerId: unknown, markupPercent: unknown, requiredQuantity: unknown, strategy: unknown): GarageItem | { duplicate: GarageItem } {
+  createGroup(vehicleId: string, vehicleRevision: unknown, name: unknown): GarageGroup {
+    const timestamp = now();
+    const group: GarageGroup = {
+      id: randomUUID(), vehicleId, revision: 1, name: normalizeText(name, "name", maxNameLength), createdAt: timestamp, updatedAt: timestamp,
+    };
+    const result = this.repository.createGroup(group, normalizeRevision(vehicleRevision), timestamp);
+    if (result === "conflict") throw new GarageConflictError();
+    if (result === "missing") throw new GarageNotFoundError();
+    return group;
+  }
+
+  addOffer(vehicleId: string, vehicleRevision: unknown, offerId: unknown, markupPercent: unknown, requiredQuantity: unknown, strategy: unknown, groupId: unknown): GarageItem | { duplicate: GarageItem } {
     const offer = this.getOffer(offerId);
     const revision = normalizeRevision(vehicleRevision);
     const quantity = normalizeQuantity(requiredQuantity);
     const markup = normalizeMarkup(markupPercent);
+    const normalizedGroupId = this.groupForVehicle(vehicleId, groupId);
     const snapshot = offer.result;
     if (typeof snapshot.quantity === "number" && Number.isFinite(snapshot.quantity) && snapshot.quantity >= 0 && quantity > snapshot.quantity) {
       throw new GarageValidationError("requiredQuantity exceeds supplier quantity");
     }
-    const duplicate = this.repository.findDuplicate(vehicleId, snapshot.supplier, snapshot.brand, snapshot.article, snapshot.warehouse);
+    const duplicate = this.repository.findDuplicate(vehicleId, normalizedGroupId, snapshot.supplier, snapshot.brand, snapshot.article, snapshot.warehouse);
     if (duplicate && strategy === undefined) return { duplicate };
     if (strategy === "increment") {
       if (!duplicate) throw new GarageConflictError();
@@ -120,15 +139,17 @@ export class GarageApplicationService {
       return result;
     }
     if (strategy !== undefined && strategy !== "new") throw new GarageValidationError("duplicateStrategy is invalid");
-    const item = this.itemFromOffer(vehicleId, snapshot, quantity, markup);
+    const item = this.itemFromOffer(vehicleId, normalizedGroupId, snapshot, quantity, markup);
     const result = this.repository.createItem(item, revision, now());
     if (result === "conflict") throw new GarageConflictError();
     if (result === "missing") throw new GarageNotFoundError();
     return item;
   }
 
-  updateItem(id: string, revision: unknown, requiredQuantity: unknown, comment: unknown): GarageItem {
-    const result = this.repository.updateItem(id, normalizeRevision(revision), normalizeQuantity(requiredQuantity), normalizeComment(comment), now());
+  updateItem(id: string, revision: unknown, requiredQuantity: unknown, comment: unknown, groupId: unknown): GarageItem {
+    const item = this.repository.findItem(id);
+    if (!item) throw new GarageNotFoundError();
+    const result = this.repository.updateItem(id, normalizeRevision(revision), normalizeQuantity(requiredQuantity), normalizeComment(comment), this.groupForVehicle(item.vehicleId, groupId), now());
     if (result === "conflict") throw new GarageConflictError();
     if (result === "missing") throw new GarageNotFoundError();
     return result;
@@ -173,11 +194,19 @@ export class GarageApplicationService {
     for (const [id, offer] of this.offers) if (offer.expiresAt < Date.now()) this.offers.delete(id);
   }
 
-  private itemFromOffer(vehicleId: string, offer: NormalizedSearchResult, requiredQuantity: number, markupPercent: number): GarageItem {
+  private groupForVehicle(vehicleId: string, value: unknown): string | null {
+    const groupId = normalizeGroupId(value);
+    if (!groupId) return null;
+    const group = this.repository.findGroup(groupId);
+    if (!group || group.vehicleId !== vehicleId) throw new GarageValidationError("groupId is invalid");
+    return groupId;
+  }
+
+  private itemFromOffer(vehicleId: string, groupId: string | null, offer: NormalizedSearchResult, requiredQuantity: number, markupPercent: number): GarageItem {
     if (!Number.isFinite(offer.price) || offer.price <= 0 || !isValidDate(offer.deliveryDate)) throw new GarageValidationError("search offer is invalid");
     const quantity = typeof offer.quantity === "number" && Number.isFinite(offer.quantity) && offer.quantity >= 0 ? offer.quantity : null;
     return {
-      id: randomUUID(), vehicleId, revision: 1, supplier: offer.supplier, brand: normalizeText(offer.brand, "brand", 120),
+      id: randomUUID(), vehicleId, groupId, revision: 1, supplier: offer.supplier, brand: normalizeText(offer.brand, "brand", 120),
       article: normalizeText(offer.article, "article", 128), title: normalizeText(offer.title, "title", 500),
       warehouse: offer.warehouse === null ? null : normalizeText(offer.warehouse, "warehouse", 300), deliveryDate: offer.deliveryDate,
       link: safeLink(offer.link), supplierQuantity: quantity, requiredQuantity, purchasePrice: offer.price,

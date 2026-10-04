@@ -13,6 +13,7 @@ export interface GarageVehicle {
 export interface GarageItem {
   id: string;
   vehicleId: string;
+  groupId: string | null;
   revision: number;
   supplier: SupplierId;
   brand: string;
@@ -31,8 +32,18 @@ export interface GarageItem {
   availabilityStatus: GarageAvailabilityStatus;
 }
 
+export interface GarageGroup {
+  id: string;
+  vehicleId: string;
+  revision: number;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface GarageVehicleDetails extends GarageVehicle {
   items: GarageItem[];
+  groups: GarageGroup[];
 }
 
 export interface GarageSearchOffer {
@@ -46,10 +57,13 @@ export interface GarageRepository {
   createVehicle(vehicle: GarageVehicle): GarageVehicle;
   renameVehicle(id: string, revision: number, name: string, updatedAt: string): GarageVehicle | "conflict" | null;
   deleteVehicle(id: string, revision: number): "deleted" | "conflict" | "missing";
+  createGroup(group: GarageGroup, vehicleRevision: number, updatedAt: string): "created" | "conflict" | "missing";
   createItem(item: GarageItem, vehicleRevision: number, updatedAt: string): "created" | "conflict" | "missing";
-  findDuplicate(vehicleId: string, supplier: SupplierId, brand: string, article: string, warehouse: string | null): GarageItem | null;
+  findGroup(id: string): GarageGroup | null;
+  findItem(id: string): GarageItem | null;
+  findDuplicate(vehicleId: string, groupId: string | null, supplier: SupplierId, brand: string, article: string, warehouse: string | null): GarageItem | null;
   incrementItem(id: string, revision: number, increment: number, updatedAt: string): GarageItem | "conflict" | "missing";
-  updateItem(id: string, revision: number, requiredQuantity: number, comment: string, updatedAt: string): GarageItem | "conflict" | "missing";
+  updateItem(id: string, revision: number, requiredQuantity: number, comment: string, groupId: string | null, updatedAt: string): GarageItem | "conflict" | "missing";
   deleteItem(id: string, revision: number, updatedAt: string): "deleted" | "conflict" | "missing";
   refreshItem(item: GarageItem, updatedAt: string): void;
   close(): void;

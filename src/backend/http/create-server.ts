@@ -193,7 +193,7 @@ export function createAggregatorServer({
       return;
     }
 
-    const vehicleMatch = /^\/api\/garage\/vehicles\/([0-9a-f-]{36})(?:\/(items|refresh))?$/.exec(url.pathname);
+    const vehicleMatch = /^\/api\/garage\/vehicles\/([0-9a-f-]{36})(?:\/(items|refresh|groups))?$/.exec(url.pathname);
     if (vehicleMatch) {
       const [, vehicleId, action] = vehicleMatch;
       try {
@@ -214,8 +214,13 @@ export function createAggregatorServer({
         }
         if (action === "items" && request.method === "POST") {
           const payload = garagePayload(await readJsonBody(request));
-          const item = garage.addOffer(vehicleId, payload.vehicleRevision, payload.offerId, payload.markupPercent, payload.requiredQuantity, payload.duplicateStrategy);
+          const item = garage.addOffer(vehicleId, payload.vehicleRevision, payload.offerId, payload.markupPercent, payload.requiredQuantity, payload.duplicateStrategy, payload.groupId);
           serveJson(response, "duplicate" in item ? 409 : 201, "duplicate" in item ? { duplicate: item.duplicate } : { item });
+          return;
+        }
+        if (action === "groups" && request.method === "POST") {
+          const payload = garagePayload(await readJsonBody(request));
+          serveJson(response, 201, { group: garage.createGroup(vehicleId, payload.vehicleRevision, payload.name) });
           return;
         }
         if (action === "refresh" && request.method === "POST") {
@@ -234,7 +239,7 @@ export function createAggregatorServer({
       try {
         const payload = garagePayload(await readJsonBody(request));
         if (request.method === "PATCH") {
-          serveJson(response, 200, { item: garage.updateItem(itemMatch[1], payload.revision, payload.requiredQuantity, payload.comment) });
+          serveJson(response, 200, { item: garage.updateItem(itemMatch[1], payload.revision, payload.requiredQuantity, payload.comment, payload.groupId) });
           return;
         }
         if (request.method === "DELETE") {

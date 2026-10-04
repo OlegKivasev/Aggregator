@@ -31,6 +31,9 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const itemsBody = document.querySelector("#garage-items");
   const status = document.querySelector("#garage-status");
   const resultCount = document.querySelector("#garage-result-count");
+  const total = document.querySelector("#garage-total");
+  const groupForm = document.querySelector("#garage-group-form");
+  const groupName = document.querySelector("#garage-group-name");
   const tableSearch = document.querySelector("#garage-table-search");
   const filtersToggle = document.querySelector("#garage-filters-toggle");
   const filtersSidebar = document.querySelector("#garage-filters-sidebar");
@@ -55,6 +58,8 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const modalSearch = document.querySelector("#garage-add-search");
   const modalVehicles = document.querySelector("#garage-add-vehicles");
   const modalQuantity = document.querySelector("#garage-add-quantity");
+  const modalGroupField = document.querySelector("#garage-add-group-field");
+  const modalGroup = document.querySelector("#garage-add-group");
   const modalConfirm = document.querySelector("#garage-add-confirm");
   const modalDuplicate = document.querySelector("#garage-add-duplicate");
   const modalDuplicateIncrement = document.querySelector("#garage-add-duplicate-increment");
@@ -164,12 +169,6 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const showSearch = () => { garageWorkspace.hidden = true; titlebar.hidden = true; workspace.hidden = false; searchShell.hidden = false; searchTabs.hidden = false; };
   const showVehicle = async (id) => {
     const { payload } = await api(`/api/garage/vehicles/${encodeURIComponent(id)}`);
-    if (!payload.vehicle.items.length) {
-      if (!view.hidden) showSearch();
-      if (selectedVehicle?.id === id) selectedVehicle = null;
-      showToast(`В «${payload.vehicle.name}» пока нет товаров. Добавьте позицию из результатов поиска.`);
-      return;
-    }
     selectedVehicle = payload.vehicle;
     viewName.textContent = selectedVehicle.name;
     workspace.hidden = true;
@@ -349,10 +348,28 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     for (const vehicle of vehicles.filter((candidate) => candidate.name.toLocaleLowerCase("ru-RU").includes(term))) {
       const button = element("button", vehicle.name, "btn btn-light garage-add-modal__vehicle");
       button.type = "button";
+      button.dataset.vehicleId = vehicle.id;
       if (vehicle.id === selectedAddVehicleId) button.classList.add("is-selected");
-      button.addEventListener("click", () => { selectedAddVehicleId = vehicle.id; modalConfirm.disabled = false; modalVehicles.querySelectorAll("button").forEach((item) => item.classList.remove("is-selected")); button.classList.add("is-selected"); });
+      button.addEventListener("click", () => { selectAddVehicle(vehicle.id).catch((error) => showToast(error.message, "error")); });
       modalVehicles.append(button);
     }
+  };
+  const renderModalGroups = (groups = []) => {
+    modalGroup.replaceChildren(element("option", "Без группы"));
+    modalGroup.firstElementChild.value = "";
+    for (const group of groups) {
+      const option = element("option", group.name);
+      option.value = group.id;
+      modalGroup.append(option);
+    }
+    modalGroupField.hidden = !selectedAddVehicleId;
+  };
+  const selectAddVehicle = async (vehicleId) => {
+    selectedAddVehicleId = vehicleId;
+    modalConfirm.disabled = false;
+    modalVehicles.querySelectorAll("button").forEach((item) => item.classList.toggle("is-selected", item.dataset.vehicleId === vehicleId));
+    const { payload } = await api(`/api/garage/vehicles/${encodeURIComponent(vehicleId)}`);
+    if (selectedAddVehicleId === vehicleId) renderModalGroups(payload.vehicle.groups);
   };
   const garageSortValue = (item, key) => {
     if (key === "availability") return item.supplierQuantity ?? -1;
@@ -386,6 +403,32 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     resultCount.dataset.tooltip = breakdown;
     resultCount.title = `Показано предложений: ${items.length}`;
     resultCount.setAttribute("aria-label", breakdown ? `По поставщикам:\n${breakdown}` : "Нет предложений");
+  };
+  const sumGarageItems = (items) => items.reduce((sum, item) => sum + item.regularPrice * item.requiredQuantity, 0);
+  const renderGarageTotal = () => {
+    total.textContent = `Итого: ${formatPrice(sumGarageItems(selectedVehicle.items))}`;
+  };
+  const groupItems = (items) => {
+    const groups = selectedVehicle.groups.map((group) => ({ id: group.id, name: group.name }));
+    const byId = new Map(groups.map((group) => [group.id, []]));
+    const ungrouped = [];
+    for (const item of items) {
+      const group = item.groupId ? byId.get(item.groupId) : null;
+      if (group) group.push(item); else ungrouped.push(item);
+    }
+    const sections = groups.map((group) => ({ ...group, items: byId.get(group.id) ?? [] })).filter((group) => group.items.length);
+    if (ungrouped.length || !groups.length) sections.push({ id: null, name: groups.length ? "Без группы" : "Все товары", items: ungrouped });
+    return sections;
+  };
+  const appendGroupSummary = (name, items) => {
+    const row = element("tr", undefined, "garage-group-summary");
+    const cell = document.createElement("td");
+    cell.colSpan = getGarageVisibleColumns().length + 1;
+    const label = element("strong", name);
+    const sum = element("span", formatPrice(sumGarageItems(items)));
+    cell.append(label, sum);
+    row.append(cell);
+    itemsBody.append(row);
   };
   const getGarageFilterValue = (item, column) => {
     if (column === "supplier") return item.supplier;
@@ -430,6 +473,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     itemsBody.replaceChildren();
     updateGarageSortHeaders();
     updateGarageResultCount(selectedVehicle.items);
+    renderGarageTotal();
     renderGarageFilters();
     applyGarageTableColumns();
     const term = garageTableSearchTerm.toLocaleLowerCase("ru-RU");
@@ -444,7 +488,9 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       itemsBody.append(empty);
       return;
     }
-    for (const item of [...visibleItems].sort(compareGarageItems)) {
+    for (const group of groupItems(visibleItems)) {
+      appendGroupSummary(group.name, group.items);
+      for (const item of [...group.items].sort(compareGarageItems)) {
       const row = element("tr", undefined, item.availabilityStatus === "available" || item.availabilityStatus === "unknown" ? "" : "garage-item--problem");
       const cells = [["supplier", item.supplier], ["brand", formatBrand(item.brand)], ["article", formatArticle(item.article)], ["title", item.title], ["availability", formatQuantity(item.supplierQuantity)]];
       for (const [column, value] of cells) {
@@ -487,6 +533,24 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       const regularPriceCell = element("td", formatPrice(item.regularPrice)); regularPriceCell.dataset.garageColumn = "price"; row.append(regularPriceCell);
       const sumCell = element("td", formatPrice(item.regularPrice * item.requiredQuantity)); sumCell.dataset.garageColumn = "sum"; row.append(sumCell);
       const actions = document.createElement("td"); actions.className = "garage-actions-cell";
+      const assignment = document.createElement("select"); assignment.className = "garage-item-group"; assignment.setAttribute("aria-label", `Группа для «${item.title}»`);
+      const noGroup = element("option", "Без группы"); noGroup.value = ""; assignment.append(noGroup);
+      for (const group of selectedVehicle.groups) {
+        const option = element("option", group.name); option.value = group.id; option.selected = group.id === item.groupId; assignment.append(option);
+      }
+      assignment.addEventListener("change", async () => {
+        assignment.disabled = true;
+        try {
+          await api(`/api/garage/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ revision: item.revision, requiredQuantity: item.requiredQuantity, comment: item.comment, groupId: assignment.value || null }) });
+          await showVehicle(selectedVehicle.id);
+        } catch (error) {
+          setStatus(error.message);
+          showToast(error.message, "error");
+          assignment.value = item.groupId ?? "";
+          assignment.disabled = false;
+        }
+      });
+      actions.append(assignment);
       const remove = document.createElement("button"); remove.type = "button"; remove.className = "garage-item-remove"; remove.title = "Удалить товар"; remove.setAttribute("aria-label", `Удалить «${item.title}»`);
       const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg"); icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
       ["M4 7h16", "M10 11v6", "M14 11v6", "M6.5 7 7.5 20h9l1-13", "M9 7V4h6v3"].forEach((pathData) => { const path = document.createElementNS("http://www.w3.org/2000/svg", "path"); path.setAttribute("d", pathData); icon.append(path); });
@@ -503,6 +567,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
         }
       });
       actions.append(remove); row.append(actions); itemsBody.append(row);
+      }
     }
   };
   const openAdd = (offerId, vehicleId = null, supplierQuantity = null) => {
@@ -530,6 +595,10 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     modalSearch.value = "";
     modalQuantity.value = "1";
     setModalQuantityMaximum(pendingOfferQuantity);
+    renderModalGroups(selectedVehicle?.id === selectedAddVehicleId ? selectedVehicle.groups : []);
+    if (selectedAddVehicleId && selectedVehicle?.id !== selectedAddVehicleId) {
+      selectAddVehicle(selectedAddVehicleId).catch((error) => showToast(error.message, "error"));
+    }
     renderModalVehicles();
     requestAnimationFrame(() => (hasSelectedVehicle ? modalQuantity : modalSearch).focus());
   };
@@ -545,6 +614,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     pendingOfferQuantity = null;
     setModalQuantityMaximum(null);
     selectedAddVehicleId = null;
+    renderModalGroups();
   };
   toggle.addEventListener("click", () => setSidebarOpen(sidebar.hidden));
   sidebar.addEventListener("dragenter", (event) => { event.preventDefault(); sidebar.classList.add("is-drop-target"); });
@@ -623,6 +693,24 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     selectedFilterValues.forEach((values) => values.clear());
     renderItems();
   });
+  groupForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!selectedVehicle) return;
+    const name = groupName.value.trim();
+    if (!name) return;
+    try {
+      const { payload: currentVehiclePayload } = await api(`/api/garage/vehicles/${selectedVehicle.id}`);
+      const vehicleRevision = currentVehiclePayload?.vehicle?.revision;
+      if (!Number.isInteger(vehicleRevision)) throw new Error("Не удалось обновить данные автомобиля.");
+      await api(`/api/garage/vehicles/${selectedVehicle.id}/groups`, { method: "POST", body: JSON.stringify({ vehicleRevision, name }) });
+      groupName.value = "";
+      await showVehicle(selectedVehicle.id);
+      showToast(`Группа «${name}» создана.`, "success");
+    } catch (error) {
+      setStatus(error.message);
+      showToast(error.message, "error");
+    }
+  });
   modalSearch.addEventListener("input", renderModalVehicles);
   create.addEventListener("click", () => {
     deletingVehicleId = null;
@@ -673,7 +761,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       const { payload: currentVehiclePayload } = await api(`/api/garage/vehicles/${vehicle.id}`);
       const currentVehicleRevision = currentVehiclePayload?.vehicle?.revision;
       if (!Number.isInteger(currentVehicleRevision)) throw new Error("Не удалось обновить данные автомобиля.");
-      const result = await api(`/api/garage/vehicles/${vehicle.id}/items`, { method: "POST", body: JSON.stringify({ vehicleRevision: currentVehicleRevision, offerId: pendingOfferId, markupPercent: getMarkupPercent(), requiredQuantity, ...(duplicateStrategy ? { duplicateStrategy } : {}) }) }, true);
+      const result = await api(`/api/garage/vehicles/${vehicle.id}/items`, { method: "POST", body: JSON.stringify({ vehicleRevision: currentVehicleRevision, offerId: pendingOfferId, markupPercent: getMarkupPercent(), requiredQuantity, groupId: modalGroup.value || null, ...(duplicateStrategy ? { duplicateStrategy } : {}) }) }, true);
       if (result.response.status === 409 && result.payload?.duplicate && !duplicateStrategy) {
         const supplierQuantity = result.payload.duplicate.supplierQuantity;
         if (typeof supplierQuantity === "number" && supplierQuantity >= 0) {

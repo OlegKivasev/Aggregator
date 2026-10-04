@@ -452,7 +452,14 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /const renderVehicleEditor =/);
   assert.match(garage, /const showContextMenu =/);
   assert.match(html, /id="garage-toast" role="status" aria-live="polite" hidden/);
-  assert.match(garage, /showToast\(`В «\$\{payload\.vehicle\.name\}» пока нет товаров/);
+  assert.match(html, /id="garage-group-form"[\s\S]*?id="garage-group-name"/);
+  assert.match(html, /id="garage-total"/);
+  assert.match(html, /id="garage-add-group"/);
+  assert.match(garage, /const groupItems = \(items\) =>/);
+  assert.match(garage, /const renderGarageTotal = \(\) =>/);
+  assert.match(garage, /api\(`\/api\/garage\/vehicles\/\$\{selectedVehicle\.id\}\/groups`/);
+  assert.match(garage, /groupId: modalGroup\.value \|\| null/);
+  assert.match(garage, /className = "garage-item-group"/);
   assert.match(garage, /showToast\(`Товар добавлен в «\$\{vehicle\.name\}»\.`, "success"\)/);
   assert.match(html, /id="garage-titlebar" hidden>[\s\S]*?class="garage-titlebar__heading">\s*<span>Товары для автомобиля<\/span>\s*<h1 id="garage-vehicle-name"/);
   assert.match(html, /class="garage-view results-panel card border-0 shadow-sm overflow-hidden" id="garage-view"/);
@@ -582,17 +589,15 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.doesNotMatch(styles, /\.analogs-results th:nth-child/);
 });
 
-test("search shows authorization progress before waiting for session validation", async () => {
+test("search reports supplier authorization failures without waiting for session validation", async () => {
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
   const submitHandler = app.slice(app.indexOf('form.addEventListener("submit"'));
-  const progressIndex = submitHandler.indexOf("showSupplierSessionCheckProgress(article);");
-  const validationIndex = submitHandler.indexOf("await checkSupplierSessions(article, enabledSuppliers);");
 
-  assert.notEqual(progressIndex, -1);
-  assert.notEqual(validationIndex, -1);
-  assert.ok(progressIndex < validationIndex);
-  assert.match(app, /searchLoadingTitle\.textContent = "Проверяем авторизацию поставщиков";/);
-  assert.match(app, /setSearchUiState\(false\);\s+return;\s+}\s+rememberSupplierSessionsChecked/);
+  assert.doesNotMatch(submitHandler, /checkSupplierSessions|showSupplierSessionCheckProgress/);
+  assert.match(submitHandler, /startSearch\(article, enabledSuppliers\);/);
+  assert.match(app, /payload\.status === "auth_error"[\s\S]*?showSearchToast\(/);
+  assert.match(app, /Поиск по остальным поставщикам продолжается/);
+  assert.doesNotMatch(app, /supplier-check/);
 });
 
 test("search stream parses fragmented multiline SSE data", async () => {
