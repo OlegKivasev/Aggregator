@@ -41,7 +41,11 @@ test("garage persists vehicles, guards revisions, merges known duplicates, and r
     const current = service.getVehicle(vehicle.id);
     assert.deepEqual(current.groups.map(({ name }) => name), ["Стойки"]);
     assert.equal(current.items[0].groupId, group.id);
-    const refreshedVehicle = await service.refreshVehicle(vehicle.id, current.revision, new AbortController().signal);
+    service.deleteGroup(vehicle.id, group.id, current.revision);
+    const ungrouped = service.getVehicle(vehicle.id);
+    assert.deepEqual(ungrouped.groups, []);
+    assert.equal(ungrouped.items[0].groupId, null);
+    const refreshedVehicle = await service.refreshVehicle(vehicle.id, ungrouped.revision, new AbortController().signal);
     assert.equal(refreshedVehicle.items[0].purchasePrice, 120);
     assert.equal(refreshedVehicle.items[0].regularPrice, 162);
     assert.equal(refreshedVehicle.items[0].availabilityStatus, "insufficient");

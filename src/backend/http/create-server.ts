@@ -248,6 +248,16 @@ export function createAggregatorServer({
       } catch (error) { serveGarageError(response, error, reportError, "garage-vehicle"); return; }
     }
 
+    const groupMatch = /^\/api\/garage\/vehicles\/([0-9a-f-]{36})\/groups\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (groupMatch && request.method === "DELETE") {
+      try {
+        const payload = garagePayload(await readJsonBody(request));
+        garage.deleteGroup(groupMatch[1], groupMatch[2], payload.vehicleRevision);
+        serveJson(response, 204, null);
+        return;
+      } catch (error) { serveGarageError(response, error, reportError, "garage-group"); return; }
+    }
+
     const itemMatch = /^\/api\/garage\/items\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (itemMatch) {
       try {

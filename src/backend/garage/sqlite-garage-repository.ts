@@ -133,6 +133,22 @@ export class SqliteGarageRepository implements GarageRepository {
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
   }
 
+  deleteGroup(vehicleId: string, groupId: string, vehicleRevision: number, updatedAt: string): "deleted" | "conflict" | "missing" {
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const vehicle = this.database.prepare("SELECT revision FROM garage_vehicles WHERE id = ?").get(vehicleId) as { revision: number } | undefined;
+      if (!vehicle) { this.database.exec("ROLLBACK"); return "missing"; }
+      if (vehicle.revision !== vehicleRevision) { this.database.exec("ROLLBACK"); return "conflict"; }
+      const group = this.database.prepare("SELECT id FROM garage_groups WHERE id = ? AND vehicle_id = ?").get(groupId, vehicleId);
+      if (!group) { this.database.exec("ROLLBACK"); return "missing"; }
+      this.database.prepare("UPDATE garage_items SET group_id = NULL, revision = revision + 1 WHERE group_id = ?").run(groupId);
+      this.database.prepare("DELETE FROM garage_groups WHERE id = ?").run(groupId);
+      this.database.prepare("UPDATE garage_vehicles SET revision = revision + 1, updated_at = ? WHERE id = ?").run(updatedAt, vehicleId);
+      this.database.exec("COMMIT");
+      return "deleted";
+    } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+  }
+
   createItem(item: GarageItem, vehicleRevision: number, updatedAt: string): "created" | "conflict" | "missing" {
     this.database.exec("BEGIN IMMEDIATE");
     try {

@@ -206,12 +206,6 @@
             <span class="panel__meta results-count" id="garage-result-count" tabindex="0">0</span>
           </div>
           <div class="results-panel__controls">
-            <form class="garage-group-form" id="garage-group-form">
-              <label class="visually-hidden" for="garage-group-name">Название группы</label>
-              <input class="garage-group-form__input" id="garage-group-name" type="text" maxlength="120" placeholder="Новая группа, например: Стойки" autocomplete="off" required />
-              <button type="submit" class="btn btn-light garage-inline-action">Создать группу</button>
-            </form>
-            <span class="garage-total" id="garage-total" aria-live="polite"></span>
             <label class="table-search-control" for="garage-table-search">
               <span class="visually-hidden">Поиск по таблице гаража</span>
               <input id="garage-table-search" type="search" placeholder="Бренд, артикул или название" autocomplete="off" />
@@ -235,8 +229,22 @@
               <tbody id="garage-items"></tbody>
             </table>
           </div>
-        <footer class="results-panel__footer" aria-hidden="true"></footer>
+        <footer class="results-panel__footer garage-view__footer"><span class="garage-total" id="garage-total" aria-live="polite"></span></footer>
       </section>
+      <div class="garage-groups-control">
+        <button type="button" class="filters-toggle garage-groups-toggle" id="garage-groups-toggle" aria-controls="garage-groups-sidebar" aria-expanded="false" aria-label="Открыть группы товаров" title="Открыть группы товаров">☷</button>
+      </div>
+      <aside class="garage-sidebar garage-groups-sidebar card border-0 shadow-sm" id="garage-groups-sidebar" hidden aria-label="Группы товаров">
+        <header class="garage-sidebar__header"><strong>Группы товаров</strong><button type="button" class="new-tab-button btn btn-light garage-create" id="garage-group-create" aria-label="Создать группу" title="Создать группу">+</button></header>
+        <form class="garage-group-editor" id="garage-group-form" hidden>
+          <label class="visually-hidden" for="garage-group-name">Название группы</label>
+          <input class="garage-vehicle-editor__input" id="garage-group-name" type="text" maxlength="120" placeholder="Например: Стойки" autocomplete="off" required />
+          <div class="garage-vehicle-delete__actions"><button type="submit" class="btn btn-primary garage-inline-action garage-vehicle-editor__save">Создать</button><button type="button" class="btn btn-light garage-inline-action" id="garage-group-cancel">Отмена</button></div>
+        </form>
+        <p class="garage-groups__hint">Перетащите товар за кнопку «⋮» в нужную группу.</p>
+        <ul id="garage-groups" class="garage-vehicles garage-groups"></ul>
+        <div class="garage-sidebar__resize" id="garage-groups-resize" role="separator" aria-label="Изменить ширину групп товаров" aria-orientation="vertical" tabindex="0"></div>
+      </aside>
       </div>
       <div class="garage-toast" id="garage-toast" role="status" aria-live="polite" hidden></div>
     </main>
@@ -516,6 +524,11 @@
     <div class="result-context-menu garage-context-menu card border-0 shadow" id="garage-context-menu" role="menu" hidden>
       <button type="button" id="garage-rename-button" role="menuitem">Переименовать</button>
       <button type="button" class="garage-context-menu__delete" id="garage-delete-button" role="menuitem">Удалить</button>
+    </div>
+    <div class="result-context-menu garage-context-menu garage-item-menu card border-0 shadow" id="garage-item-menu" role="menu" hidden>
+      <div class="garage-item-menu__heading">Переместить в группу</div>
+      <div id="garage-item-menu-groups"></div>
+      <button type="button" class="garage-context-menu__delete" id="garage-item-delete-button" role="menuitem">Удалить</button>
     </div>
     <div class="warehouse-tooltip" id="warehouse-tooltip" role="tooltip" hidden></div>
 

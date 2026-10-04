@@ -190,11 +190,23 @@ test("garage creates persisted groups for a vehicle", async () => {
     body: JSON.stringify({ vehicleRevision: vehicle.revision, name: "Стойки" }),
   });
   assert.equal(createdGroup.status, 201);
-  assert.equal((await createdGroup.json()).group.name, "Стойки");
+  const { group } = await createdGroup.json();
+  assert.equal(group.name, "Стойки");
 
   const details = await fetch(`${baseUrl}/api/garage/vehicles/${vehicle.id}`);
   assert.equal(details.status, 200);
-  assert.deepEqual((await details.json()).vehicle.groups.map((group) => group.name), ["Стойки"]);
+  const detailsPayload = await details.json();
+  assert.deepEqual(detailsPayload.vehicle.groups.map((group) => group.name), ["Стойки"]);
+
+  const deletedGroup = await fetch(`${baseUrl}/api/garage/vehicles/${vehicle.id}/groups/${group.id}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vehicleRevision: detailsPayload.vehicle.revision }),
+  });
+  assert.equal(deletedGroup.status, 204);
+
+  const afterDeletion = await fetch(`${baseUrl}/api/garage/vehicles/${vehicle.id}`);
+  assert.deepEqual((await afterDeletion.json()).vehicle.groups, []);
 });
 
 test("table column width preferences persist safely across clients", async () => {

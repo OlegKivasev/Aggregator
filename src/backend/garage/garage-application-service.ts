@@ -148,6 +148,14 @@ export class GarageApplicationService {
     return group;
   }
 
+  deleteGroup(vehicleId: string, groupId: string, vehicleRevision: unknown): void {
+    const normalizedGroupId = normalizeGroupId(groupId);
+    if (normalizedGroupId === null) throw new GarageValidationError("groupId is invalid");
+    const result = this.repository.deleteGroup(vehicleId, normalizedGroupId, normalizeRevision(vehicleRevision), now());
+    if (result === "conflict") throw new GarageConflictError();
+    if (result === "missing") throw new GarageNotFoundError();
+  }
+
   addOffer(vehicleId: string, vehicleRevision: unknown, offerId: unknown, markupPercent: unknown, requiredQuantity: unknown, strategy: unknown, groupId: unknown): GarageItem | { duplicate: GarageItem } {
     const offer = this.getOffer(offerId);
     const revision = normalizeRevision(vehicleRevision);
