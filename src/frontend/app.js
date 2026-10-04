@@ -37,8 +37,6 @@ const searchLoadingNote = document.querySelector("#search-loading-note");
 const searchLoadingCancel = document.querySelector("#search-loading-cancel");
 const cancelSearchButton = document.querySelector("#cancel-search-button");
 const markupPercentInput = document.querySelector("#markup-percent");
-const purchasePriceToggle = document.querySelector("#purchase-price-toggle");
-const analogsPurchasePriceToggle = document.querySelector("#analogs-purchase-price-toggle");
 const tableSearchInput = document.querySelector("#table-search");
 const sortButtons = [...resultsTable.querySelectorAll(".table-sort")];
 const tableColumnInputs = [...document.querySelectorAll(".table-column-input")];
@@ -170,7 +168,6 @@ let tabSequence = 1;
 let results = [];
 let sortState = { key: "markupPrice", direction: "ascending" };
 let markupPercent = 35;
-let showPurchasePrices = false;
 let tableSearchTerm = "";
 let contextMenuResult = null;
 let contextMenuAnchor = null;
@@ -229,10 +226,9 @@ const tableColumnWidths = {
   brand: 125,
   article: 140,
   title: 323,
-  quantity: 120,
-  purchasePrice: 120,
-  markupPrice: 120,
   deliveryDate: 180,
+  quantity: 120,
+  markupPrice: 120,
 };
 const garageActionColumnWidth = 52;
 let visibleTableColumns = new Set(tableColumnIds);
@@ -317,10 +313,9 @@ const analogTableColumnWidths = {
   brand: 125,
   article: 140,
   title: 323,
-  quantity: 120,
-  purchasePrice: 120,
-  markupPrice: 120,
   deliveryDate: 180,
+  quantity: 120,
+  markupPrice: 120,
 };
 const analogTableColumnIds = Object.keys(analogTableColumnWidths);
 
@@ -904,10 +899,7 @@ const updateResultCount = (items) => {
   resultCount.setAttribute("aria-label", breakdown ? `По поставщикам:\n${breakdown}` : "Нет результатов");
 };
 
-const getVisibleTableColumns = () => [
-  ...(showPurchasePrices ? ["purchasePrice"] : []),
-  ...tableColumnIds.filter((column) => visibleTableColumns.has(column)),
-];
+const getVisibleTableColumns = () => tableColumnIds.filter((column) => visibleTableColumns.has(column));
 
 const saveTableColumns = () => {
   try {
@@ -1239,10 +1231,9 @@ const renderResults = () => {
         <td data-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
         <td data-column="title"><div class="result-title-cell">${renderOfferLink(result, result.title)}</div></td>
-        <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
-        <td data-column="purchasePrice">${escapeHtml(formatPrice(result.price))}</td>
-        <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         <td data-column="deliveryDate"><span class="delivery-date">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
+        <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
+        <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</span><span class="main-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         <td class="garage-add-cell"><button type="button" class="garage-offer-button" draggable="${Boolean(result.offerId)}" data-garage-offer-id="${escapeHtml(result.offerId ?? "")}" data-garage-offer-quantity="${Number.isFinite(result.quantity) && result.quantity >= 0 ? result.quantity : ""}" aria-disabled="${!result.offerId}" aria-label="Добавить в гараж" title="Добавить в гараж"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5.1 9.75 1.25-3.2A2.25 2.25 0 0 1 8.45 5h7.1a2.25 2.25 0 0 1 2.1 1.55l1.25 3.2"/><path d="M4.5 10.25h15a1.5 1.5 0 0 1 1.5 1.5v4.75h-2.25V19H16.5v-2.5h-9V19H5.25v-2.5H3v-4.75a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="7.25" cy="13.5" r="1"/><circle cx="16.75" cy="13.5" r="1"/></svg></button></td>
       </tr>
     `;
@@ -1270,19 +1261,6 @@ const setMarkupPercent = (value) => {
   }
   renderResults();
   saveSearchState();
-};
-
-const setPurchasePricesVisible = (visible) => {
-  showPurchasePrices = visible;
-  [purchasePriceToggle, analogsPurchasePriceToggle].forEach((toggle) => {
-    toggle.setAttribute("aria-pressed", String(visible));
-    toggle.setAttribute("aria-label", visible ? "Скрыть закупочные цены" : "Показать закупочные цены");
-    toggle.title = visible ? "Скрыть закупочные цены" : "Показать закупочные цены";
-  });
-  renderResults();
-  if (!analogsModal.hidden) {
-    renderAnalogRowsNow();
-  }
 };
 
 const setAnalogFiltersSidebarWidth = (value) => {
@@ -2149,7 +2127,7 @@ const updateAnalogSortHeaders = () => {
   });
 };
 
-const getVisibleAnalogTableColumns = () => analogTableColumnIds.filter((column) => column !== "purchasePrice" || showPurchasePrices);
+const getVisibleAnalogTableColumns = () => analogTableColumnIds;
 
 const applyAnalogTableColumns = () => {
   const visibleColumns = getVisibleAnalogTableColumns();
@@ -2165,9 +2143,6 @@ const applyAnalogTableColumns = () => {
     const visible = visibleColumns.includes(element.dataset.analogColumn);
     element.hidden = !visible;
     element.style.display = visible ? "" : "none";
-  });
-  analogsModal.querySelectorAll('.analogs-source [data-analog-column="purchasePrice"]').forEach((element) => {
-    element.hidden = !showPurchasePrices;
   });
 };
 
@@ -2215,10 +2190,9 @@ const renderAnalogRows = () => {
         <td data-analog-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-analog-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
         <td class="analogs-result-title" data-analog-column="title">${renderOfferLink(result, result.title)}</td>
-        <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
-        <td data-analog-column="purchasePrice"${showPurchasePrices ? "" : " hidden"}><span class="analogs-result-price">${escapeHtml(formatPrice(result.price))}</span></td>
-        <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
         <td data-analog-column="deliveryDate"><span class="delivery-date">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
+        <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
+        <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span><span class="analogs-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
         <td class="garage-add-cell"><button type="button" class="garage-offer-button" draggable="${Boolean(result.offerId)}" data-garage-offer-id="${escapeHtml(result.offerId ?? "")}" data-garage-offer-quantity="${Number.isFinite(result.quantity) && result.quantity >= 0 ? result.quantity : ""}" aria-disabled="${!result.offerId}" aria-label="Добавить в гараж" title="Добавить в гараж"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5.1 9.75 1.25-3.2A2.25 2.25 0 0 1 8.45 5h7.1a2.25 2.25 0 0 1 2.1 1.55l1.25 3.2"/><path d="M4.5 10.25h15a1.5 1.5 0 0 1 1.5 1.5v4.75h-2.25V19H16.5v-2.5h-9V19H5.25v-2.5H3v-4.75a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="7.25" cy="13.5" r="1"/><circle cx="16.75" cy="13.5" r="1"/></svg></button></td>
       </tr>`;
   }).join("");
@@ -2946,13 +2920,6 @@ supplierSearchSelectionsRestored = true;
 markupPercentInput.addEventListener("change", () => {
   setMarkupPercent(markupPercentInput.value);
 });
-purchasePriceToggle.addEventListener("click", () => {
-  setPurchasePricesVisible(!showPurchasePrices);
-});
-analogsPurchasePriceToggle.addEventListener("click", () => {
-  setPurchasePricesVisible(!showPurchasePrices);
-});
-
 tableSearchInput.addEventListener("input", () => {
   tableSearchTerm = tableSearchInput.value;
   renderResults();

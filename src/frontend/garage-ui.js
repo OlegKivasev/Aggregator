@@ -48,8 +48,6 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   };
   const back = document.querySelector("#garage-back");
   const refresh = document.querySelector("#garage-refresh");
-  const priceToggle = document.querySelector("#garage-price-toggle");
-  const purchasePriceHeading = document.querySelector("#garage-purchase-price-heading");
   const garageSortButtons = [...document.querySelectorAll("[data-garage-sort-key]")];
   const resize = document.querySelector("#garage-resize");
   const modal = document.querySelector("#garage-add-modal");
@@ -74,7 +72,6 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   let selectedAddVehicleId = null;
   let pendingOfferId = null;
   let pendingOfferQuantity = null;
-  let showPurchase = false;
   let garageTableSearchTerm = "";
   let garageSortState = { key: "price", direction: "ascending" };
   const selectedFilterValues = new Map(["supplier", "brand", "article", "availability"].map((column) => [column, new Set()]));
@@ -88,7 +85,7 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
   const widthStorageKey = "autoservice-garage-sidebar-width-v1";
   const filtersWidthStorageKey = "autoservice-garage-filters-width-v1";
   const closeThresholdRatio = 0.02;
-  const garageColumnWidths = { supplier: 100, brand: 125, article: 140, title: 323, deliveryDate: 180, availability: 120, quantity: 120, purchasePrice: 120, price: 120, sum: 120 };
+  const garageColumnWidths = { supplier: 100, brand: 125, article: 140, title: 323, deliveryDate: 180, availability: 120, quantity: 120, price: 120, sum: 120 };
   const garageActionColumnWidth = 52;
 
   const setStatus = (message) => { status.textContent = message; };
@@ -106,14 +103,6 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
       return;
     }
     modalQuantity.removeAttribute("max");
-  };
-  const setPurchasePricesVisible = (visible) => {
-    showPurchase = visible;
-    priceToggle.setAttribute("aria-pressed", String(visible));
-    priceToggle.setAttribute("aria-label", visible ? "Скрыть закупочные цены" : "Показать закупочные цены");
-    priceToggle.title = visible ? "Скрыть закупочные цены" : "Показать закупочные цены";
-    purchasePriceHeading.hidden = !visible;
-    if (selectedVehicle) renderItems();
   };
   const setFiltersOpen = (open) => {
     filtersSidebar.hidden = !open;
@@ -376,7 +365,6 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     if (key === "availability") return item.supplierQuantity ?? -1;
     if (key === "quantity") return item.requiredQuantity;
     if (key === "price") return item.regularPrice;
-    if (key === "purchasePrice") return item.purchasePrice;
     if (key === "sum") return item.regularPrice * item.requiredQuantity;
     if (key === "deliveryDate") {
       const timestamp = item.deliveryDate ? new Date(item.deliveryDate).getTime() : Number.NaN;
@@ -461,16 +449,14 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     filtersReset.hidden = ![...selectedFilterValues.values()].some((values) => values.size > 0);
   };
   const getGarageVisibleColumns = () => [
-    "supplier", "brand", "article", "title", "deliveryDate", "availability", "quantity",
-    ...(showPurchase ? ["purchasePrice"] : []),
-    "price", "sum",
+    "supplier", "brand", "article", "title", "deliveryDate", "availability", "quantity", "price", "sum",
   ];
   const applyGarageTableColumns = () => {
     const columns = getGarageVisibleColumns();
     const minimumWidth = columns.reduce((width, column) => width + garageColumnWidths[column], garageActionColumnWidth);
     view.style.setProperty("--results-table-min-width", `${minimumWidth}px`);
     view.querySelectorAll("th[data-garage-column]").forEach((header) => {
-      const width = garageColumnWidths[header.dataset.garageColumn === "purchase-price" ? "purchasePrice" : header.dataset.garageColumn];
+      const width = garageColumnWidths[header.dataset.garageColumn];
       header.style.width = !header.hidden && width ? `${width / minimumWidth * 100}%` : "";
     });
   };
@@ -531,11 +517,9 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
         required.select();
       });
       requiredCell.append(requiredDisplay); row.append(requiredCell);
-      const purchasePriceCell = element("td", formatPrice(item.purchasePrice));
-      purchasePriceCell.dataset.garageColumn = "purchase-price";
-      purchasePriceCell.hidden = !showPurchase;
-      row.append(purchasePriceCell);
-      const regularPriceCell = element("td", formatPrice(item.regularPrice)); regularPriceCell.dataset.garageColumn = "price"; row.append(regularPriceCell);
+      const regularPriceCell = document.createElement("td"); regularPriceCell.dataset.garageColumn = "price";
+      regularPriceCell.append(element("span", formatPrice(item.regularPrice), "garage-regular-price"), element("span", formatPrice(item.purchasePrice), "garage-purchase-price"));
+      row.append(regularPriceCell);
       const sumCell = element("td", formatPrice(item.regularPrice * item.requiredQuantity)); sumCell.dataset.garageColumn = "sum"; row.append(sumCell);
       const actions = document.createElement("td"); actions.className = "garage-actions-cell";
       const assignment = document.createElement("select"); assignment.className = "garage-item-group"; assignment.setAttribute("aria-label", `Группа для «${item.title}»`);
@@ -750,7 +734,6 @@ export const bootstrapGarage = ({ getMarkupPercent }) => {
     renderItems();
   }));
   refresh.addEventListener("click", async () => { refresh.disabled = true; try { const { payload } = await api(`/api/garage/vehicles/${selectedVehicle.id}/refresh`, { method: "POST", body: JSON.stringify({ revision: selectedVehicle.revision }) }); selectedVehicle = payload.vehicle; renderItems(); await loadVehicles(); } catch (error) { setStatus(error.message); showToast(error.message, "error"); } finally { refresh.disabled = false; } });
-  priceToggle.addEventListener("click", () => setPurchasePricesVisible(!showPurchase));
   modal.querySelectorAll("[data-garage-close]").forEach((button) => button.addEventListener("click", closeModal));
   const addOfferToVehicle = async (duplicateStrategy) => {
     const vehicle = vehicles.find((item) => item.id === selectedAddVehicleId);
