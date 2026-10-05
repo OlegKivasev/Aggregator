@@ -21,6 +21,8 @@ export interface GarageItem {
   title: string;
   warehouse: string | null;
   deliveryDate: string | null;
+  deliveryDateTo: string | null;
+  deliveryDateApproximate: boolean;
   link: string;
   supplierQuantity: number | null;
   requiredQuantity: number;

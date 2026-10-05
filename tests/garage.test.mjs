@@ -9,7 +9,7 @@ import { SqliteGarageRepository } from "../src/backend/garage/sqlite-garage-repo
 
 const offer = {
   supplier: "rossko", brand: "Toyota", article: "ABC-123", title: "Фильтр", price: 100,
-  quantity: 4, warehouse: "Основной", deliveryDate: "2026-09-11", deliveryDateApproximate: false,
+  quantity: 4, warehouse: "Основной", deliveryDate: "2026-09-11", deliveryDateTo: "2026-09-13", deliveryDateApproximate: true,
   link: "https://rossko.ru/product/123",
 };
 
@@ -27,6 +27,8 @@ test("garage persists vehicles, guards revisions, merges known duplicates, and r
     assert.throws(() => service.addOffer(vehicle.id, vehicle.revision, offerId, 35, 5), GarageValidationError);
     const item = service.addOffer(vehicle.id, vehicle.revision, offerId, 35, 2);
     assert.equal(item.purchasePrice, 100);
+    assert.equal(item.deliveryDateTo, "2026-09-13");
+    assert.equal(item.deliveryDateApproximate, true);
     const details = service.getVehicle(vehicle.id);
     const duplicate = service.addOffer(vehicle.id, details.revision, offerId, 35, 2);
     assert.equal(duplicate.duplicate.id, item.id);
@@ -52,6 +54,8 @@ test("garage persists vehicles, guards revisions, merges known duplicates, and r
     assert.equal(refreshedVehicle.items[0].purchasePrice, 120);
     assert.equal(refreshedVehicle.items[0].regularPrice, 162);
     assert.equal(refreshedVehicle.items[0].availabilityStatus, "insufficient");
+    assert.equal(refreshedVehicle.items[0].deliveryDateTo, "2026-09-13");
+    assert.equal(refreshedVehicle.items[0].deliveryDateApproximate, true);
   } finally {
     repository.close();
     await rm(directory, { recursive: true, force: true });
@@ -85,6 +89,8 @@ test("garage migrates existing items into the ungrouped section", async () => {
     const vehicle = repository.getVehicle(vehicleId);
     assert.deepEqual(vehicle?.groups, []);
     assert.equal(vehicle?.items[0].groupId, null);
+    assert.equal(vehicle?.items[0].deliveryDateTo, null);
+    assert.equal(vehicle?.items[0].deliveryDateApproximate, false);
   } finally {
     repository.close();
     await rm(directory, { recursive: true, force: true });

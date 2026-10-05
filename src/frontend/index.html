@@ -220,7 +220,6 @@
               <th scope="col" data-garage-column="article" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="article">Артикул<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="title" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="title">Наименование<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="deliveryDate" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="deliveryDate">Доставка<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-              <th scope="col" data-garage-column="availability" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="availability">Остаток<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="quantity" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="quantity">Количество<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="price" aria-sort="ascending"><button type="button" class="table-sort is-active" data-garage-sort-key="price">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="sum" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="sum">Сумма<span class="table-sort__icon" aria-hidden="true"></span></button></th>
@@ -241,7 +240,10 @@
           <input class="garage-vehicle-editor__input" id="garage-group-name" type="text" maxlength="120" placeholder="Например: Стойки" autocomplete="off" required />
           <div class="garage-vehicle-delete__actions"><button type="submit" class="btn btn-primary garage-inline-action garage-vehicle-editor__save" id="garage-group-save">Создать</button><button type="button" class="btn btn-light garage-inline-action" id="garage-group-cancel">Отмена</button></div>
         </form>
-        <p class="garage-groups__hint">Перетащите товар за кнопку «⋮» в нужную группу.</p>
+        <form class="garage-search-form search-row" id="garage-group-search-form">
+          <label class="visually-hidden" for="garage-group-search">Поиск группы</label>
+          <input class="search-input" id="garage-group-search" type="search" placeholder="Поиск группы" autocomplete="off" />
+        </form>
         <ul id="garage-groups" class="garage-vehicles garage-groups"></ul>
         <div class="garage-sidebar__resize" id="garage-groups-resize" role="separator" aria-label="Изменить ширину групп товаров" aria-orientation="vertical" tabindex="0"></div>
       </aside>
@@ -528,8 +530,14 @@
     <div class="result-context-menu garage-context-menu garage-item-menu card border-0 shadow" id="garage-item-menu" role="menu" hidden>
       <button type="button" id="garage-item-search-button" role="menuitem">Выполнить поиск</button>
       <div class="garage-item-menu__groups-control" id="garage-item-menu-groups-control">
-        <button type="button" class="garage-item-menu__groups-toggle" id="garage-item-menu-groups-toggle" role="menuitem" aria-controls="garage-item-menu-groups" aria-expanded="false">Переместить в группу<span aria-hidden="true">›</span></button>
-        <div class="garage-item-menu__groups card border-0 shadow" id="garage-item-menu-groups" role="menu" hidden></div>
+        <button type="button" class="garage-item-menu__groups-toggle" id="garage-item-menu-groups-toggle" role="menuitem" aria-controls="garage-item-menu-groups" aria-expanded="false">Группы<span aria-hidden="true">›</span></button>
+        <div class="garage-item-menu__groups card border-0 shadow" id="garage-item-menu-groups" role="menu" hidden>
+          <button type="button" id="garage-item-menu-remove-group" role="menuitem" hidden>Убрать из группы</button>
+          <div class="garage-item-menu__groups-control" id="garage-item-menu-move-control">
+            <button type="button" class="garage-item-menu__groups-toggle" id="garage-item-menu-move-toggle" role="menuitem" aria-controls="garage-item-menu-move-groups" aria-expanded="false">Переместить в группу<span aria-hidden="true">›</span></button>
+            <div class="garage-item-menu__groups card border-0 shadow" id="garage-item-menu-move-groups" role="menu" hidden></div>
+          </div>
+        </div>
       </div>
       <button type="button" class="garage-context-menu__delete" id="garage-item-delete-button" role="menuitem">Удалить из гаража</button>
     </div>

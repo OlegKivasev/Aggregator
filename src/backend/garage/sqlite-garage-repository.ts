@@ -26,6 +26,11 @@ function nullableNumber(row: SqlRow, key: string): number | null {
   if (value !== null && (typeof value !== "number" || !Number.isFinite(value))) throw new Error(`Invalid SQLite ${key}`);
   return value;
 }
+function boolean(row: SqlRow, key: string): boolean {
+  const value = row[key];
+  if (value !== 0 && value !== 1) throw new Error(`Invalid SQLite ${key}`);
+  return value === 1;
+}
 function mapVehicle(row: SqlRow): GarageVehicle {
   return { id: text(row, "id"), name: text(row, "name"), revision: number(row, "revision"), createdAt: text(row, "created_at"), updatedAt: text(row, "updated_at") };
 }
@@ -41,7 +46,8 @@ function mapItem(row: SqlRow): GarageItem {
   return {
     id: text(row, "id"), vehicleId: text(row, "vehicle_id"), groupId: nullableText(row, "group_id"), revision: number(row, "revision"), supplier: text(row, "supplier") as SupplierId,
     brand: text(row, "brand"), article: text(row, "article"), title: text(row, "title"), warehouse: nullableText(row, "warehouse"),
-    deliveryDate: nullableText(row, "delivery_date"), link: text(row, "link"), supplierQuantity: nullableNumber(row, "supplier_quantity"),
+    deliveryDate: nullableText(row, "delivery_date"), deliveryDateTo: nullableText(row, "delivery_date_to"),
+    deliveryDateApproximate: boolean(row, "delivery_date_approximate"), link: text(row, "link"), supplierQuantity: nullableNumber(row, "supplier_quantity"),
     requiredQuantity: number(row, "required_quantity"), purchasePrice: number(row, "purchase_price"), markupPercent: number(row, "markup_percent"),
     regularPrice: number(row, "regular_price"), comment: text(row, "comment"), lastCheckedAt: nullableText(row, "last_checked_at"),
     availabilityStatus: text(row, "availability_status") as GarageAvailabilityStatus,
@@ -63,7 +69,7 @@ export class SqliteGarageRepository implements GarageRepository {
       CREATE TABLE IF NOT EXISTS garage_items (
         id TEXT PRIMARY KEY, vehicle_id TEXT NOT NULL REFERENCES garage_vehicles(id) ON DELETE CASCADE,
         revision INTEGER NOT NULL, supplier TEXT NOT NULL, brand TEXT NOT NULL, article TEXT NOT NULL,
-        title TEXT NOT NULL, warehouse TEXT, delivery_date TEXT, link TEXT NOT NULL,
+        title TEXT NOT NULL, warehouse TEXT, delivery_date TEXT, delivery_date_to TEXT, delivery_date_approximate INTEGER NOT NULL DEFAULT 0, link TEXT NOT NULL,
         supplier_quantity REAL, required_quantity REAL NOT NULL, purchase_price REAL NOT NULL,
         markup_percent REAL NOT NULL, regular_price REAL NOT NULL, comment TEXT NOT NULL,
         last_checked_at TEXT, availability_status TEXT NOT NULL
@@ -81,6 +87,12 @@ export class SqliteGarageRepository implements GarageRepository {
     const itemColumns = this.database.prepare("PRAGMA table_info(garage_items)").all() as SqlRow[];
     if (!itemColumns.some((column) => text(column, "name") === "group_id")) {
       this.database.exec("ALTER TABLE garage_items ADD COLUMN group_id TEXT");
+    }
+    if (!itemColumns.some((column) => text(column, "name") === "delivery_date_to")) {
+      this.database.exec("ALTER TABLE garage_items ADD COLUMN delivery_date_to TEXT");
+    }
+    if (!itemColumns.some((column) => text(column, "name") === "delivery_date_approximate")) {
+      this.database.exec("ALTER TABLE garage_items ADD COLUMN delivery_date_approximate INTEGER NOT NULL DEFAULT 0");
     }
   }
 
@@ -171,11 +183,11 @@ export class SqliteGarageRepository implements GarageRepository {
       const vehicle = this.database.prepare("SELECT revision FROM garage_vehicles WHERE id = ?").get(item.vehicleId) as { revision: number } | undefined;
       if (!vehicle) { this.database.exec("ROLLBACK"); return "missing"; }
       if (vehicle.revision !== vehicleRevision) { this.database.exec("ROLLBACK"); return "conflict"; }
-    this.database.prepare(`INSERT INTO garage_items (id, vehicle_id, revision, supplier, brand, article, title, warehouse, delivery_date, link,
+    this.database.prepare(`INSERT INTO garage_items (id, vehicle_id, revision, supplier, brand, article, title, warehouse, delivery_date, delivery_date_to, delivery_date_approximate, link,
       supplier_quantity, required_quantity, purchase_price, markup_percent, regular_price, comment, last_checked_at, availability_status, group_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(item.id, item.vehicleId, item.revision, item.supplier, item.brand, item.article, item.title, item.warehouse,
-          item.deliveryDate, item.link, item.supplierQuantity, item.requiredQuantity, item.purchasePrice, item.markupPercent,
+          item.deliveryDate, item.deliveryDateTo, Number(item.deliveryDateApproximate), item.link, item.supplierQuantity, item.requiredQuantity, item.purchasePrice, item.markupPercent,
           item.regularPrice, item.comment, item.lastCheckedAt, item.availabilityStatus, item.groupId);
       this.database.prepare("UPDATE garage_vehicles SET revision = revision + 1, updated_at = ? WHERE id = ?").run(updatedAt, item.vehicleId);
       this.database.exec("COMMIT");
@@ -234,9 +246,9 @@ export class SqliteGarageRepository implements GarageRepository {
   }
 
   refreshItem(item: GarageItem, updatedAt: string): void {
-    this.database.prepare(`UPDATE garage_items SET supplier = ?, brand = ?, article = ?, title = ?, warehouse = ?, delivery_date = ?, link = ?,
+    this.database.prepare(`UPDATE garage_items SET supplier = ?, brand = ?, article = ?, title = ?, warehouse = ?, delivery_date = ?, delivery_date_to = ?, delivery_date_approximate = ?, link = ?,
       supplier_quantity = ?, purchase_price = ?, markup_percent = ?, regular_price = ?, last_checked_at = ?, availability_status = ?, revision = revision + 1 WHERE id = ?`)
-      .run(item.supplier, item.brand, item.article, item.title, item.warehouse, item.deliveryDate, item.link, item.supplierQuantity,
+      .run(item.supplier, item.brand, item.article, item.title, item.warehouse, item.deliveryDate, item.deliveryDateTo, Number(item.deliveryDateApproximate), item.link, item.supplierQuantity,
         item.purchasePrice, item.markupPercent, item.regularPrice, item.lastCheckedAt, item.availabilityStatus, item.id);
     this.database.prepare("UPDATE garage_vehicles SET revision = revision + 1, updated_at = ? WHERE id = ?").run(updatedAt, item.vehicleId);
   }

@@ -45,7 +45,7 @@ export const formatDeliveryDate = (value, approximate = false, valueTo = null) =
     : "";
   const formattedDate = formattedTo ? formattedFrom : formatCalendarDate(parsed, today);
 
-  return `${approximate && !formattedTo ? "~" : ""}${formattedDate}${formattedTo}`;
+  return `${approximate ? "~" : ""}${formattedDate}${formattedTo}`;
 };
 
 export const buildSupplierResultTooltip = (suppliers, results, durations, supplierNames) => {

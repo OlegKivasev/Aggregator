@@ -9,7 +9,7 @@ const tableWidthPreferenceKey = "table-column-widths-v1";
 const tableColumns = {
   main: ["supplier", "brand", "article", "title", "deliveryDate", "quantity", "markupPrice"],
   analogs: ["supplier", "brand", "article", "title", "deliveryDate", "quantity", "markupPrice"],
-  garage: ["supplier", "brand", "article", "title", "deliveryDate", "availability", "quantity", "price", "sum"],
+  garage: ["supplier", "brand", "article", "title", "deliveryDate", "quantity", "price", "sum"],
 } as const;
 const minimumColumnWidth = 80;
 const maximumColumnWidth = 800;
@@ -80,6 +80,7 @@ function normalizeTableColumnWidths(value: unknown): TableWidthPreferences {
     if (!isRecord(savedWidths)) throw new GarageValidationError("table column widths are invalid");
     const widths: Record<string, number> = {};
     for (const [column, width] of Object.entries(savedWidths)) {
+      if (table === "garage" && column === "availability") continue;
       if (typeof width !== "number" || !columns.includes(column) || !Number.isInteger(width) || width < minimumColumnWidth || width > maximumColumnWidth) {
         throw new GarageValidationError("table column widths are invalid");
       }
@@ -269,12 +270,18 @@ export class GarageApplicationService {
   }
 
   private itemFromOffer(vehicleId: string, groupId: string | null, offer: NormalizedSearchResult, requiredQuantity: number, markupPercent: number): GarageItem {
-    if (!Number.isFinite(offer.price) || offer.price <= 0 || !isValidDate(offer.deliveryDate)) throw new GarageValidationError("search offer is invalid");
+    const deliveryDateTo = offer.deliveryDateTo ?? null;
+    if (!Number.isFinite(offer.price) || offer.price <= 0 || !isValidDate(offer.deliveryDate) || !isValidDate(deliveryDateTo)
+      || typeof offer.deliveryDateApproximate !== "boolean" || (offer.deliveryDate === null && deliveryDateTo !== null)
+      || (offer.deliveryDate !== null && deliveryDateTo !== null && Date.parse(deliveryDateTo) < Date.parse(offer.deliveryDate))) {
+      throw new GarageValidationError("search offer is invalid");
+    }
     const quantity = typeof offer.quantity === "number" && Number.isFinite(offer.quantity) && offer.quantity >= 0 ? offer.quantity : null;
     return {
       id: randomUUID(), vehicleId, groupId, revision: 1, supplier: offer.supplier, brand: normalizeText(offer.brand, "brand", 120),
       article: normalizeText(offer.article, "article", 128), title: normalizeText(offer.title, "title", 500),
       warehouse: offer.warehouse === null ? null : normalizeText(offer.warehouse, "warehouse", 300), deliveryDate: offer.deliveryDate,
+      deliveryDateTo, deliveryDateApproximate: offer.deliveryDateApproximate,
       link: safeLink(offer.link), supplierQuantity: quantity, requiredQuantity, purchasePrice: offer.price,
       markupPercent, regularPrice: regularPrice(offer.price, markupPercent), comment: "", lastCheckedAt: now(),
       availabilityStatus: availability(quantity, requiredQuantity),
@@ -299,6 +306,7 @@ export class GarageApplicationService {
     const quantity = typeof offer.quantity === "number" && Number.isFinite(offer.quantity) && offer.quantity >= 0 ? offer.quantity : null;
     this.repository.refreshItem({
       ...item, brand: offer.brand, article: offer.article, title: offer.title, warehouse: offer.warehouse, deliveryDate: offer.deliveryDate,
+      deliveryDateTo: offer.deliveryDateTo ?? null, deliveryDateApproximate: offer.deliveryDateApproximate,
       link: safeLink(offer.link), supplierQuantity: quantity, purchasePrice: offer.price,
       regularPrice: regularPrice(offer.price, item.markupPercent), lastCheckedAt: checkedAt,
       availabilityStatus: availability(quantity, item.requiredQuantity),

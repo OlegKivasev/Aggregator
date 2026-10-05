@@ -23,6 +23,7 @@ import { isPartKomReturnableVisible } from "../src/frontend/partkom-return-setti
 import { isForumAutoReturnableVisible } from "../src/frontend/forum-auto-return-settings.js";
 import { isArmtekReturnableVisible } from "../src/frontend/armtek-return-settings.js";
 import { applySavedColumnWidths } from "../src/frontend/table-column-widths.js";
+import { formatDeliveryDate } from "../src/frontend/supplier-search-summary.js";
 
 test("result formatting escapes untrusted text and limits result links", () => {
   assert.equal(escapeHtml('<script data-value="x">'), "&lt;script data-value=&quot;x&quot;&gt;");
@@ -39,6 +40,10 @@ test("quantity formatting distinguishes real zero from missing data", () => {
   assert.equal(formatQuantity(0), "0");
   assert.equal(formatQuantity(null), "-");
   assert.equal(formatQuantity(Number.NaN), "-");
+});
+
+test("delivery date keeps the approximate marker on an interval", () => {
+  assert.match(formatDeliveryDate("2026-10-07", true, "2026-10-09"), /^~07\.10\.2026 - 09\.10\.2026$/);
 });
 
 test("table column widths accept only bounded integer preferences", () => {
@@ -450,7 +455,8 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /className = "result-title-cell";/);
   assert.match(garage, /"main-result-purchase-price"/);
   assert.match(html, /class="table table-hover align-middle mb-0 results-data-table garage-data-table"/);
-  assert.match(html, /data-garage-sort-key="deliveryDate">Доставка[\s\S]*?data-garage-sort-key="availability">Остаток[\s\S]*?data-garage-sort-key="quantity">Количество[\s\S]*?data-garage-sort-key="price">Цена[\s\S]*?data-garage-sort-key="sum">Сумма/);
+  assert.match(html, /data-garage-sort-key="deliveryDate">Доставка[\s\S]*?data-garage-sort-key="quantity">Количество[\s\S]*?data-garage-sort-key="price">Цена[\s\S]*?data-garage-sort-key="sum">Сумма/);
+  assert.doesNotMatch(html, /data-garage-column="availability"/);
   assert.doesNotMatch(html, /<th>Комментарий<\/th>|<th>Нужно<\/th>|<th>Итог<\/th>/);
   assert.doesNotMatch(garage, /const comment = document\.createElement/);
   assert.match(styles, /\.garage-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
@@ -478,8 +484,9 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(styles, /\.garage-price-stack__regular\s*\{[^}]*color: var\(--ink\);/s);
   assert.match(styles, /\.garage-price-stack__purchase\s*\{[^}]*color: var\(--muted\);[^}]*font-size: 10px;/s);
   assert.match(html, /id="garage-groups-toggle"[\s\S]*?aria-controls="garage-groups-sidebar"/);
-  assert.match(html, /id="garage-groups-sidebar" hidden[\s\S]*?id="garage-groups"[\s\S]*?id="garage-groups-resize"/);
-  assert.match(html, /id="garage-item-menu" role="menu"[\s\S]*?id="garage-item-search-button"[\s\S]*?id="garage-item-menu-groups-toggle"[\s\S]*?id="garage-item-menu-groups"[\s\S]*?Удалить из гаража/);
+  assert.match(html, /id="garage-groups-sidebar" hidden[\s\S]*?id="garage-group-search"[\s\S]*?id="garage-groups"[\s\S]*?id="garage-groups-resize"/);
+  assert.doesNotMatch(html, /Перетащите товар за кнопку/);
+  assert.match(html, /id="garage-item-menu" role="menu"[\s\S]*?id="garage-item-search-button"[\s\S]*?id="garage-item-menu-groups-toggle"[\s\S]*?id="garage-item-menu-remove-group"[\s\S]*?id="garage-item-menu-move-toggle"[\s\S]*?id="garage-item-menu-move-groups"[\s\S]*?Удалить из гаража/);
   assert.match(html, /id="garage-group-context-menu" role="menu"[\s\S]*?id="garage-group-rename-button"[\s\S]*?id="garage-group-delete-button"/);
   assert.match(html, /id="garage-add-group"/);
   assert.match(garage, /const groupItems = \(items\) =>/);
@@ -508,12 +515,14 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /const garageSortButtons = \[\.\.\.document\.querySelectorAll\("\[data-garage-sort-key\]"\)\]/);
   assert.match(garage, /import \{ formatArticle, formatBrand, formatPrice, formatQuantity, getSafeResultLink \} from "\.\/result-formatting\.js"/);
   assert.match(garage, /import \{ formatDeliveryDate \} from "\.\/supplier-search-summary\.js"/);
-  assert.match(garage, /\["deliveryDate", formatDeliveryDate\(item\.deliveryDate\)\]/);
+  assert.match(garage, /\["deliveryDate", formatDeliveryDate\(item\.deliveryDate, item\.deliveryDateApproximate, item\.deliveryDateTo\)\]/);
+  assert.match(garage, /Остаток: \$\{formatQuantity\(item\.supplierQuantity\)\}/);
   assert.match(garage, /const updateGarageResultCount = \(items\) =>/);
   assert.match(garage, /const renderGarageFilters = \(\) =>/);
   assert.match(garage, /const applyGarageTableColumns = \(\) =>/);
   assert.match(garage, /const tableSearch = document\.querySelector\("#garage-table-search"\)/);
   assert.match(garage, /tableSearch\.addEventListener\("input"/);
+  assert.match(garage, /groupSearch\.addEventListener\("input"/);
   assert.match(garage, /const filtersWidthStorageKey = "autoservice-garage-filters-width-v1";/);
   assert.match(garage, /filtersResize\.addEventListener\("pointerdown"/);
   assert.match(garage, /setFiltersOpen\(false\);/);
@@ -523,9 +532,10 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(styles, /\.garage-filters-control:has\(\.garage-filters-sidebar:not\(\[hidden\]\)\) \.garage-filters-toggle\s*\{[^}]*display: none;/s);
   assert.match(garage, /const compareGarageItems =/);
   assert.match(garage, /const button = event\.target\.closest\("\.garage-offer-button"\)/);
-  assert.match(styles, /\.garage-group-summary td\s*\{[^}]*padding: 0 !important;/s);
+  assert.match(styles, /\.garage-group-summary td\s*\{[^}]*padding: 8px 14px !important;/s);
   assert.match(styles, /\.garage-group-summary__content\s*\{[^}]*display: flex;/s);
-  assert.match(garage, /content\.append\(element\("strong", name\), createGaragePriceStack\(items\)\);/);
+  assert.match(garage, /const formatGroupDeliveryDate = \(items\) =>/);
+  assert.match(garage, /formatDeliveryDate\(latest\.deliveryDate, latest\.deliveryDateApproximate, latest\.deliveryDateTo\)/);
   assert.doesNotMatch(garage, /Сохранить", "btn btn-light"|confirmRemove|cancelRemove/);
   assert.match(garage, /sidebar\.addEventListener\("drop"/);
   assert.match(app, /const garageActionColumnWidth = 52;/);

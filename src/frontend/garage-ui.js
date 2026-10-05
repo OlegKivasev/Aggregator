@@ -39,6 +39,8 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   const groupCreate = document.querySelector("#garage-group-create");
   const groupCancel = document.querySelector("#garage-group-cancel");
   const groupSave = document.querySelector("#garage-group-save");
+  const groupSearchForm = document.querySelector("#garage-group-search-form");
+  const groupSearch = document.querySelector("#garage-group-search");
   const groupsToggle = document.querySelector("#garage-groups-toggle");
   const groupsSidebar = document.querySelector("#garage-groups-sidebar");
   const groupsList = document.querySelector("#garage-groups");
@@ -48,6 +50,10 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   const itemMenuGroupsControl = document.querySelector("#garage-item-menu-groups-control");
   const itemMenuGroupsToggle = document.querySelector("#garage-item-menu-groups-toggle");
   const itemMenuGroups = document.querySelector("#garage-item-menu-groups");
+  const itemMenuRemoveGroup = document.querySelector("#garage-item-menu-remove-group");
+  const itemMenuMoveControl = document.querySelector("#garage-item-menu-move-control");
+  const itemMenuMoveToggle = document.querySelector("#garage-item-menu-move-toggle");
+  const itemMenuMoveGroups = document.querySelector("#garage-item-menu-move-groups");
   const itemDeleteButton = document.querySelector("#garage-item-delete-button");
   const groupContextMenu = document.querySelector("#garage-group-context-menu");
   const groupRenameButton = document.querySelector("#garage-group-rename-button");
@@ -90,6 +96,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   let pendingOfferId = null;
   let pendingOfferQuantity = null;
   let garageTableSearchTerm = "";
+  let garageGroupSearchTerm = "";
   let garageSortState = { key: "price", direction: "ascending" };
   const selectedFilterValues = new Map(["supplier", "brand", "article", "availability"].map((column) => [column, new Set()]));
   let resizeStart = null;
@@ -109,8 +116,9 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   const widthStorageKey = "autoservice-garage-sidebar-width-v1";
   const filtersWidthStorageKey = "autoservice-garage-filters-width-v1";
   const groupsWidthStorageKey = "autoservice-garage-groups-width-v1";
+  const garageSelectionStorageKey = "autoservice-garage-selected-vehicle-v1";
   const closeThresholdRatio = 0.02;
-  const garageColumnWidths = { supplier: 100, brand: 125, article: 140, title: 323, deliveryDate: 180, availability: 120, quantity: 120, price: 120, sum: 120 };
+  const garageColumnWidths = { supplier: 100, brand: 125, article: 140, title: 323, deliveryDate: 180, quantity: 120, price: 120, sum: 120 };
   Object.assign(garageColumnWidths, restoreLocalColumnWidths("garage", garageColumnWidths));
   const garageActionColumnWidth = 52;
 
@@ -229,11 +237,33 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   const getGroupsCloseWidth = () => (garageWorkspace.getBoundingClientRect().width ?? 0) * closeThresholdRatio;
   const findVehicle = (id) => vehicles.find((vehicle) => vehicle.id === id) ?? null;
   const focusVehicleEditor = () => requestAnimationFrame(() => vehiclesList.querySelector(".garage-vehicle-editor__input")?.focus());
-  const showSearch = () => { garageWorkspace.hidden = true; titlebar.hidden = true; workspace.hidden = false; searchShell.hidden = false; searchTabs.hidden = false; };
+  const saveSelectedVehicle = (id) => {
+    try {
+      sessionStorage.setItem(garageSelectionStorageKey, id);
+    } catch {
+      // The active garage remains open until navigation when session storage is unavailable.
+    }
+  };
+  const clearSelectedVehicle = () => {
+    try {
+      sessionStorage.removeItem(garageSelectionStorageKey);
+    } catch {
+      // The next reload may restore the prior garage only when session storage is available.
+    }
+  };
+  const restoreSelectedVehicle = () => {
+    try {
+      return sessionStorage.getItem(garageSelectionStorageKey);
+    } catch {
+      return null;
+    }
+  };
+  const showSearch = () => { clearSelectedVehicle(); garageWorkspace.hidden = true; titlebar.hidden = true; workspace.hidden = false; searchShell.hidden = false; searchTabs.hidden = false; };
   const showVehicle = async (id) => {
     const isAnotherVehicle = selectedVehicle?.id !== id;
     const { payload } = await api(`/api/garage/vehicles/${encodeURIComponent(id)}`);
     selectedVehicle = payload.vehicle;
+    saveSelectedVehicle(selectedVehicle.id);
     if (isAnotherVehicle || (typeof selectedGroupId === "string" && !selectedVehicle.groups.some((group) => group.id === selectedGroupId))) selectedGroupId = undefined;
     viewName.textContent = selectedVehicle.name;
     workspace.hidden = true;
@@ -416,12 +446,21 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
     itemMenuAnchor = null;
   };
   const setItemMenuGroupsOpen = (open) => {
+    if (!open) setItemMenuMoveGroupsOpen(false);
     itemMenuGroups.hidden = !open;
     itemMenuGroupsToggle.setAttribute("aria-expanded", String(open));
     itemMenuGroupsControl.classList.remove("garage-item-menu__groups-control--left");
     if (!open) return;
     const bounds = itemMenuGroups.getBoundingClientRect();
     if (bounds.right > window.innerWidth - 8) itemMenuGroupsControl.classList.add("garage-item-menu__groups-control--left");
+  };
+  const setItemMenuMoveGroupsOpen = (open) => {
+    itemMenuMoveGroups.hidden = !open;
+    itemMenuMoveToggle.setAttribute("aria-expanded", String(open));
+    itemMenuMoveControl.classList.remove("garage-item-menu__groups-control--left");
+    if (!open) return;
+    const bounds = itemMenuMoveGroups.getBoundingClientRect();
+    if (bounds.right > window.innerWidth - 8) itemMenuMoveControl.classList.add("garage-item-menu__groups-control--left");
   };
   const hideGroupContextMenu = (restoreFocus = false) => {
     groupContextMenu.hidden = true;
@@ -458,8 +497,9 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
     }
     itemMenuItemId = item.id;
     itemMenuAnchor = anchor;
-    itemMenuGroups.replaceChildren();
+    itemMenuMoveGroups.replaceChildren();
     setItemMenuGroupsOpen(false);
+    itemMenuRemoveGroup.hidden = item.groupId === null;
     const appendMoveAction = (groupId, name) => {
       const button = element("button", name, "garage-item-menu__move");
       button.type = "button";
@@ -469,9 +509,8 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
         hideItemMenu();
         moveItemToGroup(item.id, groupId).catch((error) => { setStatus(error.message); showToast(error.message, "error"); });
       });
-      itemMenuGroups.append(button);
+      itemMenuMoveGroups.append(button);
     };
-    appendMoveAction(null, "Убрать из группы");
     for (const group of selectedVehicle.groups) appendMoveAction(group.id, group.name);
     itemMenu.hidden = false;
     const bounds = itemMenu.getBoundingClientRect();
@@ -546,6 +585,18 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   };
   const sumGarageItems = (items) => items.reduce((sum, item) => sum + item.regularPrice * item.requiredQuantity, 0);
   const sumGaragePurchaseItems = (items) => items.reduce((sum, item) => sum + item.purchasePrice * item.requiredQuantity, 0);
+  const formatGroupDeliveryDate = (items) => {
+    if (items.some((item) => !item.deliveryDate || Number.isNaN(new Date(item.deliveryDate).getTime())
+      || (item.deliveryDateTo && Number.isNaN(new Date(item.deliveryDateTo).getTime())))) {
+      return "Не указана";
+    }
+    const latest = items.reduce((current, item) => {
+      const currentEnd = Date.parse(current.deliveryDateTo ?? current.deliveryDate);
+      const itemEnd = Date.parse(item.deliveryDateTo ?? item.deliveryDate);
+      return itemEnd > currentEnd ? item : current;
+    });
+    return formatDeliveryDate(latest.deliveryDate, latest.deliveryDateApproximate, latest.deliveryDateTo);
+  };
   const createGaragePriceStack = (items) => {
     const prices = element("span", undefined, "garage-price-stack");
     prices.append(
@@ -574,12 +625,18 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   };
   const appendGroupSummary = (name, items) => {
     const row = element("tr", undefined, "garage-group-summary");
-    const cell = document.createElement("td");
-    cell.colSpan = getGarageVisibleColumns().length + 1;
+    const nameCell = document.createElement("td");
+    nameCell.colSpan = 4;
     const content = element("div", undefined, "garage-group-summary__content");
-    content.append(element("strong", name), createGaragePriceStack(items));
-    cell.append(content);
-    row.append(cell);
+    content.append(element("strong", name));
+    nameCell.append(content);
+    const deliveryCell = element("td", formatGroupDeliveryDate(items), "garage-group-summary__delivery");
+    deliveryCell.dataset.garageColumn = "deliveryDate";
+    const quantityCell = document.createElement("td"); quantityCell.dataset.garageColumn = "quantity";
+    const priceCell = document.createElement("td"); priceCell.dataset.garageColumn = "price";
+    const sumCell = document.createElement("td"); sumCell.dataset.garageColumn = "sum"; sumCell.className = "garage-group-summary__total";
+    sumCell.append(createGaragePriceStack(items));
+    row.append(nameCell, deliveryCell, quantityCell, priceCell, sumCell, document.createElement("td"));
     itemsBody.append(row);
   };
   const moveItemToGroup = async (itemId, groupId) => {
@@ -635,7 +692,10 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
       groupsList.append(listItem);
     };
     appendGroup(undefined, "Все группы", selectedVehicle.items, false);
-    for (const group of selectedVehicle.groups) appendGroup(group.id, group.name, selectedVehicle.items.filter((item) => item.groupId === group.id));
+    const term = garageGroupSearchTerm.toLocaleLowerCase("ru-RU");
+    for (const group of selectedVehicle.groups.filter((candidate) => candidate.name.toLocaleLowerCase("ru-RU").includes(term))) {
+      appendGroup(group.id, group.name, selectedVehicle.items.filter((item) => item.groupId === group.id));
+    }
   };
   const getGarageFilterValue = (item, column) => {
     if (column === "supplier") return item.supplier;
@@ -663,7 +723,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
     filtersReset.hidden = ![...selectedFilterValues.values()].some((values) => values.size > 0);
   };
   const getGarageVisibleColumns = () => [
-    "supplier", "brand", "article", "title", "deliveryDate", "availability", "quantity", "price", "sum",
+    "supplier", "brand", "article", "title", "deliveryDate", "quantity", "price", "sum",
   ];
   const applyGarageTableColumns = () => {
     const columns = getGarageVisibleColumns();
@@ -713,7 +773,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
         const bounds = row.getBoundingClientRect();
         showItemMenu(item, bounds.left + 16, bounds.top + 16, row);
       });
-      const cells = [["supplier", item.supplier], ["brand", formatBrand(item.brand)], ["article", formatArticle(item.article)], ["title", item.title], ["deliveryDate", formatDeliveryDate(item.deliveryDate)], ["availability", formatQuantity(item.supplierQuantity)]];
+      const cells = [["supplier", item.supplier], ["brand", formatBrand(item.brand)], ["article", formatArticle(item.article)], ["title", item.title], ["deliveryDate", formatDeliveryDate(item.deliveryDate, item.deliveryDateApproximate, item.deliveryDateTo)]];
       for (const [column, value] of cells) {
         const cell = element("td");
         cell.dataset.garageColumn = column;
@@ -751,7 +811,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
         required.focus();
         required.select();
       });
-      requiredCell.append(requiredDisplay); row.append(requiredCell);
+      requiredCell.append(requiredDisplay, element("span", `Остаток: ${formatQuantity(item.supplierQuantity)}`, "main-result-purchase-price")); row.append(requiredCell);
       const regularPriceCell = document.createElement("td"); regularPriceCell.dataset.garageColumn = "price";
       regularPriceCell.append(element("span", formatPrice(item.regularPrice), "main-result-price"), element("span", formatPrice(item.purchasePrice), "main-result-purchase-price"));
       row.append(regularPriceCell);
@@ -924,6 +984,8 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   });
   searchForm.addEventListener("submit", (event) => event.preventDefault());
   search.addEventListener("input", () => loadVehicles().catch((error) => setStatus(error.message)));
+  groupSearchForm.addEventListener("submit", (event) => event.preventDefault());
+  groupSearch.addEventListener("input", () => { garageGroupSearchTerm = groupSearch.value.trim(); renderGarageGroups(); });
   tableSearch.addEventListener("input", () => { garageTableSearchTerm = tableSearch.value.trim(); renderItems(); });
   filtersToggle.addEventListener("click", () => setFiltersOpen(filtersSidebar.hidden));
   groupsToggle.addEventListener("click", () => setGroupsOpen(groupsSidebar.hidden));
@@ -993,13 +1055,34 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
     if (event.key !== "ArrowRight" && event.key !== "ArrowDown") return;
     event.preventDefault();
     setItemMenuGroupsOpen(true);
-    itemMenuGroups.querySelector("button:not(:disabled)")?.focus();
+    itemMenuGroups.querySelector("button:not([hidden]):not(:disabled)")?.focus();
   });
   itemMenuGroups.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" && event.key !== "ArrowLeft") return;
     event.preventDefault();
     setItemMenuGroupsOpen(false);
     itemMenuGroupsToggle.focus();
+  });
+  itemMenuMoveControl.addEventListener("mouseenter", () => setItemMenuMoveGroupsOpen(true));
+  itemMenuMoveControl.addEventListener("mouseleave", () => setItemMenuMoveGroupsOpen(false));
+  itemMenuMoveToggle.addEventListener("click", () => setItemMenuMoveGroupsOpen(itemMenuMoveGroups.hidden));
+  itemMenuMoveToggle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    setItemMenuMoveGroupsOpen(true);
+    itemMenuMoveGroups.querySelector("button:not(:disabled)")?.focus();
+  });
+  itemMenuMoveGroups.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" && event.key !== "ArrowLeft") return;
+    event.preventDefault();
+    setItemMenuMoveGroupsOpen(false);
+    itemMenuMoveToggle.focus();
+  });
+  itemMenuRemoveGroup.addEventListener("click", () => {
+    const item = selectedVehicle?.items.find((candidate) => candidate.id === itemMenuItemId);
+    hideItemMenu();
+    if (!item || item.groupId === null) return;
+    moveItemToGroup(item.id, null).catch((error) => { setStatus(error.message); showToast(error.message, "error"); });
   });
   itemDeleteButton.addEventListener("click", async () => {
     const item = selectedVehicle?.items.find((candidate) => candidate.id === itemMenuItemId);
@@ -1117,7 +1200,15 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   restoreSidebarWidth();
   restoreFiltersSidebarWidth();
   restoreGroupsSidebarWidth();
-  loadVehicles().catch((error) => setStatus(error.message));
+  loadVehicles().then(async () => {
+    const vehicleId = restoreSelectedVehicle();
+    if (!vehicleId) return;
+    if (!vehicles.some((vehicle) => vehicle.id === vehicleId)) {
+      clearSelectedVehicle();
+      return;
+    }
+    await showVehicle(vehicleId);
+  }).catch((error) => setStatus(error.message));
   setupColumnResizing({
     table: view.querySelector("table"),
     columnAttribute: "data-garage-column",

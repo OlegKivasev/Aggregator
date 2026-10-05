@@ -682,9 +682,9 @@ test("STParts exposes only exact positive availability as quantity", () => {
   assert.deepEqual(results.map((result) => result.quantity), [7, null, null]);
 });
 
-test("delivery formatter omits an approximate marker for date ranges", () => {
+test("delivery formatter keeps an approximate marker for date ranges", () => {
   assert.equal(formatDeliveryDate("2000-07-26T00:00:00.000Z", true, "2000-07-26T12:00:00.000Z"), "~26.07.2000");
-  assert.equal(formatDeliveryDate("2000-07-26T00:00:00.000Z", true, "2000-07-27T00:00:00.000Z"), "26.07.2000 - 27.07.2000");
+  assert.equal(formatDeliveryDate("2000-07-26T00:00:00.000Z", true, "2000-07-27T00:00:00.000Z"), "~26.07.2000 - 27.07.2000");
 });
 
 test("delivery formatter names today, tomorrow and the day after tomorrow", () => {
