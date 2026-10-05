@@ -1624,9 +1624,9 @@ table tbody tr:hover td {
 .garage-item-menu__groups-control { position: relative; }
 .garage-item-menu__groups-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .garage-item-menu__groups-toggle > span { color: var(--muted); font-size: 18px; line-height: 1; }
-.garage-item-menu__groups { position: absolute; z-index: 1; top: -6px; left: calc(100% + 8px); min-width: 210px; padding: 6px; border-radius: 10px; background: var(--surface); }
+.garage-item-menu__groups { position: absolute; z-index: 1; top: -6px; left: 100%; min-width: 210px; padding: 6px; border-radius: 10px; background: var(--surface); }
 .garage-item-menu__groups[hidden] { display: none; }
-.garage-item-menu__groups-control--left .garage-item-menu__groups { right: calc(100% + 8px); left: auto; }
+.garage-item-menu__groups-control--left .garage-item-menu__groups { right: 100%; left: auto; }
 .garage-item-menu__groups .garage-item-menu__groups { top: -6px; }
 .garage-item-menu__move:disabled {
   color: var(--muted) !important;

@@ -501,6 +501,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /startSearch\(item\.article\);/);
   assert.match(garage, /itemMenuGroupsControl\.addEventListener\("mouseenter"/);
   assert.match(styles, /\.garage-item-menu__groups\s*\{[^}]*position: absolute;/s);
+  assert.match(styles, /\.garage-item-menu__groups\s*\{[^}]*left: 100%;/s);
   assert.match(garage, /const showGroupContextMenu =/);
   assert.match(garage, /method: "PATCH", body: JSON.stringify\(\{ vehicleRevision, name \}\)/);
   assert.doesNotMatch(garage, /appendGroup\(null, "Без группы"/);
@@ -517,6 +518,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /import \{ formatDeliveryDate \} from "\.\/supplier-search-summary\.js"/);
   assert.match(garage, /\["deliveryDate", formatDeliveryDate\(item\.deliveryDate, item\.deliveryDateApproximate, item\.deliveryDateTo\)\]/);
   assert.match(garage, /Остаток: \$\{formatQuantity\(item\.supplierQuantity\)\}/);
+  assert.match(garage, /Нельзя указать больше остатка: \$\{formatQuantity\(maximumQuantity\)\}\./);
   assert.match(garage, /const updateGarageResultCount = \(items\) =>/);
   assert.match(garage, /const renderGarageFilters = \(\) =>/);
   assert.match(garage, /const applyGarageTableColumns = \(\) =>/);
@@ -555,7 +557,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /vehicleRevision: currentVehicleRevision/);
   assert.match(garage, /duplicateStrategy \? \{ duplicateStrategy \} : \{\}\) \}\) \}, true\);/);
   assert.match(garage, /modalQuantity\.max = String\(quantity\);/);
-  assert.match(garage, /required\.max = String\(item\.supplierQuantity\);/);
+  assert.match(garage, /required\.max = String\(maximumQuantity\);/);
   assert.match(garage, /const remainingQuantity = Math\.max\(0, supplierQuantity - result\.payload\.duplicate\.requiredQuantity\);/);
   assert.match(garage, /application\/x-garage-offer-quantity/);
   assert.match(app, /data-garage-offer-quantity="\$\{Number\.isFinite\(result\.quantity\)/);
