@@ -786,7 +786,8 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
       }
       const requiredCell = document.createElement("td"); requiredCell.dataset.garageColumn = "quantity";
       const requiredDisplay = element("button", formatQuantity(item.requiredQuantity), "garage-quantity-display"); requiredDisplay.type = "button"; requiredDisplay.setAttribute("aria-label", `Изменить количество: ${item.title}`);
-      const restoreQuantityDisplay = () => requiredCell.replaceChildren(requiredDisplay);
+      const stockDisplay = element("span", `Остаток: ${formatQuantity(item.supplierQuantity)}`, "garage-stock-quantity");
+      const restoreQuantityDisplay = () => requiredCell.replaceChildren(requiredDisplay, stockDisplay);
       requiredDisplay.addEventListener("click", () => {
         const required = document.createElement("input"); required.className = "garage-quantity-input"; required.type = "number"; required.min = "0.001"; required.step = "0.001"; const maximumQuantity = typeof item.supplierQuantity === "number" && item.supplierQuantity >= 0 ? item.supplierQuantity : null; const previousQuantity = String(item.requiredQuantity); if (maximumQuantity !== null) required.max = String(maximumQuantity); required.value = previousQuantity; required.setAttribute("aria-label", `Количество: ${item.title}`);
         required.addEventListener("input", () => {
@@ -822,7 +823,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
         required.focus();
         required.select();
       });
-      requiredCell.append(requiredDisplay, element("span", `Остаток: ${formatQuantity(item.supplierQuantity)}`, "main-result-purchase-price")); row.append(requiredCell);
+      restoreQuantityDisplay(); row.append(requiredCell);
       const regularPriceCell = document.createElement("td"); regularPriceCell.dataset.garageColumn = "price";
       regularPriceCell.append(element("span", formatPrice(item.regularPrice), "main-result-price"), element("span", formatPrice(item.purchasePrice), "main-result-purchase-price"));
       row.append(regularPriceCell);

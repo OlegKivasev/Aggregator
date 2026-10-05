@@ -453,7 +453,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /anchor\.target = "_blank";/);
   assert.match(garage, /anchor\.rel = "noreferrer";/);
   assert.match(garage, /className = "result-title-cell";/);
-  assert.match(garage, /"main-result-purchase-price"/);
+  assert.match(garage, /"garage-stock-quantity"/);
   assert.match(html, /class="table table-hover align-middle mb-0 results-data-table garage-data-table"/);
   assert.match(html, /data-garage-sort-key="deliveryDate">Доставка[\s\S]*?data-garage-sort-key="quantity">Количество[\s\S]*?data-garage-sort-key="price">Цена[\s\S]*?data-garage-sort-key="sum">Сумма/);
   assert.doesNotMatch(html, /data-garage-column="availability"/);
@@ -518,6 +518,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /import \{ formatDeliveryDate \} from "\.\/supplier-search-summary\.js"/);
   assert.match(garage, /\["deliveryDate", formatDeliveryDate\(item\.deliveryDate, item\.deliveryDateApproximate, item\.deliveryDateTo\)\]/);
   assert.match(garage, /Остаток: \$\{formatQuantity\(item\.supplierQuantity\)\}/);
+  assert.match(garage, /replaceChildren\(requiredDisplay, stockDisplay\)/);
   assert.match(garage, /Нельзя указать больше остатка: \$\{formatQuantity\(maximumQuantity\)\}\./);
   assert.match(garage, /const previousQuantity = String\(item\.requiredQuantity\);/);
   assert.match(garage, /required\.value = previousQuantity;/);
@@ -638,6 +639,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(styles, /\.results-data-table tbody td\s*\{[^}]*font-size: 12px;/s);
   assert.match(styles, /\.analogs-results td\s*\{[^}]*font-size: 12px;/s);
   assert.match(styles, /\.main-result-purchase-price\s*\{[^}]*font-size: 12px;/s);
+  assert.match(styles, /\.garage-stock-quantity\s*\{[^}]*display: block;[^}]*color: var\(--muted\);/s);
   assert.match(styles, /\.results-data-table \[data-column="deliveryDate"\]\s*\{[^}]*text-align: left;/s);
   assert.match(styles, /\.analogs-results \[data-analog-column="deliveryDate"\]\s*\{[^}]*text-align: left;/s);
   assert.match(styles, /\.garage-data-table \[data-garage-column="deliveryDate"\]\s*\{[^}]*text-align: left;/s);

@@ -85,6 +85,7 @@
 .garage-item-menu-toggle:hover, .garage-item-menu-toggle:focus-visible { color: var(--accent-dark); background: #fff3ed; outline: 0; }
 .garage-quantity-display { min-width: 52px; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; font-weight: 800; cursor: text; }
 .garage-quantity-display:hover, .garage-quantity-display:focus-visible { border-radius: 5px; color: var(--accent-dark); background: #fff3ed; outline: 0; }
+.garage-stock-quantity { display: block; margin-top: 1px; color: var(--muted); font-size: 10px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
 .garage-quantity-input { width: 72px; min-width: 72px; padding: 3px 5px; border: 1px solid var(--accent); border-radius: 5px; background: #fff; text-align: center; }
 .garage-item--problem { background: #fff0f0; }
 .garage-actions-column, .garage-actions-cell { width: 44px; min-width: 44px; padding-right: 8px !important; padding-left: 8px !important; text-align: center; }
