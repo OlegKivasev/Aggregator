@@ -788,11 +788,11 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
       const requiredDisplay = element("button", formatQuantity(item.requiredQuantity), "garage-quantity-display"); requiredDisplay.type = "button"; requiredDisplay.setAttribute("aria-label", `Изменить количество: ${item.title}`);
       const restoreQuantityDisplay = () => requiredCell.replaceChildren(requiredDisplay);
       requiredDisplay.addEventListener("click", () => {
-        const required = document.createElement("input"); required.className = "garage-quantity-input"; required.type = "number"; required.min = "0.001"; required.step = "0.001"; const maximumQuantity = typeof item.supplierQuantity === "number" && item.supplierQuantity >= 0 ? item.supplierQuantity : null; if (maximumQuantity !== null) required.max = String(maximumQuantity); required.value = String(item.requiredQuantity); required.setAttribute("aria-label", `Количество: ${item.title}`);
+        const required = document.createElement("input"); required.className = "garage-quantity-input"; required.type = "number"; required.min = "0.001"; required.step = "0.001"; const maximumQuantity = typeof item.supplierQuantity === "number" && item.supplierQuantity >= 0 ? item.supplierQuantity : null; const previousQuantity = String(item.requiredQuantity); if (maximumQuantity !== null) required.max = String(maximumQuantity); required.value = previousQuantity; required.setAttribute("aria-label", `Количество: ${item.title}`);
         required.addEventListener("input", () => {
           const requiredQuantity = Number(required.value);
           if (maximumQuantity === null || !Number.isFinite(requiredQuantity) || requiredQuantity <= maximumQuantity) return;
-          required.value = String(maximumQuantity);
+          required.value = previousQuantity;
           showToast(`Нельзя указать больше остатка: ${formatQuantity(maximumQuantity)}.`, "error");
         });
         required.addEventListener("change", async () => {
@@ -803,7 +803,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
             return;
           }
           if (maximumQuantity !== null && requiredQuantity > maximumQuantity) {
-            required.value = String(maximumQuantity);
+            required.value = previousQuantity;
             showToast(`Нельзя указать больше остатка: ${formatQuantity(maximumQuantity)}.`, "error");
             return;
           }

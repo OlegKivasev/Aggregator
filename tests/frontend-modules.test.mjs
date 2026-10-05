@@ -519,6 +519,8 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /\["deliveryDate", formatDeliveryDate\(item\.deliveryDate, item\.deliveryDateApproximate, item\.deliveryDateTo\)\]/);
   assert.match(garage, /Остаток: \$\{formatQuantity\(item\.supplierQuantity\)\}/);
   assert.match(garage, /Нельзя указать больше остатка: \$\{formatQuantity\(maximumQuantity\)\}\./);
+  assert.match(garage, /const previousQuantity = String\(item\.requiredQuantity\);/);
+  assert.match(garage, /required\.value = previousQuantity;/);
   assert.match(garage, /const updateGarageResultCount = \(items\) =>/);
   assert.match(garage, /const renderGarageFilters = \(\) =>/);
   assert.match(garage, /const applyGarageTableColumns = \(\) =>/);
