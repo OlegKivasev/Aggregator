@@ -25,6 +25,7 @@ const submitButton = document.querySelector("#applicability-submit");
 const feedback = document.querySelector("#applicability-feedback");
 const resultsBody = document.querySelector("#applicability-results-body");
 const listButton = document.querySelector("#applicability-list-button");
+const applicabilityToast = document.querySelector("#applicability-toast");
 const documentModal = document.querySelector("#applicability-document-modal");
 const documentText = document.querySelector("#applicability-document-text");
 const closeDocumentButtons = [...document.querySelectorAll("[data-close-applicability-document]")];
@@ -48,6 +49,7 @@ let contextMenuEntryAnchor = null;
 let documentModalReturnFocus = null;
 let documentFormat = "structured";
 let documentEntries = [];
+let applicabilityToastTimer = null;
 
 const applicabilityStateStorageKey = "autoservice.applicabilityState";
 const activeFunctionStorageKey = "autoservice.activeFunction";
@@ -96,6 +98,17 @@ const setFeedback = (message, tone = "error") => {
   feedback.textContent = message;
   feedback.dataset.tone = tone;
   feedback.hidden = !message;
+};
+
+const showApplicabilityToast = (message) => {
+  if (applicabilityToastTimer !== null) window.clearTimeout(applicabilityToastTimer);
+  applicabilityToast.textContent = message;
+  applicabilityToast.dataset.tone = "notice";
+  applicabilityToast.hidden = false;
+  applicabilityToastTimer = window.setTimeout(() => {
+    applicabilityToast.hidden = true;
+    applicabilityToastTimer = null;
+  }, 4_000);
 };
 
 const normalizeTabName = (value) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 100) : "");
@@ -245,6 +258,21 @@ const visibleDocumentColumns = () => new Set(
     .filter((input) => input.checked)
     .map((input) => input.dataset.applicabilityDocumentColumn),
 );
+
+const normalizeApplicabilitySku = (sku) => sku.replace(/[^\p{L}\p{N}]/gu, "");
+
+const searchApplicability = async (sku, brand, signal) => {
+  const response = await fetch("/api/applicability/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ sku, brand }),
+    signal,
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось выполнить поиск применимости.");
+  if (!Array.isArray(payload?.results)) throw new Error("Сервис вернул некорректный ответ.");
+  return payload.results;
+};
 
 const buildApplicabilityDocument = (entries, format = documentFormat) => entries
   .map((entry) => {
@@ -740,18 +768,18 @@ form.addEventListener("submit", async (event) => {
   renderTabs();
   saveApplicabilityState();
   try {
-    const response = await fetch("/api/applicability/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ sku, brand: make.name }),
-      signal: controller.signal,
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось выполнить поиск применимости.");
-    if (!Array.isArray(payload?.results)) throw new Error("Сервис вернул некорректный ответ.");
-    entry.results = payload.results;
+    let results = await searchApplicability(sku, make.name, controller.signal);
+    const normalizedSku = normalizeApplicabilitySku(sku);
+    if (!results.length && normalizedSku && normalizedSku !== sku) {
+      results = await searchApplicability(normalizedSku, make.name, controller.signal);
+      if (results.length) {
+        entry.sku = normalizedSku;
+        showApplicabilityToast(`Артикул «${sku}» изменён на «${normalizedSku}» и успешно найден.`);
+      }
+    }
+    entry.results = results;
     entry.hasSearched = true;
-    entry.status = payload.results.length ? `Найдено автомобилей: ${payload.results.length}` : "Не найдено";
+    entry.status = results.length ? `Найдено автомобилей: ${results.length}` : "Не найдено";
     if (activeTabId === tab.id) renderResults(tab);
     renderTabs();
     saveApplicabilityState();

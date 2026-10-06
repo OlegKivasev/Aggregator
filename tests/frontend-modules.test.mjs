@@ -600,6 +600,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /aria-label="Показать API-ключ"/);
   assert.match(html, /OEM-артикул[\s\S]*?Производитель[\s\S]*?Количество/);
   assert.match(html, /id="applicability-list-button"/);
+  assert.match(html, /id="applicability-toast"/);
   assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
   assert.match(html, /id="applicability-document-format"[\s\S]*?Структурированный список[\s\S]*?Сырые данные/);
   assert.match(html, /id="applicability-document-columns"[\s\S]*?data-applicability-document-column="bodyType"[\s\S]*?data-applicability-document-column="bodyCode"[\s\S]*?data-applicability-document-column="carName"/);
@@ -611,8 +612,10 @@ test("applicability is a separate static function with safe client-side renderin
   assert.ok(html.indexOf('id="applicability-function"') < html.indexOf("</main>"));
   assert.match(html, /src="\/applicability\.js"/);
   assert.match(applicability, /fetch\("\/api\/applicability\/search"/);
+  assert.match(applicability, /const normalizeApplicabilitySku = \(sku\) => sku\.replace\(/);
+  assert.match(applicability, /Артикул «\$\{sku\}» изменён на «\$\{normalizedSku\}» и успешно найден\./);
   assert.match(applicability, /fetch\("\/api\/applicability\/api-key"/);
-  assert.match(applicability, /JSON\.stringify\(\{ sku, brand: make\.name \}\)/);
+  assert.match(applicability, /JSON\.stringify\(\{ sku, brand \}\)/);
   assert.match(applicability, /className = "applicability-expand"/);
   assert.match(applicability, /JSON\.stringify\(entry\.results, null, 2\)/);
   assert.match(applicability, /const buildApplicabilityDocument/);
