@@ -594,6 +594,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-new-tab"/);
   assert.match(html, /id="applicability-settings-toggle"/);
   assert.match(html, /class="search-row applicability-search-row"/);
+  assert.ok(html.indexOf('class="function-content"') < html.indexOf('id="applicability-function"'));
+  assert.ok(html.indexOf('id="applicability-function"') < html.indexOf("</main>"));
   assert.match(html, /src="\/applicability\.js"/);
   assert.match(applicability, /fetch\("\/api\/applicability\/search"/);
   assert.match(applicability, /const createTab/);
@@ -603,6 +605,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.equal(makes.length, 735);
   assert.ok(makes.some((make) => make.makeName === "LADA" && make.makeId === 63));
   assert.match(styles, /\.function-layout\s*\{[^}]*grid-template-columns: 200px minmax\(0, 1fr\);/s);
+  assert.match(styles, /\.function-content\s*\{[^}]*grid-column: 2;/s);
+  assert.match(styles, /\.applicability-function\s*\{[\s\S]*min-height: calc\(100dvh - 140px\);/s);
   assert.match(styles, /\.function-tabs\s*\{[^}]*flex-direction: column;/s);
 });
 

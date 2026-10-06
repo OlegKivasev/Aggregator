@@ -256,6 +256,47 @@
       </aside>
       </div>
       <div class="garage-toast" id="garage-toast" role="status" aria-live="polite" hidden></div>
+      </div>
+
+      <section class="applicability-function" id="applicability-function" hidden aria-labelledby="applicability-title">
+        <h1 class="visually-hidden" id="applicability-title">Применимость</h1>
+        <nav class="search-tabs applicability-tabs card border-0 shadow-sm mb-4" aria-label="Вкладки применимости">
+          <div class="search-tabs__list" id="applicability-tabs-list" role="tablist"></div>
+          <button type="button" class="new-tab-button btn btn-light" id="applicability-new-tab" aria-label="Открыть новую вкладку применимости">+</button>
+        </nav>
+        <div class="applicability-shell card border-0 shadow-sm">
+          <div class="search-row applicability-search-row">
+            <form class="search-form applicability-search-form" id="applicability-search-form">
+              <label class="visually-hidden" for="applicability-sku">OEM-артикул</label>
+              <input class="search-input" id="applicability-sku" name="sku" type="text" placeholder="Введите OEM-артикул" autocomplete="off" maxlength="128" required />
+              <label class="visually-hidden" for="applicability-make">Бренд</label>
+              <input class="search-input applicability-make-input" id="applicability-make" name="make" list="applicability-makes" placeholder="Выберите бренд" autocomplete="off" required />
+              <datalist id="applicability-makes"></datalist>
+              <button type="button" class="settings-button" id="applicability-settings-toggle" aria-label="Открыть настройки применимости" title="Настройки применимости">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" /><path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2.47-1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58-1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 3.46-2.47-1a8.05 8.05 0 0 0-2.58-1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" /></svg>
+              </button>
+              <button type="submit" class="btn btn-primary applicability-search__submit" id="applicability-submit"><span>Найти</span></button>
+            </form>
+          </div>
+          <p class="applicability-feedback" id="applicability-feedback" role="status" aria-live="polite" hidden></p>
+          <div class="results-panel applicability-results-panel card border-0 shadow-sm overflow-hidden" id="applicability-result" aria-busy="false">
+            <div class="results-panel__header card-header bg-white border-0">
+              <div class="results-panel__heading">
+                <h2>Применимость</h2>
+                <span class="panel__meta results-panel__status" id="applicability-result-summary">Введите артикул и бренд</span>
+              </div>
+            </div>
+            <div class="results-table applicability-results-table">
+              <table class="table table-hover align-middle mb-0 results-data-table">
+                <thead><tr><th>Бренд</th><th>Модель</th><th>Модификация</th><th>Период выпуска</th><th>Тип</th></tr></thead>
+                <tbody id="applicability-results-body"><tr class="results-table__empty"><td colspan="5">Выполните поиск применимости.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+      </div>
+      </div>
     </main>
 
     <aside class="settings-drawer" id="settings-drawer" hidden>
@@ -682,46 +723,6 @@
         </form>
       </section>
     </div>
-      </div>
-
-      <section class="applicability-function" id="applicability-function" hidden aria-labelledby="applicability-title">
-        <h1 class="visually-hidden" id="applicability-title">Применимость</h1>
-        <nav class="search-tabs applicability-tabs card border-0 shadow-sm mb-4" aria-label="Вкладки применимости">
-          <div class="search-tabs__list" id="applicability-tabs-list" role="tablist"></div>
-          <button type="button" class="new-tab-button btn btn-light" id="applicability-new-tab" aria-label="Открыть новую вкладку применимости">+</button>
-        </nav>
-        <div class="applicability-shell card border-0 shadow-sm">
-          <div class="search-row applicability-search-row">
-            <form class="search-form applicability-search-form" id="applicability-search-form">
-            <label class="visually-hidden" for="applicability-sku">OEM-артикул</label>
-            <input class="search-input" id="applicability-sku" name="sku" type="text" placeholder="Введите OEM-артикул" autocomplete="off" maxlength="128" required />
-            <label class="visually-hidden" for="applicability-make">Бренд</label>
-            <input class="search-input applicability-make-input" id="applicability-make" name="make" list="applicability-makes" placeholder="Выберите бренд" autocomplete="off" required />
-            <datalist id="applicability-makes"></datalist>
-            <button type="button" class="settings-button" id="applicability-settings-toggle" aria-label="Открыть настройки применимости" title="Настройки применимости">
-              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" /><path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.46-2.47 1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58 1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 3.46 2.47 1a8.05 8.05 0 0 0 2.58 1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" /></svg>
-            </button>
-            <button type="submit" class="btn btn-primary applicability-search__submit" id="applicability-submit"><span>Найти</span></button>
-            </form>
-          </div>
-          <p class="applicability-feedback" id="applicability-feedback" role="status" aria-live="polite" hidden></p>
-          <div class="results-panel applicability-results-panel card border-0 shadow-sm overflow-hidden" id="applicability-result" aria-busy="false">
-            <div class="results-panel__header card-header bg-white border-0">
-              <div class="results-panel__heading">
-                <h2>Применимость</h2>
-                <span class="panel__meta results-panel__status" id="applicability-result-summary">Введите артикул и бренд</span>
-              </div>
-            </div>
-            <div class="results-table applicability-results-table">
-              <table class="table table-hover align-middle mb-0 results-data-table">
-                <thead><tr><th>Бренд</th><th>Модель</th><th>Модификация</th><th>Период выпуска</th><th>Тип</th></tr></thead>
-                <tbody id="applicability-results-body"><tr class="results-table__empty"><td colspan="5">Выполните поиск применимости.</td></tr></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
-      </div>
       </div>
 
     <aside class="settings-drawer applicability-settings-drawer" id="applicability-settings-drawer" hidden>

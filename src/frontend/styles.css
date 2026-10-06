@@ -195,7 +195,11 @@ input {
   gap: 16px;
 }
 
-.function-content { min-width: 0; }
+.function-tabs { grid-column: 1; }
+.function-content {
+  grid-column: 2;
+  min-width: 0;
+}
 
 .function-tabs {
   position: sticky;
@@ -247,9 +251,18 @@ input {
 
 .applicability-function[hidden] { display: none; }
 
+.applicability-function {
+  display: flex;
+  min-width: 0;
+  min-height: calc(100dvh - 140px);
+  flex-direction: column;
+  gap: 18px;
+}
+
 .applicability-shell {
   display: flex;
   min-height: 0;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 14px;
   padding: 0;
@@ -257,7 +270,8 @@ input {
   box-shadow: none !important;
 }
 
-.applicability-tabs { margin-bottom: 14px !important; }
+.applicability-tabs { flex: 0 0 auto; margin-bottom: 0 !important; }
+.applicability-search-row { flex: 0 0 auto; }
 .applicability-search-shell { display: grid; gap: 8px; }
 .applicability-search-form { display: flex; }
 .applicability-search-form .search-input { flex: 1 1 0; }
@@ -265,7 +279,7 @@ input {
 .applicability-search__submit { min-width: 100px; border-radius: 0; font-weight: 800; }
 .applicability-feedback { margin: 0 2px; color: #9d241c; font-weight: 700; }
 .applicability-feedback[hidden] { display: none; }
-.applicability-results-panel { display: flex; min-height: 420px; flex-direction: column; }
+.applicability-results-panel { display: flex; min-height: 420px; flex: 1 1 auto; flex-direction: column; }
 .applicability-results-table { min-height: 0; flex: 1 1 auto; overflow: auto; }
 .applicability-results-table table { min-width: 760px; }
 .applicability-results-table th,
