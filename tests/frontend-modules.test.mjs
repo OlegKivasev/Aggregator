@@ -599,9 +599,12 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /src="\/applicability\.js"/);
   assert.match(applicability, /fetch\("\/api\/applicability\/search"/);
   assert.match(applicability, /JSON\.stringify\(\{ sku, brand: make\.name, apiKey \}\)/);
+  assert.match(applicability, /className = "applicability-expand"/);
+  assert.match(applicability, /JSON\.stringify\(vehicles, null, 2\)/);
+  assert.match(applicability, /appendCell\(row, "Не найдено"\)/);
   assert.match(applicability, /const createTab/);
   assert.match(applicability, /const renderTabs/);
-  assert.match(applicability, /appendCell\(row, vehicle\.makeName\)/);
+  assert.match(applicability, /appendCell\(row, tab\.makeName\)/);
   assert.doesNotMatch(applicability, /innerHTML|localStorage/);
   assert.equal(makes.length, 735);
   assert.ok(makes.some((make) => make.makeName === "LADA" && make.makeId === 63));

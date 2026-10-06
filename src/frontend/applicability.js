@@ -32,6 +32,7 @@ const createTab = (data = {}) => ({
   results: Array.isArray(data.results) ? data.results : [],
   status: typeof data.status === "string" ? data.status : "",
   hasSearched: Boolean(data.hasSearched),
+  expanded: Boolean(data.expanded),
 });
 
 const getActiveTab = () => tabs.find((tab) => tab.id === activeTabId);
@@ -69,25 +70,59 @@ const renderResults = (tab) => {
   const vehicles = tab.results;
   resultSummary.textContent = tab.status || (tab.hasSearched ? (vehicles.length ? `Найдено автомобилей: ${vehicles.length}` : "Не найдено") : "Введите артикул и бренд");
   resultSummary.dataset.tone = tab.hasSearched && !vehicles.length ? "empty" : "";
-  if (!vehicles.length) {
+  if (!tab.hasSearched) {
     const row = document.createElement("tr");
-    row.className = `results-table__empty${tab.hasSearched ? " applicability-no-results" : ""}`;
+    row.className = "results-table__empty";
     const cell = document.createElement("td");
-    cell.colSpan = 5;
-    cell.textContent = tab.hasSearched ? "По вашему запросу ничего не найдено." : "Выполните поиск применимости.";
+    cell.colSpan = 3;
+    cell.textContent = "Выполните поиск применимости.";
     row.append(cell);
     resultsBody.append(row);
     return;
   }
-  vehicles.forEach((vehicle) => {
+  if (!vehicles.length) {
     const row = document.createElement("tr");
-    appendCell(row, vehicle.makeName);
-    appendCell(row, vehicle.modelName);
-    appendCell(row, vehicle.carName);
-    appendCell(row, `${vehicle.yearStart} — ${vehicle.yearEnd}`);
-    appendCell(row, vehicle.carType);
+    row.className = "applicability-no-results";
+    appendCell(row, tab.sku);
+    appendCell(row, tab.makeName);
+    appendCell(row, "Не найдено");
     resultsBody.append(row);
-  });
+    return;
+  }
+  const row = document.createElement("tr");
+  row.className = "applicability-summary-row";
+  const articleCell = document.createElement("td");
+  const expandButton = document.createElement("button");
+  expandButton.type = "button";
+  expandButton.className = "applicability-expand";
+  expandButton.dataset.expandTabId = tab.id;
+  expandButton.setAttribute("aria-expanded", String(tab.expanded));
+  expandButton.setAttribute("aria-label", tab.expanded ? "Скрыть исходный ответ" : "Показать исходный ответ");
+  const arrow = document.createElement("span");
+  arrow.className = "applicability-expand__arrow";
+  arrow.setAttribute("aria-hidden", "true");
+  arrow.textContent = "▸";
+  const article = document.createElement("span");
+  article.textContent = tab.sku;
+  expandButton.append(arrow, article);
+  articleCell.append(expandButton);
+  row.append(articleCell);
+  appendCell(row, tab.makeName);
+  appendCell(row, String(vehicles.length));
+  resultsBody.append(row);
+
+  if (tab.expanded) {
+    const rawRow = document.createElement("tr");
+    rawRow.className = "applicability-raw-row";
+    const rawCell = document.createElement("td");
+    rawCell.colSpan = 3;
+    const raw = document.createElement("pre");
+    raw.className = "applicability-raw";
+    raw.textContent = JSON.stringify(vehicles, null, 2);
+    rawCell.append(raw);
+    rawRow.append(rawCell);
+    resultsBody.append(rawRow);
+  }
 };
 
 const renderTabs = () => {
@@ -205,6 +240,15 @@ applicabilityTabsList.addEventListener("click", (event) => {
   if (tab) activateTab(tab.dataset.tabId);
 });
 
+resultsBody.addEventListener("click", (event) => {
+  const expandButton = event.target.closest("[data-expand-tab-id]");
+  if (!expandButton) return;
+  const tab = tabs.find((item) => item.id === expandButton.dataset.expandTabId);
+  if (!tab || tab.id !== activeTabId || !tab.results.length) return;
+  tab.expanded = !tab.expanded;
+  renderResults(tab);
+});
+
 skuInput.addEventListener("input", syncActiveTab);
 makeInput.addEventListener("input", () => {
   makeInput.dataset.makeId = selectedMake()?.id ? String(selectedMake().id) : "";
@@ -239,6 +283,7 @@ form.addEventListener("submit", async (event) => {
   submitButton.querySelector("span").textContent = "Ищем…";
   setFeedback("", "notice");
   tab.status = "Ищем применимость…";
+  tab.expanded = false;
   renderTabs();
   try {
     const response = await fetch("/api/applicability/search", {
