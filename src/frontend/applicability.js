@@ -28,7 +28,9 @@ const listButton = document.querySelector("#applicability-list-button");
 const documentModal = document.querySelector("#applicability-document-modal");
 const documentText = document.querySelector("#applicability-document-text");
 const closeDocumentButtons = [...document.querySelectorAll("[data-close-applicability-document]")];
-const documentFormatSelect = document.querySelector("#applicability-document-format");
+const documentFormatControl = document.querySelector("#applicability-document-format");
+const documentFormatValue = document.querySelector("#applicability-document-format-value");
+const documentFormatButtons = [...document.querySelectorAll("[data-applicability-document-format]")];
 const documentColumnsControl = document.querySelector("#applicability-document-columns");
 const documentColumnInputs = [...document.querySelectorAll("[data-applicability-document-column]")];
 
@@ -255,7 +257,10 @@ const buildApplicabilityDocument = (entries, format = documentFormat) => entries
 
 const renderApplicabilityDocument = () => {
   documentText.value = buildApplicabilityDocument(documentEntries);
-  documentFormatSelect.value = documentFormat;
+  documentFormatValue.textContent = documentFormat === "structured" ? "Структурированный список" : "Сырые данные";
+  documentFormatButtons.forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.applicabilityDocumentFormat === documentFormat));
+  });
   documentColumnsControl.hidden = documentFormat !== "structured";
   if (documentFormat !== "structured") documentColumnsControl.open = false;
 };
@@ -447,14 +452,15 @@ applicabilityTab.addEventListener("click", () => setActiveFunction("applicabilit
 newApplicabilityTabButton.addEventListener("click", addTab);
 listButton.addEventListener("click", openDocumentModal);
 closeDocumentButtons.forEach((button) => button.addEventListener("click", () => closeDocumentModal()));
-documentFormatSelect.addEventListener("change", () => {
-  const format = documentFormatSelect.value;
+documentFormatButtons.forEach((button) => button.addEventListener("click", () => {
+  const format = button.dataset.applicabilityDocumentFormat;
   if (format !== "raw" && format !== "structured") return;
   documentFormat = format;
+  documentFormatControl.open = false;
   renderApplicabilityDocument();
   documentText.focus();
   documentText.select();
-});
+}));
 documentColumnInputs.forEach((input) => input.addEventListener("change", () => {
   if (!documentColumnInputs.some((column) => column.checked)) input.checked = true;
   renderApplicabilityDocument();
@@ -646,12 +652,14 @@ makesMenu.addEventListener("click", (event) => {
 });
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".applicability-make-picker")) closeMakeMenu();
+  if (!documentFormatControl.contains(event.target)) documentFormatControl.open = false;
+  if (!documentColumnsControl.contains(event.target)) documentColumnsControl.open = false;
   if (!tabContextMenu.hidden && !tabContextMenu.contains(event.target)) hideTabContextMenu();
   if (!resultContextMenu.hidden && !resultContextMenu.contains(event.target)) hideResultContextMenu();
 });
 document.addEventListener("keydown", (event) => {
   if (!documentModal.hidden && event.key === "Tab") {
-    const focusable = [...documentModal.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, textarea:not([disabled]), [tabindex='0']")]
+    const focusable = [...documentModal.querySelectorAll("button:not([disabled]), input:not([disabled]), summary, textarea:not([disabled]), [tabindex='0']")]
       .filter((element) => element.offsetParent !== null);
     if (!focusable.length) {
       event.preventDefault();

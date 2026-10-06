@@ -649,8 +649,9 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(styles, /\.applicability-function\s*\{[\s\S]*min-height: calc\(100dvh - 140px\);/s);
   assert.match(styles, /\.applicability-results-footer\s*\{[^}]*flex: 0 0 auto;/s);
   assert.match(styles, /\.applicability-document-modal \.analogs-modal__card/);
-  assert.match(styles, /\.applicability-document-control select/);
+  assert.match(styles, /\.applicability-document-format > summary/);
   assert.match(styles, /\.applicability-document-columns__menu/);
+  assert.match(styles, /\.applicability-document-columns__menu\s*\{[^}]*left: 0;/s);
   assert.match(styles, /\.function-tabs\s*\{[^}]*flex-direction: column;/s);
 });
 

@@ -705,12 +705,16 @@
         <div class="applicability-document-modal__content">
           <p id="applicability-document-description">Найдены данные по применимости. Выделите текст и скопируйте его.</p>
           <div class="applicability-document-controls">
-            <label class="applicability-document-control" for="applicability-document-format">Формат
-              <select id="applicability-document-format">
-                <option value="structured" selected>Структурированный список</option>
-                <option value="raw">Сырые данные</option>
-              </select>
-            </label>
+            <div class="applicability-document-control">
+              <span>Формат</span>
+              <details class="applicability-document-format" id="applicability-document-format">
+                <summary id="applicability-document-format-value">Структурированный список</summary>
+                <div class="applicability-document-format__menu" role="group" aria-label="Формат списка">
+                  <button type="button" data-applicability-document-format="structured" aria-pressed="true">Структурированный список</button>
+                  <button type="button" data-applicability-document-format="raw" aria-pressed="false">Сырые данные</button>
+                </div>
+              </details>
+            </div>
             <details class="applicability-document-columns" id="applicability-document-columns">
               <summary>Столбцы</summary>
               <div class="applicability-document-columns__menu" role="group" aria-label="Столбцы структурированного списка">
