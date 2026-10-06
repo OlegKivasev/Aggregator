@@ -18,10 +18,12 @@
   </head>
   <body>
     <main class="page container-fluid py-4 py-lg-5">
-      <nav class="function-tabs card border-0 shadow-sm mb-4" aria-label="Разделы приложения">
+      <div class="function-layout">
+      <nav class="function-tabs card border-0 shadow-sm" aria-label="Разделы приложения">
         <button type="button" class="function-tab active" id="markup-function-tab" aria-controls="markup-function" aria-selected="true">Процентки</button>
         <button type="button" class="function-tab" id="applicability-function-tab" aria-controls="applicability-function" aria-selected="false">Применимость</button>
       </nav>
+      <div class="function-content">
       <div id="markup-function">
       <nav class="search-tabs card border-0 shadow-sm mb-4" id="search-tabs" aria-label="Поисковые вкладки">
         <div class="search-tabs__list" id="search-tabs-list" role="tablist"></div>
@@ -717,6 +719,8 @@
           </details>
         </div>
       </section>
+      </div>
+      </div>
 
     <script type="module" src="/app.js"></script>
     <script type="module" src="/applicability.js"></script>
