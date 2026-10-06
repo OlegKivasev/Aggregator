@@ -2,44 +2,13 @@ import { createBoundedAbortSignal } from "../abort.ts";
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
 import { readBoundedJsonResponse } from "../suppliers/fetch-json.ts";
 import type { ApplicabilitySearchQuery, ApplicabilityVehicle } from "./types.ts";
+import { parseApplicabilityVehicles } from "./vehicle-records.ts";
 
 const partsApiOrigin = "https://api.partsapi.ru";
 const timeoutMs = 8_000;
 const maximumResponseBytes = 2 * 1024 * 1024;
 
 type FetchImplementation = (input: URL, init: RequestInit) => Promise<Response>;
-
-function readOptionalText(record: Record<string, unknown>, field: string): string | null {
-  const value = record[field];
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    throw new SupplierIntegrationError("PartsAPI returned an invalid applicability record");
-  }
-  return value.trim() || null;
-}
-
-function readVehicle(value: unknown): ApplicabilityVehicle {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new SupplierIntegrationError("PartsAPI returned an invalid applicability record");
-  }
-  const record = value as Record<string, unknown>;
-  const carId = record.carId;
-  if (typeof carId !== "number" || !Number.isSafeInteger(carId) || carId <= 0) {
-    throw new SupplierIntegrationError("PartsAPI returned an invalid applicability record");
-  }
-
-  return {
-    carId,
-    carName: readOptionalText(record, "carName"),
-    carType: readOptionalText(record, "carType"),
-    makeName: readOptionalText(record, "makeName"),
-    modelName: readOptionalText(record, "modelName"),
-    yearEnd: readOptionalText(record, "yearEnd"),
-    yearStart: readOptionalText(record, "yearStart"),
-  };
-}
 
 export class PartsApiApplicabilityClient {
   private readonly request: FetchImplementation;
@@ -77,10 +46,7 @@ export class PartsApiApplicabilityClient {
       }
 
       const payload = await readBoundedJsonResponse(response, maximumResponseBytes, "PartsAPI");
-      if (!Array.isArray(payload)) {
-        throw new SupplierIntegrationError("PartsAPI returned an invalid applicability response");
-      }
-      return payload.map(readVehicle);
+      return parseApplicabilityVehicles(payload);
     } finally {
       boundedSignal.dispose();
     }

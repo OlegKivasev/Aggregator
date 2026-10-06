@@ -15,7 +15,7 @@ import type {
   SupplierSessionValidationResult,
   SupplierSearchQuery,
 } from "../types.ts";
-import type { ApplicabilityApiKeyState, ApplicabilitySearchRequest, ApplicabilityVehicle } from "../applicability/types.ts";
+import type { ApplicabilityApiKeyState, ApplicabilitySearchRequest, ApplicabilitySearchResult } from "../applicability/types.ts";
 import {
   articleLengthLimit,
   parseApplicabilityApiKeyPayload,
@@ -54,7 +54,7 @@ export interface AggregatorApplication {
   logoutMotorDetal(): SupplierSessionState;
   logoutMladov(): SupplierSessionState;
   streamSearch(query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal): Promise<void>;
-  searchApplicability(query: ApplicabilitySearchRequest, signal: AbortSignal): Promise<ApplicabilityVehicle[]>;
+  searchApplicability(query: ApplicabilitySearchRequest, signal: AbortSignal): Promise<ApplicabilitySearchResult>;
   getApplicabilityApiKeyState(): ApplicabilityApiKeyState;
   saveApplicabilityApiKey(apiKey: string): ApplicabilityApiKeyState;
   deleteApplicabilityApiKey(): ApplicabilityApiKeyState;
@@ -215,8 +215,8 @@ export function createAggregatorServer({
       };
       response.once("close", abortSearch);
       try {
-        const results = await application.searchApplicability(parseApplicabilitySearchPayload(await readJsonBody(request)), controller.signal);
-        if (!controller.signal.aborted) serveJson(response, 200, { results });
+        const result = await application.searchApplicability(parseApplicabilitySearchPayload(await readJsonBody(request)), controller.signal);
+        if (!controller.signal.aborted) serveJson(response, 200, result);
       } catch (error) {
         if (!controller.signal.aborted) serveApplicabilityError(response, error, reportError);
       } finally {

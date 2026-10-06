@@ -37,7 +37,7 @@ function createApplication(overrides = {}) {
     logoutMotorDetal: () => session("motordetal"),
     logoutMladov: () => session("mladov"),
     streamSearch: async () => {},
-    searchApplicability: async () => [],
+    searchApplicability: async () => ({ results: [], cacheHit: false }),
     getApplicabilityApiKeyState: () => ({ configured: false, persistent: true }),
     saveApplicabilityApiKey: () => ({ configured: true, persistent: true }),
     deleteApplicabilityApiKey: () => ({ configured: false, persistent: true }),
@@ -106,15 +106,18 @@ test("HTTP server stores the applicability API key without exposing it to search
   const application = createApplication({
     searchApplicability: async (query) => {
       receivedQuery = query;
-      return [{
-        carId: 31251,
-        carName: "1.4 16V",
-        carType: "PC",
-        makeName: "LADA",
-        modelName: "KALINA Saloon (1118)",
-        yearEnd: "12.2013",
-        yearStart: "09.2006",
-      }];
+      return {
+        cacheHit: false,
+        results: [{
+          carId: 31251,
+          carName: "1.4 16V",
+          carType: "PC",
+          makeName: "LADA",
+          modelName: "KALINA Saloon (1118)",
+          yearEnd: "12.2013",
+          yearStart: "09.2006",
+        }],
+      };
     },
     getApplicabilityApiKeyState: () => ({ configured: Boolean(savedApiKey), persistent: true }),
     saveApplicabilityApiKey: (apiKey) => {
@@ -147,7 +150,9 @@ test("HTTP server stores the applicability API key without exposing it to search
 
   assert.equal(response.status, 200);
   assert.deepEqual(receivedQuery, { sku: "11182905003", brand: "LADA" });
-  assert.equal((await response.json()).results[0].makeName, "LADA");
+  const responsePayload = await response.json();
+  assert.equal(responsePayload.results[0].makeName, "LADA");
+  assert.equal(responsePayload.cacheHit, false);
 
   const deleteResponse = await fetch(`${baseUrl}/api/applicability/api-key`, { method: "DELETE" });
   assert.deepEqual(await deleteResponse.json(), { configured: false, persistent: true });

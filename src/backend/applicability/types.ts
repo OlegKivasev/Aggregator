@@ -9,6 +9,11 @@ export interface ApplicabilitySearchRequest {
   brand: string;
 }
 
+export interface ApplicabilitySearchResult {
+  results: ApplicabilityVehicle[];
+  cacheHit: boolean;
+}
+
 export interface ApplicabilityApiKeyState {
   configured: boolean;
   persistent: boolean;

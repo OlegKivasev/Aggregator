@@ -3,8 +3,9 @@ import { decodeRosskoApiCredentials, SupplierSessionService } from "./applicatio
 import { ApplicabilityApplicationService } from "./applicability/applicability-application-service.ts";
 import { EncryptedApplicabilityApiKeyStore } from "./applicability/encrypted-api-key-store.ts";
 import { PartsApiApplicabilityClient } from "./applicability/partsapi-client.ts";
+import { SqliteApplicabilityCacheRepository } from "./applicability/sqlite-applicability-cache-repository.ts";
 import type { ApplicabilitySearchRequest } from "./applicability/types.ts";
-import { getArmtekApiConfig, getStateFilePath, getStpartsApiConfig, supplierCredentialsEncryptionKey } from "./config.ts";
+import { getArmtekApiConfig, getGarageDatabasePath, getStateFilePath, getStpartsApiConfig, supplierCredentialsEncryptionKey } from "./config.ts";
 import { EncryptedSupplierCredentialStore } from "./session/encrypted-credential-store.ts";
 import { SupplierSessionManager } from "./session/session-manager.ts";
 import { clearArmtekApiAccountState } from "./suppliers/armtek/armtek-api-account-state.ts";
@@ -49,6 +50,7 @@ const applicabilityApiKeyStore = new EncryptedApplicabilityApiKeyStore(
   getStateFilePath("partsapi-key.enc.json"),
   supplierCredentialsEncryptionKey,
 );
+const applicabilityCacheRepository = new SqliteApplicabilityCacheRepository(getGarageDatabasePath());
 const adapters = [
   new RosskoApiAdapter(),
   new ArmtekApiAdapter(),
@@ -77,7 +79,7 @@ const searchService = new SearchApplicationService(
   sessionManager,
   (supplier) => sessionService.disconnectSupplier(supplier),
 );
-const applicabilityService = new ApplicabilityApplicationService(new PartsApiApplicabilityClient(), applicabilityApiKeyStore);
+const applicabilityService = new ApplicabilityApplicationService(new PartsApiApplicabilityClient(), applicabilityApiKeyStore, applicabilityCacheRepository);
 
 function bootstrapPersistedSessions(): void {
   const rosskoCredentials = credentialStore.get("rossko");
@@ -168,5 +170,6 @@ export const deleteApplicabilityApiKey = () => applicabilityService.deleteApiKey
 
 export async function shutdownSearchService(): Promise<void> {
   closeSiteHttpAgent();
+  applicabilityCacheRepository.close();
   await closeMladovBrowser();
 }

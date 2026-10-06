@@ -19,8 +19,8 @@ const bodyTypePatterns = [
 
 const textValue = (value) => typeof value === "string" && value.trim() ? value.trim() : "отсутствует";
 
-const yearValue = (value) => {
-  const source = textValue(value);
+const yearValue = (value, fallback = "отсутствует") => {
+  const source = typeof value === "string" && value.trim() ? value.trim() : fallback;
   const match = source.match(/\d{4}/);
   return match?.[0] ?? source;
 };
@@ -32,16 +32,17 @@ const bodyTypeMatch = (modelName) => {
 
 const bodyType = (modelName) => bodyTypeMatch(modelName)?.[0] ?? "отсутствует";
 
-const bodyCode = (modelName) => {
+const bodyCodes = (modelName) => {
   const source = textValue(modelName);
-  if (source === "отсутствует") return source;
+  if (source === "отсутствует") return [];
 
-  const codes = [...source.matchAll(/\(([^()]*)\)/g)]
+  return [...source.matchAll(/\(([^()]*)\)/g)]
     .flatMap((match) => match[1].split(/[\/,;|]+/))
-    .map((code) => code.replace(/\s+/g, " ").trim())
+    .map((code) => code.replaceAll("_", "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
-  return [...new Set(codes)].join("/") || "отсутствует";
 };
+
+const bodyCode = (modelName) => [...new Set(bodyCodes(modelName))].join("/") || "отсутствует";
 
 const modelWithoutBodyType = (modelName) => {
   const source = textValue(modelName);
@@ -68,17 +69,22 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns) => {
   const record = vehicle && typeof vehicle === "object" && !Array.isArray(vehicle) ? vehicle : {};
   const modelName = textValue(record.modelName);
   const { capacity, remaining } = splitCarName(record.carName);
-  const values = [
-    ["bodyType", bodyType(modelName)],
-    ["bodyCode", bodyCode(modelName)],
-    ["makeName", textValue(record.makeName)],
-    ["modelName", modelWithoutBodyType(modelName)],
-    ["years", `${yearValue(record.yearStart)}-${yearValue(record.yearEnd)}`],
-    ["capacity", capacity],
-    ["carName", remaining],
-  ];
-  return values
-    .filter(([column]) => !visibleColumns || visibleColumns.has(column))
-    .map(([, value]) => value)
-    .join(", ");
+  const model = modelWithoutBodyType(modelName);
+  const codes = bodyCodes(modelName);
+  const codeVariants = model === "SAMARA" && codes.length ? codes : [bodyCode(modelName)];
+
+  return codeVariants
+    .map((code) => [
+      ["bodyType", bodyType(modelName)],
+      ["bodyCode", code],
+      ["makeName", textValue(record.makeName)],
+      ["modelName", model === "SAMARA" && code !== "отсутствует" ? code : model],
+      ["years", `${yearValue(record.yearStart)}-${yearValue(record.yearEnd, "н.в.")}`],
+      ["capacity", capacity],
+      ["carName", remaining],
+    ]
+      .filter(([column]) => !visibleColumns || visibleColumns.has(column))
+      .map(([, value]) => value)
+      .join(", "))
+    .join("\n");
 };

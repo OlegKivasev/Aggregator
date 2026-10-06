@@ -15,13 +15,13 @@ test("applicability compact list extracts body type, year and engine capacity", 
   );
 });
 
-test("applicability compact list supports English body types and absent optional parts", () => {
+test("applicability compact list uses present for an absent end year", () => {
   assert.equal(
     formatApplicabilityVehicle({
       carName: "1.6",
       makeName: "AUDI",
       modelName: "A2 (8Z0) Saloon",
-      yearEnd: "н.в.",
+      yearEnd: null,
       yearStart: "05.2002",
     }),
     "Седан, 8Z0, AUDI, A2, 2002-н.в., 1.6, отсутствует",
@@ -51,5 +51,36 @@ test("applicability structured list joins multiple body codes", () => {
       yearStart: "01.2005",
     }),
     "отсутствует, E90/E91, BMW, 3, 2005-2012, 2.0, отсутствует",
+  );
+});
+
+test("applicability structured list removes TECDOC placeholders from body codes", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "0.8",
+      makeName: "LADA",
+      modelName: "OKA (1111_)",
+      yearEnd: "12.2007",
+      yearStart: "01.1996",
+    }),
+    "отсутствует, 1111, LADA, OKA, 1996-2007, 0.8, отсутствует",
+  );
+});
+
+test("applicability structured list expands SAMARA body codes into separate rows", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.5",
+      makeName: "LADA",
+      modelName: "SAMARA (2108/2109/2113/2114)",
+      yearEnd: "12.2013",
+      yearStart: "01.1996",
+    }),
+    [
+      "отсутствует, 2108, LADA, 2108, 1996-2013, 1.5, отсутствует",
+      "отсутствует, 2109, LADA, 2109, 1996-2013, 1.5, отсутствует",
+      "отсутствует, 2113, LADA, 2113, 1996-2013, 1.5, отсутствует",
+      "отсутствует, 2114, LADA, 2114, 1996-2013, 1.5, отсутствует",
+    ].join("\n"),
   );
 });

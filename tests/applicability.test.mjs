@@ -7,6 +7,7 @@ import { ApplicabilityApplicationService } from "../src/backend/applicability/ap
 import { EncryptedApplicabilityApiKeyStore } from "../src/backend/applicability/encrypted-api-key-store.ts";
 import { SupplierAuthError, SupplierIntegrationError } from "../src/backend/errors.ts";
 import { PartsApiApplicabilityClient } from "../src/backend/applicability/partsapi-client.ts";
+import { SqliteApplicabilityCacheRepository } from "../src/backend/applicability/sqlite-applicability-cache-repository.ts";
 
 const vehicle = {
   carId: 31251,
@@ -93,9 +94,27 @@ test("PartsAPI key is stored encrypted and can only be removed explicitly", () =
   }
 });
 
-test("applicability service keeps the API key out of the search request boundary", async () => {
+test("applicability cache persists real PartsAPI responses", () => {
+  const directory = mkdtempSync(join(tmpdir(), "partsapi-cache-"));
+  const filePath = join(directory, "cache.sqlite");
+  try {
+    const cache = new SqliteApplicabilityCacheRepository(filePath);
+    cache.set({ sku: "11182905003", brand: "LADA" }, [vehicle]);
+    cache.close();
+
+    const restoredCache = new SqliteApplicabilityCacheRepository(filePath);
+    assert.deepEqual(restoredCache.get({ sku: "11182905003", brand: "LADA" }), [vehicle]);
+    restoredCache.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("applicability service returns cached results without repeating the PartsAPI request", async () => {
   let savedKey = null;
   let receivedQuery = null;
+  let calls = 0;
+  const entries = new Map();
   const repository = {
     get: () => savedKey,
     set: (apiKey) => { savedKey = apiKey; },
@@ -104,15 +123,27 @@ test("applicability service keeps the API key out of the search request boundary
   };
   const service = new ApplicabilityApplicationService({
     search: async (query) => {
+      calls += 1;
       receivedQuery = query;
-      return [];
+      return [vehicle];
     },
-  }, repository);
+  }, repository, {
+    get: (query) => entries.get(`${query.sku}\u0000${query.brand}`) ?? null,
+    set: (query, results) => entries.set(`${query.sku}\u0000${query.brand}`, results),
+  });
 
   assert.deepEqual(service.getApiKeyState(), { configured: false, persistent: true });
   service.saveApiKey("test-key");
-  await service.search({ sku: "11182905003", brand: "LADA" }, new AbortController().signal);
+  assert.deepEqual(
+    await service.search({ sku: "11182905003", brand: "LADA" }, new AbortController().signal),
+    { results: [vehicle], cacheHit: false },
+  );
+  assert.deepEqual(
+    await service.search({ sku: "11182905003", brand: "LADA" }, new AbortController().signal),
+    { results: [vehicle], cacheHit: true },
+  );
   assert.deepEqual(receivedQuery, { sku: "11182905003", brand: "LADA", apiKey: "test-key" });
+  assert.equal(calls, 1);
   assert.deepEqual(service.deleteApiKey(), { configured: false, persistent: true });
 });
 
@@ -123,6 +154,9 @@ test("applicability service refuses to save an API key without encrypted persist
     delete: () => {},
     isPersistent: () => false,
   };
-  const service = new ApplicabilityApplicationService({ search: async () => [] }, repository);
+  const service = new ApplicabilityApplicationService({ search: async () => [] }, repository, {
+    get: () => null,
+    set: () => {},
+  });
   assert.throws(() => service.saveApiKey("test-key"), SupplierIntegrationError);
 });

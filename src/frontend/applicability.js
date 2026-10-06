@@ -100,10 +100,10 @@ const setFeedback = (message, tone = "error") => {
   feedback.hidden = !message;
 };
 
-const showApplicabilityToast = (message) => {
+const showApplicabilityToast = (message, tone = "notice") => {
   if (applicabilityToastTimer !== null) window.clearTimeout(applicabilityToastTimer);
   applicabilityToast.textContent = message;
-  applicabilityToast.dataset.tone = "notice";
+  applicabilityToast.dataset.tone = tone;
   applicabilityToast.hidden = false;
   applicabilityToastTimer = window.setTimeout(() => {
     applicabilityToast.hidden = true;
@@ -270,18 +270,23 @@ const searchApplicability = async (sku, brand, signal) => {
   });
   const payload = await response.json();
   if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось выполнить поиск применимости.");
-  if (!Array.isArray(payload?.results)) throw new Error("Сервис вернул некорректный ответ.");
-  return payload.results;
+  if (!Array.isArray(payload?.results) || typeof payload.cacheHit !== "boolean") throw new Error("Сервис вернул некорректный ответ.");
+  return { results: payload.results, cacheHit: payload.cacheHit };
 };
 
-const buildApplicabilityDocument = (entries, format = documentFormat) => entries
-  .map((entry) => {
+const buildApplicabilityDocument = (entries, format = documentFormat) => {
+  const visibleColumns = visibleDocumentColumns();
+  return entries
+    .map((entry) => {
     const contents = format === "structured"
-      ? entry.results.map((vehicle) => formatApplicabilityVehicle(vehicle, visibleDocumentColumns())).join("\n")
+      ? entry.results.map((vehicle) => formatApplicabilityVehicle(vehicle, visibleColumns)).join("\n")
       : JSON.stringify(entry.results, null, 2);
-    return `Артикул: ${entry.sku}\n${contents}`;
+    return format !== "structured" || visibleColumns.has("article")
+      ? `Артикул: ${entry.sku}\n${contents}`
+      : contents;
   })
   .join("\n\n");
+};
 
 const renderApplicabilityDocument = ({ preserveTextState = false } = {}) => {
   const textState = preserveTextState ? {
@@ -768,15 +773,21 @@ form.addEventListener("submit", async (event) => {
   renderTabs();
   saveApplicabilityState();
   try {
-    let results = await searchApplicability(sku, make.name, controller.signal);
+    let { results, cacheHit } = await searchApplicability(sku, make.name, controller.signal);
     const normalizedSku = normalizeApplicabilitySku(sku);
     if (!results.length && normalizedSku && normalizedSku !== sku) {
-      results = await searchApplicability(normalizedSku, make.name, controller.signal);
+      ({ results, cacheHit } = await searchApplicability(normalizedSku, make.name, controller.signal));
       if (results.length) {
         entry.sku = normalizedSku;
-        showApplicabilityToast(`Артикул «${sku}» изменён на «${normalizedSku}» и успешно найден.`);
+        showApplicabilityToast(
+          cacheHit
+            ? `Артикул «${sku}» изменён на «${normalizedSku}». Использован сохранённый результат из базы.`
+            : `Артикул «${sku}» изменён на «${normalizedSku}» и успешно найден.`,
+          cacheHit ? "success" : "notice",
+        );
       }
     }
+    if (cacheHit && entry.sku === sku) showApplicabilityToast("Использован сохранённый результат из базы.", "success");
     entry.results = results;
     entry.hasSearched = true;
     entry.status = results.length ? `Найдено автомобилей: ${results.length}` : "Не найдено";
