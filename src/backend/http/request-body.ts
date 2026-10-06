@@ -82,6 +82,30 @@ export function parseRosskoApiCredentials(payload: unknown): RosskoApiCredential
   return { key1: normalizedKey1, key2: normalizedKey2 };
 }
 
+export function parseApplicabilitySearchPayload(payload: unknown): { sku: string; apiKey: string } {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new RequestBodyError(400, "sku and API key are required");
+  }
+  const { sku, apiKey } = payload as { sku?: unknown; apiKey?: unknown };
+  if (typeof sku !== "string" || typeof apiKey !== "string") {
+    throw new RequestBodyError(400, "sku and API key must be strings within the allowed length");
+  }
+  const normalizedSku = sku.trim();
+  const normalizedApiKey = apiKey.trim();
+  if (!normalizedSku || !normalizedApiKey) {
+    throw new RequestBodyError(400, "sku and API key are required");
+  }
+  if (
+    normalizedSku.length > articleLengthLimit ||
+    normalizedApiKey.length > 512 ||
+    /[\u0000-\u001f\u007f]/.test(normalizedSku) ||
+    /[\u0000-\u001f\u007f]/.test(normalizedApiKey)
+  ) {
+    throw new RequestBodyError(400, "sku and API key must be strings within the allowed length");
+  }
+  return { sku: normalizedSku, apiKey: normalizedApiKey };
+}
+
 export async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Uint8Array[] = [];
   let bodySize = 0;

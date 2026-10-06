@@ -18,6 +18,7 @@ import {
   logoutPartKom,
   logoutRossko,
   logoutStparts,
+  searchApplicability,
   shutdownSearchService,
   streamSearch,
   validateSupplierSessions,
@@ -45,6 +46,7 @@ const application: AggregatorApplication = {
   logoutPartKom,
   logoutRossko,
   logoutStparts,
+  searchApplicability,
   streamSearch,
   validateSupplierSessions,
 };

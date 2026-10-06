@@ -580,6 +580,22 @@ test("main application frame uses the expanded shared width", async () => {
   assert.match(styles, /\.page\s*\{[^}]*max-width: 2400px;/s);
 });
 
+test("applicability is a separate static function with safe client-side rendering", async () => {
+  const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
+  const applicability = await readFile(new URL("../src/frontend/applicability.js", import.meta.url), "utf8");
+  const makes = JSON.parse(await readFile(new URL("../src/frontend/applicability-makes.json", import.meta.url), "utf8"));
+
+  assert.match(html, /id="markup-function-tab"[\s\S]*?Процентки/);
+  assert.match(html, /id="applicability-function-tab"[\s\S]*?Применимость/);
+  assert.match(html, /id="applicability-api-key" type="password"/);
+  assert.match(html, /src="\/applicability\.js"/);
+  assert.match(applicability, /fetch\("\/api\/applicability\/search"/);
+  assert.match(applicability, /appendCell\(row, vehicle\.makeName\)/);
+  assert.doesNotMatch(applicability, /innerHTML|localStorage/);
+  assert.equal(makes.length, 735);
+  assert.ok(makes.some((make) => make.makeName === "LADA" && make.makeId === 63));
+});
+
 test("Rossko authorization form accepts only API keys", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");

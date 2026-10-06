@@ -15,8 +15,10 @@ import type {
   SupplierSessionValidationResult,
   SupplierSearchQuery,
 } from "../types.ts";
+import type { ApplicabilitySearchQuery, ApplicabilityVehicle } from "../applicability/types.ts";
 import {
   articleLengthLimit,
+  parseApplicabilitySearchPayload,
   parseCredentials,
   parseRosskoApiCredentials,
   parseSessionValidationPayload,
@@ -51,6 +53,7 @@ export interface AggregatorApplication {
   logoutMotorDetal(): SupplierSessionState;
   logoutMladov(): SupplierSessionState;
   streamSearch(query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal): Promise<void>;
+  searchApplicability(query: ApplicabilitySearchQuery, signal: AbortSignal): Promise<ApplicabilityVehicle[]>;
 }
 
 interface CreateAggregatorServerOptions {
@@ -89,6 +92,26 @@ function serveAuthorizationError(
   const message = error instanceof SupplierIntegrationError && error.publicMessage
     ? error.publicMessage
     : "Supplier authorization failed";
+  serveJson(response, statusCode, { message });
+}
+
+function serveApplicabilityError(
+  response: ServerResponse,
+  error: unknown,
+  reportError: (event: OperationalErrorEvent) => void,
+): void {
+  if (error instanceof RequestBodyError) {
+    serveJson(response, error.statusCode, { message: "Applicability request is invalid" });
+    return;
+  }
+  const category = classifyOperationalError(error);
+  reportError({ operation: "search-applicability", category });
+  const statusCode = category === "authorization" ? 401 : category === "timeout" ? 504 : category === "integration" ? 502 : 500;
+  const message = category === "authorization"
+    ? "PartsAPI rejected the API key"
+    : category === "timeout"
+      ? "PartsAPI did not respond in time"
+      : "Applicability search failed";
   serveJson(response, statusCode, { message });
 }
 
@@ -176,6 +199,23 @@ export function createAggregatorServer({
 
     if (request.method === "GET" && url.pathname === "/api/suppliers/sessions") {
       serveJson(response, 200, { sessions: application.listSupplierSessions() });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/applicability/search") {
+      const controller = new AbortController();
+      const abortSearch = () => {
+        if (!response.writableEnded) controller.abort(new Error("Client disconnected"));
+      };
+      response.once("close", abortSearch);
+      try {
+        const results = await application.searchApplicability(parseApplicabilitySearchPayload(await readJsonBody(request)), controller.signal);
+        if (!controller.signal.aborted) serveJson(response, 200, { results });
+      } catch (error) {
+        if (!controller.signal.aborted) serveApplicabilityError(response, error, reportError);
+      } finally {
+        response.removeListener("close", abortSearch);
+      }
       return;
     }
 

@@ -37,6 +37,7 @@ function createApplication(overrides = {}) {
     logoutMotorDetal: () => session("motordetal"),
     logoutMladov: () => session("mladov"),
     streamSearch: async () => {},
+    searchApplicability: async () => [],
     ...overrides,
   };
 }
@@ -94,6 +95,43 @@ test("HTTP server delegates authorization to the injected application", async ()
   assert.equal(response.status, 200);
   assert.deepEqual(receivedCredentials, { login: "api-user", password: " secret " });
   assert.deepEqual(await response.json(), { session: session("armtek", true) });
+});
+
+test("HTTP server validates and delegates applicability searches without exposing the API key", async () => {
+  let receivedQuery;
+  const application = createApplication({
+    searchApplicability: async (query) => {
+      receivedQuery = query;
+      return [{
+        carId: 31251,
+        carName: "1.4 16V",
+        carType: "PC",
+        makeName: "LADA",
+        modelName: "KALINA Saloon (1118)",
+        yearEnd: "12.2013",
+        yearStart: "09.2006",
+      }];
+    },
+  });
+  const { baseUrl } = await listen(application);
+
+  const response = await fetch(`${baseUrl}/api/applicability/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sku: " 11182905003 ", apiKey: " test-key " }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(receivedQuery, { sku: "11182905003", apiKey: "test-key" });
+  assert.equal((await response.json()).results[0].makeName, "LADA");
+
+  const invalid = await fetch(`${baseUrl}/api/applicability/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sku: "", apiKey: "" }),
+  });
+  assert.equal(invalid.status, 400);
+  assert.deepEqual(await invalid.json(), { message: "Applicability request is invalid" });
 });
 
 test("HTTP server delegates Forum-Auto authorization without exposing credentials", async () => {

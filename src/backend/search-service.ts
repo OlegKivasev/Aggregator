@@ -1,5 +1,8 @@
 import { SearchApplicationService } from "./application/search-application-service.ts";
 import { decodeRosskoApiCredentials, SupplierSessionService } from "./application/supplier-session-service.ts";
+import { ApplicabilityApplicationService } from "./applicability/applicability-application-service.ts";
+import { PartsApiApplicabilityClient } from "./applicability/partsapi-client.ts";
+import type { ApplicabilitySearchQuery } from "./applicability/types.ts";
 import { getArmtekApiConfig, getStateFilePath, getStpartsApiConfig, supplierCredentialsEncryptionKey } from "./config.ts";
 import { EncryptedSupplierCredentialStore } from "./session/encrypted-credential-store.ts";
 import { SupplierSessionManager } from "./session/session-manager.ts";
@@ -69,6 +72,7 @@ const searchService = new SearchApplicationService(
   sessionManager,
   (supplier) => sessionService.disconnectSupplier(supplier),
 );
+const applicabilityService = new ApplicabilityApplicationService(new PartsApiApplicabilityClient());
 
 function bootstrapPersistedSessions(): void {
   const rosskoCredentials = credentialStore.get("rossko");
@@ -147,6 +151,10 @@ export function validateSupplierSessions(article: string, suppliers: SupplierId[
 
 export function streamSearch(query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) {
   return searchService.streamSearch(query, emit, signal);
+}
+
+export function searchApplicability(query: ApplicabilitySearchQuery, signal: AbortSignal) {
+  return applicabilityService.search(query, signal);
 }
 
 export async function shutdownSearchService(): Promise<void> {

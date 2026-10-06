@@ -18,6 +18,11 @@
   </head>
   <body>
     <main class="page container-fluid py-4 py-lg-5">
+      <nav class="function-tabs card border-0 shadow-sm mb-4" aria-label="Разделы приложения">
+        <button type="button" class="function-tab active" id="markup-function-tab" aria-controls="markup-function" aria-selected="true">Процентки</button>
+        <button type="button" class="function-tab" id="applicability-function-tab" aria-controls="applicability-function" aria-selected="false">Применимость</button>
+      </nav>
+      <div id="markup-function">
       <nav class="search-tabs card border-0 shadow-sm mb-4" id="search-tabs" aria-label="Поисковые вкладки">
         <div class="search-tabs__list" id="search-tabs-list" role="tablist"></div>
         <button type="button" class="new-tab-button btn btn-light" id="new-tab-button" aria-label="Открыть новую вкладку">+</button>
@@ -675,7 +680,45 @@
         </form>
       </section>
     </div>
+      </div>
+
+      <section class="applicability-function" id="applicability-function" hidden aria-labelledby="applicability-title">
+        <div class="applicability-shell card border-0 shadow-sm">
+          <header class="applicability-shell__header">
+            <div>
+              <h1 id="applicability-title">Применимость</h1>
+              <p>Проверьте, для каких автомобилей подходит запчасть.</p>
+            </div>
+          </header>
+          <form class="applicability-search" id="applicability-search-form">
+            <label class="visually-hidden" for="applicability-sku">OEM-артикул</label>
+            <input class="applicability-search__input" id="applicability-sku" name="sku" type="text" placeholder="Введите OEM-артикул" autocomplete="off" maxlength="128" required />
+            <label class="visually-hidden" for="applicability-make">Марка автомобиля</label>
+            <input class="applicability-search__input applicability-search__make" id="applicability-make" name="make" list="applicability-makes" placeholder="Выберите марку" autocomplete="off" required />
+            <datalist id="applicability-makes"></datalist>
+            <button type="button" class="settings-button" id="applicability-settings-toggle" aria-label="Открыть настройки применимости" title="Настройки применимости">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" /><path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.46-2.47 1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58 1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 3.46 2.47 1a8.05 8.05 0 0 0 2.58 1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" /></svg>
+            </button>
+            <button type="submit" class="btn btn-primary applicability-search__submit" id="applicability-submit">Найти</button>
+          </form>
+          <section class="applicability-settings card" id="applicability-settings" hidden aria-label="Настройки применимости">
+            <label class="field" for="applicability-api-key"><span>API-ключ PartsAPI</span><input id="applicability-api-key" type="password" autocomplete="off" maxlength="512" /></label>
+            <p>Ключ хранится только в этом поле до обновления страницы.</p>
+          </section>
+          <p class="applicability-feedback" id="applicability-feedback" role="status" aria-live="polite" hidden></p>
+          <details class="applicability-result" id="applicability-result" hidden>
+            <summary id="applicability-result-summary"></summary>
+            <div class="applicability-result__table-wrap">
+              <table class="table table-hover align-middle mb-0">
+                <thead><tr><th>Марка</th><th>Модель</th><th>Модификация</th><th>Период выпуска</th><th>Тип</th></tr></thead>
+                <tbody id="applicability-results-body"></tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+      </section>
 
     <script type="module" src="/app.js"></script>
+    <script type="module" src="/applicability.js"></script>
   </body>
 </html>
