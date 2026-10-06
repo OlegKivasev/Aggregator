@@ -329,6 +329,10 @@ input {
 .applicability-document-modal .analogs-modal__card { width: min(920px, calc(100vw - 24px)); height: min(720px, calc(100dvh - 24px)); }
 .applicability-document-modal__content { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 12px; padding: 0 22px 22px; }
 .applicability-document-modal__content p { flex: 0 0 auto; margin: 0; color: var(--muted); font-weight: 600; }
+.applicability-document-format { display: inline-flex; align-self: flex-start; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: #f8fafc; }
+.applicability-document-format__button { padding: 7px 10px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font: inherit; font-size: 12px; font-weight: 800; }
+.applicability-document-format__button[aria-pressed="true"] { color: #fff; background: var(--accent); }
+.applicability-document-format__button:not([aria-pressed="true"]):hover, .applicability-document-format__button:not([aria-pressed="true"]):focus-visible { color: var(--accent-dark); background: #fff1eb; outline: 0; }
 .applicability-document-modal__text { width: 100%; min-height: 0; flex: 1 1 auto; resize: none; padding: 15px 16px; border: 1px solid var(--line); border-radius: 12px; color: #344054; background: #fff; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre; }
 .applicability-document-modal__text:focus-visible { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 22%, transparent); outline-offset: 1px; }
 .settings-drawer__hint { margin: 10px 0 0; color: var(--muted); font-size: 12px; }

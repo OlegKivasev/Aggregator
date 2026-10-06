@@ -26,6 +26,7 @@ const listButton = document.querySelector("#applicability-list-button");
 const documentModal = document.querySelector("#applicability-document-modal");
 const documentText = document.querySelector("#applicability-document-text");
 const closeDocumentButtons = [...document.querySelectorAll("[data-close-applicability-document]")];
+const documentFormatButtons = [...document.querySelectorAll("[data-applicability-document-format]")];
 
 let makesByName = new Map();
 let tabs = [];
@@ -39,6 +40,8 @@ let contextMenuTabAnchor = null;
 let contextMenuEntryId = null;
 let contextMenuEntryAnchor = null;
 let documentModalReturnFocus = null;
+let documentFormat = "raw";
+let documentEntries = [];
 
 const applicabilityStateStorageKey = "autoservice.applicabilityState";
 const activeFunctionStorageKey = "autoservice.activeFunction";
@@ -231,9 +234,33 @@ const appendCell = (row, text) => {
 
 const successfulSearches = (tab) => tab.searches.filter((entry) => entry.hasSearched && entry.results.length);
 
-const buildApplicabilityDocument = (tab) => successfulSearches(tab)
-  .map((entry) => `Артикул: ${entry.sku}\n${JSON.stringify(entry.results, null, 2)}`)
+const textValue = (value) => typeof value === "string" && value.trim() ? value.trim() : "—";
+
+const formatVehicleSummary = (vehicle) => {
+  const record = vehicle && typeof vehicle === "object" && !Array.isArray(vehicle) ? vehicle : {};
+  return [
+    textValue(record.makeName),
+    textValue(record.modelName),
+    `${textValue(record.yearStart)} — ${textValue(record.yearEnd)}`,
+    textValue(record.carName),
+  ].join(", ");
+};
+
+const buildApplicabilityDocument = (entries, format = documentFormat) => entries
+  .map((entry) => {
+    const contents = format === "summary"
+      ? entry.results.map(formatVehicleSummary).join("\n")
+      : JSON.stringify(entry.results, null, 2);
+    return `Артикул: ${entry.sku}\n${contents}`;
+  })
   .join("\n\n");
+
+const renderApplicabilityDocument = () => {
+  documentText.value = buildApplicabilityDocument(documentEntries);
+  documentFormatButtons.forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.applicabilityDocumentFormat === documentFormat));
+  });
+};
 
 const updateListButton = (tab) => {
   const hasResults = successfulSearches(tab).length > 0;
@@ -312,10 +339,10 @@ const closeDocumentModal = (restoreFocus = true) => {
 const openDocumentModal = () => {
   const tab = getActiveTab();
   if (!tab) return;
-  const documentTextValue = buildApplicabilityDocument(tab);
-  if (!documentTextValue) return;
+  documentEntries = successfulSearches(tab);
+  if (!documentEntries.length) return;
   documentModalReturnFocus = document.activeElement;
-  documentText.value = documentTextValue;
+  renderApplicabilityDocument();
   documentModal.hidden = false;
   documentText.focus();
   documentText.select();
@@ -422,6 +449,14 @@ applicabilityTab.addEventListener("click", () => setActiveFunction("applicabilit
 newApplicabilityTabButton.addEventListener("click", addTab);
 listButton.addEventListener("click", openDocumentModal);
 closeDocumentButtons.forEach((button) => button.addEventListener("click", () => closeDocumentModal()));
+documentFormatButtons.forEach((button) => button.addEventListener("click", () => {
+  const format = button.dataset.applicabilityDocumentFormat;
+  if (format !== "raw" && format !== "summary") return;
+  documentFormat = format;
+  renderApplicabilityDocument();
+  documentText.focus();
+  documentText.select();
+}));
 settingsToggle.addEventListener("click", () => {
   settingsDrawer.hidden = false;
   apiKeyInput.focus();

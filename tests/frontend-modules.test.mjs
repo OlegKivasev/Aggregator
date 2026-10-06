@@ -601,6 +601,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /OEM-артикул[\s\S]*?Производитель[\s\S]*?Количество/);
   assert.match(html, /id="applicability-list-button"/);
   assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
+  assert.match(html, /data-applicability-document-format="raw"[\s\S]*?data-applicability-document-format="summary"/);
   assert.doesNotMatch(html, /id="applicability-result-summary"/);
   assert.match(html, /id="applicability-tab-context-menu"[\s\S]*?id="applicability-rename-tab-button"/);
   assert.match(html, /id="applicability-result-context-menu"[\s\S]*?id="applicability-result-delete-button"/);
@@ -614,6 +615,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /className = "applicability-expand"/);
   assert.match(applicability, /JSON\.stringify\(entry\.results, null, 2\)/);
   assert.match(applicability, /const buildApplicabilityDocument/);
+  assert.match(applicability, /const formatVehicleSummary/);
+  assert.match(applicability, /record\.makeName[\s\S]*?record\.modelName[\s\S]*?record\.yearStart[\s\S]*?record\.yearEnd[\s\S]*?record\.carName/);
   assert.match(applicability, /entry\.hasSearched && entry\.results\.length/);
   assert.match(applicability, /documentText\.select\(\)/);
   assert.match(applicability, /appendCell\(row, "Не найдено"\)/);
@@ -644,6 +647,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(styles, /\.applicability-function\s*\{[\s\S]*min-height: calc\(100dvh - 140px\);/s);
   assert.match(styles, /\.applicability-results-footer\s*\{[^}]*flex: 0 0 auto;/s);
   assert.match(styles, /\.applicability-document-modal \.analogs-modal__card/);
+  assert.match(styles, /\.applicability-document-format__button\[aria-pressed="true"\]/);
   assert.match(styles, /\.function-tabs\s*\{[^}]*flex-direction: column;/s);
 });
 
