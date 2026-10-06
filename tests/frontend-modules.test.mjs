@@ -586,13 +586,17 @@ test("applicability is a separate static function with safe client-side renderin
   const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
   const makes = JSON.parse(await readFile(new URL("../src/frontend/applicability-makes.json", import.meta.url), "utf8"));
 
-  assert.match(html, /id="markup-function-tab"[\s\S]*?Процентка/);
+  assert.match(html, /id="markup-function-tab"[\s\S]*?Проценка/);
   assert.match(html, /id="applicability-function-tab"[\s\S]*?Применимость/);
   assert.match(html, /class="function-layout"[\s\S]*?class="function-tabs/);
   assert.match(html, /id="applicability-api-key" type="password"/);
   assert.match(html, /id="applicability-tabs-list"/);
   assert.match(html, /id="applicability-new-tab"/);
   assert.match(html, /id="applicability-settings-toggle"/);
+  assert.match(html, /id="applicability-api-key-status"/);
+  assert.match(html, /aria-label="Показать API-ключ"/);
+  assert.match(html, /OEM-артикул[\s\S]*?Производитель[\s\S]*?Количество/);
+  assert.doesNotMatch(html, /id="applicability-result-summary"/);
   assert.match(html, /class="search-row applicability-search-row"/);
   assert.ok(html.indexOf('class="function-content"') < html.indexOf('id="applicability-function"'));
   assert.ok(html.indexOf('id="applicability-function"') < html.indexOf("</main>"));
@@ -600,11 +604,15 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /fetch\("\/api\/applicability\/search"/);
   assert.match(applicability, /JSON\.stringify\(\{ sku, brand: make\.name, apiKey \}\)/);
   assert.match(applicability, /className = "applicability-expand"/);
-  assert.match(applicability, /JSON\.stringify\(vehicles, null, 2\)/);
+  assert.match(applicability, /JSON\.stringify\(entry\.results, null, 2\)/);
   assert.match(applicability, /appendCell\(row, "Не найдено"\)/);
+  assert.match(applicability, /tab\.searches\.push\(entry\)/);
+  assert.match(applicability, /tab\.searches\.forEach/);
+  assert.match(applicability, /data-expand-entry-id/);
+  assert.match(applicability, /apiKeyInput\.addEventListener\("keydown"/);
   assert.match(applicability, /const createTab/);
   assert.match(applicability, /const renderTabs/);
-  assert.match(applicability, /appendCell\(row, tab\.makeName\)/);
+  assert.match(applicability, /appendCell\(row, entry\.makeName\)/);
   assert.doesNotMatch(applicability, /innerHTML|localStorage/);
   assert.equal(makes.length, 735);
   assert.ok(makes.some((make) => make.makeName === "LADA" && make.makeId === 63));

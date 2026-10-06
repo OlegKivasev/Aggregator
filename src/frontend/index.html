@@ -20,7 +20,7 @@
     <main class="page container-fluid py-4 py-lg-5">
       <div class="function-layout">
       <nav class="function-tabs card border-0 shadow-sm" aria-label="Разделы приложения">
-        <button type="button" class="function-tab active" id="markup-function-tab" aria-controls="markup-function" aria-selected="true">Процентка</button>
+        <button type="button" class="function-tab active" id="markup-function-tab" aria-controls="markup-function" aria-selected="true">Проценка</button>
         <button type="button" class="function-tab" id="applicability-function-tab" aria-controls="applicability-function" aria-selected="false">Применимость</button>
       </nav>
       <div class="function-content">
@@ -273,23 +273,20 @@
               <input class="search-input applicability-make-input" id="applicability-make" name="make" list="applicability-makes" placeholder="Выберите бренд" autocomplete="off" required />
               <datalist id="applicability-makes"></datalist>
               <button type="button" class="settings-button" id="applicability-settings-toggle" aria-label="Открыть настройки применимости" title="Настройки применимости">
-                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" /><path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2.47-1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58-1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 3.46-2.47-1a8.05 8.05 0 0 0-2.58-1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" /></svg>
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" /><path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.46-2.47 1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58-1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 1.55 2 3.46 2.47-1a8.05 8.05 0 0 0 2.58 1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" /></svg>
               </button>
-              <button type="submit" class="btn btn-primary applicability-search__submit" id="applicability-submit"><span>Найти</span></button>
+              <button type="submit" class="btn btn-primary applicability-search__submit" id="applicability-submit">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.75" cy="10.75" r="6.25" /><path d="m15.5 15.5 4 4" /></svg>
+                <span>Поиск</span>
+              </button>
             </form>
           </div>
           <p class="applicability-feedback" id="applicability-feedback" role="status" aria-live="polite" hidden></p>
           <div class="results-panel applicability-results-panel card border-0 shadow-sm overflow-hidden" id="applicability-result" aria-busy="false">
-            <div class="results-panel__header card-header bg-white border-0">
-              <div class="results-panel__heading">
-                <h2>Результат поиска</h2>
-                <span class="panel__meta results-panel__status" id="applicability-result-summary">Введите артикул и бренд</span>
-              </div>
-            </div>
             <div class="results-table applicability-results-table">
               <table class="table table-hover align-middle mb-0 results-data-table">
                 <thead><tr><th>OEM-артикул</th><th>Производитель</th><th>Количество</th></tr></thead>
-                <tbody id="applicability-results-body"><tr class="results-table__empty"><td colspan="3">Выполните поиск применимости.</td></tr></tbody>
+                <tbody id="applicability-results-body"></tbody>
               </table>
             </div>
           </div>
@@ -732,7 +729,8 @@
           <h2>Настройки применимости</h2>
           <button type="button" class="button-secondary settings-close btn btn-light" id="applicability-settings-close" aria-label="Закрыть настройки применимости">×</button>
         </div>
-        <label class="field" for="applicability-api-key"><span>API-ключ PartsAPI</span><input id="applicability-api-key" type="password" autocomplete="off" maxlength="512" /></label>
+        <label class="field" for="applicability-api-key"><span>API-ключ PartsAPI</span><span class="password-field"><input id="applicability-api-key" type="password" autocomplete="off" maxlength="512" /><button class="password-toggle" type="button" aria-label="Показать API-ключ" aria-controls="applicability-api-key"><span aria-hidden="true">&#128065;</span></button></span></label>
+        <p class="settings-drawer__status" id="applicability-api-key-status" role="status" aria-live="polite" hidden>Ключ введён</p>
         <p class="settings-drawer__hint">Ключ действует только до обновления страницы и не сохраняется в браузере.</p>
       </div>
     </aside>

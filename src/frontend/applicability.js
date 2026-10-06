@@ -13,9 +13,9 @@ const settingsDrawer = document.querySelector("#applicability-settings-drawer");
 const settingsToggle = document.querySelector("#applicability-settings-toggle");
 const settingsClose = document.querySelector("#applicability-settings-close");
 const settingsBackdrop = document.querySelector("#applicability-settings-backdrop");
+const apiKeyStatus = document.querySelector("#applicability-api-key-status");
 const submitButton = document.querySelector("#applicability-submit");
 const feedback = document.querySelector("#applicability-feedback");
-const resultSummary = document.querySelector("#applicability-result-summary");
 const resultsBody = document.querySelector("#applicability-results-body");
 
 let makesByName = new Map();
@@ -24,15 +24,22 @@ let activeTabId = null;
 let tabSequence = 1;
 let activeRequest = null;
 
+const createSearchEntry = (data = {}) => ({
+  id: data.id ?? `applicability-search-${Date.now()}-${tabSequence++}`,
+  sku: typeof data.sku === "string" ? data.sku : "",
+  makeName: typeof data.makeName === "string" ? data.makeName : "",
+  results: Array.isArray(data.results) ? data.results : [],
+  status: typeof data.status === "string" ? data.status : "",
+  hasSearched: Boolean(data.hasSearched),
+  expanded: Boolean(data.expanded),
+});
+
 const createTab = (data = {}) => ({
   id: data.id ?? `applicability-tab-${Date.now()}-${tabSequence++}`,
   sku: typeof data.sku === "string" ? data.sku : "",
   makeName: typeof data.makeName === "string" ? data.makeName : "",
   makeId: Number.isSafeInteger(data.makeId) ? data.makeId : null,
-  results: Array.isArray(data.results) ? data.results : [],
-  status: typeof data.status === "string" ? data.status : "",
-  hasSearched: Boolean(data.hasSearched),
-  expanded: Boolean(data.expanded),
+  searches: Array.isArray(data.searches) ? data.searches.map(createSearchEntry) : [],
 });
 
 const getActiveTab = () => tabs.find((tab) => tab.id === activeTabId);
@@ -67,62 +74,59 @@ const appendCell = (row, text) => {
 
 const renderResults = (tab) => {
   resultsBody.replaceChildren();
-  const vehicles = tab.results;
-  resultSummary.textContent = tab.status || (tab.hasSearched ? (vehicles.length ? `Найдено автомобилей: ${vehicles.length}` : "Не найдено") : "Введите артикул и бренд");
-  resultSummary.dataset.tone = tab.hasSearched && !vehicles.length ? "empty" : "";
-  if (!tab.hasSearched) {
+  if (!tab.searches.length) return;
+  tab.searches.forEach((entry) => {
     const row = document.createElement("tr");
-    row.className = "results-table__empty";
-    const cell = document.createElement("td");
-    cell.colSpan = 3;
-    cell.textContent = "Выполните поиск применимости.";
-    row.append(cell);
+    if (!entry.hasSearched) {
+      row.className = "applicability-searching-row";
+      appendCell(row, entry.sku);
+      appendCell(row, entry.makeName);
+      appendCell(row, entry.status || "Ищем…");
+      resultsBody.append(row);
+      return;
+    }
+    if (!entry.results.length) {
+      row.className = "applicability-no-results";
+      appendCell(row, entry.sku);
+      appendCell(row, entry.makeName);
+      appendCell(row, "Не найдено");
+      resultsBody.append(row);
+      return;
+    }
+    row.className = "applicability-summary-row";
+    const articleCell = document.createElement("td");
+    const expandButton = document.createElement("button");
+    expandButton.type = "button";
+    expandButton.className = "applicability-expand";
+    expandButton.dataset.expandEntryId = entry.id;
+    expandButton.setAttribute("aria-expanded", String(entry.expanded));
+    expandButton.setAttribute("aria-label", entry.expanded ? "Скрыть исходный ответ" : "Показать исходный ответ");
+    const arrow = document.createElement("span");
+    arrow.className = "applicability-expand__arrow";
+    arrow.setAttribute("aria-hidden", "true");
+    arrow.textContent = "▸";
+    const article = document.createElement("span");
+    article.textContent = entry.sku;
+    expandButton.append(arrow, article);
+    articleCell.append(expandButton);
+    row.append(articleCell);
+    appendCell(row, entry.makeName);
+    appendCell(row, String(entry.results.length));
     resultsBody.append(row);
-    return;
-  }
-  if (!vehicles.length) {
-    const row = document.createElement("tr");
-    row.className = "applicability-no-results";
-    appendCell(row, tab.sku);
-    appendCell(row, tab.makeName);
-    appendCell(row, "Не найдено");
-    resultsBody.append(row);
-    return;
-  }
-  const row = document.createElement("tr");
-  row.className = "applicability-summary-row";
-  const articleCell = document.createElement("td");
-  const expandButton = document.createElement("button");
-  expandButton.type = "button";
-  expandButton.className = "applicability-expand";
-  expandButton.dataset.expandTabId = tab.id;
-  expandButton.setAttribute("aria-expanded", String(tab.expanded));
-  expandButton.setAttribute("aria-label", tab.expanded ? "Скрыть исходный ответ" : "Показать исходный ответ");
-  const arrow = document.createElement("span");
-  arrow.className = "applicability-expand__arrow";
-  arrow.setAttribute("aria-hidden", "true");
-  arrow.textContent = "▸";
-  const article = document.createElement("span");
-  article.textContent = tab.sku;
-  expandButton.append(arrow, article);
-  articleCell.append(expandButton);
-  row.append(articleCell);
-  appendCell(row, tab.makeName);
-  appendCell(row, String(vehicles.length));
-  resultsBody.append(row);
 
-  if (tab.expanded) {
-    const rawRow = document.createElement("tr");
-    rawRow.className = "applicability-raw-row";
-    const rawCell = document.createElement("td");
-    rawCell.colSpan = 3;
-    const raw = document.createElement("pre");
-    raw.className = "applicability-raw";
-    raw.textContent = JSON.stringify(vehicles, null, 2);
-    rawCell.append(raw);
-    rawRow.append(rawCell);
-    resultsBody.append(rawRow);
-  }
+    if (entry.expanded) {
+      const rawRow = document.createElement("tr");
+      rawRow.className = "applicability-raw-row";
+      const rawCell = document.createElement("td");
+      rawCell.colSpan = 3;
+      const raw = document.createElement("pre");
+      raw.className = "applicability-raw";
+      raw.textContent = JSON.stringify(entry.results, null, 2);
+      rawCell.append(raw);
+      rawRow.append(rawCell);
+      resultsBody.append(rawRow);
+    }
+  });
 };
 
 const renderTabs = () => {
@@ -135,7 +139,8 @@ const renderTabs = () => {
     button.setAttribute("role", "tab");
     button.setAttribute("aria-selected", String(tab.id === activeTabId));
     const status = document.createElement("span");
-    status.className = `search-tab__status${tab.hasSearched && tab.results.length ? " is-completed" : ""}`;
+    const isCompleted = tab.searches.some((entry) => entry.hasSearched && entry.results.length);
+    status.className = `search-tab__status${isCompleted ? " is-completed" : ""}`;
     status.setAttribute("aria-hidden", "true");
     const title = document.createElement("span");
     title.className = "search-tab__title";
@@ -228,6 +233,14 @@ settingsToggle.addEventListener("click", () => {
 });
 settingsClose.addEventListener("click", () => { settingsDrawer.hidden = true; });
 settingsBackdrop.addEventListener("click", () => { settingsDrawer.hidden = true; });
+apiKeyInput.addEventListener("input", () => {
+  apiKeyStatus.hidden = true;
+});
+apiKeyInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  apiKeyStatus.hidden = !apiKeyInput.value.trim();
+});
 
 applicabilityTabsList.addEventListener("click", (event) => {
   const close = event.target.closest("[data-close-tab-id]");
@@ -241,11 +254,12 @@ applicabilityTabsList.addEventListener("click", (event) => {
 });
 
 resultsBody.addEventListener("click", (event) => {
-  const expandButton = event.target.closest("[data-expand-tab-id]");
+  const expandButton = event.target.closest("[data-expand-entry-id]");
   if (!expandButton) return;
-  const tab = tabs.find((item) => item.id === expandButton.dataset.expandTabId);
-  if (!tab || tab.id !== activeTabId || !tab.results.length) return;
-  tab.expanded = !tab.expanded;
+  const tab = getActiveTab();
+  const entry = tab?.searches.find((item) => item.id === expandButton.dataset.expandEntryId);
+  if (!tab || !entry || !entry.results.length) return;
+  entry.expanded = !entry.expanded;
   renderResults(tab);
 });
 
@@ -276,14 +290,15 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
+  const entry = createSearchEntry({ sku, makeName: make.name, status: "Ищем применимость…" });
+  tab.searches.push(entry);
   activeRequest?.abort();
   const controller = new AbortController();
   activeRequest = controller;
   submitButton.disabled = true;
   submitButton.querySelector("span").textContent = "Ищем…";
   setFeedback("", "notice");
-  tab.status = "Ищем применимость…";
-  tab.expanded = false;
+  renderResults(tab);
   renderTabs();
   try {
     const response = await fetch("/api/applicability/search", {
@@ -295,16 +310,21 @@ form.addEventListener("submit", async (event) => {
     const payload = await response.json();
     if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось выполнить поиск применимости.");
     if (!Array.isArray(payload?.results)) throw new Error("Сервис вернул некорректный ответ.");
-    tab.results = payload.results;
-    tab.hasSearched = true;
-    tab.status = payload.results.length ? `Найдено автомобилей: ${payload.results.length}` : "Не найдено";
+    entry.results = payload.results;
+    entry.hasSearched = true;
+    entry.status = payload.results.length ? `Найдено автомобилей: ${payload.results.length}` : "Не найдено";
     if (activeTabId === tab.id) renderResults(tab);
     renderTabs();
   } catch (error) {
     if (error.name !== "AbortError") {
-      tab.status = "Ошибка поиска";
+      tab.searches = tab.searches.filter((item) => item !== entry);
+      if (activeTabId === tab.id) renderResults(tab);
       renderTabs();
       setFeedback(error instanceof Error ? error.message : "Не удалось выполнить поиск применимости.");
+    } else {
+      tab.searches = tab.searches.filter((item) => item !== entry);
+      if (activeTabId === tab.id) renderResults(tab);
+      renderTabs();
     }
   } finally {
     if (activeRequest === controller) {
