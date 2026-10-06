@@ -27,3 +27,16 @@ test("applicability compact list supports English body types and absent optional
     "Седан, AUDI, A2 (8Z0), 2002-н.в., 1.6, отсутствует",
   );
 });
+
+test("applicability structured list omits unchecked columns", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6 Sport",
+      makeName: "LADA",
+      modelName: "KALINA Хэтчбэк (1119)",
+      yearEnd: "12.2013",
+      yearStart: "06.2013",
+    }, new Set(["makeName", "modelName", "years", "capacity"])),
+    "LADA, KALINA (1119), 2013-2013, 1.6",
+  );
+});

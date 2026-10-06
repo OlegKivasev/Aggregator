@@ -28,7 +28,9 @@ const listButton = document.querySelector("#applicability-list-button");
 const documentModal = document.querySelector("#applicability-document-modal");
 const documentText = document.querySelector("#applicability-document-text");
 const closeDocumentButtons = [...document.querySelectorAll("[data-close-applicability-document]")];
-const documentFormatButtons = [...document.querySelectorAll("[data-applicability-document-format]")];
+const documentFormatSelect = document.querySelector("#applicability-document-format");
+const documentColumnsControl = document.querySelector("#applicability-document-columns");
+const documentColumnInputs = [...document.querySelectorAll("[data-applicability-document-column]")];
 
 let makesByName = new Map();
 let tabs = [];
@@ -42,7 +44,7 @@ let contextMenuTabAnchor = null;
 let contextMenuEntryId = null;
 let contextMenuEntryAnchor = null;
 let documentModalReturnFocus = null;
-let documentFormat = "raw";
+let documentFormat = "structured";
 let documentEntries = [];
 
 const applicabilityStateStorageKey = "autoservice.applicabilityState";
@@ -236,10 +238,16 @@ const appendCell = (row, text) => {
 
 const successfulSearches = (tab) => tab.searches.filter((entry) => entry.hasSearched && entry.results.length);
 
+const visibleDocumentColumns = () => new Set(
+  documentColumnInputs
+    .filter((input) => input.checked)
+    .map((input) => input.dataset.applicabilityDocumentColumn),
+);
+
 const buildApplicabilityDocument = (entries, format = documentFormat) => entries
   .map((entry) => {
-    const contents = format === "summary"
-      ? entry.results.map(formatApplicabilityVehicle).join("\n")
+    const contents = format === "structured"
+      ? entry.results.map((vehicle) => formatApplicabilityVehicle(vehicle, visibleDocumentColumns())).join("\n")
       : JSON.stringify(entry.results, null, 2);
     return `Артикул: ${entry.sku}\n${contents}`;
   })
@@ -247,9 +255,9 @@ const buildApplicabilityDocument = (entries, format = documentFormat) => entries
 
 const renderApplicabilityDocument = () => {
   documentText.value = buildApplicabilityDocument(documentEntries);
-  documentFormatButtons.forEach((button) => {
-    button.setAttribute("aria-pressed", String(button.dataset.applicabilityDocumentFormat === documentFormat));
-  });
+  documentFormatSelect.value = documentFormat;
+  documentColumnsControl.hidden = documentFormat !== "structured";
+  if (documentFormat !== "structured") documentColumnsControl.open = false;
 };
 
 const updateListButton = (tab) => {
@@ -439,10 +447,16 @@ applicabilityTab.addEventListener("click", () => setActiveFunction("applicabilit
 newApplicabilityTabButton.addEventListener("click", addTab);
 listButton.addEventListener("click", openDocumentModal);
 closeDocumentButtons.forEach((button) => button.addEventListener("click", () => closeDocumentModal()));
-documentFormatButtons.forEach((button) => button.addEventListener("click", () => {
-  const format = button.dataset.applicabilityDocumentFormat;
-  if (format !== "raw" && format !== "summary") return;
+documentFormatSelect.addEventListener("change", () => {
+  const format = documentFormatSelect.value;
+  if (format !== "raw" && format !== "structured") return;
   documentFormat = format;
+  renderApplicabilityDocument();
+  documentText.focus();
+  documentText.select();
+});
+documentColumnInputs.forEach((input) => input.addEventListener("change", () => {
+  if (!documentColumnInputs.some((column) => column.checked)) input.checked = true;
   renderApplicabilityDocument();
   documentText.focus();
   documentText.select();
@@ -637,7 +651,7 @@ document.addEventListener("click", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (!documentModal.hidden && event.key === "Tab") {
-    const focusable = [...documentModal.querySelectorAll("button:not([disabled]), textarea:not([disabled]), [tabindex='0']")]
+    const focusable = [...documentModal.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, textarea:not([disabled]), [tabindex='0']")]
       .filter((element) => element.offsetParent !== null);
     if (!focusable.length) {
       event.preventDefault();

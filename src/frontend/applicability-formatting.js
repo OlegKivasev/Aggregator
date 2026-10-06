@@ -51,16 +51,20 @@ const splitCarName = (carName) => {
   return { capacity, remaining: remaining || "отсутствует" };
 };
 
-export const formatApplicabilityVehicle = (vehicle) => {
+export const formatApplicabilityVehicle = (vehicle, visibleColumns) => {
   const record = vehicle && typeof vehicle === "object" && !Array.isArray(vehicle) ? vehicle : {};
   const modelName = textValue(record.modelName);
   const { capacity, remaining } = splitCarName(record.carName);
-  return [
-    bodyType(modelName),
-    textValue(record.makeName),
-    modelWithoutBodyType(modelName),
-    `${yearValue(record.yearStart)}-${yearValue(record.yearEnd)}`,
-    capacity,
-    remaining,
-  ].join(", ");
+  const values = [
+    ["bodyType", bodyType(modelName)],
+    ["makeName", textValue(record.makeName)],
+    ["modelName", modelWithoutBodyType(modelName)],
+    ["years", `${yearValue(record.yearStart)}-${yearValue(record.yearEnd)}`],
+    ["capacity", capacity],
+    ["carName", remaining],
+  ];
+  return values
+    .filter(([column]) => !visibleColumns || visibleColumns.has(column))
+    .map(([, value]) => value)
+    .join(", ");
 };

@@ -704,9 +704,24 @@
         </header>
         <div class="applicability-document-modal__content">
           <p id="applicability-document-description">Найдены данные по применимости. Выделите текст и скопируйте его.</p>
-          <div class="applicability-document-format" role="group" aria-label="Формат списка">
-            <button type="button" class="applicability-document-format__button" data-applicability-document-format="raw" aria-pressed="true">Сырые данные</button>
-            <button type="button" class="applicability-document-format__button" data-applicability-document-format="summary" aria-pressed="false">Краткий список</button>
+          <div class="applicability-document-controls">
+            <label class="applicability-document-control" for="applicability-document-format">Формат
+              <select id="applicability-document-format">
+                <option value="structured" selected>Структурированный список</option>
+                <option value="raw">Сырые данные</option>
+              </select>
+            </label>
+            <details class="applicability-document-columns" id="applicability-document-columns">
+              <summary>Столбцы</summary>
+              <div class="applicability-document-columns__menu" role="group" aria-label="Столбцы структурированного списка">
+                <label><input type="checkbox" data-applicability-document-column="bodyType" checked /> Кузов</label>
+                <label><input type="checkbox" data-applicability-document-column="makeName" checked /> Марка</label>
+                <label><input type="checkbox" data-applicability-document-column="modelName" checked /> Модель</label>
+                <label><input type="checkbox" data-applicability-document-column="years" checked /> Годы выпуска</label>
+                <label><input type="checkbox" data-applicability-document-column="capacity" checked /> Объём двигателя</label>
+                <label><input type="checkbox" data-applicability-document-column="carName" checked /> Модификация</label>
+              </div>
+            </details>
           </div>
           <label class="visually-hidden" for="applicability-document-text">Список применимости</label>
           <textarea id="applicability-document-text" class="applicability-document-modal__text" readonly spellcheck="false"></textarea>
