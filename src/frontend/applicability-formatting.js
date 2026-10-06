@@ -32,12 +32,25 @@ const bodyTypeMatch = (modelName) => {
 
 const bodyType = (modelName) => bodyTypeMatch(modelName)?.[0] ?? "отсутствует";
 
+const bodyCode = (modelName) => {
+  const source = textValue(modelName);
+  if (source === "отсутствует") return source;
+
+  const codes = [...source.matchAll(/\(([^()]*)\)/g)]
+    .flatMap((match) => match[1].split(/[\/,;|]+/))
+    .map((code) => code.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  return [...new Set(codes)].join("/") || "отсутствует";
+};
+
 const modelWithoutBodyType = (modelName) => {
   const source = textValue(modelName);
   const match = bodyTypeMatch(source);
-  if (!match) return source;
-
-  const model = source.replace(match[1], "").replace(/\s{2,}/g, " ").trim();
+  const model = source
+    .replace(/\s*\([^()]*\)/g, "")
+    .replace(match?.[1] ?? /$^/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
   return model || "отсутствует";
 };
 
@@ -57,6 +70,7 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns) => {
   const { capacity, remaining } = splitCarName(record.carName);
   const values = [
     ["bodyType", bodyType(modelName)],
+    ["bodyCode", bodyCode(modelName)],
     ["makeName", textValue(record.makeName)],
     ["modelName", modelWithoutBodyType(modelName)],
     ["years", `${yearValue(record.yearStart)}-${yearValue(record.yearEnd)}`],

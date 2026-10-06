@@ -11,7 +11,7 @@ test("applicability compact list extracts body type, year and engine capacity", 
       yearEnd: "12.2013",
       yearStart: "11.2008",
     }),
-    "Универсал, LADA, KALINA (1117), 2008-2013, 1.4, 16V LPG",
+    "Универсал, 1117, LADA, KALINA, 2008-2013, 1.4, 16V LPG",
   );
 });
 
@@ -24,7 +24,7 @@ test("applicability compact list supports English body types and absent optional
       yearEnd: "н.в.",
       yearStart: "05.2002",
     }),
-    "Седан, AUDI, A2 (8Z0), 2002-н.в., 1.6, отсутствует",
+    "Седан, 8Z0, AUDI, A2, 2002-н.в., 1.6, отсутствует",
   );
 });
 
@@ -36,7 +36,20 @@ test("applicability structured list omits unchecked columns", () => {
       modelName: "KALINA Хэтчбэк (1119)",
       yearEnd: "12.2013",
       yearStart: "06.2013",
-    }, new Set(["makeName", "modelName", "years", "capacity"])),
-    "LADA, KALINA (1119), 2013-2013, 1.6",
+    }, new Set(["bodyCode", "makeName", "modelName", "years", "capacity"])),
+    "1119, LADA, KALINA, 2013-2013, 1.6",
+  );
+});
+
+test("applicability structured list joins multiple body codes", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "2.0",
+      makeName: "BMW",
+      modelName: "3 (E90, E91)",
+      yearEnd: "12.2012",
+      yearStart: "01.2005",
+    }),
+    "отсутствует, E90/E91, BMW, 3, 2005-2012, 2.0, отсутствует",
   );
 });
