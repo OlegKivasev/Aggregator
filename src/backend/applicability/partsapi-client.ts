@@ -9,12 +9,15 @@ const maximumResponseBytes = 2 * 1024 * 1024;
 
 type FetchImplementation = (input: URL, init: RequestInit) => Promise<Response>;
 
-function readRequiredText(record: Record<string, unknown>, field: string): string {
+function readOptionalText(record: Record<string, unknown>, field: string): string | null {
   const value = record[field];
-  if (typeof value !== "string" || !value.trim()) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== "string") {
     throw new SupplierIntegrationError("PartsAPI returned an invalid applicability record");
   }
-  return value.trim();
+  return value.trim() || null;
 }
 
 function readVehicle(value: unknown): ApplicabilityVehicle {
@@ -29,12 +32,12 @@ function readVehicle(value: unknown): ApplicabilityVehicle {
 
   return {
     carId,
-    carName: readRequiredText(record, "carName"),
-    carType: readRequiredText(record, "carType"),
-    makeName: readRequiredText(record, "makeName"),
-    modelName: readRequiredText(record, "modelName"),
-    yearEnd: readRequiredText(record, "yearEnd"),
-    yearStart: readRequiredText(record, "yearStart"),
+    carName: readOptionalText(record, "carName"),
+    carType: readOptionalText(record, "carType"),
+    makeName: readOptionalText(record, "makeName"),
+    modelName: readOptionalText(record, "modelName"),
+    yearEnd: readOptionalText(record, "yearEnd"),
+    yearStart: readOptionalText(record, "yearStart"),
   };
 }
 

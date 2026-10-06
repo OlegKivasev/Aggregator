@@ -35,6 +35,28 @@ test("PartsAPI applicability client uses the documented endpoint and validates r
   assert.deepEqual(results, [vehicle]);
 });
 
+test("PartsAPI applicability client accepts nullable optional vehicle fields", async () => {
+  const nullableVehicle = {
+    ...vehicle,
+    carName: null,
+    carType: null,
+    makeName: null,
+    modelName: null,
+    yearEnd: null,
+    yearStart: null,
+  };
+  const client = new PartsApiApplicabilityClient(async () => new Response(JSON.stringify([nullableVehicle]), {
+    headers: { "Content-Type": "application/json" },
+  }));
+
+  const results = await client.search(
+    { sku: "11182905003", brand: "LADA", apiKey: "test-key" },
+    new AbortController().signal,
+  );
+
+  assert.deepEqual(results, [nullableVehicle]);
+});
+
 test("PartsAPI applicability client rejects malformed data and rejected API keys", async () => {
   const malformedClient = new PartsApiApplicabilityClient(async () => new Response(JSON.stringify([{ ...vehicle, carId: "31251" }]), {
     headers: { "Content-Type": "application/json" },

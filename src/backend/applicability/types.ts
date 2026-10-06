@@ -16,10 +16,10 @@ export interface ApplicabilityApiKeyState {
 
 export interface ApplicabilityVehicle {
   carId: number;
-  carName: string;
-  carType: string;
-  makeName: string;
-  modelName: string;
-  yearEnd: string;
-  yearStart: string;
+  carName: string | null;
+  carType: string | null;
+  makeName: string | null;
+  modelName: string | null;
+  yearEnd: string | null;
+  yearStart: string | null;
 }
