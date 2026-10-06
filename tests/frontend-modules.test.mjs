@@ -593,11 +593,15 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-tabs-list"/);
   assert.match(html, /id="applicability-new-tab"/);
   assert.match(html, /id="applicability-settings-toggle"/);
+  assert.match(html, /id="applicability-make"[^>]*role="combobox"/);
+  assert.match(html, /id="applicability-makes" role="listbox"/);
   assert.match(html, /id="applicability-api-key-status"/);
   assert.match(html, /id="applicability-api-key-delete"/);
   assert.match(html, /aria-label="Показать API-ключ"/);
   assert.match(html, /OEM-артикул[\s\S]*?Производитель[\s\S]*?Количество/);
   assert.doesNotMatch(html, /id="applicability-result-summary"/);
+  assert.match(html, /id="applicability-tab-context-menu"[\s\S]*?id="applicability-rename-tab-button"/);
+  assert.match(html, /id="applicability-result-context-menu"[\s\S]*?id="applicability-result-delete-button"/);
   assert.match(html, /class="search-row applicability-search-row"/);
   assert.ok(html.indexOf('class="function-content"') < html.indexOf('id="applicability-function"'));
   assert.ok(html.indexOf('id="applicability-function"') < html.indexOf("</main>"));
@@ -611,12 +615,23 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /tab\.searches\.push\(entry\)/);
   assert.match(applicability, /tab\.searches\.forEach/);
   assert.match(applicability, /data-expand-entry-id/);
+  assert.match(applicability, /data-applicability-entry-id/);
+  assert.match(applicability, /applicabilityTabsList\.addEventListener\("contextmenu"/);
+  assert.match(applicability, /resultsBody\.addEventListener\("contextmenu"/);
+  assert.match(applicability, /saveApplicabilityState/);
+  assert.match(applicability, /restoreApplicabilityState/);
+  assert.match(applicability, /activeFunctionStorageKey/);
   assert.match(applicability, /apiKeyInput\.addEventListener\("keydown"/);
   assert.match(applicability, /deleteApiKeyButton\.addEventListener\("click"/);
   assert.match(applicability, /const createTab/);
   assert.match(applicability, /const renderTabs/);
   assert.match(applicability, /appendCell\(row, entry\.makeName\)/);
-  assert.doesNotMatch(applicability, /innerHTML|localStorage|sessionStorage/);
+  assert.doesNotMatch(applicability, /innerHTML|sessionStorage/);
+  const savedApplicabilityState = applicability.slice(
+    applicability.indexOf("const saveApplicabilityState"),
+    applicability.indexOf("const restoreApplicabilityState"),
+  );
+  assert.doesNotMatch(savedApplicabilityState, /apiKey/);
   assert.equal(makes.length, 735);
   assert.ok(makes.some((make) => make.makeName === "LADA" && make.makeId === 63));
   assert.match(styles, /\.function-layout\s*\{[^}]*grid-template-columns: 200px minmax\(0, 1fr\);/s);

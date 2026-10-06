@@ -270,10 +270,12 @@
               <label class="visually-hidden" for="applicability-sku">OEM-артикул</label>
               <input class="search-input" id="applicability-sku" name="sku" type="text" placeholder="Введите OEM-артикул" autocomplete="off" maxlength="128" required />
               <label class="visually-hidden" for="applicability-make">Бренд</label>
-              <input class="search-input applicability-make-input" id="applicability-make" name="make" list="applicability-makes" placeholder="Выберите бренд" autocomplete="off" required />
-              <datalist id="applicability-makes"></datalist>
+              <div class="applicability-make-picker">
+                <input class="search-input applicability-make-input" id="applicability-make" name="make" placeholder="Выберите бренд" autocomplete="off" required role="combobox" aria-autocomplete="list" aria-controls="applicability-makes" aria-expanded="false" />
+                <div class="applicability-make-menu card border-0 shadow" id="applicability-makes" role="listbox" hidden></div>
+              </div>
               <button type="button" class="settings-button" id="applicability-settings-toggle" aria-label="Открыть настройки применимости" title="Настройки применимости">
-                <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.25" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.28 5.28 7.4 7.4M16.6 16.6l2.12 2.12M18.72 5.28 16.6 7.4M7.4 16.6l-2.12 2.12" /></svg>
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" /><path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.46-2.47 1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58 1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 1.55 2 3.46 2.47-1a8.05 8.05 0 0 0 2.58 1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" /></svg>
               </button>
               <button type="submit" class="btn btn-primary applicability-search__submit" id="applicability-submit">
                 <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.75" cy="10.75" r="6.25" /><path d="m15.5 15.5 4 4" /></svg>
@@ -567,6 +569,12 @@
     </div>
     <div class="tab-context-menu card border-0 shadow" id="tab-context-menu" role="menu" hidden>
       <button type="button" id="rename-tab-button" role="menuitem">Переименовать вкладку</button>
+    </div>
+    <div class="tab-context-menu card border-0 shadow" id="applicability-tab-context-menu" role="menu" hidden>
+      <button type="button" id="applicability-rename-tab-button" role="menuitem">Переименовать вкладку</button>
+    </div>
+    <div class="result-context-menu applicability-context-menu card border-0 shadow" id="applicability-result-context-menu" role="menu" hidden>
+      <button type="button" class="applicability-context-menu__delete" id="applicability-result-delete-button" role="menuitem">Удалить строку</button>
     </div>
     <div class="result-context-menu garage-context-menu card border-0 shadow" id="garage-context-menu" role="menu" hidden>
       <button type="button" id="garage-rename-button" role="menuitem">Переименовать</button>
