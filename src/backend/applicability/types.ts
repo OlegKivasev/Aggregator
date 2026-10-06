@@ -1,5 +1,6 @@
 export interface ApplicabilitySearchQuery {
   sku: string;
+  brand: string;
   apiKey: string;
 }
 

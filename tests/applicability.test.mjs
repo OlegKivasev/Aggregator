@@ -20,13 +20,13 @@ test("PartsAPI applicability client uses the documented endpoint and validates r
     return new Response(JSON.stringify([vehicle]), { headers: { "Content-Type": "application/json" } });
   });
 
-  const results = await client.search({ sku: "11182905003", apiKey: "test-key" }, new AbortController().signal);
+  const results = await client.search({ sku: "11182905003", brand: "LADA", apiKey: "test-key" }, new AbortController().signal);
 
   assert.equal(requestedUrl.origin, "https://api.partsapi.ru");
-  assert.equal(requestedUrl.searchParams.get("method"), "getApplicability2");
+  assert.equal(requestedUrl.searchParams.get("method"), "getApplicability");
   assert.equal(requestedUrl.searchParams.get("sku"), "11182905003");
+  assert.equal(requestedUrl.searchParams.get("brand"), "LADA");
   assert.equal(requestedUrl.searchParams.get("key"), "test-key");
-  assert.equal(requestedUrl.searchParams.has("brand"), false);
   assert.deepEqual(results, [vehicle]);
 });
 
@@ -35,13 +35,13 @@ test("PartsAPI applicability client rejects malformed data and rejected API keys
     headers: { "Content-Type": "application/json" },
   }));
   await assert.rejects(
-    malformedClient.search({ sku: "11182905003", apiKey: "test-key" }, new AbortController().signal),
+    malformedClient.search({ sku: "11182905003", brand: "LADA", apiKey: "test-key" }, new AbortController().signal),
     SupplierIntegrationError,
   );
 
   const rejectedClient = new PartsApiApplicabilityClient(async () => new Response(null, { status: 403 }));
   await assert.rejects(
-    rejectedClient.search({ sku: "11182905003", apiKey: "test-key" }, new AbortController().signal),
+    rejectedClient.search({ sku: "11182905003", brand: "LADA", apiKey: "test-key" }, new AbortController().signal),
     SupplierAuthError,
   );
 });

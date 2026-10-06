@@ -244,7 +244,7 @@ form.addEventListener("submit", async (event) => {
     const response = await fetch("/api/applicability/search", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ sku, apiKey }),
+      body: JSON.stringify({ sku, brand: make.name, apiKey }),
       signal: controller.signal,
     });
     const payload = await response.json();

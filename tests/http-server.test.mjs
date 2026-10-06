@@ -118,11 +118,11 @@ test("HTTP server validates and delegates applicability searches without exposin
   const response = await fetch(`${baseUrl}/api/applicability/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sku: " 11182905003 ", apiKey: " test-key " }),
+    body: JSON.stringify({ sku: " 11182905003 ", brand: " LADA ", apiKey: " test-key " }),
   });
 
   assert.equal(response.status, 200);
-  assert.deepEqual(receivedQuery, { sku: "11182905003", apiKey: "test-key" });
+  assert.deepEqual(receivedQuery, { sku: "11182905003", brand: "LADA", apiKey: "test-key" });
   assert.equal((await response.json()).results[0].makeName, "LADA");
 
   const invalid = await fetch(`${baseUrl}/api/applicability/search`, {

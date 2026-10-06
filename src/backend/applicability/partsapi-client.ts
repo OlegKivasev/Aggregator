@@ -47,9 +47,10 @@ export class PartsApiApplicabilityClient {
 
   async search(query: ApplicabilitySearchQuery, signal: AbortSignal): Promise<ApplicabilityVehicle[]> {
     const url = new URL("/", partsApiOrigin);
-    url.searchParams.set("method", "getApplicability2");
+    url.searchParams.set("method", "getApplicability");
     url.searchParams.set("key", query.apiKey);
     url.searchParams.set("sku", query.sku);
+    url.searchParams.set("brand", query.brand);
     const boundedSignal = createBoundedAbortSignal(signal, timeoutMs, "PartsAPI applicability request timed out");
 
     try {

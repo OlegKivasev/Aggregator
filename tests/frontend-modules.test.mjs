@@ -598,6 +598,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.ok(html.indexOf('id="applicability-function"') < html.indexOf("</main>"));
   assert.match(html, /src="\/applicability\.js"/);
   assert.match(applicability, /fetch\("\/api\/applicability\/search"/);
+  assert.match(applicability, /JSON\.stringify\(\{ sku, brand: make\.name, apiKey \}\)/);
   assert.match(applicability, /const createTab/);
   assert.match(applicability, /const renderTabs/);
   assert.match(applicability, /appendCell\(row, vehicle\.makeName\)/);
