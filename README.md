@@ -12,6 +12,11 @@ pnpm start
 
 The application listens on `127.0.0.1:3000` by default. `PORT` can override the port.
 
+For persistent runtime credentials and the PartsAPI applicability key, configure
+`SUPPLIER_CREDENTIALS_ENCRYPTION_KEY` as a base64-encoded 32-byte key and keep
+`STATE_DIR` outside the application checkout in production. The key is stored
+encrypted on the server and can be removed from the applicability settings.
+
 ## Safe Git Workflow
 
 Changes prepared by AI agents are published only through task branches named

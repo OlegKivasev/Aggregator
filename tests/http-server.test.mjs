@@ -38,6 +38,9 @@ function createApplication(overrides = {}) {
     logoutMladov: () => session("mladov"),
     streamSearch: async () => {},
     searchApplicability: async () => [],
+    getApplicabilityApiKeyState: () => ({ configured: false, persistent: true }),
+    saveApplicabilityApiKey: () => ({ configured: true, persistent: true }),
+    deleteApplicabilityApiKey: () => ({ configured: false, persistent: true }),
     ...overrides,
   };
 }
@@ -97,8 +100,9 @@ test("HTTP server delegates authorization to the injected application", async ()
   assert.deepEqual(await response.json(), { session: session("armtek", true) });
 });
 
-test("HTTP server validates and delegates applicability searches without exposing the API key", async () => {
+test("HTTP server stores the applicability API key without exposing it to searches", async () => {
   let receivedQuery;
+  let savedApiKey;
   const application = createApplication({
     searchApplicability: async (query) => {
       receivedQuery = query;
@@ -112,23 +116,47 @@ test("HTTP server validates and delegates applicability searches without exposin
         yearStart: "09.2006",
       }];
     },
+    getApplicabilityApiKeyState: () => ({ configured: Boolean(savedApiKey), persistent: true }),
+    saveApplicabilityApiKey: (apiKey) => {
+      savedApiKey = apiKey;
+      return { configured: true, persistent: true };
+    },
+    deleteApplicabilityApiKey: () => {
+      savedApiKey = null;
+      return { configured: false, persistent: true };
+    },
   });
   const { baseUrl } = await listen(application);
+
+  const initialState = await fetch(`${baseUrl}/api/applicability/api-key`);
+  assert.deepEqual(await initialState.json(), { configured: false, persistent: true });
+
+  const saveResponse = await fetch(`${baseUrl}/api/applicability/api-key`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey: " test-key " }),
+  });
+  assert.deepEqual(await saveResponse.json(), { configured: true, persistent: true });
+  assert.equal(savedApiKey, "test-key");
 
   const response = await fetch(`${baseUrl}/api/applicability/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sku: " 11182905003 ", brand: " LADA ", apiKey: " test-key " }),
+    body: JSON.stringify({ sku: " 11182905003 ", brand: " LADA " }),
   });
 
   assert.equal(response.status, 200);
-  assert.deepEqual(receivedQuery, { sku: "11182905003", brand: "LADA", apiKey: "test-key" });
+  assert.deepEqual(receivedQuery, { sku: "11182905003", brand: "LADA" });
   assert.equal((await response.json()).results[0].makeName, "LADA");
+
+  const deleteResponse = await fetch(`${baseUrl}/api/applicability/api-key`, { method: "DELETE" });
+  assert.deepEqual(await deleteResponse.json(), { configured: false, persistent: true });
+  assert.equal(savedApiKey, null);
 
   const invalid = await fetch(`${baseUrl}/api/applicability/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sku: "", apiKey: "" }),
+    body: JSON.stringify({ sku: "", brand: "" }),
   });
   assert.equal(invalid.status, 400);
   assert.deepEqual(await invalid.json(), { message: "Applicability request is invalid" });

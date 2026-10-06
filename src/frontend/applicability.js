@@ -14,6 +14,7 @@ const settingsToggle = document.querySelector("#applicability-settings-toggle");
 const settingsClose = document.querySelector("#applicability-settings-close");
 const settingsBackdrop = document.querySelector("#applicability-settings-backdrop");
 const apiKeyStatus = document.querySelector("#applicability-api-key-status");
+const deleteApiKeyButton = document.querySelector("#applicability-api-key-delete");
 const submitButton = document.querySelector("#applicability-submit");
 const feedback = document.querySelector("#applicability-feedback");
 const resultsBody = document.querySelector("#applicability-results-body");
@@ -23,6 +24,7 @@ let tabs = [];
 let activeTabId = null;
 let tabSequence = 1;
 let activeRequest = null;
+let hasStoredApiKey = false;
 
 const createSearchEntry = (data = {}) => ({
   id: data.id ?? `applicability-search-${Date.now()}-${tabSequence++}`,
@@ -62,6 +64,44 @@ const setFeedback = (message, tone = "error") => {
   feedback.textContent = message;
   feedback.dataset.tone = tone;
   feedback.hidden = !message;
+};
+
+const setApiKeyStatus = (message, configured) => {
+  apiKeyStatus.textContent = message;
+  apiKeyStatus.hidden = !message;
+  deleteApiKeyButton.hidden = !configured;
+  hasStoredApiKey = configured;
+};
+
+const readApiKeyState = async (response) => {
+  const payload = await response.json();
+  if (!response.ok || typeof payload?.configured !== "boolean") {
+    throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось сохранить API-ключ.");
+  }
+  return payload;
+};
+
+const saveApiKey = async () => {
+  const apiKey = apiKeyInput.value.trim();
+  if (!apiKey) {
+    throw new Error("Укажите API-ключ PartsAPI.");
+  }
+  const state = await readApiKeyState(await fetch("/api/applicability/api-key", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ apiKey }),
+  }));
+  setApiKeyStatus("Ключ сохранён", state.configured);
+  return state;
+};
+
+const loadApiKeyState = async () => {
+  try {
+    const state = await readApiKeyState(await fetch("/api/applicability/api-key", { headers: { Accept: "application/json" } }));
+    setApiKeyStatus(state.configured ? "Ключ сохранён" : "", state.configured);
+  } catch {
+    setFeedback("Не удалось проверить настройки API-ключа.");
+  }
 };
 
 const selectedMake = () => makesByName.get(makeInput.value.trim().toLocaleUpperCase()) ?? null;
@@ -236,10 +276,26 @@ settingsBackdrop.addEventListener("click", () => { settingsDrawer.hidden = true;
 apiKeyInput.addEventListener("input", () => {
   apiKeyStatus.hidden = true;
 });
-apiKeyInput.addEventListener("keydown", (event) => {
+apiKeyInput.addEventListener("keydown", async (event) => {
   if (event.key !== "Enter") return;
   event.preventDefault();
-  apiKeyStatus.hidden = !apiKeyInput.value.trim();
+  try {
+    await saveApiKey();
+  } catch (error) {
+    setApiKeyStatus(error instanceof Error ? error.message : "Не удалось сохранить API-ключ.", hasStoredApiKey);
+  }
+});
+deleteApiKeyButton.addEventListener("click", async () => {
+  try {
+    const state = await readApiKeyState(await fetch("/api/applicability/api-key", {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    }));
+    apiKeyInput.value = "";
+    setApiKeyStatus(state.configured ? "Ключ сохранён" : "Ключ удалён", state.configured);
+  } catch (error) {
+    setApiKeyStatus(error instanceof Error ? error.message : "Не удалось удалить API-ключ.", hasStoredApiKey);
+  }
 });
 
 applicabilityTabsList.addEventListener("click", (event) => {
@@ -276,14 +332,22 @@ form.addEventListener("submit", async (event) => {
   syncActiveTab();
   const sku = tab.sku;
   const make = selectedMake();
-  const apiKey = apiKeyInput.value.trim();
   if (!sku) return;
   if (!make) {
     setFeedback("Выберите марку из списка.");
     makeInput.focus();
     return;
   }
-  if (!apiKey) {
+  if (apiKeyInput.value.trim()) {
+    try {
+      await saveApiKey();
+    } catch (error) {
+      settingsDrawer.hidden = false;
+      setFeedback(error instanceof Error ? error.message : "Не удалось сохранить API-ключ.");
+      return;
+    }
+  }
+  if (!hasStoredApiKey) {
     settingsDrawer.hidden = false;
     setFeedback("Укажите API-ключ PartsAPI в настройках.");
     apiKeyInput.focus();
@@ -304,7 +368,7 @@ form.addEventListener("submit", async (event) => {
     const response = await fetch("/api/applicability/search", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ sku, brand: make.name, apiKey }),
+      body: JSON.stringify({ sku, brand: make.name }),
       signal: controller.signal,
     });
     const payload = await response.json();
@@ -330,7 +394,7 @@ form.addEventListener("submit", async (event) => {
     if (activeRequest === controller) {
       activeRequest = null;
       submitButton.disabled = false;
-      submitButton.querySelector("span").textContent = "Найти";
+      submitButton.querySelector("span").textContent = "Поиск";
     }
   }
 });
@@ -339,3 +403,4 @@ tabs.push(createTab());
 activeTabId = tabs[0].id;
 renderActiveTab();
 loadMakes();
+loadApiKeyState();

@@ -1,8 +1,9 @@
 import { SearchApplicationService } from "./application/search-application-service.ts";
 import { decodeRosskoApiCredentials, SupplierSessionService } from "./application/supplier-session-service.ts";
 import { ApplicabilityApplicationService } from "./applicability/applicability-application-service.ts";
+import { EncryptedApplicabilityApiKeyStore } from "./applicability/encrypted-api-key-store.ts";
 import { PartsApiApplicabilityClient } from "./applicability/partsapi-client.ts";
-import type { ApplicabilitySearchQuery } from "./applicability/types.ts";
+import type { ApplicabilitySearchRequest } from "./applicability/types.ts";
 import { getArmtekApiConfig, getStateFilePath, getStpartsApiConfig, supplierCredentialsEncryptionKey } from "./config.ts";
 import { EncryptedSupplierCredentialStore } from "./session/encrypted-credential-store.ts";
 import { SupplierSessionManager } from "./session/session-manager.ts";
@@ -44,6 +45,10 @@ const credentialStore = new EncryptedSupplierCredentialStore(
   getStateFilePath("supplier-credentials.enc.json"),
   supplierCredentialsEncryptionKey,
 );
+const applicabilityApiKeyStore = new EncryptedApplicabilityApiKeyStore(
+  getStateFilePath("partsapi-key.enc.json"),
+  supplierCredentialsEncryptionKey,
+);
 const adapters = [
   new RosskoApiAdapter(),
   new ArmtekApiAdapter(),
@@ -72,7 +77,7 @@ const searchService = new SearchApplicationService(
   sessionManager,
   (supplier) => sessionService.disconnectSupplier(supplier),
 );
-const applicabilityService = new ApplicabilityApplicationService(new PartsApiApplicabilityClient());
+const applicabilityService = new ApplicabilityApplicationService(new PartsApiApplicabilityClient(), applicabilityApiKeyStore);
 
 function bootstrapPersistedSessions(): void {
   const rosskoCredentials = credentialStore.get("rossko");
@@ -153,9 +158,13 @@ export function streamSearch(query: SupplierSearchQuery, emit: (event: SearchStr
   return searchService.streamSearch(query, emit, signal);
 }
 
-export function searchApplicability(query: ApplicabilitySearchQuery, signal: AbortSignal) {
+export function searchApplicability(query: ApplicabilitySearchRequest, signal: AbortSignal) {
   return applicabilityService.search(query, signal);
 }
+
+export const getApplicabilityApiKeyState = () => applicabilityService.getApiKeyState();
+export const saveApplicabilityApiKey = (apiKey: string) => applicabilityService.saveApiKey(apiKey);
+export const deleteApplicabilityApiKey = () => applicabilityService.deleteApiKey();
 
 export async function shutdownSearchService(): Promise<void> {
   closeSiteHttpAgent();

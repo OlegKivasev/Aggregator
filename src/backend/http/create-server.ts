@@ -15,9 +15,10 @@ import type {
   SupplierSessionValidationResult,
   SupplierSearchQuery,
 } from "../types.ts";
-import type { ApplicabilitySearchQuery, ApplicabilityVehicle } from "../applicability/types.ts";
+import type { ApplicabilityApiKeyState, ApplicabilitySearchRequest, ApplicabilityVehicle } from "../applicability/types.ts";
 import {
   articleLengthLimit,
+  parseApplicabilityApiKeyPayload,
   parseApplicabilitySearchPayload,
   parseCredentials,
   parseRosskoApiCredentials,
@@ -53,7 +54,10 @@ export interface AggregatorApplication {
   logoutMotorDetal(): SupplierSessionState;
   logoutMladov(): SupplierSessionState;
   streamSearch(query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal): Promise<void>;
-  searchApplicability(query: ApplicabilitySearchQuery, signal: AbortSignal): Promise<ApplicabilityVehicle[]>;
+  searchApplicability(query: ApplicabilitySearchRequest, signal: AbortSignal): Promise<ApplicabilityVehicle[]>;
+  getApplicabilityApiKeyState(): ApplicabilityApiKeyState;
+  saveApplicabilityApiKey(apiKey: string): ApplicabilityApiKeyState;
+  deleteApplicabilityApiKey(): ApplicabilityApiKeyState;
 }
 
 interface CreateAggregatorServerOptions {
@@ -111,6 +115,8 @@ function serveApplicabilityError(
     ? "PartsAPI rejected the API key"
     : category === "timeout"
       ? "PartsAPI did not respond in time"
+      : error instanceof SupplierIntegrationError && error.publicMessage
+        ? error.publicMessage
       : "Applicability search failed";
   serveJson(response, statusCode, { message });
 }
@@ -217,6 +223,27 @@ export function createAggregatorServer({
         response.removeListener("close", abortSearch);
       }
       return;
+    }
+
+    if (url.pathname === "/api/applicability/api-key") {
+      try {
+        if (request.method === "GET") {
+          serveJson(response, 200, application.getApplicabilityApiKeyState());
+          return;
+        }
+        if (request.method === "PUT") {
+          const { apiKey } = parseApplicabilityApiKeyPayload(await readJsonBody(request));
+          serveJson(response, 200, application.saveApplicabilityApiKey(apiKey));
+          return;
+        }
+        if (request.method === "DELETE") {
+          serveJson(response, 200, application.deleteApplicabilityApiKey());
+          return;
+        }
+      } catch (error) {
+        serveApplicabilityError(response, error, reportError);
+        return;
+      }
     }
 
     if (url.pathname === "/api/ui-preferences/table-column-widths") {

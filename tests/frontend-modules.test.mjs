@@ -594,6 +594,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-new-tab"/);
   assert.match(html, /id="applicability-settings-toggle"/);
   assert.match(html, /id="applicability-api-key-status"/);
+  assert.match(html, /id="applicability-api-key-delete"/);
   assert.match(html, /aria-label="Показать API-ключ"/);
   assert.match(html, /OEM-артикул[\s\S]*?Производитель[\s\S]*?Количество/);
   assert.doesNotMatch(html, /id="applicability-result-summary"/);
@@ -602,7 +603,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.ok(html.indexOf('id="applicability-function"') < html.indexOf("</main>"));
   assert.match(html, /src="\/applicability\.js"/);
   assert.match(applicability, /fetch\("\/api\/applicability\/search"/);
-  assert.match(applicability, /JSON\.stringify\(\{ sku, brand: make\.name, apiKey \}\)/);
+  assert.match(applicability, /fetch\("\/api\/applicability\/api-key"/);
+  assert.match(applicability, /JSON\.stringify\(\{ sku, brand: make\.name \}\)/);
   assert.match(applicability, /className = "applicability-expand"/);
   assert.match(applicability, /JSON\.stringify\(entry\.results, null, 2\)/);
   assert.match(applicability, /appendCell\(row, "Не найдено"\)/);
@@ -610,10 +612,11 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /tab\.searches\.forEach/);
   assert.match(applicability, /data-expand-entry-id/);
   assert.match(applicability, /apiKeyInput\.addEventListener\("keydown"/);
+  assert.match(applicability, /deleteApiKeyButton\.addEventListener\("click"/);
   assert.match(applicability, /const createTab/);
   assert.match(applicability, /const renderTabs/);
   assert.match(applicability, /appendCell\(row, entry\.makeName\)/);
-  assert.doesNotMatch(applicability, /innerHTML|localStorage/);
+  assert.doesNotMatch(applicability, /innerHTML|localStorage|sessionStorage/);
   assert.equal(makes.length, 735);
   assert.ok(makes.some((make) => make.makeName === "LADA" && make.makeId === 63));
   assert.match(styles, /\.function-layout\s*\{[^}]*grid-template-columns: 200px minmax\(0, 1fr\);/s);
