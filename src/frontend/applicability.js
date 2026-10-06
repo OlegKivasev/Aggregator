@@ -50,6 +50,8 @@ let documentModalReturnFocus = null;
 let documentFormat = "structured";
 let documentEntries = [];
 let applicabilityToastTimer = null;
+let cachedBrandLookupTimer = null;
+let cachedBrandLookupController = null;
 
 const applicabilityStateStorageKey = "autoservice.applicabilityState";
 const activeFunctionStorageKey = "autoservice.activeFunction";
@@ -64,13 +66,25 @@ const createSearchEntry = (data = {}) => ({
   expanded: Boolean(data.expanded),
 });
 
+const searchIdentity = (sku, brand) => `${normalizeApplicabilitySku(sku).toLocaleUpperCase()}\u0000${brand.trim().toLocaleUpperCase()}`;
+
 const createTab = (data = {}) => ({
   id: data.id ?? `applicability-tab-${Date.now()}-${tabSequence++}`,
   name: typeof data.name === "string" ? data.name.replace(/\s+/g, " ").trim().slice(0, 100) : "",
   sku: typeof data.sku === "string" ? data.sku : "",
   makeName: typeof data.makeName === "string" ? data.makeName : "",
   makeId: Number.isSafeInteger(data.makeId) ? data.makeId : null,
-  searches: Array.isArray(data.searches) ? data.searches.map(createSearchEntry) : [],
+  searches: (() => {
+    const seen = new Set();
+    return Array.isArray(data.searches)
+      ? data.searches.map(createSearchEntry).filter((entry) => {
+        const identity = searchIdentity(entry.sku, entry.makeName);
+        if (!identity || seen.has(identity)) return false;
+        seen.add(identity);
+        return true;
+      })
+      : [];
+  })(),
 });
 
 const getActiveTab = () => tabs.find((tab) => tab.id === activeTabId);
@@ -261,6 +275,36 @@ const visibleDocumentColumns = () => new Set(
 
 const normalizeApplicabilitySku = (sku) => sku.replace(/[^\p{L}\p{N}]/gu, "");
 
+const lookupCachedBrands = async (sku, signal) => {
+  const response = await fetch(`/api/applicability/cached-brands?sku=${encodeURIComponent(sku)}`, {
+    headers: { Accept: "application/json" },
+    signal,
+  });
+  const payload = await response.json();
+  if (!response.ok || !Array.isArray(payload?.brands)) return [];
+  return payload.brands.filter((brand) => typeof brand === "string" && brand.trim());
+};
+
+const applyCachedBrand = async (sku, { force = false } = {}) => {
+  if (!normalizeApplicabilitySku(sku)) return null;
+  cachedBrandLookupController?.abort();
+  const controller = new AbortController();
+  cachedBrandLookupController = controller;
+  try {
+    const brands = await lookupCachedBrands(sku, controller.signal);
+    if (brands.length !== 1 || (!force && makeInput.value.trim() && selectedMake())) return null;
+    const make = makesByName.get(brands[0].trim().toLocaleUpperCase());
+    if (!make) return null;
+    selectMake(make);
+    return make;
+  } catch (error) {
+    if (error.name !== "AbortError") return null;
+    return null;
+  } finally {
+    if (cachedBrandLookupController === controller) cachedBrandLookupController = null;
+  }
+};
+
 const searchApplicability = async (sku, brand, signal) => {
   const response = await fetch("/api/applicability/search", {
     method: "POST",
@@ -273,6 +317,8 @@ const searchApplicability = async (sku, brand, signal) => {
   if (!Array.isArray(payload?.results) || typeof payload.cacheHit !== "boolean") throw new Error("Сервис вернул некорректный ответ.");
   return { results: payload.results, cacheHit: payload.cacheHit };
 };
+
+const duplicateSearch = (tab, sku, brand) => tab.searches.find((entry) => searchIdentity(entry.sku, entry.makeName) === searchIdentity(sku, brand));
 
 const buildApplicabilityDocument = (entries, format = documentFormat) => {
   const visibleColumns = visibleDocumentColumns();
@@ -654,6 +700,11 @@ resultsBody.addEventListener("click", (event) => {
 skuInput.addEventListener("input", () => {
   syncActiveTab();
   saveApplicabilityState();
+  if (cachedBrandLookupTimer !== null) window.clearTimeout(cachedBrandLookupTimer);
+  cachedBrandLookupTimer = window.setTimeout(() => {
+    cachedBrandLookupTimer = null;
+    void applyCachedBrand(skuInput.value.trim());
+  }, 250);
 });
 makeInput.addEventListener("input", () => {
   const make = selectedMake();
@@ -738,11 +789,16 @@ form.addEventListener("submit", async (event) => {
   if (!tab) return;
   syncActiveTab();
   const sku = tab.sku;
-  const make = selectedMake();
   if (!sku) return;
+  let make = selectedMake();
+  if (!make) make = await applyCachedBrand(sku, { force: true });
   if (!make) {
     setFeedback("Выберите марку из списка.");
     makeInput.focus();
+    return;
+  }
+  if (duplicateSearch(tab, sku, make.name)) {
+    setFeedback("Такой артикул и бренд уже добавлены.");
     return;
   }
   if (apiKeyInput.value.trim()) {

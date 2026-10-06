@@ -38,6 +38,7 @@ function createApplication(overrides = {}) {
     logoutMladov: () => session("mladov"),
     streamSearch: async () => {},
     searchApplicability: async () => ({ results: [], cacheHit: false }),
+    getApplicabilityCachedBrands: () => [],
     getApplicabilityApiKeyState: () => ({ configured: false, persistent: true }),
     saveApplicabilityApiKey: () => ({ configured: true, persistent: true }),
     deleteApplicabilityApiKey: () => ({ configured: false, persistent: true }),
@@ -165,6 +166,20 @@ test("HTTP server stores the applicability API key without exposing it to search
   });
   assert.equal(invalid.status, 400);
   assert.deepEqual(await invalid.json(), { message: "Applicability request is invalid" });
+});
+
+test("HTTP server returns cached applicability brands for an article", async () => {
+  const application = createApplication({
+    getApplicabilityCachedBrands: (sku) => {
+      assert.equal(sku, "2170-2915004");
+      return ["LADA"];
+    },
+  });
+  const { baseUrl } = await listen(application);
+
+  const response = await fetch(`${baseUrl}/api/applicability/cached-brands?sku=2170-2915004`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { brands: ["LADA"] });
 });
 
 test("HTTP server delegates Forum-Auto authorization without exposing credentials", async () => {

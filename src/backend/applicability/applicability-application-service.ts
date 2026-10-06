@@ -14,6 +14,7 @@ export interface ApplicabilityApiKeyRepository {
 
 export interface ApplicabilityCacheRepository {
   get(query: ApplicabilitySearchRequest): ApplicabilityVehicle[] | null;
+  findBrands(sku: string): string[];
   set(query: ApplicabilitySearchRequest, results: ApplicabilityVehicle[]): void;
 }
 
@@ -29,13 +30,17 @@ export class ApplicabilityApplicationService {
   }
 
   async search(query: ApplicabilitySearchRequest, signal: AbortSignal): Promise<ApplicabilitySearchResult> {
-    const apiKey = this.apiKeyRepository.get();
-    if (!apiKey) throw new SupplierAuthError("PartsAPI key is not configured");
     const cachedResults = this.cacheRepository.get(query);
     if (cachedResults) return { results: cachedResults, cacheHit: true };
+    const apiKey = this.apiKeyRepository.get();
+    if (!apiKey) throw new SupplierAuthError("PartsAPI key is not configured");
     const results = await this.client.search({ ...query, apiKey }, signal);
     this.cacheRepository.set(query, results);
     return { results, cacheHit: false };
+  }
+
+  getCachedBrands(sku: string): string[] {
+    return this.cacheRepository.findBrands(sku);
   }
 
   getApiKeyState(): ApplicabilityApiKeyState {

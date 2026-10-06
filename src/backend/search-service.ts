@@ -164,6 +164,10 @@ export function searchApplicability(query: ApplicabilitySearchRequest, signal: A
   return applicabilityService.search(query, signal);
 }
 
+export function getApplicabilityCachedBrands(sku: string) {
+  return applicabilityService.getCachedBrands(sku);
+}
+
 export const getApplicabilityApiKeyState = () => applicabilityService.getApiKeyState();
 export const saveApplicabilityApiKey = (apiKey: string) => applicabilityService.saveApiKey(apiKey);
 export const deleteApplicabilityApiKey = () => applicabilityService.deleteApiKey();

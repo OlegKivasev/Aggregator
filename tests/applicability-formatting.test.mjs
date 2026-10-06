@@ -84,3 +84,16 @@ test("applicability structured list expands SAMARA body codes into separate rows
     ].join("\n"),
   );
 });
+
+test("applicability structured list keeps combined van and wagon body type together", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.5",
+      makeName: "LADA",
+      modelName: "KALINKA Фургон /универсал (21043)",
+      yearEnd: "12.1998",
+      yearStart: "01.1985",
+    }),
+    "Фургон/универсал, 21043, LADA, KALINKA, 1985-1998, 1.5, отсутствует",
+  );
+});

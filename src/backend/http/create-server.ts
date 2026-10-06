@@ -19,6 +19,7 @@ import type { ApplicabilityApiKeyState, ApplicabilitySearchRequest, Applicabilit
 import {
   articleLengthLimit,
   parseApplicabilityApiKeyPayload,
+  parseApplicabilitySkuQuery,
   parseApplicabilitySearchPayload,
   parseCredentials,
   parseRosskoApiCredentials,
@@ -55,6 +56,7 @@ export interface AggregatorApplication {
   logoutMladov(): SupplierSessionState;
   streamSearch(query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal): Promise<void>;
   searchApplicability(query: ApplicabilitySearchRequest, signal: AbortSignal): Promise<ApplicabilitySearchResult>;
+  getApplicabilityCachedBrands(sku: string): string[];
   getApplicabilityApiKeyState(): ApplicabilityApiKeyState;
   saveApplicabilityApiKey(apiKey: string): ApplicabilityApiKeyState;
   deleteApplicabilityApiKey(): ApplicabilityApiKeyState;
@@ -221,6 +223,15 @@ export function createAggregatorServer({
         if (!controller.signal.aborted) serveApplicabilityError(response, error, reportError);
       } finally {
         response.removeListener("close", abortSearch);
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/applicability/cached-brands") {
+      try {
+        serveJson(response, 200, { brands: application.getApplicabilityCachedBrands(parseApplicabilitySkuQuery(url.searchParams.get("sku"))) });
+      } catch (error) {
+        serveApplicabilityError(response, error, reportError);
       }
       return;
     }

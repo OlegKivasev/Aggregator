@@ -100,10 +100,12 @@ test("applicability cache persists real PartsAPI responses", () => {
   try {
     const cache = new SqliteApplicabilityCacheRepository(filePath);
     cache.set({ sku: "11182905003", brand: "LADA" }, [vehicle]);
+    cache.set({ sku: "21702915004", brand: "LADA" }, [vehicle]);
     cache.close();
 
     const restoredCache = new SqliteApplicabilityCacheRepository(filePath);
     assert.deepEqual(restoredCache.get({ sku: "11182905003", brand: "LADA" }), [vehicle]);
+    assert.deepEqual(restoredCache.findBrands("2170-2915004"), ["LADA"]);
     restoredCache.close();
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -129,6 +131,7 @@ test("applicability service returns cached results without repeating the PartsAP
     },
   }, repository, {
     get: (query) => entries.get(`${query.sku}\u0000${query.brand}`) ?? null,
+    findBrands: () => [],
     set: (query, results) => entries.set(`${query.sku}\u0000${query.brand}`, results),
   });
 
@@ -156,6 +159,7 @@ test("applicability service refuses to save an API key without encrypted persist
   };
   const service = new ApplicabilityApplicationService({ search: async () => [] }, repository, {
     get: () => null,
+    findBrands: () => [],
     set: () => {},
   });
   assert.throws(() => service.saveApiKey("test-key"), SupplierIntegrationError);

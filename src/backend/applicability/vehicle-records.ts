@@ -1,6 +1,10 @@
 import { SupplierIntegrationError } from "../errors.ts";
 import type { ApplicabilityVehicle } from "./types.ts";
 
+export function normalizeApplicabilitySku(sku: string): string {
+  return sku.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase();
+}
+
 function readOptionalText(record: Record<string, unknown>, field: string): string | null {
   const value = record[field];
   if (value === null || value === undefined) return null;

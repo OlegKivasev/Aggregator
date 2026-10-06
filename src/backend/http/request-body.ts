@@ -106,6 +106,17 @@ export function parseApplicabilitySearchPayload(payload: unknown): { sku: string
   return { sku: normalizedSku, brand: normalizedBrand };
 }
 
+export function parseApplicabilitySkuQuery(value: string | null): string {
+  if (typeof value !== "string") {
+    throw new RequestBodyError(400, "sku is required");
+  }
+  const normalizedSku = value.trim();
+  if (!normalizedSku || normalizedSku.length > articleLengthLimit || /[\u0000-\u001f\u007f]/.test(normalizedSku)) {
+    throw new RequestBodyError(400, "sku must be a string within the allowed length");
+  }
+  return normalizedSku;
+}
+
 export function parseApplicabilityApiKeyPayload(payload: unknown): { apiKey: string } {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new RequestBodyError(400, "API key is required");

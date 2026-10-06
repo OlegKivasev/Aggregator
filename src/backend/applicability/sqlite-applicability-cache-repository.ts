@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ApplicabilityCacheRepository } from "./applicability-application-service.ts";
 import type { ApplicabilitySearchRequest, ApplicabilityVehicle } from "./types.ts";
-import { parseApplicabilityVehicles } from "./vehicle-records.ts";
+import { normalizeApplicabilitySku, parseApplicabilityVehicles } from "./vehicle-records.ts";
 
 type SqlRow = Record<string, string | number | bigint | Uint8Array | null>;
 
@@ -48,6 +48,15 @@ export class SqliteApplicabilityCacheRepository implements ApplicabilityCacheRep
       this.database.prepare("DELETE FROM applicability_search_cache WHERE sku = ? AND brand = ?").run(sku, brand);
       return null;
     }
+  }
+
+  findBrands(sku: string): string[] {
+    const normalizedSku = normalizeApplicabilitySku(sku);
+    if (!normalizedSku) return [];
+    const rows = this.database.prepare("SELECT sku, brand FROM applicability_search_cache").all() as SqlRow[];
+    return [...new Set(rows
+      .filter((row) => typeof row.sku === "string" && normalizeApplicabilitySku(row.sku) === normalizedSku)
+      .map((row) => text(row, "brand")))];
   }
 
   set(query: ApplicabilitySearchRequest, results: ApplicabilityVehicle[]): void {
