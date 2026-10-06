@@ -1,3 +1,5 @@
+import { formatApplicabilityVehicle } from "./applicability-formatting.js";
+
 const markupFunction = document.querySelector("#markup-function");
 const applicabilityFunction = document.querySelector("#applicability-function");
 const markupTab = document.querySelector("#markup-function-tab");
@@ -234,22 +236,10 @@ const appendCell = (row, text) => {
 
 const successfulSearches = (tab) => tab.searches.filter((entry) => entry.hasSearched && entry.results.length);
 
-const textValue = (value) => typeof value === "string" && value.trim() ? value.trim() : "—";
-
-const formatVehicleSummary = (vehicle) => {
-  const record = vehicle && typeof vehicle === "object" && !Array.isArray(vehicle) ? vehicle : {};
-  return [
-    textValue(record.makeName),
-    textValue(record.modelName),
-    `${textValue(record.yearStart)} — ${textValue(record.yearEnd)}`,
-    textValue(record.carName),
-  ].join(", ");
-};
-
 const buildApplicabilityDocument = (entries, format = documentFormat) => entries
   .map((entry) => {
     const contents = format === "summary"
-      ? entry.results.map(formatVehicleSummary).join("\n")
+      ? entry.results.map(formatApplicabilityVehicle).join("\n")
       : JSON.stringify(entry.results, null, 2);
     return `Артикул: ${entry.sku}\n${contents}`;
   })

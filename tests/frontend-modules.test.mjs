@@ -615,8 +615,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /className = "applicability-expand"/);
   assert.match(applicability, /JSON\.stringify\(entry\.results, null, 2\)/);
   assert.match(applicability, /const buildApplicabilityDocument/);
-  assert.match(applicability, /const formatVehicleSummary/);
-  assert.match(applicability, /record\.makeName[\s\S]*?record\.modelName[\s\S]*?record\.yearStart[\s\S]*?record\.yearEnd[\s\S]*?record\.carName/);
+  assert.match(applicability, /import \{ formatApplicabilityVehicle \} from "\.\/applicability-formatting\.js"/);
   assert.match(applicability, /entry\.hasSearched && entry\.results\.length/);
   assert.match(applicability, /documentText\.select\(\)/);
   assert.match(applicability, /appendCell\(row, "Не найдено"\)/);
