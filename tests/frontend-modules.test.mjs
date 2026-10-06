@@ -618,6 +618,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /const buildApplicabilityDocument/);
   assert.match(applicability, /let documentFormat = "structured"/);
   assert.match(applicability, /const visibleDocumentColumns/);
+  assert.match(applicability, /renderApplicabilityDocument\(\{ preserveTextState: true \}\)/);
   assert.match(applicability, /import \{ formatApplicabilityVehicle \} from "\.\/applicability-formatting\.js"/);
   assert.match(applicability, /entry\.hasSearched && entry\.results\.length/);
   assert.match(applicability, /documentText\.select\(\)/);

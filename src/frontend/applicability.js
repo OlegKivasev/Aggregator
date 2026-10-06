@@ -255,8 +255,25 @@ const buildApplicabilityDocument = (entries, format = documentFormat) => entries
   })
   .join("\n\n");
 
-const renderApplicabilityDocument = () => {
+const renderApplicabilityDocument = ({ preserveTextState = false } = {}) => {
+  const textState = preserveTextState ? {
+    selectionDirection: documentText.selectionDirection,
+    selectionEnd: documentText.selectionEnd,
+    selectionStart: documentText.selectionStart,
+    scrollLeft: documentText.scrollLeft,
+    scrollTop: documentText.scrollTop,
+  } : null;
   documentText.value = buildApplicabilityDocument(documentEntries);
+  if (textState) {
+    const length = documentText.value.length;
+    documentText.setSelectionRange(
+      Math.min(textState.selectionStart, length),
+      Math.min(textState.selectionEnd, length),
+      textState.selectionDirection,
+    );
+    documentText.scrollLeft = textState.scrollLeft;
+    documentText.scrollTop = textState.scrollTop;
+  }
   documentFormatValue.textContent = documentFormat === "structured" ? "Структурированный список" : "Сырые данные";
   documentFormatButtons.forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.applicabilityDocumentFormat === documentFormat));
@@ -457,15 +474,11 @@ documentFormatButtons.forEach((button) => button.addEventListener("click", () =>
   if (format !== "raw" && format !== "structured") return;
   documentFormat = format;
   documentFormatControl.open = false;
-  renderApplicabilityDocument();
-  documentText.focus();
-  documentText.select();
+  renderApplicabilityDocument({ preserveTextState: true });
 }));
 documentColumnInputs.forEach((input) => input.addEventListener("change", () => {
   if (!documentColumnInputs.some((column) => column.checked)) input.checked = true;
-  renderApplicabilityDocument();
-  documentText.focus();
-  documentText.select();
+  renderApplicabilityDocument({ preserveTextState: true });
 }));
 settingsToggle.addEventListener("click", () => {
   settingsDrawer.hidden = false;
