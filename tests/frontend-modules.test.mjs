@@ -594,7 +594,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-new-tab"/);
   assert.match(html, /id="applicability-settings-toggle"/);
   assert.match(html, /id="applicability-make"[^>]*role="combobox"/);
-  assert.match(html, /id="applicability-makes" role="listbox"/);
+  assert.match(html, /id="applicability-selected-makes"/);
+  assert.match(html, /id="applicability-makes" role="listbox" aria-multiselectable="true"/);
   assert.match(html, /id="applicability-api-key-status"/);
   assert.match(html, /id="applicability-api-key-delete"/);
   assert.match(html, /aria-label="Показать API-ключ"/);
@@ -614,10 +615,11 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /fetch\("\/api\/applicability\/search"/);
   assert.match(applicability, /fetch\(`\/api\/applicability\/cached-brands\?sku=/);
   assert.match(applicability, /const duplicateSearch =/);
-  assert.match(applicability, /Такой артикул и бренд уже добавлены\./);
-  assert.match(applicability, /showApplicabilityToast\("Такой артикул и бренд уже добавлены\.", "error"\)/);
+  assert.match(applicability, /const selectedMakeNames/);
+  assert.match(applicability, /const toggleMake/);
+  assert.match(applicability, /Некоторые пары «артикул \+ бренд» уже добавлены\./);
   assert.match(applicability, /const normalizeApplicabilitySku = \(sku\) => sku\.replace\(/);
-  assert.match(applicability, /Артикул «\$\{sku\}» изменён на «\$\{normalizedSku\}» и успешно найден\./);
+  assert.match(applicability, /Артикул «\$\{sku\}» изменён на «\$\{normalizedOutcome\.result\.normalizedSku\}» и успешно найден\./);
   assert.match(applicability, /fetch\("\/api\/applicability\/api-key"/);
   assert.match(applicability, /JSON\.stringify\(\{ sku, brand \}\)/);
   assert.match(applicability, /className = "applicability-expand"/);
@@ -633,7 +635,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /entry\.hasSearched && entry\.results\.length/);
   assert.match(applicability, /documentText\.select\(\)/);
   assert.match(applicability, /appendCell\(row, "Не найдено"\)/);
-  assert.match(applicability, /tab\.searches\.push\(entry\)/);
+  assert.match(applicability, /tab\.searches\.push\(\.\.\.entries\)/);
+  assert.match(applicability, /Promise\.all\(entries\.map/);
   assert.match(applicability, /tab\.searches\.forEach/);
   assert.match(applicability, /data-expand-entry-id/);
   assert.match(applicability, /data-applicability-entry-id/);

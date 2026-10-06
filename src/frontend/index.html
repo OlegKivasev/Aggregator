@@ -270,10 +270,13 @@
             <form class="search-form applicability-search-form" id="applicability-search-form">
               <label class="visually-hidden" for="applicability-sku">OEM-артикул</label>
               <input class="search-input" id="applicability-sku" name="sku" type="text" placeholder="Введите OEM-артикул" autocomplete="off" maxlength="128" required />
-              <label class="visually-hidden" for="applicability-make">Бренд</label>
+              <label class="visually-hidden" for="applicability-make">Бренды</label>
               <div class="applicability-make-picker">
-                <input class="search-input applicability-make-input" id="applicability-make" name="make" placeholder="Выберите бренд" autocomplete="off" required role="combobox" aria-autocomplete="list" aria-controls="applicability-makes" aria-expanded="false" />
-                <div class="applicability-make-menu card border-0 shadow" id="applicability-makes" role="listbox" hidden></div>
+                <div class="applicability-make-control">
+                  <div class="applicability-make-selected" id="applicability-selected-makes" aria-label="Выбранные бренды"></div>
+                  <input class="search-input applicability-make-input" id="applicability-make" name="make" placeholder="Выберите бренды" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="applicability-makes" aria-expanded="false" />
+                </div>
+                <div class="applicability-make-menu card border-0 shadow" id="applicability-makes" role="listbox" aria-multiselectable="true" hidden></div>
               </div>
               <button type="button" class="settings-button" id="applicability-settings-toggle" aria-label="Открыть настройки применимости" title="Настройки применимости">
                 <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" /><path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.46-2.47 1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58 1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 1.55 2 3.46 2.47-1a8.05 8.05 0 0 0 2.58 1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" /></svg>

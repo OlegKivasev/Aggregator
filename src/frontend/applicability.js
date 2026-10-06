@@ -9,6 +9,7 @@ const newApplicabilityTabButton = document.querySelector("#applicability-new-tab
 const form = document.querySelector("#applicability-search-form");
 const skuInput = document.querySelector("#applicability-sku");
 const makeInput = document.querySelector("#applicability-make");
+const selectedMakesContainer = document.querySelector("#applicability-selected-makes");
 const makesMenu = document.querySelector("#applicability-makes");
 const apiKeyInput = document.querySelector("#applicability-api-key");
 const settingsDrawer = document.querySelector("#applicability-settings-drawer");
@@ -68,24 +69,39 @@ const createSearchEntry = (data = {}) => ({
 
 const searchIdentity = (sku, brand) => `${normalizeApplicabilitySku(sku).toLocaleUpperCase()}\u0000${brand.trim().toLocaleUpperCase()}`;
 
-const createTab = (data = {}) => ({
-  id: data.id ?? `applicability-tab-${Date.now()}-${tabSequence++}`,
-  name: typeof data.name === "string" ? data.name.replace(/\s+/g, " ").trim().slice(0, 100) : "",
-  sku: typeof data.sku === "string" ? data.sku : "",
-  makeName: typeof data.makeName === "string" ? data.makeName : "",
-  makeId: Number.isSafeInteger(data.makeId) ? data.makeId : null,
-  searches: (() => {
-    const seen = new Set();
-    return Array.isArray(data.searches)
-      ? data.searches.map(createSearchEntry).filter((entry) => {
-        const identity = searchIdentity(entry.sku, entry.makeName);
-        if (!identity || seen.has(identity)) return false;
-        seen.add(identity);
-        return true;
-      })
-      : [];
-  })(),
-});
+const normalizeMakeNames = (value) => {
+  const names = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  const uniqueNames = new Map();
+  names.forEach((name) => {
+    if (typeof name !== "string") return;
+    const normalizedName = name.replace(/\s+/g, " ").trim();
+    if (normalizedName) uniqueNames.set(normalizedName.toLocaleUpperCase(), normalizedName);
+  });
+  return [...uniqueNames.values()];
+};
+
+const createTab = (data = {}) => {
+  const makeNames = normalizeMakeNames([...(Array.isArray(data.makeNames) ? data.makeNames : []), data.makeName]);
+  return {
+    id: data.id ?? `applicability-tab-${Date.now()}-${tabSequence++}`,
+    name: typeof data.name === "string" ? data.name.replace(/\s+/g, " ").trim().slice(0, 100) : "",
+    sku: typeof data.sku === "string" ? data.sku : "",
+    makeNames,
+    makeName: makeNames[0] ?? "",
+    makeId: Number.isSafeInteger(data.makeId) ? data.makeId : null,
+    searches: (() => {
+      const seen = new Set();
+      return Array.isArray(data.searches)
+        ? data.searches.map(createSearchEntry).filter((entry) => {
+          const identity = searchIdentity(entry.sku, entry.makeName);
+          if (!identity || seen.has(identity)) return false;
+          seen.add(identity);
+          return true;
+        })
+        : [];
+    })(),
+  };
+};
 
 const getActiveTab = () => tabs.find((tab) => tab.id === activeTabId);
 
@@ -136,6 +152,7 @@ const saveApplicabilityState = () => {
         id: tab.id,
         name: tab.name,
         sku: tab.sku,
+        makeNames: tab.makeNames,
         makeName: tab.makeName,
         makeId: tab.makeId,
         searches: tab.searches.map((entry) => ({
@@ -205,7 +222,14 @@ const loadApiKeyState = async () => {
   }
 };
 
-const selectedMake = () => makesByName.get(makeInput.value.trim().toLocaleUpperCase()) ?? null;
+const selectedMakeNames = (tab = getActiveTab()) => normalizeMakeNames(tab?.makeNames);
+
+const selectedMakes = (tab = getActiveTab()) => selectedMakeNames(tab)
+  .map((name) => makesByName.get(name.toLocaleUpperCase()))
+  .filter(Boolean);
+
+const isMakeSelected = (make, tab = getActiveTab()) => selectedMakeNames(tab)
+  .some((name) => name.toLocaleUpperCase() === make.name.toLocaleUpperCase());
 
 const matchingMakes = () => {
   const query = makeInput.value.trim().toLocaleUpperCase();
@@ -221,12 +245,50 @@ const closeMakeMenu = () => {
   activeMakeIndex = -1;
 };
 
-const selectMake = (make) => {
-  makeInput.value = make.name;
-  makeInput.dataset.makeId = String(make.id);
-  closeMakeMenu();
+const renderSelectedMakes = () => {
+  const tab = getActiveTab();
+  selectedMakesContainer.replaceChildren();
+  selectedMakeNames(tab).forEach((name) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "applicability-make-chip";
+    chip.dataset.removeMakeName = name;
+    chip.setAttribute("aria-label", `Убрать бренд ${name}`);
+    const label = document.createElement("span");
+    label.className = "applicability-make-chip__label";
+    label.textContent = name;
+    const remove = document.createElement("span");
+    remove.className = "applicability-make-chip__remove";
+    remove.setAttribute("aria-hidden", "true");
+    remove.textContent = "×";
+    chip.append(label, remove);
+    selectedMakesContainer.append(chip);
+  });
+};
+
+const setSelectedMakeNames = (names, { focus = false } = {}) => {
+  const tab = getActiveTab();
+  if (!tab) return;
+  tab.makeNames = normalizeMakeNames(names);
+  tab.makeName = tab.makeNames[0] ?? "";
+  tab.makeId = selectedMakes(tab)[0]?.id ?? null;
+  renderSelectedMakes();
   syncActiveTab();
   saveApplicabilityState();
+  if (focus) makeInput.focus();
+};
+
+const toggleMake = (make) => {
+  const names = selectedMakeNames();
+  const selected = isMakeSelected(make);
+  setSelectedMakeNames(selected
+    ? names.filter((name) => name.toLocaleUpperCase() !== make.name.toLocaleUpperCase())
+    : [...names, make.name], { focus: true });
+  renderMakeMenu();
+};
+
+const selectMake = (make) => {
+  if (!isMakeSelected(make)) setSelectedMakeNames([...selectedMakeNames(), make.name]);
 };
 
 const renderMakeMenu = () => {
@@ -242,11 +304,18 @@ const renderMakeMenu = () => {
       const option = document.createElement("button");
       option.type = "button";
       option.id = `applicability-make-${index}`;
-      option.className = `applicability-make-option${index === activeMakeIndex ? " is-active" : ""}`;
+      const selected = isMakeSelected(make);
+      option.className = `applicability-make-option${index === activeMakeIndex ? " is-active" : ""}${selected ? " is-selected" : ""}`;
       option.dataset.makeName = make.name;
       option.setAttribute("role", "option");
-      option.setAttribute("aria-selected", String(index === activeMakeIndex));
-      option.textContent = make.name;
+      option.setAttribute("aria-selected", String(selected));
+      const check = document.createElement("span");
+      check.className = "applicability-make-option__check";
+      check.setAttribute("aria-hidden", "true");
+      check.textContent = selected ? "✓" : "";
+      const label = document.createElement("span");
+      label.textContent = make.name;
+      option.append(check, label);
       makesMenu.append(option);
     });
   }
@@ -292,7 +361,7 @@ const applyCachedBrand = async (sku, { force = false } = {}) => {
   cachedBrandLookupController = controller;
   try {
     const brands = await lookupCachedBrands(sku, controller.signal);
-    if (brands.length !== 1 || (!force && makeInput.value.trim() && selectedMake())) return null;
+    if (brands.length !== 1 || (!force && selectedMakeNames().length)) return null;
     const make = makesByName.get(brands[0].trim().toLocaleUpperCase());
     if (!make) return null;
     selectMake(make);
@@ -316,6 +385,17 @@ const searchApplicability = async (sku, brand, signal) => {
   if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось выполнить поиск применимости.");
   if (!Array.isArray(payload?.results) || typeof payload.cacheHit !== "boolean") throw new Error("Сервис вернул некорректный ответ.");
   return { results: payload.results, cacheHit: payload.cacheHit };
+};
+
+const executeApplicabilitySearch = async (sku, brand, signal) => {
+  let { results, cacheHit } = await searchApplicability(sku, brand, signal);
+  const normalizedSku = normalizeApplicabilitySku(sku);
+  let usedNormalizedSku = false;
+  if (!results.length && normalizedSku && normalizedSku !== sku) {
+    ({ results, cacheHit } = await searchApplicability(normalizedSku, brand, signal));
+    usedNormalizedSku = results.length > 0;
+  }
+  return { results, cacheHit, usedNormalizedSku, normalizedSku };
 };
 
 const duplicateSearch = (tab, sku, brand) => tab.searches.find((entry) => searchIdentity(entry.sku, entry.makeName) === searchIdentity(sku, brand));
@@ -480,16 +560,17 @@ const syncActiveTab = () => {
   const tab = getActiveTab();
   if (!tab) return;
   tab.sku = skuInput.value.trim();
-  tab.makeName = makeInput.value.trim();
-  tab.makeId = selectedMake()?.id ?? null;
+  tab.makeNames = selectedMakeNames(tab);
+  tab.makeName = tab.makeNames[0] ?? "";
+  tab.makeId = selectedMakes(tab)[0]?.id ?? null;
 };
 
 const renderActiveTab = () => {
   const tab = getActiveTab();
   if (!tab) return;
   skuInput.value = tab.sku;
-  makeInput.value = tab.makeName;
-  makeInput.dataset.makeId = tab.makeId ? String(tab.makeId) : "";
+  makeInput.value = "";
+  renderSelectedMakes();
   setFeedback("");
   renderResults(tab);
   renderTabs();
@@ -707,12 +788,8 @@ skuInput.addEventListener("input", () => {
   }, 250);
 });
 makeInput.addEventListener("input", () => {
-  const make = selectedMake();
-  makeInput.dataset.makeId = make?.id ? String(make.id) : "";
   activeMakeIndex = -1;
   renderMakeMenu();
-  syncActiveTab();
-  saveApplicabilityState();
 });
 makeInput.addEventListener("focus", () => {
   activeMakeIndex = -1;
@@ -738,14 +815,21 @@ makeInput.addEventListener("keydown", (event) => {
   }
   if (event.key === "Enter" && !makesMenu.hidden && matches[activeMakeIndex]) {
     event.preventDefault();
-    selectMake(matches[activeMakeIndex]);
+    toggleMake(matches[activeMakeIndex]);
   }
 });
 makesMenu.addEventListener("click", (event) => {
   const option = event.target.closest("[data-make-name]");
   if (!option) return;
   const make = makesByName.get(option.dataset.makeName.toLocaleUpperCase());
-  if (make) selectMake(make);
+  if (make) toggleMake(make);
+});
+selectedMakesContainer.addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-remove-make-name]");
+  if (!chip) return;
+  const removeName = chip.dataset.removeMakeName.toLocaleUpperCase();
+  setSelectedMakeNames(selectedMakeNames().filter((name) => name.toLocaleUpperCase() !== removeName), { focus: true });
+  renderMakeMenu();
 });
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".applicability-make-picker")) closeMakeMenu();
@@ -790,18 +874,25 @@ form.addEventListener("submit", async (event) => {
   syncActiveTab();
   const sku = tab.sku;
   if (!sku) return;
-  let make = selectedMake();
-  if (!make) make = await applyCachedBrand(sku, { force: true });
-  if (!make) {
-    setFeedback("Выберите марку из списка.");
+  if (!selectedMakes().length) await applyCachedBrand(sku, { force: true });
+  const makes = selectedMakes();
+  if (!makes.length) {
+    setFeedback("Выберите хотя бы один бренд из списка.");
     makeInput.focus();
     return;
   }
-  if (duplicateSearch(tab, sku, make.name)) {
+  const duplicateMakes = makes.filter((make) => duplicateSearch(tab, sku, make.name));
+  const requestedMakes = makes.filter((make) => !duplicateSearch(tab, sku, make.name));
+  if (duplicateMakes.length) {
     setFeedback("");
-    showApplicabilityToast("Такой артикул и бренд уже добавлены.", "error");
-    return;
+    showApplicabilityToast(
+      duplicateMakes.length === 1
+        ? `Артикул и бренд «${duplicateMakes[0].name}» уже добавлены.`
+        : "Некоторые пары «артикул + бренд» уже добавлены.",
+      "error",
+    );
   }
+  if (!requestedMakes.length) return;
   if (apiKeyInput.value.trim()) {
     try {
       await saveApiKey();
@@ -818,8 +909,8 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
-  const entry = createSearchEntry({ sku, makeName: make.name, status: "Ищем применимость…" });
-  tab.searches.push(entry);
+  const entries = requestedMakes.map((make) => createSearchEntry({ sku, makeName: make.name, status: "Ищем применимость…" }));
+  tab.searches.push(...entries);
   activeRequest?.abort();
   const controller = new AbortController();
   activeRequest = controller;
@@ -830,40 +921,55 @@ form.addEventListener("submit", async (event) => {
   renderTabs();
   saveApplicabilityState();
   try {
-    let { results, cacheHit } = await searchApplicability(sku, make.name, controller.signal);
-    const normalizedSku = normalizeApplicabilitySku(sku);
-    if (!results.length && normalizedSku && normalizedSku !== sku) {
-      ({ results, cacheHit } = await searchApplicability(normalizedSku, make.name, controller.signal));
-      if (results.length) {
-        entry.sku = normalizedSku;
-        showApplicabilityToast(
-          cacheHit
-            ? `Артикул «${sku}» изменён на «${normalizedSku}». Использован сохранённый результат из базы.`
-            : `Артикул «${sku}» изменён на «${normalizedSku}» и успешно найден.`,
-          cacheHit ? "success" : "notice",
-        );
+    const outcomes = await Promise.all(entries.map(async (entry) => {
+      try {
+        const result = await executeApplicabilitySearch(sku, entry.makeName, controller.signal);
+        return { entry, result };
+      } catch (error) {
+        return { entry, error };
       }
+    }));
+    if (controller.signal.aborted) {
+      tab.searches = tab.searches.filter((item) => !entries.includes(item));
+      if (activeTabId === tab.id) renderResults(tab);
+      renderTabs();
+      saveApplicabilityState();
+      return;
     }
-    if (cacheHit && entry.sku === sku) showApplicabilityToast("Использован сохранённый результат из базы.", "success");
-    entry.results = results;
-    entry.hasSearched = true;
-    entry.status = results.length ? `Найдено автомобилей: ${results.length}` : "Не найдено";
+    const failed = outcomes.filter((outcome) => outcome.error);
+    const completed = outcomes.filter((outcome) => outcome.result);
+    completed.forEach(({ entry, result }) => {
+      entry.sku = result.usedNormalizedSku ? result.normalizedSku : sku;
+      entry.results = result.results;
+      entry.hasSearched = true;
+      entry.status = result.results.length ? `Найдено автомобилей: ${result.results.length}` : "Не найдено";
+    });
+    if (failed.length) {
+      tab.searches = tab.searches.filter((item) => !failed.some((outcome) => outcome.entry === item));
+      const failure = failed[0].error;
+      setFeedback(failure instanceof Error ? failure.message : "Не удалось выполнить поиск применимости.");
+    }
+    const normalizedOutcome = completed.find(({ result }) => result.usedNormalizedSku);
+    const cachedOutcome = completed.find(({ result }) => result.cacheHit);
+    if (normalizedOutcome) {
+      showApplicabilityToast(
+        normalizedOutcome.result.cacheHit
+          ? `Артикул «${sku}» изменён на «${normalizedOutcome.result.normalizedSku}». Использован сохранённый результат из базы.`
+          : `Артикул «${sku}» изменён на «${normalizedOutcome.result.normalizedSku}» и успешно найден.`,
+        normalizedOutcome.result.cacheHit ? "success" : "notice",
+      );
+    } else if (cachedOutcome) {
+      showApplicabilityToast("Использован сохранённый результат из базы.", "success");
+    }
     if (activeTabId === tab.id) renderResults(tab);
     renderTabs();
     saveApplicabilityState();
   } catch (error) {
-    if (error.name !== "AbortError") {
-      tab.searches = tab.searches.filter((item) => item !== entry);
-      if (activeTabId === tab.id) renderResults(tab);
-      renderTabs();
-      saveApplicabilityState();
-      setFeedback(error instanceof Error ? error.message : "Не удалось выполнить поиск применимости.");
-    } else {
-      tab.searches = tab.searches.filter((item) => item !== entry);
-      if (activeTabId === tab.id) renderResults(tab);
-      renderTabs();
-      saveApplicabilityState();
-    }
+    tab.searches = tab.searches.filter((item) => !entries.includes(item));
+    if (activeTabId === tab.id) renderResults(tab);
+    renderTabs();
+    saveApplicabilityState();
+    if (error?.name !== "AbortError") setFeedback(error instanceof Error ? error.message : "Не удалось выполнить поиск применимости.");
   } finally {
     if (activeRequest === controller) {
       activeRequest = null;
