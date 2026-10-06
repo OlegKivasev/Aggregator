@@ -798,7 +798,8 @@ form.addEventListener("submit", async (event) => {
     return;
   }
   if (duplicateSearch(tab, sku, make.name)) {
-    setFeedback("Такой артикул и бренд уже добавлены.");
+    setFeedback("");
+    showApplicabilityToast("Такой артикул и бренд уже добавлены.", "error");
     return;
   }
   if (apiKeyInput.value.trim()) {

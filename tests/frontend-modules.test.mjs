@@ -615,6 +615,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /fetch\(`\/api\/applicability\/cached-brands\?sku=/);
   assert.match(applicability, /const duplicateSearch =/);
   assert.match(applicability, /Такой артикул и бренд уже добавлены\./);
+  assert.match(applicability, /showApplicabilityToast\("Такой артикул и бренд уже добавлены\.", "error"\)/);
   assert.match(applicability, /const normalizeApplicabilitySku = \(sku\) => sku\.replace\(/);
   assert.match(applicability, /Артикул «\$\{sku\}» изменён на «\$\{normalizedSku\}» и успешно найден\./);
   assert.match(applicability, /fetch\("\/api\/applicability\/api-key"/);
