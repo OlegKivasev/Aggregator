@@ -292,8 +292,9 @@ input {
 .applicability-results-table th,
 .applicability-results-table td { padding: 10px 12px; }
 .applicability-results-footer { display: flex; min-height: 58px; flex: 0 0 auto; align-items: center; justify-content: flex-end; padding: 9px 12px; border-top: 1px solid var(--line); background: #fff; }
-.applicability-list-button { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 14px; font-weight: 800; }
+.applicability-list-button { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 14px; border-color: var(--accent); background: var(--accent); font-weight: 800; }
 .applicability-list-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.applicability-list-button:hover, .applicability-list-button:focus-visible { border-color: var(--accent-dark); background: var(--accent-dark); }
 .applicability-list-button:disabled { opacity: 0.55; cursor: not-allowed; }
 .applicability-results-panel .results-panel__status[data-tone="empty"] { color: #b42318; }
 .applicability-summary-row td { background: #fff; }
