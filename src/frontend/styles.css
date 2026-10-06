@@ -248,89 +248,36 @@ input {
 .applicability-function[hidden] { display: none; }
 
 .applicability-shell {
-  display: grid;
-  gap: 18px;
-  min-height: 420px;
-  padding: 24px;
-}
-
-.applicability-shell__header h1 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 800;
-}
-
-.applicability-shell__header p,
-.applicability-settings p {
-  margin: 5px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.applicability-search {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) 52px auto;
-  min-height: 44px;
-  overflow: hidden;
-  border: 2px solid var(--accent);
-  border-radius: 7px;
-}
-
-.applicability-search__input {
-  min-width: 0;
-  padding: 0 12px;
-  border: 0;
-  border-right: 1px solid #e1e6eb;
-  color: var(--ink);
-  outline: 0;
-}
-
-.applicability-search__input:focus { box-shadow: inset 0 0 0 2px rgba(255, 75, 19, 0.12); }
-.applicability-search .settings-button { min-width: 52px; }
-.applicability-search__submit { min-width: 100px; border: 0; border-radius: 0; font-weight: 800; }
-
-.applicability-settings {
-  width: min(460px, 100%);
-  padding: 16px;
-  border: 1px solid var(--line);
-  background: #f8fafc;
-}
-
-.applicability-settings[hidden],
-.applicability-feedback[hidden],
-.applicability-result[hidden] { display: none; }
-
-.applicability-settings .field { display: grid; gap: 6px; color: var(--ink); font-size: 12px; font-weight: 700; }
-.applicability-settings input { min-height: 36px; padding: 7px 9px; border: 1px solid #d7dfe7; border-radius: 6px; }
-.applicability-feedback { margin: 0; color: #9d241c; font-weight: 700; }
-
-.applicability-result {
-  overflow: hidden;
-  border: 1px solid #cfe8d9;
-  border-radius: 10px;
-  background: #f4fbf6;
-}
-
-.applicability-result summary {
   display: flex;
-  min-height: 48px;
-  align-items: center;
-  padding: 0 16px;
-  color: #146c43;
-  cursor: pointer;
-  font-weight: 800;
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0;
+  background: transparent;
+  box-shadow: none !important;
 }
 
-.applicability-result summary::marker { color: var(--muted); }
-.applicability-result.is-empty { border-color: #d8dee5; background: #eef1f4; }
-.applicability-result.is-empty summary { color: #b42318; cursor: default; }
-.applicability-result__table-wrap { overflow: auto; background: #fff; }
-.applicability-result table { min-width: 760px; }
+.applicability-tabs { margin-bottom: 14px !important; }
+.applicability-search-shell { display: grid; gap: 8px; }
+.applicability-search-form { display: flex; }
+.applicability-search-form .search-input { flex: 1 1 0; }
+.applicability-make-input { border-left: 1px solid var(--line); }
+.applicability-search__submit { min-width: 100px; border-radius: 0; font-weight: 800; }
+.applicability-feedback { margin: 0 2px; color: #9d241c; font-weight: 700; }
+.applicability-feedback[hidden] { display: none; }
+.applicability-results-panel { display: flex; min-height: 420px; flex-direction: column; }
+.applicability-results-table { min-height: 0; flex: 1 1 auto; overflow: auto; }
+.applicability-results-table table { min-width: 760px; }
+.applicability-results-table th,
+.applicability-results-table td { padding: 10px 12px; }
+.applicability-results-panel .results-panel__status[data-tone="empty"] { color: #b42318; }
+.applicability-no-results td { color: #b42318; background: #f1f3f5; }
+.settings-drawer__hint { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
 
 @media (max-width: 720px) {
-  .applicability-shell { padding: 12px; }
-  .applicability-search { grid-template-columns: minmax(0, 1fr) 52px 82px; }
-  .applicability-search__make { grid-column: 1 / -1; min-height: 42px; border-top: 1px solid #e1e6eb; border-right: 0; }
+  .applicability-search-form { flex-wrap: wrap; }
+  .applicability-search-form .search-input { min-height: 40px; }
+  .applicability-make-input { border-top: 1px solid var(--line); border-left: 0; }
   .applicability-search__submit { min-width: 82px; padding: 0 8px; }
 }
 

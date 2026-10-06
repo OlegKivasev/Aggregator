@@ -2,21 +2,39 @@ const markupFunction = document.querySelector("#markup-function");
 const applicabilityFunction = document.querySelector("#applicability-function");
 const markupTab = document.querySelector("#markup-function-tab");
 const applicabilityTab = document.querySelector("#applicability-function-tab");
+const applicabilityTabsList = document.querySelector("#applicability-tabs-list");
+const newApplicabilityTabButton = document.querySelector("#applicability-new-tab");
 const form = document.querySelector("#applicability-search-form");
 const skuInput = document.querySelector("#applicability-sku");
 const makeInput = document.querySelector("#applicability-make");
 const makesList = document.querySelector("#applicability-makes");
 const apiKeyInput = document.querySelector("#applicability-api-key");
-const settings = document.querySelector("#applicability-settings");
+const settingsDrawer = document.querySelector("#applicability-settings-drawer");
 const settingsToggle = document.querySelector("#applicability-settings-toggle");
+const settingsClose = document.querySelector("#applicability-settings-close");
+const settingsBackdrop = document.querySelector("#applicability-settings-backdrop");
 const submitButton = document.querySelector("#applicability-submit");
 const feedback = document.querySelector("#applicability-feedback");
-const result = document.querySelector("#applicability-result");
 const resultSummary = document.querySelector("#applicability-result-summary");
 const resultsBody = document.querySelector("#applicability-results-body");
 
 let makesByName = new Map();
+let tabs = [];
+let activeTabId = null;
+let tabSequence = 1;
 let activeRequest = null;
+
+const createTab = (data = {}) => ({
+  id: data.id ?? `applicability-tab-${Date.now()}-${tabSequence++}`,
+  sku: typeof data.sku === "string" ? data.sku : "",
+  makeName: typeof data.makeName === "string" ? data.makeName : "",
+  makeId: Number.isSafeInteger(data.makeId) ? data.makeId : null,
+  results: Array.isArray(data.results) ? data.results : [],
+  status: typeof data.status === "string" ? data.status : "",
+  hasSearched: Boolean(data.hasSearched),
+});
+
+const getActiveTab = () => tabs.find((tab) => tab.id === activeTabId);
 
 const setActiveFunction = (name) => {
   const isApplicability = name === "applicability";
@@ -26,7 +44,10 @@ const setActiveFunction = (name) => {
   applicabilityTab.classList.toggle("active", isApplicability);
   markupTab.setAttribute("aria-selected", String(!isApplicability));
   applicabilityTab.setAttribute("aria-selected", String(isApplicability));
-  if (isApplicability) skuInput.focus();
+  if (isApplicability) {
+    renderActiveTab();
+    skuInput.focus();
+  }
 };
 
 const setFeedback = (message, tone = "error") => {
@@ -43,14 +64,21 @@ const appendCell = (row, text) => {
   row.append(cell);
 };
 
-const renderResults = (vehicles) => {
+const renderResults = (tab) => {
   resultsBody.replaceChildren();
-  result.hidden = false;
-  result.open = false;
-  result.classList.toggle("is-empty", vehicles.length === 0);
-  resultSummary.textContent = vehicles.length
-    ? `Найдено автомобилей: ${vehicles.length}`
-    : "Не найдено";
+  const vehicles = tab.results;
+  resultSummary.textContent = tab.status || (tab.hasSearched ? (vehicles.length ? `Найдено автомобилей: ${vehicles.length}` : "Не найдено") : "Введите артикул и бренд");
+  resultSummary.dataset.tone = tab.hasSearched && !vehicles.length ? "empty" : "";
+  if (!vehicles.length) {
+    const row = document.createElement("tr");
+    row.className = `results-table__empty${tab.hasSearched ? " applicability-no-results" : ""}`;
+    const cell = document.createElement("td");
+    cell.colSpan = 5;
+    cell.textContent = tab.hasSearched ? "По вашему запросу ничего не найдено." : "Выполните поиск применимости.";
+    row.append(cell);
+    resultsBody.append(row);
+    return;
+  }
   vehicles.forEach((vehicle) => {
     const row = document.createElement("tr");
     appendCell(row, vehicle.makeName);
@@ -60,6 +88,76 @@ const renderResults = (vehicles) => {
     appendCell(row, vehicle.carType);
     resultsBody.append(row);
   });
+};
+
+const renderTabs = () => {
+  applicabilityTabsList.replaceChildren();
+  tabs.forEach((tab, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `search-tab${tab.id === activeTabId ? " active" : ""}`;
+    button.dataset.tabId = tab.id;
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", String(tab.id === activeTabId));
+    const status = document.createElement("span");
+    status.className = `search-tab__status${tab.hasSearched && tab.results.length ? " is-completed" : ""}`;
+    status.setAttribute("aria-hidden", "true");
+    const title = document.createElement("span");
+    title.className = "search-tab__title";
+    title.textContent = tab.sku || `Новая применимость ${index + 1}`;
+    const close = document.createElement("span");
+    close.className = "search-tab__close";
+    close.dataset.closeTabId = tab.id;
+    close.setAttribute("aria-label", "Закрыть вкладку");
+    close.textContent = "×";
+    button.append(status, title, close);
+    applicabilityTabsList.append(button);
+  });
+};
+
+const syncActiveTab = () => {
+  const tab = getActiveTab();
+  if (!tab) return;
+  tab.sku = skuInput.value.trim();
+  tab.makeName = makeInput.value.trim();
+  tab.makeId = selectedMake()?.id ?? null;
+};
+
+const renderActiveTab = () => {
+  const tab = getActiveTab();
+  if (!tab) return;
+  skuInput.value = tab.sku;
+  makeInput.value = tab.makeName;
+  makeInput.dataset.makeId = tab.makeId ? String(tab.makeId) : "";
+  setFeedback("");
+  renderResults(tab);
+  renderTabs();
+};
+
+const activateTab = (tabId) => {
+  if (!tabs.some((tab) => tab.id === tabId) || tabId === activeTabId) return;
+  syncActiveTab();
+  activeTabId = tabId;
+  renderActiveTab();
+};
+
+const addTab = () => {
+  syncActiveTab();
+  const tab = createTab();
+  tabs.push(tab);
+  activeTabId = tab.id;
+  renderActiveTab();
+  skuInput.focus();
+};
+
+const closeTab = (tabId) => {
+  const index = tabs.findIndex((tab) => tab.id === tabId);
+  if (index < 0) return;
+  if (activeTabId === tabId) activeRequest?.abort();
+  tabs.splice(index, 1);
+  if (!tabs.length) tabs.push(createTab());
+  if (!tabs.some((tab) => tab.id === activeTabId)) activeTabId = tabs[Math.min(index, tabs.length - 1)].id;
+  renderActiveTab();
 };
 
 const loadMakes = async () => {
@@ -82,24 +180,43 @@ const loadMakes = async () => {
     makesByName = makes;
     makesList.replaceChildren(options);
   } catch {
-    setFeedback("Не удалось загрузить список марок. Обновите страницу и повторите попытку.");
+    setFeedback("Не удалось загрузить список брендов. Обновите страницу и повторите попытку.");
   }
 };
 
 markupTab.addEventListener("click", () => setActiveFunction("markup"));
 applicabilityTab.addEventListener("click", () => setActiveFunction("applicability"));
+newApplicabilityTabButton.addEventListener("click", addTab);
 settingsToggle.addEventListener("click", () => {
-  settings.hidden = !settings.hidden;
-  if (!settings.hidden) apiKeyInput.focus();
+  settingsDrawer.hidden = false;
+  apiKeyInput.focus();
+});
+settingsClose.addEventListener("click", () => { settingsDrawer.hidden = true; });
+settingsBackdrop.addEventListener("click", () => { settingsDrawer.hidden = true; });
+
+applicabilityTabsList.addEventListener("click", (event) => {
+  const close = event.target.closest("[data-close-tab-id]");
+  if (close) {
+    event.stopPropagation();
+    closeTab(close.dataset.closeTabId);
+    return;
+  }
+  const tab = event.target.closest("[data-tab-id]");
+  if (tab) activateTab(tab.dataset.tabId);
 });
 
+skuInput.addEventListener("input", syncActiveTab);
 makeInput.addEventListener("input", () => {
   makeInput.dataset.makeId = selectedMake()?.id ? String(selectedMake().id) : "";
+  syncActiveTab();
 });
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const sku = skuInput.value.trim();
+  const tab = getActiveTab();
+  if (!tab) return;
+  syncActiveTab();
+  const sku = tab.sku;
   const make = selectedMake();
   const apiKey = apiKeyInput.value.trim();
   if (!sku) return;
@@ -109,7 +226,7 @@ form.addEventListener("submit", async (event) => {
     return;
   }
   if (!apiKey) {
-    settings.hidden = false;
+    settingsDrawer.hidden = false;
     setFeedback("Укажите API-ключ PartsAPI в настройках.");
     apiKeyInput.focus();
     return;
@@ -119,9 +236,10 @@ form.addEventListener("submit", async (event) => {
   const controller = new AbortController();
   activeRequest = controller;
   submitButton.disabled = true;
-  submitButton.textContent = "Ищем…";
+  submitButton.querySelector("span").textContent = "Ищем…";
   setFeedback("", "notice");
-  result.hidden = true;
+  tab.status = "Ищем применимость…";
+  renderTabs();
   try {
     const response = await fetch("/api/applicability/search", {
       method: "POST",
@@ -132,18 +250,27 @@ form.addEventListener("submit", async (event) => {
     const payload = await response.json();
     if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось выполнить поиск применимости.");
     if (!Array.isArray(payload?.results)) throw new Error("Сервис вернул некорректный ответ.");
-    renderResults(payload.results);
+    tab.results = payload.results;
+    tab.hasSearched = true;
+    tab.status = payload.results.length ? `Найдено автомобилей: ${payload.results.length}` : "Не найдено";
+    if (activeTabId === tab.id) renderResults(tab);
+    renderTabs();
   } catch (error) {
     if (error.name !== "AbortError") {
+      tab.status = "Ошибка поиска";
+      renderTabs();
       setFeedback(error instanceof Error ? error.message : "Не удалось выполнить поиск применимости.");
     }
   } finally {
     if (activeRequest === controller) {
       activeRequest = null;
       submitButton.disabled = false;
-      submitButton.textContent = "Найти";
+      submitButton.querySelector("span").textContent = "Найти";
     }
   }
 });
 
+tabs.push(createTab());
+activeTabId = tabs[0].id;
+renderActiveTab();
 loadMakes();

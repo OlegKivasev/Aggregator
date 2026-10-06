@@ -586,12 +586,18 @@ test("applicability is a separate static function with safe client-side renderin
   const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
   const makes = JSON.parse(await readFile(new URL("../src/frontend/applicability-makes.json", import.meta.url), "utf8"));
 
-  assert.match(html, /id="markup-function-tab"[\s\S]*?Процентки/);
+  assert.match(html, /id="markup-function-tab"[\s\S]*?Процентка/);
   assert.match(html, /id="applicability-function-tab"[\s\S]*?Применимость/);
   assert.match(html, /class="function-layout"[\s\S]*?class="function-tabs/);
   assert.match(html, /id="applicability-api-key" type="password"/);
+  assert.match(html, /id="applicability-tabs-list"/);
+  assert.match(html, /id="applicability-new-tab"/);
+  assert.match(html, /id="applicability-settings-toggle"/);
+  assert.match(html, /class="search-row applicability-search-row"/);
   assert.match(html, /src="\/applicability\.js"/);
   assert.match(applicability, /fetch\("\/api\/applicability\/search"/);
+  assert.match(applicability, /const createTab/);
+  assert.match(applicability, /const renderTabs/);
   assert.match(applicability, /appendCell\(row, vehicle\.makeName\)/);
   assert.doesNotMatch(applicability, /innerHTML|localStorage/);
   assert.equal(makes.length, 735);
