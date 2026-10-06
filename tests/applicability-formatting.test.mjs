@@ -11,7 +11,7 @@ test("applicability compact list extracts body type, year and engine capacity", 
       yearEnd: "12.2013",
       yearStart: "11.2008",
     }),
-    "Универсал, LADA, KALINA универсал (1117), 2008-2013, 1.4, 16V LPG",
+    "Универсал, LADA, KALINA (1117), 2008-2013, 1.4, 16V LPG",
   );
 });
 
@@ -24,6 +24,6 @@ test("applicability compact list supports English body types and absent optional
       yearEnd: "н.в.",
       yearStart: "05.2002",
     }),
-    "Седан, AUDI, A2 (8Z0) Saloon, 2002-н.в., 1.6, отсутствует",
+    "Седан, AUDI, A2 (8Z0), 2002-н.в., 1.6, отсутствует",
   );
 });
