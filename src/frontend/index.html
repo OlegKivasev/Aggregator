@@ -291,6 +291,12 @@
                 <tbody id="applicability-results-body"></tbody>
               </table>
             </div>
+            <footer class="applicability-results-footer">
+              <button type="button" class="btn btn-primary applicability-list-button" id="applicability-list-button" disabled>
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3.75h7l3.25 3.25v13.25H7z" /><path d="M14 3.75V7h3.25M9.75 11h4.5M9.75 14.25h4.5M9.75 17.5h3" /></svg>
+                <span>Сформировать список</span>
+              </button>
+            </footer>
           </div>
         </div>
       </section>
@@ -685,6 +691,21 @@
               <button type="button" class="analogs-show-more btn btn-light" id="analogs-show-more" hidden></button>
             </footer>
           </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="analogs-modal applicability-document-modal" id="applicability-document-modal" role="dialog" aria-modal="true" aria-labelledby="applicability-document-title" tabindex="-1" hidden>
+      <div class="analogs-modal__backdrop" data-close-applicability-document></div>
+      <section class="analogs-modal__card card border-0 shadow-lg">
+        <header class="analogs-modal__header">
+          <div><h2 id="applicability-document-title">Список применимости</h2></div>
+          <button type="button" class="analogs-modal__close btn btn-light" data-close-applicability-document aria-label="Закрыть окно">×</button>
+        </header>
+        <div class="applicability-document-modal__content">
+          <p id="applicability-document-description">Найдены данные по применимости. Выделите текст и скопируйте его.</p>
+          <label class="visually-hidden" for="applicability-document-text">Список применимости</label>
+          <textarea id="applicability-document-text" class="applicability-document-modal__text" readonly spellcheck="false"></textarea>
         </div>
       </section>
     </div>

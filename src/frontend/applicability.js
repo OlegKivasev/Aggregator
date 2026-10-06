@@ -22,6 +22,10 @@ const deleteResultButton = document.querySelector("#applicability-result-delete-
 const submitButton = document.querySelector("#applicability-submit");
 const feedback = document.querySelector("#applicability-feedback");
 const resultsBody = document.querySelector("#applicability-results-body");
+const listButton = document.querySelector("#applicability-list-button");
+const documentModal = document.querySelector("#applicability-document-modal");
+const documentText = document.querySelector("#applicability-document-text");
+const closeDocumentButtons = [...document.querySelectorAll("[data-close-applicability-document]")];
 
 let makesByName = new Map();
 let tabs = [];
@@ -34,6 +38,7 @@ let contextMenuTabId = null;
 let contextMenuTabAnchor = null;
 let contextMenuEntryId = null;
 let contextMenuEntryAnchor = null;
+let documentModalReturnFocus = null;
 
 const applicabilityStateStorageKey = "autoservice.applicabilityState";
 const activeFunctionStorageKey = "autoservice.activeFunction";
@@ -224,8 +229,21 @@ const appendCell = (row, text) => {
   row.append(cell);
 };
 
+const successfulSearches = (tab) => tab.searches.filter((entry) => entry.hasSearched && entry.results.length);
+
+const buildApplicabilityDocument = (tab) => successfulSearches(tab)
+  .map((entry) => `Артикул: ${entry.sku}\n${JSON.stringify(entry.results, null, 2)}`)
+  .join("\n\n");
+
+const updateListButton = (tab) => {
+  const hasResults = successfulSearches(tab).length > 0;
+  listButton.disabled = !hasResults;
+  listButton.title = hasResults ? "Сформировать список найденной применимости" : "Нет найденной применимости для списка";
+};
+
 const renderResults = (tab) => {
   resultsBody.replaceChildren();
+  updateListButton(tab);
   if (!tab.searches.length) return;
   tab.searches.forEach((entry) => {
     const row = document.createElement("tr");
@@ -283,6 +301,24 @@ const renderResults = (tab) => {
       resultsBody.append(rawRow);
     }
   });
+};
+
+const closeDocumentModal = (restoreFocus = true) => {
+  documentModal.hidden = true;
+  if (restoreFocus && documentModalReturnFocus?.isConnected) documentModalReturnFocus.focus();
+  documentModalReturnFocus = null;
+};
+
+const openDocumentModal = () => {
+  const tab = getActiveTab();
+  if (!tab) return;
+  const documentTextValue = buildApplicabilityDocument(tab);
+  if (!documentTextValue) return;
+  documentModalReturnFocus = document.activeElement;
+  documentText.value = documentTextValue;
+  documentModal.hidden = false;
+  documentText.focus();
+  documentText.select();
 };
 
 const renderTabs = () => {
@@ -384,6 +420,8 @@ const loadMakes = async () => {
 markupTab.addEventListener("click", () => setActiveFunction("markup"));
 applicabilityTab.addEventListener("click", () => setActiveFunction("applicability"));
 newApplicabilityTabButton.addEventListener("click", addTab);
+listButton.addEventListener("click", openDocumentModal);
+closeDocumentButtons.forEach((button) => button.addEventListener("click", () => closeDocumentModal()));
 settingsToggle.addEventListener("click", () => {
   settingsDrawer.hidden = false;
   apiKeyInput.focus();
@@ -573,7 +611,30 @@ document.addEventListener("click", (event) => {
   if (!resultContextMenu.hidden && !resultContextMenu.contains(event.target)) hideResultContextMenu();
 });
 document.addEventListener("keydown", (event) => {
+  if (!documentModal.hidden && event.key === "Tab") {
+    const focusable = [...documentModal.querySelectorAll("button:not([disabled]), textarea:not([disabled]), [tabindex='0']")]
+      .filter((element) => element.offsetParent !== null);
+    if (!focusable.length) {
+      event.preventDefault();
+      documentModal.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === documentModal)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+    return;
+  }
   if (event.key !== "Escape") return;
+  if (!documentModal.hidden) {
+    closeDocumentModal();
+    return;
+  }
   if (!tabContextMenu.hidden) hideTabContextMenu(true);
   if (!resultContextMenu.hidden) hideResultContextMenu(true);
 });

@@ -599,6 +599,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-api-key-delete"/);
   assert.match(html, /aria-label="Показать API-ключ"/);
   assert.match(html, /OEM-артикул[\s\S]*?Производитель[\s\S]*?Количество/);
+  assert.match(html, /id="applicability-list-button"/);
+  assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
   assert.doesNotMatch(html, /id="applicability-result-summary"/);
   assert.match(html, /id="applicability-tab-context-menu"[\s\S]*?id="applicability-rename-tab-button"/);
   assert.match(html, /id="applicability-result-context-menu"[\s\S]*?id="applicability-result-delete-button"/);
@@ -611,6 +613,9 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /JSON\.stringify\(\{ sku, brand: make\.name \}\)/);
   assert.match(applicability, /className = "applicability-expand"/);
   assert.match(applicability, /JSON\.stringify\(entry\.results, null, 2\)/);
+  assert.match(applicability, /const buildApplicabilityDocument/);
+  assert.match(applicability, /entry\.hasSearched && entry\.results\.length/);
+  assert.match(applicability, /documentText\.select\(\)/);
   assert.match(applicability, /appendCell\(row, "Не найдено"\)/);
   assert.match(applicability, /tab\.searches\.push\(entry\)/);
   assert.match(applicability, /tab\.searches\.forEach/);
@@ -637,6 +642,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(styles, /\.function-layout\s*\{[^}]*grid-template-columns: 200px minmax\(0, 1fr\);/s);
   assert.match(styles, /\.function-content\s*\{[^}]*grid-column: 2;/s);
   assert.match(styles, /\.applicability-function\s*\{[\s\S]*min-height: calc\(100dvh - 140px\);/s);
+  assert.match(styles, /\.applicability-results-footer\s*\{[^}]*flex: 0 0 auto;/s);
+  assert.match(styles, /\.applicability-document-modal \.analogs-modal__card/);
   assert.match(styles, /\.function-tabs\s*\{[^}]*flex-direction: column;/s);
 });
 
