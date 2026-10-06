@@ -361,11 +361,13 @@ const applyCachedBrand = async (sku, { force = false } = {}) => {
   cachedBrandLookupController = controller;
   try {
     const brands = await lookupCachedBrands(sku, controller.signal);
-    if (brands.length !== 1 || (!force && selectedMakeNames().length)) return null;
-    const make = makesByName.get(brands[0].trim().toLocaleUpperCase());
-    if (!make) return null;
-    selectMake(make);
-    return make;
+    if (!force && selectedMakeNames().length) return null;
+    const cachedMakes = normalizeMakeNames(brands)
+      .map((brand) => makesByName.get(brand.toLocaleUpperCase()))
+      .filter(Boolean);
+    if (!cachedMakes.length) return null;
+    setSelectedMakeNames([...selectedMakeNames(), ...cachedMakes.map((make) => make.name)]);
+    return cachedMakes;
   } catch (error) {
     if (error.name !== "AbortError") return null;
     return null;

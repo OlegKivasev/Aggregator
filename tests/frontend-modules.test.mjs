@@ -617,6 +617,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /const duplicateSearch =/);
   assert.match(applicability, /const selectedMakeNames/);
   assert.match(applicability, /const toggleMake/);
+  assert.match(applicability, /const cachedMakes = normalizeMakeNames\(brands\)/);
+  assert.match(applicability, /setSelectedMakeNames\(\[\.\.\.selectedMakeNames\(\), \.\.\.cachedMakes\.map/);
   assert.match(applicability, /Некоторые пары «артикул \+ бренд» уже добавлены\./);
   assert.match(applicability, /const normalizeApplicabilitySku = \(sku\) => sku\.replace\(/);
   assert.match(applicability, /Артикул «\$\{sku\}» изменён на «\$\{normalizedOutcome\.result\.normalizedSku\}» и успешно найден\./);
