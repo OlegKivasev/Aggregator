@@ -603,6 +603,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-list-button"/);
   assert.match(html, /id="applicability-toast"/);
   assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
+  assert.match(html, /id="applicability-document-text"[^>]*wrap="off"/);
   assert.match(html, /id="applicability-document-format"[\s\S]*?Структурированный список[\s\S]*?Сырые данные/);
   assert.match(html, /id="applicability-document-columns"[\s\S]*?data-applicability-document-column="article"[\s\S]*?data-applicability-document-column="bodyType"[\s\S]*?data-applicability-document-column="bodyCode"[\s\S]*?data-applicability-document-column="carName"/);
   assert.doesNotMatch(html, /id="applicability-result-summary"/);
