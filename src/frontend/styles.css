@@ -345,6 +345,7 @@ input {
 .applicability-article-name-modal .analogs-modal__card { width: min(480px, calc(100vw - 24px)); height: auto; max-height: calc(100dvh - 24px); border-radius: 16px; }
 .applicability-article-name-modal__form { display: flex; flex-direction: column; }
 .applicability-article-name-modal__content { display: grid; gap: 14px; padding: 6px 22px 22px; }
+.applicability-article-name-modal__tab-context { margin: 0; color: var(--muted); font-weight: 700; }
 .applicability-article-name-modal__content input { min-height: 40px; border-color: #d7dfe7; }
 .applicability-article-name-modal__footer { justify-content: flex-end; gap: 8px; padding: 12px 22px; }
 .applicability-article-name-modal .btn-primary { border-color: var(--accent) !important; color: #fff !important; background: var(--accent) !important; }

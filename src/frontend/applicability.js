@@ -34,6 +34,7 @@ const applicabilityToast = document.querySelector("#applicability-toast");
 const articleNameModal = document.querySelector("#applicability-article-name-modal");
 const articleNameForm = document.querySelector("#applicability-article-name-form");
 const articleNameInput = document.querySelector("#applicability-article-name-input");
+const articleNameTabContext = document.querySelector("#applicability-article-name-tab-context");
 const closeArticleNameButtons = [...document.querySelectorAll("[data-close-applicability-article-name]")];
 const multiListModal = document.querySelector("#applicability-multi-list-modal");
 const multiListForm = document.querySelector("#applicability-multi-list-form");
@@ -725,13 +726,15 @@ const closeArticleNameModal = (restoreFocus = true) => {
   multiDocumentTabIds = null;
 };
 
-const openArticleNameModal = (tabId, { openDocument = false, returnFocus = document.activeElement } = {}) => {
+const openArticleNameModal = (tabId, { openDocument = false, showTabContext = false, returnFocus = document.activeElement } = {}) => {
   const tab = tabs.find((item) => item.id === tabId);
   if (!tab) return;
   const index = tabs.indexOf(tab);
   articleNameModalReturnFocus = returnFocus;
   articleNameModalTabId = tabId;
   openDocumentAfterArticleNaming = openDocument;
+  articleNameTabContext.textContent = `Вкладка: ${tab.name || `Новая применимость ${index + 1}`}`;
+  articleNameTabContext.hidden = !showTabContext;
   articleNameInput.value = tab.name || tab.sku || `Новая применимость ${index + 1}`;
   articleNameModal.hidden = false;
   articleNameInput.focus();
@@ -814,7 +817,7 @@ const openMultiDocument = (selectedTabs, returnFocus) => {
   multiDocumentTabIds = selectedTabs.map((tab) => tab.id);
   const unnamedTab = selectedTabs.find((tab) => !tab.name);
   if (unnamedTab) {
-    openArticleNameModal(unnamedTab.id, { returnFocus });
+    openArticleNameModal(unnamedTab.id, { showTabContext: true, returnFocus });
     return;
   }
   multiDocumentTabIds = null;
@@ -946,7 +949,7 @@ articleNameForm.addEventListener("submit", (event) => {
     const nextUnnamedTab = selectedTabs.find((item) => !item.name);
     if (nextUnnamedTab) {
       multiDocumentTabIds = selectedMultiTabIds;
-      openArticleNameModal(nextUnnamedTab.id, { returnFocus });
+      openArticleNameModal(nextUnnamedTab.id, { showTabContext: true, returnFocus });
     }
     else openDocumentModalForTabs(selectedTabs, returnFocus);
   } else if (shouldOpenDocument) openDocumentModal(tab, returnFocus);

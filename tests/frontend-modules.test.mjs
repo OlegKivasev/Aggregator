@@ -608,13 +608,13 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /aria-label="Показать API-ключ"/);
   assert.match(html, /OEM-артикул[\s\S]*?Производитель[\s\S]*?Количество/);
   assert.match(html, /id="applicability-list-button"/);
-  assert.match(html, /id="applicability-multi-list-button"[\s\S]*?Сформировать мультисписок/);
+  assert.match(html, /class="[^"]*applicability-list-button[^"]*" id="applicability-multi-list-button"[\s\S]*?Сформировать мультисписок/);
   assert.match(styles, /\.applicability-list-button\s*\{[^}]*--bs-btn-active-bg: var\(--accent-dark\);[^}]*--bs-btn-focus-shadow-rgb: 255, 75, 19;/s);
   assert.match(styles, /\.applicability-list-button:hover[^}]*\.applicability-list-button:focus-visible[^}]*\.applicability-list-button:active[^}]*background: var\(--accent-dark\);/s);
   assert.match(styles, /\.applicability-fallback-key-add\s*\{[^}]*background: var\(--accent\) !important;/s);
   assert.match(styles, /\.applicability-key-field input\s*\{[^}]*width: 100%;[^}]*border: 1px solid #dce3ea;/s);
   assert.match(html, /id="applicability-toast"/);
-  assert.match(html, /id="applicability-article-name-modal"[\s\S]*?id="applicability-article-name-form"[\s\S]*?id="applicability-article-name-input"/);
+  assert.match(html, /id="applicability-article-name-modal"[\s\S]*?id="applicability-article-name-form"[\s\S]*?id="applicability-article-name-tab-context"[\s\S]*?id="applicability-article-name-input"/);
   assert.doesNotMatch(html, /Это наименование будет показано во вкладке и в сформированном списке\./);
   assert.match(html, /id="applicability-multi-list-modal"[\s\S]*?id="applicability-multi-list-form"[\s\S]*?id="applicability-multi-list-tabs"[\s\S]*?id="applicability-multi-list-submit"/);
   assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
@@ -655,6 +655,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /const groupSearchesBySku/);
   assert.match(applicability, /OEM-артикул: \$\{sku\}/);
   assert.match(applicability, /const openArticleNameModal/);
+  assert.match(applicability, /showTabContext = false/);
+  assert.match(applicability, /openArticleNameModal\(unnamedTab\.id, \{ showTabContext: true, returnFocus \}\)/);
   assert.match(applicability, /openDocumentAfterArticleNaming/);
   assert.match(applicability, /listButton\.addEventListener\("click", \(\) => openDocumentModal\(\)\);/);
   assert.match(applicability, /const tabTitle = tab\.name \|\| `Новая применимость \$\{index \+ 1\}`;/);
