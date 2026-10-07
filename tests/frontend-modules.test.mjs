@@ -651,6 +651,9 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /const buildApplicabilityDocument/);
   assert.match(applicability, /const openMultiListModal/);
   assert.match(applicability, /const openMultiDocument/);
+  assert.match(applicability, /const tabsWithResults = tabs\.filter\(\(tab\) => successfulSearches\(tab\)\.length\);/);
+  assert.match(applicability, /applicability-multi-list-modal__oem-tooltip/);
+  assert.doesNotMatch(applicability, /"Нет данных"/);
   assert.match(applicability, /multiListButton\.addEventListener\("click", \(\) => openMultiListModal\(\)\);/);
   assert.match(applicability, /const groupSearchesBySku/);
   assert.match(applicability, /OEM-артикул: \$\{sku\}/);

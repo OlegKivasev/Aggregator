@@ -357,10 +357,17 @@ input {
 .applicability-multi-list-modal__content { display: grid; gap: 8px; padding: 6px 22px 22px; overflow-y: auto; }
 .applicability-multi-list-modal__tab { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
 .applicability-multi-list-modal__tab:has(input:checked) { border-color: var(--accent); background: #fff7f3; }
-.applicability-multi-list-modal__tab:has(input:disabled) { color: var(--muted); background: #f8fafc; cursor: not-allowed; }
 .applicability-multi-list-modal__tab input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 .applicability-multi-list-modal__tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 800; }
-.applicability-multi-list-modal__tab-status { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.applicability-multi-list-modal__oem { position: relative; margin-left: auto; color: var(--muted); outline: 0; }
+.applicability-multi-list-modal__oem:focus-visible .applicability-multi-list-modal__tab-status { color: var(--accent-dark); text-decoration: underline; text-underline-offset: 3px; }
+.applicability-multi-list-modal__tab-status { display: block; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.applicability-multi-list-modal__oem-tooltip { position: absolute; z-index: 2; right: -8px; bottom: calc(100% + 9px); display: grid; min-width: 170px; max-width: min(320px, calc(100vw - 48px)); gap: 7px; padding: 10px; border-radius: 9px; color: #fff; background: #344054; box-shadow: 0 8px 20px rgb(16 24 40 / 22%); opacity: 0; pointer-events: none; transform: translateY(4px); transition: opacity 120ms ease, transform 120ms ease; visibility: hidden; }
+.applicability-multi-list-modal__oem:hover .applicability-multi-list-modal__oem-tooltip,
+.applicability-multi-list-modal__oem:focus .applicability-multi-list-modal__oem-tooltip { opacity: 1; transform: translateY(0); visibility: visible; }
+.applicability-multi-list-modal__oem-tooltip-title { color: #d0d5dd; font-size: 11px; font-weight: 800; }
+.applicability-multi-list-modal__oem-tooltip-values { display: flex; flex-wrap: wrap; gap: 5px; }
+.applicability-multi-list-modal__oem-tooltip-values span { padding: 3px 6px; border-radius: 5px; background: rgb(255 255 255 / 14%); font: 700 11px/1.25 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .applicability-multi-list-modal__footer { justify-content: flex-end; gap: 8px; padding: 12px 22px; }
 .applicability-multi-list-modal .btn-primary { border-color: var(--accent) !important; color: #fff !important; background: var(--accent) !important; }
 .applicability-multi-list-modal .btn-primary:hover,

@@ -783,23 +783,44 @@ const updateMultiListSubmit = () => {
 
 const renderMultiListTabs = () => {
   multiListTabs.replaceChildren();
-  tabs.forEach((tab, index) => {
+  const tabsWithResults = tabs.filter((tab) => successfulSearches(tab).length);
+  tabsWithResults.forEach((tab) => {
     const entries = successfulSearches(tab);
+    const index = tabs.indexOf(tab);
+    const oemSkus = groupSearchesBySku(entries).map(([sku]) => sku);
     const label = document.createElement("label");
     label.className = "applicability-multi-list-modal__tab";
     const input = document.createElement("input");
     input.type = "checkbox";
     input.value = tab.id;
-    input.disabled = !entries.length;
     input.setAttribute("aria-label", tab.name || `Новая применимость ${index + 1}`);
     input.addEventListener("change", updateMultiListSubmit);
     const name = document.createElement("span");
     name.className = "applicability-multi-list-modal__tab-name";
     name.textContent = tab.name || `Новая применимость ${index + 1}`;
+    const oem = document.createElement("span");
+    oem.className = "applicability-multi-list-modal__oem";
+    oem.tabIndex = 0;
+    oem.setAttribute("aria-label", `OEM-артикулы: ${oemSkus.join(", ")}`);
     const status = document.createElement("span");
     status.className = "applicability-multi-list-modal__tab-status";
-    status.textContent = entries.length ? `OEM: ${entries.length}` : "Нет данных";
-    label.append(input, name, status);
+    status.textContent = `OEM: ${oemSkus.length}`;
+    const tooltip = document.createElement("span");
+    tooltip.className = "applicability-multi-list-modal__oem-tooltip";
+    tooltip.setAttribute("role", "tooltip");
+    const tooltipTitle = document.createElement("span");
+    tooltipTitle.className = "applicability-multi-list-modal__oem-tooltip-title";
+    tooltipTitle.textContent = "OEM-артикулы";
+    const tooltipValues = document.createElement("span");
+    tooltipValues.className = "applicability-multi-list-modal__oem-tooltip-values";
+    oemSkus.forEach((sku) => {
+      const value = document.createElement("span");
+      value.textContent = sku;
+      tooltipValues.append(value);
+    });
+    tooltip.append(tooltipTitle, tooltipValues);
+    oem.append(status, tooltip);
+    label.append(input, name, oem);
     multiListTabs.append(label);
   });
   updateMultiListSubmit();
