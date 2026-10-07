@@ -653,6 +653,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /const openMultiDocument/);
   assert.match(applicability, /const tabsWithResults = tabs\.filter\(\(tab\) => successfulSearches\(tab\)\.length\);/);
   assert.match(applicability, /applicability-multi-list-modal__oem-tooltip/);
+  assert.match(applicability, /entry\.makeName/);
+  assert.match(applicability, /applicability-multi-list-modal__oem-tooltip-brand/);
   assert.doesNotMatch(applicability, /"Нет данных"/);
   assert.match(applicability, /multiListButton\.addEventListener\("click", \(\) => openMultiListModal\(\)\);/);
   assert.match(applicability, /const groupSearchesBySku/);
@@ -714,6 +716,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(styles, /\.applicability-results-footer\s*\{[^}]*flex: 0 0 auto;/s);
   assert.match(styles, /\.applicability-document-modal \.analogs-modal__card/);
   assert.match(styles, /\.applicability-article-name-modal \.analogs-modal__card/);
+  assert.match(styles, /\.applicability-multi-list-modal__oem-tooltip\s*\{[^}]*top: calc\(100% \+ 9px\);[^}]*background: #fff;/s);
   assert.match(styles, /\.applicability-document-format > summary/);
   assert.match(styles, /\.applicability-document-columns__menu/);
   assert.match(styles, /\.applicability-document-columns__menu\s*\{[^}]*left: 0;/s);

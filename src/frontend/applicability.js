@@ -787,7 +787,10 @@ const renderMultiListTabs = () => {
   tabsWithResults.forEach((tab) => {
     const entries = successfulSearches(tab);
     const index = tabs.indexOf(tab);
-    const oemSkus = groupSearchesBySku(entries).map(([sku]) => sku);
+    const oemEntries = groupSearchesBySku(entries).map(([sku, entriesForSku]) => ({
+      sku,
+      brands: [...new Set(entriesForSku.map((entry) => entry.makeName).filter(Boolean))],
+    }));
     const label = document.createElement("label");
     label.className = "applicability-multi-list-modal__tab";
     const input = document.createElement("input");
@@ -801,10 +804,10 @@ const renderMultiListTabs = () => {
     const oem = document.createElement("span");
     oem.className = "applicability-multi-list-modal__oem";
     oem.tabIndex = 0;
-    oem.setAttribute("aria-label", `OEM-артикулы: ${oemSkus.join(", ")}`);
+    oem.setAttribute("aria-label", `OEM-артикулы: ${oemEntries.map(({ sku, brands }) => `${sku}${brands.length ? ` — ${brands.join(", ")}` : ""}`).join("; ")}`);
     const status = document.createElement("span");
     status.className = "applicability-multi-list-modal__tab-status";
-    status.textContent = `OEM: ${oemSkus.length}`;
+    status.textContent = `OEM: ${oemEntries.length}`;
     const tooltip = document.createElement("span");
     tooltip.className = "applicability-multi-list-modal__oem-tooltip";
     tooltip.setAttribute("role", "tooltip");
@@ -813,9 +816,18 @@ const renderMultiListTabs = () => {
     tooltipTitle.textContent = "OEM-артикулы";
     const tooltipValues = document.createElement("span");
     tooltipValues.className = "applicability-multi-list-modal__oem-tooltip-values";
-    oemSkus.forEach((sku) => {
+    oemEntries.forEach(({ sku, brands }) => {
       const value = document.createElement("span");
-      value.textContent = sku;
+      const skuValue = document.createElement("span");
+      skuValue.className = "applicability-multi-list-modal__oem-tooltip-sku";
+      skuValue.textContent = sku;
+      value.append(skuValue);
+      if (brands.length) {
+        const brandValue = document.createElement("span");
+        brandValue.className = "applicability-multi-list-modal__oem-tooltip-brand";
+        brandValue.textContent = brands.join(", ");
+        value.append(brandValue);
+      }
       tooltipValues.append(value);
     });
     tooltip.append(tooltipTitle, tooltipValues);
