@@ -29,6 +29,8 @@ const listButton = document.querySelector("#applicability-list-button");
 const applicabilityToast = document.querySelector("#applicability-toast");
 const documentModal = document.querySelector("#applicability-document-modal");
 const documentText = document.querySelector("#applicability-document-text");
+const documentSaveButton = document.querySelector("#applicability-document-save");
+const documentSaveStatus = document.querySelector("#applicability-document-save-status");
 const closeDocumentButtons = [...document.querySelectorAll("[data-close-applicability-document]")];
 const documentFormatControl = document.querySelector("#applicability-document-format");
 const documentFormatValue = document.querySelector("#applicability-document-format-value");
@@ -403,16 +405,13 @@ const executeApplicabilitySearch = async (sku, brand, signal) => {
 const duplicateSearch = (tab, sku, brand) => tab.searches.find((entry) => searchIdentity(entry.sku, entry.makeName) === searchIdentity(sku, brand));
 
 const buildApplicabilityDocument = (entries, format = documentFormat) => {
-  if (format === "raw") {
-    return entries
-      .map((entry) => JSON.stringify({ sku: entry.sku, results: entry.results }))
-      .join("\n");
-  }
   const visibleColumns = visibleDocumentColumns();
   return entries
     .map((entry) => {
-    const contents = entry.results.map((vehicle) => formatApplicabilityVehicle(vehicle, visibleColumns)).join("\n");
-    return visibleColumns.has("article")
+    const contents = format === "structured"
+      ? entry.results.map((vehicle) => formatApplicabilityVehicle(vehicle, visibleColumns)).join("\n")
+      : JSON.stringify(entry.results, null, 2);
+    return format !== "structured" || visibleColumns.has("article")
       ? `Артикул: ${entry.sku}\n${contents}`
       : contents;
   })
@@ -444,6 +443,52 @@ const renderApplicabilityDocument = ({ preserveTextState = false } = {}) => {
   });
   documentColumnsControl.hidden = documentFormat !== "structured";
   if (documentFormat !== "structured") documentColumnsControl.open = false;
+};
+
+const setDocumentSaveStatus = (message) => {
+  documentSaveStatus.textContent = message;
+  documentSaveStatus.hidden = !message;
+};
+
+const applicabilityDocumentFileName = (date = new Date()) => {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const label = documentFormat === "raw" ? "Сырые_данные" : "Структурированный_список";
+  return `${label}_${hours}_${minutes}.txt`;
+};
+
+const saveApplicabilityDocument = async () => {
+  const suggestedName = applicabilityDocumentFileName();
+  const contents = new Blob([documentText.value], { type: "text/plain;charset=utf-8" });
+  setDocumentSaveStatus("");
+
+  if (typeof window.showSaveFilePicker === "function") {
+    const fileHandle = await window.showSaveFilePicker({
+      suggestedName,
+      types: [{ description: "Текстовый файл", accept: { "text/plain": [".txt"] } }],
+    });
+    const writable = await fileHandle.createWritable();
+    try {
+      await writable.write(contents);
+      await writable.close();
+    } catch (error) {
+      await writable.abort();
+      throw error;
+    }
+    setDocumentSaveStatus("Список сохранён.");
+    return;
+  }
+
+  const url = URL.createObjectURL(contents);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = suggestedName;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  setDocumentSaveStatus("Список скачан.");
 };
 
 const updateListButton = (tab) => {
@@ -636,6 +681,14 @@ applicabilityTab.addEventListener("click", () => setActiveFunction("applicabilit
 newApplicabilityTabButton.addEventListener("click", addTab);
 listButton.addEventListener("click", openDocumentModal);
 closeDocumentButtons.forEach((button) => button.addEventListener("click", () => closeDocumentModal()));
+documentSaveButton.addEventListener("click", async () => {
+  try {
+    await saveApplicabilityDocument();
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    setDocumentSaveStatus("Не удалось сохранить список.");
+  }
+});
 documentFormatButtons.forEach((button) => button.addEventListener("click", () => {
   const format = button.dataset.applicabilityDocumentFormat;
   if (format !== "raw" && format !== "structured") return;

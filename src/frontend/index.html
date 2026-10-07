@@ -707,7 +707,7 @@
           <button type="button" class="analogs-modal__close btn btn-light" data-close-applicability-document aria-label="Закрыть окно">×</button>
         </header>
         <div class="applicability-document-modal__content">
-          <p id="applicability-document-description">Найдены данные по применимости. Выделите текст и скопируйте его.</p>
+          <p id="applicability-document-description">Найдены данные по применимости. Сохраните список или выделите текст и скопируйте его.</p>
           <div class="applicability-document-controls">
             <div class="applicability-document-control">
               <span>Формат</span>
@@ -732,7 +732,11 @@
                 <label><input type="checkbox" data-applicability-document-column="carName" checked /> Модификация</label>
               </div>
             </details>
+            <button type="button" class="applicability-document-save" id="applicability-document-save" aria-label="Сохранить список в файл" title="Сохранить список в файл">
+              <img src="/applicability-save.png" alt="" />
+            </button>
           </div>
+          <p class="applicability-document-save-status" id="applicability-document-save-status" role="status" aria-live="polite" hidden></p>
           <label class="visually-hidden" for="applicability-document-text">Список применимости</label>
           <textarea id="applicability-document-text" class="applicability-document-modal__text" readonly wrap="off" spellcheck="false"></textarea>
         </div>

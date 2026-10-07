@@ -492,3 +492,14 @@ test("HTTP server can be constructed without opening a listening socket", () => 
   const server = createAggregatorServer({ application: createApplication(), publicDir });
   assert.equal(server.listening, false);
 });
+
+test("HTTP server serves applicability save icons as PNG files", async () => {
+  const application = createApplication();
+  const { baseUrl } = await listen(application);
+
+  const response = await fetch(`${baseUrl}/applicability-save.png`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/png");
+  assert.equal((await response.arrayBuffer()).byteLength > 0, true);
+});

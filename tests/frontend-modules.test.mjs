@@ -603,6 +603,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-list-button"/);
   assert.match(html, /id="applicability-toast"/);
   assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
+  assert.match(html, /id="applicability-document-save"[\s\S]*?src="\/applicability-save\.png"/);
   assert.match(html, /id="applicability-document-text"[^>]*wrap="off"/);
   assert.match(html, /id="applicability-document-format"[\s\S]*?Структурированный список[\s\S]*?Сырые данные/);
   assert.match(html, /id="applicability-document-columns"[\s\S]*?data-applicability-document-column="article"[\s\S]*?data-applicability-document-column="bodyType"[\s\S]*?data-applicability-document-column="bodyCode"[\s\S]*?data-applicability-document-column="carName"/);
@@ -626,7 +627,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /fetch\("\/api\/applicability\/api-key"/);
   assert.match(applicability, /JSON\.stringify\(\{ sku, brand \}\)/);
   assert.match(applicability, /className = "applicability-expand"/);
-  assert.match(applicability, /JSON\.stringify\(\{ sku: entry\.sku, results: entry\.results \}\)/);
+  assert.match(applicability, /JSON\.stringify\(entry\.results, null, 2\)/);
   assert.match(applicability, /const buildApplicabilityDocument/);
   assert.match(applicability, /let documentFormat = "structured"/);
   assert.match(applicability, /const visibleDocumentColumns/);
@@ -639,6 +640,10 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /documentText\.setSelectionRange\(0, 0\)/);
   assert.match(applicability, /documentText\.scrollTop = 0/);
   assert.match(applicability, /documentModal\.focus\(\)/);
+  assert.match(applicability, /window\.showSaveFilePicker/);
+  assert.match(applicability, /Сырые_данные/);
+  assert.match(applicability, /Структурированный_список/);
+  assert.match(applicability, /documentSaveButton\.addEventListener\("click"/);
   assert.match(applicability, /appendCell\(row, "Не найдено"\)/);
   assert.match(applicability, /tab\.searches\.push\(\.\.\.entries\)/);
   assert.match(applicability, /Promise\.all\(entries\.map/);
