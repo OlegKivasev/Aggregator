@@ -11,7 +11,7 @@ test("applicability compact list extracts body type, year and engine capacity", 
       yearEnd: "12.2013",
       yearStart: "11.2008",
     }),
-    "Универсал, отсутствует, 1117, LADA, KALINA, 2008-2013, 1.4, 16V LPG",
+    "Универсал, 1117, LADA, KALINA, 2008-2013, 1.4, 16V LPG",
   );
 });
 
@@ -36,7 +36,7 @@ test("applicability structured list keeps bare numeric EV variants as modificati
         yearEnd: null,
         yearStart,
       }),
-      `отсутствует, отсутствует, отсутствует, KIA, ${carName === "100 AWD" ? "EV9" : "EV6"}, ${yearStart}-н.в., отсутствует, ${expectedCarName}`,
+      `отсутствует, отсутствует, KIA, ${carName === "100 AWD" ? "EV9" : "EV6"}, ${yearStart}-н.в., отсутствует, ${expectedCarName}`,
     );
   });
 });
@@ -50,7 +50,7 @@ test("applicability compact list uses present for an absent end year", () => {
       yearEnd: null,
       yearStart: "05.2002",
     }),
-    "Седан, отсутствует, 8Z0, AUDI, A2, 2002-н.в., 1.6, отсутствует",
+    "Седан, 8Z0, AUDI, A2, 2002-н.в., 1.6, отсутствует",
   );
 });
 
@@ -76,7 +76,7 @@ test("applicability structured list joins multiple body codes", () => {
       yearEnd: "12.2012",
       yearStart: "01.2005",
     }),
-    "отсутствует, отсутствует, E90/E91, BMW, 3, 2005-2012, 2.0, отсутствует",
+    "отсутствует, E90/E91, BMW, 3, 2005-2012, 2.0, отсутствует",
   );
 });
 
@@ -89,7 +89,7 @@ test("applicability structured list removes TECDOC placeholders from body codes"
       yearEnd: "12.2007",
       yearStart: "01.1996",
     }),
-    "отсутствует, отсутствует, 1111, LADA, OKA, 1996-2007, 0.8, отсутствует",
+    "отсутствует, 1111, LADA, OKA, 1996-2007, 0.8, отсутствует",
   );
 });
 
@@ -103,10 +103,10 @@ test("applicability structured list expands SAMARA body codes into separate rows
       yearStart: "01.1996",
     }),
     [
-      "отсутствует, отсутствует, 2108, LADA, 2108, 1996-2013, 1.5, отсутствует",
-      "отсутствует, отсутствует, 2109, LADA, 2109, 1996-2013, 1.5, отсутствует",
-      "отсутствует, отсутствует, 2113, LADA, 2113, 1996-2013, 1.5, отсутствует",
-      "отсутствует, отсутствует, 2114, LADA, 2114, 1996-2013, 1.5, отсутствует",
+      "отсутствует, 2108, LADA, 2108, 1996-2013, 1.5, отсутствует",
+      "отсутствует, 2109, LADA, 2109, 1996-2013, 1.5, отсутствует",
+      "отсутствует, 2113, LADA, 2113, 1996-2013, 1.5, отсутствует",
+      "отсутствует, 2114, LADA, 2114, 1996-2013, 1.5, отсутствует",
     ].join("\n"),
   );
 });
@@ -120,7 +120,7 @@ test("applicability structured list keeps combined van and wagon body type toget
       yearEnd: "12.1998",
       yearStart: "01.1985",
     }),
-    "Фургон/универсал, отсутствует, 21043, LADA, KALINKA, 1985-1998, 1.5, отсутствует",
+    "Фургон/универсал, 21043, LADA, KALINKA, 1985-1998, 1.5, отсутствует",
   );
 });
 
@@ -133,7 +133,7 @@ test("applicability recognizes a combined van and SUV designation before the van
       yearEnd: "12.2020",
       yearStart: "01.2018",
     }),
-    "SUV/Внедорожник, отсутствует, TLE, HYUNDAI, TUCSON, 2018-2020, 1.6, CRDi",
+    "SUV/Внедорожник, TLE, HYUNDAI, TUCSON, 2018-2020, 1.6, CRDi",
   );
 });
 
@@ -146,7 +146,7 @@ test("applicability removes the combined van and SUV designation from KONA", () 
       yearEnd: "12.2023",
       yearStart: "06.2017",
     }),
-    "SUV/Внедорожник, отсутствует, OS, HYUNDAI, KONA, 2017-2023, 1.6, T-GDI",
+    "SUV/Внедорожник, OS, HYUNDAI, KONA, 2017-2023, 1.6, T-GDI",
   );
 });
 
@@ -168,7 +168,7 @@ test("applicability discards truncated body-code tails from combined SUV names",
         yearEnd: "12.2020",
         yearStart: "01.2018",
       }),
-      `SUV/Внедорожник, отсутствует, отсутствует, HYUNDAI, ${expectedModel}, 2018-2020, 1.6, отсутствует`,
+      `SUV/Внедорожник, отсутствует, HYUNDAI, ${expectedModel}, 2018-2020, 1.6, отсутствует`,
     );
   });
 });
@@ -182,7 +182,7 @@ test("applicability recognizes SW as a wagon without removing it from the model"
       yearEnd: "12.2012",
       yearStart: "01.2007",
     }),
-    "Универсал, отсутствует, ED, KIA, CEE'D SW, 2007-2012, 1.6, отсутствует",
+    "Универсал, ED, KIA, CEE'D SW, 2007-2012, 1.6, отсутствует",
   );
 });
 
@@ -202,16 +202,16 @@ test("applicability recognizes Sportswagon as a wagon without removing it from t
         yearEnd: "12.2020",
         yearStart: "01.2016",
       }),
-      `Универсал, отсутствует, ${bodyCode}, KIA, ${expectedModel}, 2016-2020, 1.7, CRDi`,
+      `Универсал, ${bodyCode}, KIA, ${expectedModel}, 2016-2020, 1.7, CRDi`,
     );
   });
 });
 
 test("applicability normalizes terminal FASTBACK and Cargo body descriptors", () => {
   const cases = [
-    ["1.0", "HYUNDAI", "i30 FASTBACK (PDE, PDEN)", "Фастбэк, отсутствует, PDE/PDEN, HYUNDAI, i30"],
-    ["1.0", "HYUNDAI", "i10 II Cargo (BA, IA)", "Автофургон / микроавтобус, отсутствует, BA/IA, HYUNDAI, i10 II"],
-    ["1.2", "HYUNDAI", "i10 II Cargo (BA, IA)", "Автофургон / микроавтобус, отсутствует, BA/IA, HYUNDAI, i10 II"],
+    ["1.0", "HYUNDAI", "i30 FASTBACK (PDE, PDEN)", "Фастбэк, PDE/PDEN, HYUNDAI, i30"],
+    ["1.0", "HYUNDAI", "i10 II Cargo (BA, IA)", "Автофургон / микроавтобус, BA/IA, HYUNDAI, i10 II"],
+    ["1.2", "HYUNDAI", "i10 II Cargo (BA, IA)", "Автофургон / микроавтобус, BA/IA, HYUNDAI, i10 II"],
   ];
 
   cases.forEach(([carName, makeName, modelName, expected]) => {
@@ -231,7 +231,7 @@ test("applicability retains a non-terminal FASTBACK descriptor in the model", ()
       yearEnd: null,
       yearStart: "01.2018",
     }),
-    "Фастбэк, отсутствует, PDE, HYUNDAI, i30 FASTBACK N, 2018-н.в., 1.0, отсутствует",
+    "Фастбэк, PDE, HYUNDAI, i30 FASTBACK N, 2018-н.в., 1.0, отсутствует",
   );
 });
 
@@ -244,30 +244,30 @@ test("applicability recognizes KOUP as a non-removable coupe alias", () => {
       yearEnd: null,
       yearStart: "01.2013",
     }),
-    "Купе, отсутствует, YD, KIA, CERATO KOUP III, 2013-н.в., 1.6, T-GDI",
+    "Купе, YD, KIA, CERATO KOUP III, 2013-н.в., 1.6, T-GDI",
   );
 });
 
 test("applicability removes complete terminal compound van descriptors", () => {
   const cases = [
-    ["HYUNDAI", "i20 II Hatchback Van (GB, IB)", "Hatchback", "GB/IB", "i20 II"],
-    ["KIA", "CEE'D Combi Van (ED)", "Combi", "ED", "CEE'D"],
-    ["HYUNDAI", "i30 Kombi Van (FD)", "Kombi", "FD", "i30"],
+    ["HYUNDAI", "i20 II Hatchback Van (GB, IB)", "GB/IB", "i20 II"],
+    ["KIA", "CEE'D Combi Van (ED)", "ED", "CEE'D"],
+    ["HYUNDAI", "i30 Kombi Van (FD)", "FD", "i30"],
   ];
 
-  cases.forEach(([makeName, modelName, bodySubtype, bodyCode, expectedModel]) => {
+  cases.forEach(([makeName, modelName, bodyCode, expectedModel]) => {
     assert.equal(
       formatApplicabilityVehicle({ carName: "1.6", makeName, modelName, yearEnd: null, yearStart: "01.2013" }),
-      `Автофургон / микроавтобус, ${bodySubtype}, ${bodyCode}, ${makeName}, ${expectedModel}, 2013-н.в., 1.6, отсутствует`,
+      `Автофургон / микроавтобус, ${bodyCode}, ${makeName}, ${expectedModel}, 2013-н.в., 1.6, отсутствует`,
     );
   });
 });
 
 test("applicability uses a compatible terminal car code to refine the body code", () => {
   const cases = [
-    ["STARIA Bus (US4)", "2.2 CRDi (US4W)", "Автобус, отсутствует, US4W, HYUNDAI, STARIA, 2021-н.в., 2.2, CRDi"],
-    ["SELTOS (SP2, SP2I)", "1.6 MPi (SP2)", "отсутствует, отсутствует, SP2, KIA, SELTOS, 2019-н.в., 1.6, MPI"],
-    ["SPORTAGE IV (QL, QLE)", "1.6 LPG (QLE)", "отсутствует, отсутствует, QLE, KIA, SPORTAGE IV, 2018-н.в., 1.6, LPG"],
+    ["STARIA Bus (US4)", "2.2 CRDi (US4W)", "Автобус, US4W, HYUNDAI, STARIA, 2021-н.в., 2.2, CRDi"],
+    ["SELTOS (SP2, SP2I)", "1.6 MPi (SP2)", "отсутствует, SP2, KIA, SELTOS, 2019-н.в., 1.6, MPI"],
+    ["SPORTAGE IV (QL, QLE)", "1.6 LPG (QLE)", "отсутствует, QLE, KIA, SPORTAGE IV, 2018-н.в., 1.6, LPG"],
   ];
 
   cases.forEach(([modelName, carName, expected]) => {
@@ -287,7 +287,7 @@ test("applicability retains an unrelated terminal car-name parenthesis", () => {
       yearEnd: null,
       yearStart: "01.2018",
     }),
-    "отсутствует, отсутствует, OS, HYUNDAI, KONA, 2018-н.в., 1.6, T-GDI (AWD)",
+    "отсутствует, OS, HYUNDAI, KONA, 2018-н.в., 1.6, T-GDI (AWD)",
   );
 });
 
@@ -300,7 +300,7 @@ test("applicability formats a same-year period once", () => {
       yearEnd: "12.2011",
       yearStart: "01.2011",
     }),
-    "отсутствует, отсутствует, ED, KIA, CEE'D, 2011, 1.6, отсутствует",
+    "отсутствует, ED, KIA, CEE'D, 2011, 1.6, отсутствует",
   );
 });
 
@@ -313,7 +313,7 @@ test("applicability canonicalizes known technical tokens without changing other 
       yearEnd: null,
       yearStart: "01.2011",
     }),
-    "отсутствует, отсутствует, ED, KIA, CEE'D, 2011-н.в., 1.6, T-GDI CRDi MPI GDI Hybrid GT Eco-Dynamics+ HTRAC",
+    "отсутствует, ED, KIA, CEE'D, 2011-н.в., 1.6, T-GDI CRDi MPI GDI Hybrid GT Eco-Dynamics+ HTRAC",
   );
 });
 
@@ -326,7 +326,7 @@ test("applicability preserves a body-style word when it is part of a model name"
       yearEnd: "12.2009",
       yearStart: "01.2002",
     }),
-    "Купе, отсутствует, GK, HYUNDAI, COUPE II, 2002-2009, 1.6, 16V",
+    "Купе, GK, HYUNDAI, COUPE II, 2002-2009, 1.6, 16V",
   );
 });
 
@@ -345,7 +345,7 @@ test("applicability removes a terminal Coupe body descriptor", () => {
         yearEnd: "12.2019",
         yearStart: "01.2015",
       }),
-      `Купе, отсутствует, ${bodyCode}, HYUNDAI, ${expectedModel}, 2015-2019, 1.6, отсутствует`,
+      `Купе, ${bodyCode}, HYUNDAI, ${expectedModel}, 2015-2019, 1.6, отсутствует`,
     );
   });
 });

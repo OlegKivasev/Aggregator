@@ -14,9 +14,7 @@ const bodyDescriptors = [
   { bodyType: "SUV/Внедорожник", pattern: combinedVanAndSuvPattern, removableIfTerminal: false, removeAnywhere: true },
   { bodyType: "С бортовой платформой/ходовая часть", pattern: /с\s+бортовой\s+платформой\s*\/\s*ходовая\s+часть|platform\/chassis/i, removableIfTerminal: true },
   { bodyType: "Фургон/универсал", pattern: /фургон\s*\/\s*универсал/i, removableIfTerminal: true },
-  { bodyType: "Автофургон / микроавтобус", bodySubtype: "Hatchback", pattern: /\bhatchback\s+van\b/i, removableIfTerminal: true },
-  { bodyType: "Автофургон / микроавтобус", bodySubtype: "Combi", pattern: /\bcombi\s+van\b/i, removableIfTerminal: true },
-  { bodyType: "Автофургон / микроавтобус", bodySubtype: "Kombi", pattern: /\bkombi\s+van\b/i, removableIfTerminal: true },
+  { bodyType: "Автофургон / микроавтобус", pattern: /\bhatchback\s+van\b|\bcombi\s+van\b|\bkombi\s+van\b/i, removableIfTerminal: true },
   { bodyType: "Автофургон / микроавтобус", pattern: /автофургон\s*\/\s*микроавтобус|\bvan\b/i, removableIfTerminal: true },
   { bodyType: "Автофургон / микроавтобус", pattern: /\bcargo\b/i, removableIfTerminal: true },
   { bodyType: "Фургон/хэтчбэк", pattern: /фургон\s*\/\s*хетчбэк|фургон\s*\/\s*хэтчбэк/i, removableIfTerminal: true },
@@ -57,7 +55,6 @@ const bodyDescriptor = (modelName) => {
 };
 
 const bodyType = (modelName) => bodyDescriptor(modelName)?.bodyType ?? "отсутствует";
-const bodySubtype = (modelName) => bodyDescriptor(modelName)?.bodySubtype ?? "отсутствует";
 
 const bodyCodes = (modelName) => {
   const source = textValue(modelName);
@@ -150,7 +147,6 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns) => {
   return codeVariants
     .map((code) => [
       ["bodyType", bodyType(modelName)],
-      ["bodySubtype", bodySubtype(modelName)],
       ["bodyCode", code],
       ["makeName", textValue(record.makeName)],
       ["modelName", model === "SAMARA" && code !== "отсутствует" ? code : model],
