@@ -207,6 +207,34 @@ test("applicability recognizes Sportswagon as a wagon without removing it from t
   });
 });
 
+test("applicability normalizes terminal FASTBACK and Cargo body descriptors", () => {
+  const cases = [
+    ["1.0", "HYUNDAI", "i30 FASTBACK (PDE, PDEN)", "Фастбэк, PDE/PDEN, HYUNDAI, i30"],
+    ["1.0", "HYUNDAI", "i10 II Cargo (BA, IA)", "Автофургон / микроавтобус, BA/IA, HYUNDAI, i10 II"],
+    ["1.2", "HYUNDAI", "i10 II Cargo (BA, IA)", "Автофургон / микроавтобус, BA/IA, HYUNDAI, i10 II"],
+  ];
+
+  cases.forEach(([carName, makeName, modelName, expected]) => {
+    assert.equal(
+      formatApplicabilityVehicle({ carName, makeName, modelName, yearEnd: null, yearStart: "01.2016" }),
+      `${expected}, 2016-н.в., ${carName}, отсутствует`,
+    );
+  });
+});
+
+test("applicability retains a non-terminal FASTBACK descriptor in the model", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.0",
+      makeName: "HYUNDAI",
+      modelName: "i30 FASTBACK N (PDE)",
+      yearEnd: null,
+      yearStart: "01.2018",
+    }),
+    "Фастбэк, PDE, HYUNDAI, i30 FASTBACK N, 2018-н.в., 1.0, отсутствует",
+  );
+});
+
 test("applicability preserves a body-style word when it is part of a model name", () => {
   assert.equal(
     formatApplicabilityVehicle({
