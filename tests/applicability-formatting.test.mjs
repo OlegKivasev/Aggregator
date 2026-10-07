@@ -180,3 +180,36 @@ test("applicability recognizes Sportswagon as a wagon without removing it from t
     );
   });
 });
+
+test("applicability preserves a body-style word when it is part of a model name", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6 16V",
+      makeName: "HYUNDAI",
+      modelName: "COUPE II (GK)",
+      yearEnd: "12.2009",
+      yearStart: "01.2002",
+    }),
+    "Купе, GK, HYUNDAI, COUPE II, 2002-2009, 1.6, 16V",
+  );
+});
+
+test("applicability removes a terminal Coupe body descriptor", () => {
+  const cases = [
+    ["GENESIS Coupe (BK)", "BK", "GENESIS"],
+    ["i20 II Coupe (GB)", "GB", "i20 II"],
+  ];
+
+  cases.forEach(([modelName, bodyCode, expectedModel]) => {
+    assert.equal(
+      formatApplicabilityVehicle({
+        carName: "1.6",
+        makeName: "HYUNDAI",
+        modelName,
+        yearEnd: "12.2019",
+        yearStart: "01.2015",
+      }),
+      `Купе, ${bodyCode}, HYUNDAI, ${expectedModel}, 2015-2019, 1.6, отсутствует`,
+    );
+  });
+});

@@ -49,12 +49,25 @@ const bodyCodes = (modelName) => {
 
 const bodyCode = (modelName) => [...new Set(bodyCodes(modelName))].join("/") || "отсутствует";
 
+const terminalBodyDescriptor = (source, match) => {
+  if (!match || match[2]) return null;
+  const descriptorMatch = match[1].exec(source);
+  const matchedText = descriptorMatch?.[0] ?? "";
+  const start = descriptorMatch?.index ?? -1;
+  if (start < 0 || source.slice(start + matchedText.length).trim()) return null;
+  return { start, text: matchedText };
+};
+
 const modelWithoutBodyType = (modelName) => {
   const source = textValue(modelName);
-  const match = bodyTypeMatch(source);
-  const withoutBodyType = source
-    .replace(/\s*\([^()]*\)/g, "")
-    .replace(match?.[2] ? /$^/ : match?.[1] ?? /$^/, "")
+  const withoutCodes = source.replace(/\s*\([^()]*\)/g, "");
+  const match = bodyTypeMatch(withoutCodes);
+  const descriptor = terminalBodyDescriptor(withoutCodes, match);
+  const withoutBodyType = match?.[1] === combinedVanAndSuvPattern
+    ? withoutCodes.replace(match[1], "")
+    : descriptor
+      ? `${withoutCodes.slice(0, descriptor.start)}${withoutCodes.slice(descriptor.start + descriptor.text.length)}`
+      : withoutCodes;
   const model = (match?.[1] === combinedVanAndSuvPattern
     ? withoutBodyType.replace(/\s*\([^()]*$/, "")
     : withoutBodyType)
