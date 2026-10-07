@@ -146,3 +146,37 @@ test("applicability discards truncated body-code tails from combined SUV names",
     );
   });
 });
+
+test("applicability recognizes SW as a wagon without removing it from the model", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6",
+      makeName: "KIA",
+      modelName: "CEE'D SW (ED)",
+      yearEnd: "12.2012",
+      yearStart: "01.2007",
+    }),
+    "Универсал, ED, KIA, CEE'D SW, 2007-2012, 1.6, отсутствует",
+  );
+});
+
+test("applicability recognizes Sportswagon as a wagon without removing it from the model", () => {
+  const cases = [
+    ["CEE'D Sportswagon (JD)", "JD", "CEE'D Sportswagon"],
+    ["CEED Sportswagon (CD)", "CD", "CEED Sportswagon"],
+    ["OPTIMA Sportswagon (JF)", "JF", "OPTIMA Sportswagon"],
+  ];
+
+  cases.forEach(([modelName, bodyCode, expectedModel]) => {
+    assert.equal(
+      formatApplicabilityVehicle({
+        carName: "1.7 CRDi",
+        makeName: "KIA",
+        modelName,
+        yearEnd: "12.2020",
+        yearStart: "01.2016",
+      }),
+      `Универсал, ${bodyCode}, KIA, ${expectedModel}, 2016-2020, 1.7, CRDi`,
+    );
+  });
+});

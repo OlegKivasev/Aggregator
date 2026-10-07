@@ -19,6 +19,7 @@ const bodyTypePatterns = [
   ["Тарга", /тарга|\btarga\b/i],
   ["Родстер", /родстер|\broadster\b/i],
   ["Вэн", /вэн|\bmpv\b|minivan|active tourer|gran tourer|picasso/i],
+  ["Универсал", /\bsportswagon\b|\bsw\b/i, true],
 ];
 
 const textValue = (value) => typeof value === "string" && value.trim() ? value.trim() : "отсутствует";
@@ -53,7 +54,7 @@ const modelWithoutBodyType = (modelName) => {
   const match = bodyTypeMatch(source);
   const withoutBodyType = source
     .replace(/\s*\([^()]*\)/g, "")
-    .replace(match?.[1] ?? /$^/, "")
+    .replace(match?.[2] ? /$^/ : match?.[1] ?? /$^/, "")
   const model = (match?.[1] === combinedVanAndSuvPattern
     ? withoutBodyType.replace(/\s*\([^()]*$/, "")
     : withoutBodyType)
