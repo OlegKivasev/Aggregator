@@ -34,6 +34,6 @@ export const normalizeElectrification = (source) => {
   }), { cursor: 0, value: "" });
   const withAliases = `${normalized.value}${source.slice(normalized.cursor)}`;
 
-  return ["Plug-in Hybrid", "Hybrid 48V", "MHEV", "HEV", "FCEV", "EV"]
+  return ["Plug-in Hybrid", "MHEV 48V", "MHEV", "HEV", "FCEV", "EV"]
     .reduce((value, canonical) => value.replace(new RegExp(`\\b${escapeRegularExpression(canonical)}(?:\\s+${escapeRegularExpression(canonical)})+\\b`, "g"), canonical), withAliases);
 };

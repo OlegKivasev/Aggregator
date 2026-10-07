@@ -153,9 +153,9 @@ test("applicability removes the combined van and SUV designation from KONA", () 
 test("applicability discards truncated body-code tails from combined SUV names", () => {
   const cases = [
     ["KONA Автофургон / спортивно-утилитарный автомобиль (OS, OSE,", "KONA"],
-    ["SANTA FÉ I Автофургон / спортивно-утилитарный автомобиль (SM", "SANTA FÉ I"],
-    ["SANTA FÉ II Автофургон / спортивно-утилитарный автомобиль (C", "SANTA FÉ II"],
-    ["SANTA FÉ III Автофургон / спортивно-утилитарный автомобиль (", "SANTA FÉ III"],
+    ["SANTA FÉ I Автофургон / спортивно-утилитарный автомобиль (SM", "SANTA FE I"],
+    ["SANTA FÉ II Автофургон / спортивно-утилитарный автомобиль (C", "SANTA FE II"],
+    ["SANTA FÉ III Автофургон / спортивно-утилитарный автомобиль (", "SANTA FE III"],
     ["SANTA FE IV Автофургон / спортивно-утилитарный автомобиль (T", "SANTA FE IV"],
   ];
 
@@ -370,13 +370,13 @@ test("applicability reconciles only unambiguous truncated body-code fragments in
       vehicle("SANTA FÉ III Автофургон / спортивно-утилитарный автомобиль ("),
     ]),
     [
-      "SUV/Внедорожник, SM, HYUNDAI, SANTA FÉ I, 2000-2020, 1.6, отсутствует",
-      "отсутствует, SM, HYUNDAI, SANTA FÉ I, 2000-2020, 1.6, отсутствует",
-      "SUV/Внедорожник, CM, HYUNDAI, SANTA FÉ II, 2018-2020, 1.6, отсутствует",
-      "отсутствует, CM, HYUNDAI, SANTA FÉ II, 2018-2020, 1.6, отсутствует",
+      "SUV/Внедорожник, SM, HYUNDAI, SANTA FE I, 2000-2020, 1.6, отсутствует",
+      "отсутствует, SM, HYUNDAI, SANTA FE I, 2000-2020, 1.6, отсутствует",
+      "SUV/Внедорожник, CM, HYUNDAI, SANTA FE II, 2018-2020, 1.6, отсутствует",
+      "отсутствует, CM, HYUNDAI, SANTA FE II, 2018-2020, 1.6, отсутствует",
       "SUV/Внедорожник, OS/OSE, HYUNDAI, KONA, 2018-2020, 1.6, отсутствует",
       "отсутствует, OS/OSE, HYUNDAI, KONA, 2018-2020, 1.6, отсутствует",
-      "SUV/Внедорожник, отсутствует, HYUNDAI, SANTA FÉ III, 2018-2020, 1.6, отсутствует",
+      "SUV/Внедорожник, отсутствует, HYUNDAI, SANTA FE III, 2018-2020, 1.6, отсутствует",
     ].join("\n"),
   );
 
@@ -386,7 +386,7 @@ test("applicability reconciles only unambiguous truncated body-code fragments in
       vehicle("SANTA FÉ I (CM)"),
       vehicle("SANTA FÉ I (CN)"),
     ]).split("\n")[0],
-    "SUV/Внедорожник, отсутствует, HYUNDAI, SANTA FÉ I, 2018-2020, 1.6, отсутствует",
+    "SUV/Внедорожник, отсутствует, HYUNDAI, SANTA FE I, 2018-2020, 1.6, отсутствует",
   );
 });
 
@@ -401,11 +401,11 @@ test("applicability canonicalizes compound technology and drivetrain terms", () 
 
   assert.equal(
     formatApplicabilityVehicle(vehicle("1.6 T-GDi Plug-in-Hybrid 48V-Hybrid All-wheel Drive")),
-    "отсутствует, OS, HYUNDAI, KONA, 2020-н.в., 1.6, T-GDI Plug-in Hybrid Hybrid 48V AWD",
+    "отсутствует, OS, HYUNDAI, KONA, 2020-н.в., 1.6, T-GDI Plug-in Hybrid MHEV 48V AWD",
   );
   assert.equal(
     formatApplicabilityVehicle(vehicle("1.6 T-GDI Plug-in Hybrid Hybrid 48V AWD")),
-    "отсутствует, OS, HYUNDAI, KONA, 2020-н.в., 1.6, T-GDI Plug-in Hybrid Hybrid 48V AWD",
+    "отсутствует, OS, HYUNDAI, KONA, 2020-н.в., 1.6, T-GDI Plug-in Hybrid MHEV 48V AWD",
   );
 });
 
@@ -430,9 +430,30 @@ test("applicability canonicalizes electrification aliases without collapsing dis
   assert.equal(characteristic("1.6 FCEV"), "FCEV");
   assert.equal(characteristic("1.6 GDI HEV"), "GDI HEV");
   assert.equal(characteristic("1.6 GDI Hybrid"), "GDI HEV");
-  assert.equal(characteristic("1.6 T-GDI Hybrid 48V"), "T-GDI Hybrid 48V");
+  ["Hybrid 48V", "48V Hybrid", "48V-Hybrid"].forEach((alias) => {
+    assert.equal(characteristic(`1.6 T-GDI ${alias}`), "T-GDI MHEV 48V");
+  });
   assert.equal(characteristic("1.6 T-GDI MHEV"), "T-GDI MHEV");
   assert.equal(characteristic("1.6 E-NIRO"), "E-NIRO");
+});
+
+test("applicability canonicalizes exact technical aliases, drivetrain, and SANTA FE display", () => {
+  const vehicle = (carName, modelName = "SANTA FÉ III (DM)") => ({
+    carName,
+    makeName: "HYUNDAI",
+    modelName,
+    yearEnd: null,
+    yearStart: "01.2012",
+  });
+
+  assert.equal(
+    formatApplicabilityVehicle(vehicle("2.4 CCVT TGDI VVTi VVT-I VVT i 4x4")),
+    "отсутствует, DM, HYUNDAI, SANTA FE III, 2012-н.в., 2.4, CVVT T-GDI VVT-i VVT-i VVT-i 4WD",
+  );
+  assert.equal(
+    formatApplicabilityVehicle(vehicle("2.4 4WD", "GRAND SANTA FÉ (NC)")),
+    "отсутствует, NC, HYUNDAI, GRAND SANTA FE, 2012-н.в., 2.4, 4WD",
+  );
 });
 
 test("applicability detects only explicit transmission aliases with deterministic priority", () => {

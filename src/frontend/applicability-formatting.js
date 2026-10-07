@@ -7,14 +7,18 @@ const minimumEngineDisplacementLiters = 0.5;
 const maximumEngineDisplacementLiters = 10;
 const technicalTokenCanonicalizations = [
   [/\bt-gdi\b/gi, "T-GDI"],
+  [/\btgdi\b/gi, "T-GDI"],
   [/\bcrdi\b/gi, "CRDi"],
   [/\bmpi\b/gi, "MPI"],
   [/\bgdi\b/gi, "GDI"],
+  [/\bvvti\b|\bvvt[- ]i\b/gi, "VVT-i"],
+  [/\bccvt\b/gi, "CVVT"],
   [/\bhybrid\b/gi, "Hybrid"],
 ];
 const compoundTechnicalCanonicalizations = [
   [/\ball\s*[-‐‑‒–—―]?\s*wheel\s+drive\b/gi, "AWD"],
   [/\bawd\b/gi, "AWD"],
+  [/\b4x4\b|\b4wd\b/gi, "4WD"],
 ];
 
 const bodyDescriptors = [
@@ -197,7 +201,7 @@ const modelWithoutBodyType = (modelName) => {
     : withoutBodyType)
     .replace(/\s{2,}/g, " ")
     .trim();
-  return model || "отсутствует";
+  return model.replace(/(?<![\p{L}\p{N}])SANTA FÉ(?![\p{L}\p{N}])/giu, "SANTA FE") || "отсутствует";
 };
 
 const normalizedVehicleIdentity = (vehicle) => `${textValue(vehicle?.makeName).toLocaleUpperCase()}\u0000${modelWithoutBodyType(vehicle?.modelName).toLocaleUpperCase()}`;
