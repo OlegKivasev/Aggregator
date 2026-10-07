@@ -2,6 +2,13 @@ const combinedVanAndSuvPattern = /автофургон\s*\/\s*спортивно
 const engineDisplacementPattern = /(?:^|\s)(\d{1,2}[.,]\d{1,2})(?=\s|$)/;
 const minimumEngineDisplacementLiters = 0.5;
 const maximumEngineDisplacementLiters = 10;
+const technicalTokenCanonicalizations = [
+  [/\bt-gdi\b/gi, "T-GDI"],
+  [/\bcrdi\b/gi, "CRDi"],
+  [/\bmpi\b/gi, "MPI"],
+  [/\bgdi\b/gi, "GDI"],
+  [/\bhybrid\b/gi, "Hybrid"],
+];
 
 const bodyDescriptors = [
   { bodyType: "SUV/Внедорожник", pattern: combinedVanAndSuvPattern, removableIfTerminal: false, removeAnywhere: true },
@@ -36,6 +43,12 @@ const yearValue = (value, fallback = "отсутствует") => {
   return match?.[0] ?? source;
 };
 
+const yearPeriod = (yearStart, yearEnd) => {
+  const start = yearValue(yearStart);
+  const end = yearValue(yearEnd, "н.в.");
+  return /^\d{4}$/.test(start) && start === end ? start : `${start}-${end}`;
+};
+
 const bodyDescriptor = (modelName) => {
   const source = textValue(modelName);
   return bodyDescriptors.find((descriptor) => descriptor.pattern.test(source));
@@ -54,6 +67,29 @@ const bodyCodes = (modelName) => {
 };
 
 const bodyCode = (modelName) => [...new Set(bodyCodes(modelName))].join("/") || "отсутствует";
+
+const canonicalizeTechnicalTokens = (value) => technicalTokenCanonicalizations
+  .reduce((normalized, [pattern, canonical]) => normalized.replace(pattern, canonical), value);
+
+const compatibleBodyCode = (baseCodes, candidate) => {
+  const normalizedCandidate = candidate.toLocaleUpperCase();
+  return baseCodes.some((baseCode) => {
+    const normalizedBaseCode = baseCode.toLocaleUpperCase();
+    return normalizedCandidate.startsWith(normalizedBaseCode);
+  });
+};
+
+const extractCompatibleBodyCode = (carName, baseCodes) => {
+  const match = carName.match(/\s*\(([^()]*)\)\s*$/);
+  const candidate = match?.[1].trim() ?? "";
+  if (!/^[\p{L}\p{N}]{2,12}$/u.test(candidate) || !compatibleBodyCode(baseCodes, candidate)) {
+    return { bodyCode: null, carName };
+  }
+  return {
+    bodyCode: candidate.toLocaleUpperCase(),
+    carName: carName.slice(0, match.index).trim() || "отсутствует",
+  };
+};
 
 const terminalBodyDescriptor = (source, descriptor) => {
   if (!descriptor?.removableIfTerminal) return null;
@@ -102,7 +138,11 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns) => {
   const { capacity, remaining } = splitCarName(record.carName);
   const model = modelWithoutBodyType(modelName);
   const codes = bodyCodes(modelName);
-  const codeVariants = model === "SAMARA" && codes.length ? codes : [bodyCode(modelName)];
+  const refinedBodyCode = extractCompatibleBodyCode(remaining, codes);
+  const codeVariants = refinedBodyCode.bodyCode
+    ? [refinedBodyCode.bodyCode]
+    : model === "SAMARA" && codes.length ? codes : [bodyCode(modelName)];
+  const modification = canonicalizeTechnicalTokens(refinedBodyCode.carName);
 
   return codeVariants
     .map((code) => [
@@ -110,9 +150,9 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns) => {
       ["bodyCode", code],
       ["makeName", textValue(record.makeName)],
       ["modelName", model === "SAMARA" && code !== "отсутствует" ? code : model],
-      ["years", `${yearValue(record.yearStart)}-${yearValue(record.yearEnd, "н.в.")}`],
+      ["years", yearPeriod(record.yearStart, record.yearEnd)],
       ["capacity", capacity],
-      ["carName", remaining],
+      ["carName", modification],
     ]
       .filter(([column]) => !visibleColumns || visibleColumns.has(column))
       .map(([, value]) => value)

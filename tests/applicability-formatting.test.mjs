@@ -63,7 +63,7 @@ test("applicability structured list omits unchecked columns", () => {
       yearEnd: "12.2013",
       yearStart: "06.2013",
     }, new Set(["bodyCode", "makeName", "modelName", "years", "capacity"])),
-    "1119, LADA, KALINA, 2013-2013, 1.6",
+    "1119, LADA, KALINA, 2013, 1.6",
   );
 });
 
@@ -146,7 +146,7 @@ test("applicability removes the combined van and SUV designation from KONA", () 
       yearEnd: "12.2023",
       yearStart: "06.2017",
     }),
-    "SUV/Внедорожник, OS, HYUNDAI, KONA, 2017-2023, 1.6, T-GDi",
+    "SUV/Внедорожник, OS, HYUNDAI, KONA, 2017-2023, 1.6, T-GDI",
   );
 });
 
@@ -261,6 +261,60 @@ test("applicability removes complete terminal compound van descriptors", () => {
       `Автофургон / микроавтобус, ${bodyCode}, ${makeName}, ${expectedModel}, 2013-н.в., 1.6, отсутствует`,
     );
   });
+});
+
+test("applicability uses a compatible terminal car code to refine the body code", () => {
+  const cases = [
+    ["STARIA Bus (US4)", "2.2 CRDi (US4W)", "Автобус, US4W, HYUNDAI, STARIA, 2021-н.в., 2.2, CRDi"],
+    ["SELTOS (SP2, SP2I)", "1.6 MPi (SP2)", "отсутствует, SP2, KIA, SELTOS, 2019-н.в., 1.6, MPI"],
+    ["SPORTAGE IV (QL, QLE)", "1.6 LPG (QLE)", "отсутствует, QLE, KIA, SPORTAGE IV, 2018-н.в., 1.6, LPG"],
+  ];
+
+  cases.forEach(([modelName, carName, expected]) => {
+    assert.equal(
+      formatApplicabilityVehicle({ carName, makeName: modelName === "STARIA Bus (US4)" ? "HYUNDAI" : "KIA", modelName, yearEnd: null, yearStart: modelName === "STARIA Bus (US4)" ? "01.2021" : modelName.startsWith("SELTOS") ? "01.2019" : "01.2018" }),
+      expected,
+    );
+  });
+});
+
+test("applicability retains an unrelated terminal car-name parenthesis", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6 T-GDi (AWD)",
+      makeName: "HYUNDAI",
+      modelName: "KONA (OS)",
+      yearEnd: null,
+      yearStart: "01.2018",
+    }),
+    "отсутствует, OS, HYUNDAI, KONA, 2018-н.в., 1.6, T-GDI (AWD)",
+  );
+});
+
+test("applicability formats a same-year period once", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6",
+      makeName: "KIA",
+      modelName: "CEE'D (ED)",
+      yearEnd: "12.2011",
+      yearStart: "01.2011",
+    }),
+    "отсутствует, ED, KIA, CEE'D, 2011, 1.6, отсутствует",
+  );
+});
+
+test("applicability canonicalizes known technical tokens without changing other text", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6 t-gdi crdi mpi gdi hybrid GT Eco-Dynamics+ HTRAC",
+      makeName: "KIA",
+      modelName: "CEE'D (ED)",
+      yearEnd: null,
+      yearStart: "01.2011",
+    }),
+    "отсутствует, ED, KIA, CEE'D, 2011-н.в., 1.6, T-GDI CRDi MPI GDI Hybrid GT Eco-Dynamics+ HTRAC",
+  );
 });
 
 test("applicability preserves a body-style word when it is part of a model name", () => {
