@@ -699,6 +699,26 @@
       </section>
     </div>
 
+    <div class="analogs-modal applicability-article-name-modal" id="applicability-article-name-modal" role="dialog" aria-modal="true" aria-labelledby="applicability-article-name-title" tabindex="-1" hidden>
+      <div class="analogs-modal__backdrop" data-close-applicability-article-name></div>
+      <section class="analogs-modal__card card border-0 shadow-lg">
+        <header class="analogs-modal__header">
+          <div><h2 id="applicability-article-name-title">Наименование исходного артикула</h2></div>
+          <button type="button" class="analogs-modal__close btn btn-light" data-close-applicability-article-name aria-label="Закрыть окно">×</button>
+        </header>
+        <form class="applicability-article-name-modal__form" id="applicability-article-name-form">
+          <div class="applicability-article-name-modal__content">
+            <p>Это наименование будет показано во вкладке и в сформированном списке.</p>
+            <label class="field" for="applicability-article-name-input"><span>Наименование</span><input id="applicability-article-name-input" type="text" maxlength="100" autocomplete="off" required /></label>
+          </div>
+          <footer class="analogs-modal__footer applicability-article-name-modal__footer">
+            <button type="button" class="btn btn-light" data-close-applicability-article-name>Отмена</button>
+            <button type="submit" class="btn btn-primary">Сохранить</button>
+          </footer>
+        </form>
+      </section>
+    </div>
+
     <div class="analogs-modal applicability-document-modal" id="applicability-document-modal" role="dialog" aria-modal="true" aria-labelledby="applicability-document-title" tabindex="-1" hidden>
       <div class="analogs-modal__backdrop" data-close-applicability-document></div>
       <section class="analogs-modal__card card border-0 shadow-lg">

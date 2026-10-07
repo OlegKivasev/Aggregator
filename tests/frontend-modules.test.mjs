@@ -610,6 +610,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(styles, /\.applicability-list-button:hover[^}]*\.applicability-list-button:focus-visible[^}]*\.applicability-list-button:active[^}]*background: var\(--accent-dark\);/s);
   assert.match(styles, /\.applicability-fallback-key-add\s*\{[^}]*background: var\(--accent\) !important;/s);
   assert.match(html, /id="applicability-toast"/);
+  assert.match(html, /id="applicability-article-name-modal"[\s\S]*?id="applicability-article-name-form"[\s\S]*?id="applicability-article-name-input"/);
   assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
   assert.match(html, /id="applicability-document-save"[\s\S]*?src="\/applicability-save\.png"/);
   assert.match(html, /id="applicability-document-text"[^>]*wrap="off"/);
@@ -641,7 +642,9 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /const buildApplicabilityDocument/);
   assert.match(applicability, /const groupSearchesBySku/);
   assert.match(applicability, /OEM-артикул: \$\{sku\}/);
-  assert.match(applicability, /Введите наименование исходного артикула/);
+  assert.match(applicability, /const openArticleNameModal/);
+  assert.match(applicability, /openDocumentAfterArticleNaming/);
+  assert.doesNotMatch(applicability, /window\.prompt/);
   assert.match(applicability, /let documentFormat = "structured"/);
   assert.match(applicability, /const visibleDocumentColumns/);
   assert.doesNotMatch(applicability, /visibleColumns\.has\("article"\)/);
@@ -686,6 +689,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(styles, /\.applicability-function\s*\{[\s\S]*min-height: calc\(100dvh - 140px\);/s);
   assert.match(styles, /\.applicability-results-footer\s*\{[^}]*flex: 0 0 auto;/s);
   assert.match(styles, /\.applicability-document-modal \.analogs-modal__card/);
+  assert.match(styles, /\.applicability-article-name-modal \.analogs-modal__card/);
   assert.match(styles, /\.applicability-document-format > summary/);
   assert.match(styles, /\.applicability-document-columns__menu/);
   assert.match(styles, /\.applicability-document-columns__menu\s*\{[^}]*left: 0;/s);

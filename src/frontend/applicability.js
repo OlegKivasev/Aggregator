@@ -30,6 +30,10 @@ const feedback = document.querySelector("#applicability-feedback");
 const resultsBody = document.querySelector("#applicability-results-body");
 const listButton = document.querySelector("#applicability-list-button");
 const applicabilityToast = document.querySelector("#applicability-toast");
+const articleNameModal = document.querySelector("#applicability-article-name-modal");
+const articleNameForm = document.querySelector("#applicability-article-name-form");
+const articleNameInput = document.querySelector("#applicability-article-name-input");
+const closeArticleNameButtons = [...document.querySelectorAll("[data-close-applicability-article-name]")];
 const documentModal = document.querySelector("#applicability-document-modal");
 const documentText = document.querySelector("#applicability-document-text");
 const documentSaveButton = document.querySelector("#applicability-document-save");
@@ -53,6 +57,9 @@ let contextMenuTabId = null;
 let contextMenuTabAnchor = null;
 let contextMenuEntryId = null;
 let contextMenuEntryAnchor = null;
+let articleNameModalReturnFocus = null;
+let articleNameModalTabId = null;
+let openDocumentAfterArticleNaming = false;
 let documentModalReturnFocus = null;
 let documentFormat = "structured";
 let documentEntries = [];
@@ -683,22 +690,37 @@ const closeDocumentModal = (restoreFocus = true) => {
   documentModalReturnFocus = null;
 };
 
-const openDocumentModal = () => {
-  const tab = getActiveTab();
+const closeArticleNameModal = (restoreFocus = true) => {
+  articleNameModal.hidden = true;
+  if (restoreFocus && articleNameModalReturnFocus?.isConnected) articleNameModalReturnFocus.focus();
+  articleNameModalReturnFocus = null;
+  articleNameModalTabId = null;
+  openDocumentAfterArticleNaming = false;
+};
+
+const openArticleNameModal = (tabId, { openDocument = false, returnFocus = document.activeElement } = {}) => {
+  const tab = tabs.find((item) => item.id === tabId);
   if (!tab) return;
-  documentEntries = successfulSearches(tab);
-  if (!documentEntries.length) return;
-  const sourceArticleName = window.prompt("Введите наименование исходного артикула", tab.name || tab.sku);
-  if (sourceArticleName === null) return;
-  documentSourceArticleName = normalizeTabName(sourceArticleName);
-  if (!documentSourceArticleName) {
-    showApplicabilityToast("Введите наименование исходного артикула.", "error");
+  const index = tabs.indexOf(tab);
+  articleNameModalReturnFocus = returnFocus;
+  articleNameModalTabId = tabId;
+  openDocumentAfterArticleNaming = openDocument;
+  articleNameInput.value = tab.name || tab.sku || `Новая применимость ${index + 1}`;
+  articleNameModal.hidden = false;
+  articleNameInput.focus();
+  articleNameInput.select();
+};
+
+const openDocumentModal = (tab = getActiveTab(), returnFocus = document.activeElement) => {
+  if (!tab) return;
+  if (!tab.name) {
+    openArticleNameModal(tab.id, { openDocument: true, returnFocus });
     return;
   }
-  tab.name = documentSourceArticleName;
-  renderTabs();
-  saveApplicabilityState();
-  documentModalReturnFocus = document.activeElement;
+  documentEntries = successfulSearches(tab);
+  if (!documentEntries.length) return;
+  documentSourceArticleName = tab.name;
+  documentModalReturnFocus = returnFocus;
   renderApplicabilityDocument();
   documentModal.hidden = false;
   documentText.setSelectionRange(0, 0);
@@ -808,6 +830,27 @@ markupTab.addEventListener("click", () => setActiveFunction("markup"));
 applicabilityTab.addEventListener("click", () => setActiveFunction("applicability"));
 newApplicabilityTabButton.addEventListener("click", addTab);
 listButton.addEventListener("click", openDocumentModal);
+closeArticleNameButtons.forEach((button) => button.addEventListener("click", () => closeArticleNameModal()));
+articleNameForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const tab = tabs.find((item) => item.id === articleNameModalTabId);
+  const articleName = normalizeTabName(articleNameInput.value);
+  if (!tab || !articleName) {
+    articleNameInput.setCustomValidity("Введите наименование исходного артикула.");
+    articleNameInput.reportValidity();
+    return;
+  }
+  articleNameInput.setCustomValidity("");
+  const returnFocus = articleNameModalReturnFocus;
+  const shouldOpenDocument = openDocumentAfterArticleNaming;
+  tab.name = articleName;
+  renderTabs();
+  saveApplicabilityState();
+  closeArticleNameModal(false);
+  if (shouldOpenDocument) openDocumentModal(tab, returnFocus);
+  else if (returnFocus?.isConnected) returnFocus.focus();
+});
+articleNameInput.addEventListener("input", () => articleNameInput.setCustomValidity(""));
 closeDocumentButtons.forEach((button) => button.addEventListener("click", () => closeDocumentModal()));
 documentSaveButton.addEventListener("click", async () => {
   try {
@@ -893,16 +936,10 @@ const showTabContextMenu = (tabId, clientX, clientY, anchor) => {
   renameTabButton.focus();
 };
 
-const renameTab = (tabId) => {
+const renameTab = (tabId, returnFocus) => {
   const tab = tabs.find((item) => item.id === tabId);
   if (!tab) return;
-  const index = tabs.indexOf(tab);
-  const defaultName = tab.sku || `Новая применимость ${index + 1}`;
-  const name = window.prompt("Введите наименование исходного артикула", tab.name || defaultName);
-  if (name === null) return;
-  tab.name = normalizeTabName(name);
-  renderTabs();
-  saveApplicabilityState();
+  openArticleNameModal(tab.id, { returnFocus });
 };
 
 applicabilityTabsList.addEventListener("contextmenu", (event) => {
@@ -923,8 +960,9 @@ applicabilityTabsList.addEventListener("keydown", (event) => {
 
 renameTabButton.addEventListener("click", () => {
   const tabId = contextMenuTabId;
+  const returnFocus = contextMenuTabAnchor;
   hideTabContextMenu();
-  if (tabId) renameTab(tabId);
+  if (tabId) renameTab(tabId, returnFocus);
 });
 
 const hideResultContextMenu = (restoreFocus = false) => {
@@ -1033,6 +1071,25 @@ document.addEventListener("click", (event) => {
   if (!resultContextMenu.hidden && !resultContextMenu.contains(event.target)) hideResultContextMenu();
 });
 document.addEventListener("keydown", (event) => {
+  if (!articleNameModal.hidden && event.key === "Tab") {
+    const focusable = [...articleNameModal.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex='0']")]
+      .filter((element) => element.offsetParent !== null);
+    if (!focusable.length) {
+      event.preventDefault();
+      articleNameModal.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === articleNameModal)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+    return;
+  }
   if (!documentModal.hidden && event.key === "Tab") {
     const focusable = [...documentModal.querySelectorAll("button:not([disabled]), input:not([disabled]), summary, textarea:not([disabled]), [tabindex='0']")]
       .filter((element) => element.offsetParent !== null);
@@ -1053,6 +1110,10 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key !== "Escape") return;
+  if (!articleNameModal.hidden) {
+    closeArticleNameModal();
+    return;
+  }
   if (!documentModal.hidden) {
     closeDocumentModal();
     return;
