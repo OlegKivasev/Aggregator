@@ -1,5 +1,7 @@
+const combinedVanAndSuvPattern = /автофургон\s*\/\s*спортивно-утилитарный\s+автомобиль/i;
+
 const bodyTypePatterns = [
-  ["SUV/Внедорожник", /автофургон\s*\/\s*спортивно-утилитарный\s+автомобиль/i],
+  ["SUV/Внедорожник", combinedVanAndSuvPattern],
   ["С бортовой платформой/ходовая часть", /с\s+бортовой\s+платформой\s*\/\s*ходовая\s+часть|platform\/chassis/i],
   ["Фургон/универсал", /фургон\s*\/\s*универсал/i],
   ["Автофургон / микроавтобус", /автофургон\s*\/\s*микроавтобус|\bvan\b/i],
@@ -49,9 +51,12 @@ const bodyCode = (modelName) => [...new Set(bodyCodes(modelName))].join("/") || 
 const modelWithoutBodyType = (modelName) => {
   const source = textValue(modelName);
   const match = bodyTypeMatch(source);
-  const model = source
+  const withoutBodyType = source
     .replace(/\s*\([^()]*\)/g, "")
     .replace(match?.[1] ?? /$^/, "")
+  const model = (match?.[1] === combinedVanAndSuvPattern
+    ? withoutBodyType.replace(/\s*\([^()]*$/, "")
+    : withoutBodyType)
     .replace(/\s{2,}/g, " ")
     .trim();
   return model || "отсутствует";

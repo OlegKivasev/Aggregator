@@ -123,3 +123,26 @@ test("applicability removes the combined van and SUV designation from KONA", () 
     "SUV/Внедорожник, OS, HYUNDAI, KONA, 2017-2023, 1.6, T-GDi",
   );
 });
+
+test("applicability discards truncated body-code tails from combined SUV names", () => {
+  const cases = [
+    ["KONA Автофургон / спортивно-утилитарный автомобиль (OS, OSE,", "KONA"],
+    ["SANTA FÉ I Автофургон / спортивно-утилитарный автомобиль (SM", "SANTA FÉ I"],
+    ["SANTA FÉ II Автофургон / спортивно-утилитарный автомобиль (C", "SANTA FÉ II"],
+    ["SANTA FÉ III Автофургон / спортивно-утилитарный автомобиль (", "SANTA FÉ III"],
+    ["SANTA FE IV Автофургон / спортивно-утилитарный автомобиль (T", "SANTA FE IV"],
+  ];
+
+  cases.forEach(([modelName, expectedModel]) => {
+    assert.equal(
+      formatApplicabilityVehicle({
+        carName: "1.6",
+        makeName: "HYUNDAI",
+        modelName,
+        yearEnd: "12.2020",
+        yearStart: "01.2018",
+      }),
+      `SUV/Внедорожник, отсутствует, HYUNDAI, ${expectedModel}, 2018-2020, 1.6, отсутствует`,
+    );
+  });
+});
