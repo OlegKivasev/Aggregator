@@ -613,6 +613,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(styles, /\.applicability-key-field input\s*\{[^}]*width: 100%;[^}]*border: 1px solid #dce3ea;/s);
   assert.match(html, /id="applicability-toast"/);
   assert.match(html, /id="applicability-article-name-modal"[\s\S]*?id="applicability-article-name-form"[\s\S]*?id="applicability-article-name-input"/);
+  assert.doesNotMatch(html, /Это наименование будет показано во вкладке и в сформированном списке\./);
   assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
   assert.match(html, /id="applicability-document-save"[\s\S]*?src="\/applicability-save\.png"/);
   assert.match(html, /id="applicability-document-text"[^>]*wrap="off"/);
