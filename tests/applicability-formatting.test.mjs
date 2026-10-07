@@ -97,3 +97,29 @@ test("applicability structured list keeps combined van and wagon body type toget
     "Фургон/универсал, 21043, LADA, KALINKA, 1985-1998, 1.5, отсутствует",
   );
 });
+
+test("applicability recognizes a combined van and SUV designation before the van fallback", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6 CRDi",
+      makeName: "HYUNDAI",
+      modelName: "TUCSON Автофургон / спортивно-утилитарный автомобиль (TLE)",
+      yearEnd: "12.2020",
+      yearStart: "01.2018",
+    }),
+    "SUV/Внедорожник, TLE, HYUNDAI, TUCSON, 2018-2020, 1.6, CRDi",
+  );
+});
+
+test("applicability removes the combined van and SUV designation from KONA", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6 T-GDi",
+      makeName: "HYUNDAI",
+      modelName: "KONA Автофургон / спортивно-утилитарный автомобиль (OS)",
+      yearEnd: "12.2023",
+      yearStart: "06.2017",
+    }),
+    "SUV/Внедорожник, OS, HYUNDAI, KONA, 2017-2023, 1.6, T-GDi",
+  );
+});
