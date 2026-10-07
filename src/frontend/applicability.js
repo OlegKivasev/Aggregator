@@ -1,4 +1,4 @@
-import { formatApplicabilityVehicle } from "./applicability-formatting.js";
+import { formatApplicabilityVehicles } from "./applicability-formatting.js";
 
 const markupFunction = document.querySelector("#markup-function");
 const applicabilityFunction = document.querySelector("#applicability-function");
@@ -409,7 +409,7 @@ const buildApplicabilityDocument = (entries, format = documentFormat) => {
   return entries
     .map((entry) => {
     const contents = format === "structured"
-      ? entry.results.map((vehicle) => formatApplicabilityVehicle(vehicle, visibleColumns)).join("\n")
+      ? formatApplicabilityVehicles(entry.results, visibleColumns)
       : JSON.stringify(entry.results, null, 2);
     return format !== "structured" || visibleColumns.has("article")
       ? `Артикул: ${entry.sku}\n${contents}`

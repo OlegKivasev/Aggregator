@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatApplicabilityVehicle } from "../src/frontend/applicability-formatting.js";
+import { formatApplicabilityVehicle, formatApplicabilityVehicles } from "../src/frontend/applicability-formatting.js";
 
 test("applicability compact list extracts body type, year and engine capacity", () => {
   assert.equal(
@@ -348,4 +348,85 @@ test("applicability removes a terminal Coupe body descriptor", () => {
       `Купе, ${bodyCode}, HYUNDAI, ${expectedModel}, 2015-2019, 1.6, отсутствует`,
     );
   });
+});
+
+test("applicability reconciles only unambiguous truncated body-code fragments in one document", () => {
+  const vehicle = (modelName, yearStart = "01.2018") => ({
+    carName: "1.6",
+    makeName: "HYUNDAI",
+    modelName,
+    yearEnd: "12.2020",
+    yearStart,
+  });
+
+  assert.equal(
+    formatApplicabilityVehicles([
+      vehicle("SANTA FÉ I Автофургон / спортивно-утилитарный автомобиль (SM", "01.2000"),
+      vehicle("SANTA FÉ I (SM)", "01.2000"),
+      vehicle("SANTA FÉ II Автофургон / спортивно-утилитарный автомобиль (C"),
+      vehicle("SANTA FÉ II (CM)"),
+      vehicle("KONA Автофургон / спортивно-утилитарный автомобиль (OS, OSE,"),
+      vehicle("KONA (OS, OSE)"),
+      vehicle("SANTA FÉ III Автофургон / спортивно-утилитарный автомобиль ("),
+    ]),
+    [
+      "SUV/Внедорожник, SM, HYUNDAI, SANTA FÉ I, 2000-2020, 1.6, отсутствует",
+      "отсутствует, SM, HYUNDAI, SANTA FÉ I, 2000-2020, 1.6, отсутствует",
+      "SUV/Внедорожник, CM, HYUNDAI, SANTA FÉ II, 2018-2020, 1.6, отсутствует",
+      "отсутствует, CM, HYUNDAI, SANTA FÉ II, 2018-2020, 1.6, отсутствует",
+      "SUV/Внедорожник, OS/OSE, HYUNDAI, KONA, 2018-2020, 1.6, отсутствует",
+      "отсутствует, OS/OSE, HYUNDAI, KONA, 2018-2020, 1.6, отсутствует",
+      "SUV/Внедорожник, отсутствует, HYUNDAI, SANTA FÉ III, 2018-2020, 1.6, отсутствует",
+    ].join("\n"),
+  );
+
+  assert.equal(
+    formatApplicabilityVehicles([
+      vehicle("SANTA FÉ I Автофургон / спортивно-утилитарный автомобиль (C"),
+      vehicle("SANTA FÉ I (CM)"),
+      vehicle("SANTA FÉ I (CN)"),
+    ]).split("\n")[0],
+    "SUV/Внедорожник, отсутствует, HYUNDAI, SANTA FÉ I, 2018-2020, 1.6, отсутствует",
+  );
+});
+
+test("applicability canonicalizes compound technology and drivetrain terms", () => {
+  const vehicle = (carName) => ({
+    carName,
+    makeName: "HYUNDAI",
+    modelName: "KONA (OS)",
+    yearEnd: null,
+    yearStart: "01.2020",
+  });
+
+  assert.equal(
+    formatApplicabilityVehicle(vehicle("1.6 T-GDi Plug-in-Hybrid 48V-Hybrid All-wheel Drive")),
+    "отсутствует, OS, HYUNDAI, KONA, 2020-н.в., 1.6, T-GDI Plug-in Hybrid Hybrid 48V AWD",
+  );
+  assert.equal(
+    formatApplicabilityVehicle(vehicle("1.6 T-GDI Plug-in Hybrid Hybrid 48V AWD")),
+    "отсутствует, OS, HYUNDAI, KONA, 2020-н.в., 1.6, T-GDI Plug-in Hybrid Hybrid 48V AWD",
+  );
+});
+
+test("applicability detects only explicit transmission aliases with deterministic priority", () => {
+  const transmission = (carName) => formatApplicabilityVehicle({
+    carName,
+    makeName: "KIA",
+    modelName: "CEED (CD)",
+    yearEnd: null,
+    yearStart: "01.2020",
+  }, new Set(["transmission"]));
+
+  assert.equal(transmission("1.6 6M/T"), "Механика");
+  assert.equal(transmission("1.6 8AT"), "АКПП");
+  assert.equal(transmission("1.6 7DCT automatic"), "Робот");
+  assert.equal(transmission("1.6 CVT automatic"), "Вариатор");
+  assert.equal(transmission("1.6 C.V.T."), "Вариатор");
+  assert.equal(transmission("1.6 e-CVT"), "Вариатор");
+  assert.equal(transmission("1.6 Steptronic DCT"), "Робот");
+  assert.equal(transmission("1.6 7G-Tronic"), "АКПП");
+  assert.equal(transmission("1.6 AWD 4WD 4x4 HTRAC"), "отсутствует");
+  assert.equal(transmission("1.6 CVT DCT"), "отсутствует");
+  assert.equal(transmission("1.6 CVVT"), "отсутствует");
 });
