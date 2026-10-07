@@ -313,7 +313,7 @@ test("applicability canonicalizes known technical tokens without changing other 
       yearEnd: null,
       yearStart: "01.2011",
     }),
-    "отсутствует, ED, KIA, CEE'D, 2011-н.в., 1.6, T-GDI CRDi MPI GDI Hybrid GT Eco-Dynamics+ HTRAC",
+    "отсутствует, ED, KIA, CEE'D, 2011-н.в., 1.6, T-GDI CRDi MPI GDI HEV GT Eco-Dynamics+ HTRAC",
   );
 });
 
@@ -407,6 +407,32 @@ test("applicability canonicalizes compound technology and drivetrain terms", () 
     formatApplicabilityVehicle(vehicle("1.6 T-GDI Plug-in Hybrid Hybrid 48V AWD")),
     "отсутствует, OS, HYUNDAI, KONA, 2020-н.в., 1.6, T-GDI Plug-in Hybrid Hybrid 48V AWD",
   );
+});
+
+test("applicability canonicalizes electrification aliases without collapsing distinct powertrains", () => {
+  const characteristic = (carName) => formatApplicabilityVehicle({
+    carName,
+    makeName: "HYUNDAI",
+    modelName: "KONA (OS)",
+    yearEnd: null,
+    yearStart: "01.2020",
+  }, new Set(["carName"]));
+
+  ["PHEV", "Plug-in Hybrid", "Plug in Hybrid", "Plug-in-Hybrid"].forEach((alias) => {
+    assert.equal(characteristic(`1.6 T-GDI ${alias} HTRAC`), "T-GDI Plug-in Hybrid HTRAC");
+  });
+  ["EV", "Electric", "ELECTRIC"].forEach((alias) => {
+    assert.equal(characteristic(`1.6 ${alias} AWD`), "EV AWD");
+  });
+  assert.equal(characteristic("1.6 EV Electric"), "EV");
+  assert.equal(characteristic("1.6 Fuel Cell"), "FCEV");
+  assert.equal(characteristic("1.6 Hydrogen Fuel Cell"), "FCEV");
+  assert.equal(characteristic("1.6 FCEV"), "FCEV");
+  assert.equal(characteristic("1.6 GDI HEV"), "GDI HEV");
+  assert.equal(characteristic("1.6 GDI Hybrid"), "GDI HEV");
+  assert.equal(characteristic("1.6 T-GDI Hybrid 48V"), "T-GDI Hybrid 48V");
+  assert.equal(characteristic("1.6 T-GDI MHEV"), "T-GDI MHEV");
+  assert.equal(characteristic("1.6 E-NIRO"), "E-NIRO");
 });
 
 test("applicability detects only explicit transmission aliases with deterministic priority", () => {

@@ -1,4 +1,5 @@
 import { transmissionAliases } from "./transmission-aliases.js";
+import { normalizeElectrification } from "./electrification-normalizer.js";
 
 const combinedVanAndSuvPattern = /автофургон\s*\/\s*спортивно-утилитарный\s+автомобиль/i;
 const engineDisplacementPattern = /(?:^|\s)(\d{1,2}[.,]\d{1,2})(?=\s|$)/;
@@ -12,9 +13,6 @@ const technicalTokenCanonicalizations = [
   [/\bhybrid\b/gi, "Hybrid"],
 ];
 const compoundTechnicalCanonicalizations = [
-  [/\bplug\s*[-‐‑‒–—―]?\s*in\s*[-‐‑‒–—―]?\s*hybrid\b/gi, "Plug-in Hybrid"],
-  [/\b48\s*v\s*[-‐‑‒–—―]?\s*hybrid\b/gi, "Hybrid 48V"],
-  [/\bhybrid\s+48\s*v\b/gi, "Hybrid 48V"],
   [/\ball\s*[-‐‑‒–—―]?\s*wheel\s+drive\b/gi, "AWD"],
   [/\bawd\b/gi, "AWD"],
 ];
@@ -87,7 +85,7 @@ const codeFragments = (modelName) => {
 };
 
 const canonicalizeTechnicalTokens = (value) => [...compoundTechnicalCanonicalizations, ...technicalTokenCanonicalizations]
-  .reduce((normalized, [pattern, canonical]) => normalized.replace(pattern, canonical), value);
+  .reduce((normalized, [pattern, canonical]) => normalized.replace(pattern, canonical), normalizeElectrification(value));
 
 const normalizeTransmissionText = (value) => textValue(value)
   .toLocaleLowerCase()
