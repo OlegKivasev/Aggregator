@@ -235,6 +235,34 @@ test("applicability retains a non-terminal FASTBACK descriptor in the model", ()
   );
 });
 
+test("applicability recognizes KOUP as a non-removable coupe alias", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6 T-GDI",
+      makeName: "KIA",
+      modelName: "CERATO KOUP III (YD)",
+      yearEnd: null,
+      yearStart: "01.2013",
+    }),
+    "Купе, YD, KIA, CERATO KOUP III, 2013-н.в., 1.6, T-GDI",
+  );
+});
+
+test("applicability removes complete terminal compound van descriptors", () => {
+  const cases = [
+    ["HYUNDAI", "i20 II Hatchback Van (GB, IB)", "GB/IB", "i20 II"],
+    ["KIA", "CEE'D Combi Van (ED)", "ED", "CEE'D"],
+    ["HYUNDAI", "i30 Kombi Van (FD)", "FD", "i30"],
+  ];
+
+  cases.forEach(([makeName, modelName, bodyCode, expectedModel]) => {
+    assert.equal(
+      formatApplicabilityVehicle({ carName: "1.6", makeName, modelName, yearEnd: null, yearStart: "01.2013" }),
+      `Автофургон / микроавтобус, ${bodyCode}, ${makeName}, ${expectedModel}, 2013-н.в., 1.6, отсутствует`,
+    );
+  });
+});
+
 test("applicability preserves a body-style word when it is part of a model name", () => {
   assert.equal(
     formatApplicabilityVehicle({
