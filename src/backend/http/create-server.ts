@@ -60,6 +60,8 @@ export interface AggregatorApplication {
   getApplicabilityApiKeyState(): ApplicabilityApiKeyState;
   saveApplicabilityApiKey(apiKey: string): ApplicabilityApiKeyState;
   deleteApplicabilityApiKey(): ApplicabilityApiKeyState;
+  addApplicabilityFallbackApiKey(apiKey: string): ApplicabilityApiKeyState;
+  deleteApplicabilityFallbackApiKey(index: number): ApplicabilityApiKeyState;
 }
 
 interface CreateAggregatorServerOptions {
@@ -230,6 +232,28 @@ export function createAggregatorServer({
     if (request.method === "GET" && url.pathname === "/api/applicability/cached-brands") {
       try {
         serveJson(response, 200, { brands: application.getApplicabilityCachedBrands(parseApplicabilitySkuQuery(url.searchParams.get("sku"))) });
+      } catch (error) {
+        serveApplicabilityError(response, error, reportError);
+      }
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/applicability/api-key/fallbacks") {
+      try {
+        const { apiKey } = parseApplicabilityApiKeyPayload(await readJsonBody(request));
+        serveJson(response, 200, application.addApplicabilityFallbackApiKey(apiKey));
+      } catch (error) {
+        serveApplicabilityError(response, error, reportError);
+      }
+      return;
+    }
+
+    const fallbackKeyMatch = /^\/api\/applicability\/api-key\/fallbacks\/(\d+)$/.exec(url.pathname);
+    if (request.method === "DELETE" && fallbackKeyMatch) {
+      try {
+        const index = Number(fallbackKeyMatch[1]);
+        if (!Number.isSafeInteger(index)) throw new RequestBodyError(400, "Fallback key index is invalid");
+        serveJson(response, 200, application.deleteApplicabilityFallbackApiKey(index));
       } catch (error) {
         serveApplicabilityError(response, error, reportError);
       }

@@ -39,9 +39,11 @@ function createApplication(overrides = {}) {
     streamSearch: async () => {},
     searchApplicability: async () => ({ results: [], cacheHit: false }),
     getApplicabilityCachedBrands: () => [],
-    getApplicabilityApiKeyState: () => ({ configured: false, persistent: true }),
-    saveApplicabilityApiKey: () => ({ configured: true, persistent: true }),
-    deleteApplicabilityApiKey: () => ({ configured: false, persistent: true }),
+    getApplicabilityApiKeyState: () => ({ configured: false, fallbackKeyCount: 0, persistent: true }),
+    saveApplicabilityApiKey: () => ({ configured: true, fallbackKeyCount: 0, persistent: true }),
+    deleteApplicabilityApiKey: () => ({ configured: false, fallbackKeyCount: 0, persistent: true }),
+    addApplicabilityFallbackApiKey: () => ({ configured: false, fallbackKeyCount: 1, persistent: true }),
+    deleteApplicabilityFallbackApiKey: () => ({ configured: false, fallbackKeyCount: 0, persistent: true }),
     ...overrides,
   };
 }
@@ -104,6 +106,7 @@ test("HTTP server delegates authorization to the injected application", async ()
 test("HTTP server stores the applicability API key without exposing it to searches", async () => {
   let receivedQuery;
   let savedApiKey;
+  const fallbackApiKeys = [];
   const application = createApplication({
     searchApplicability: async (query) => {
       receivedQuery = query;
@@ -120,28 +123,44 @@ test("HTTP server stores the applicability API key without exposing it to search
         }],
       };
     },
-    getApplicabilityApiKeyState: () => ({ configured: Boolean(savedApiKey), persistent: true }),
+    getApplicabilityApiKeyState: () => ({ configured: Boolean(savedApiKey), fallbackKeyCount: fallbackApiKeys.length, persistent: true }),
     saveApplicabilityApiKey: (apiKey) => {
       savedApiKey = apiKey;
-      return { configured: true, persistent: true };
+      return { configured: true, fallbackKeyCount: fallbackApiKeys.length, persistent: true };
     },
     deleteApplicabilityApiKey: () => {
       savedApiKey = null;
-      return { configured: false, persistent: true };
+      return { configured: false, fallbackKeyCount: fallbackApiKeys.length, persistent: true };
+    },
+    addApplicabilityFallbackApiKey: (apiKey) => {
+      fallbackApiKeys.push(apiKey);
+      return { configured: Boolean(savedApiKey), fallbackKeyCount: fallbackApiKeys.length, persistent: true };
+    },
+    deleteApplicabilityFallbackApiKey: (index) => {
+      fallbackApiKeys.splice(index, 1);
+      return { configured: Boolean(savedApiKey), fallbackKeyCount: fallbackApiKeys.length, persistent: true };
     },
   });
   const { baseUrl } = await listen(application);
 
   const initialState = await fetch(`${baseUrl}/api/applicability/api-key`);
-  assert.deepEqual(await initialState.json(), { configured: false, persistent: true });
+  assert.deepEqual(await initialState.json(), { configured: false, fallbackKeyCount: 0, persistent: true });
 
   const saveResponse = await fetch(`${baseUrl}/api/applicability/api-key`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ apiKey: " test-key " }),
   });
-  assert.deepEqual(await saveResponse.json(), { configured: true, persistent: true });
+  assert.deepEqual(await saveResponse.json(), { configured: true, fallbackKeyCount: 0, persistent: true });
   assert.equal(savedApiKey, "test-key");
+
+  const addFallbackResponse = await fetch(`${baseUrl}/api/applicability/api-key/fallbacks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey: " backup-key " }),
+  });
+  assert.deepEqual(await addFallbackResponse.json(), { configured: true, fallbackKeyCount: 1, persistent: true });
+  assert.deepEqual(fallbackApiKeys, ["backup-key"]);
 
   const response = await fetch(`${baseUrl}/api/applicability/search`, {
     method: "POST",
@@ -155,8 +174,12 @@ test("HTTP server stores the applicability API key without exposing it to search
   assert.equal(responsePayload.results[0].makeName, "LADA");
   assert.equal(responsePayload.cacheHit, false);
 
+  const deleteFallbackResponse = await fetch(`${baseUrl}/api/applicability/api-key/fallbacks/0`, { method: "DELETE" });
+  assert.deepEqual(await deleteFallbackResponse.json(), { configured: true, fallbackKeyCount: 0, persistent: true });
+  assert.deepEqual(fallbackApiKeys, []);
+
   const deleteResponse = await fetch(`${baseUrl}/api/applicability/api-key`, { method: "DELETE" });
-  assert.deepEqual(await deleteResponse.json(), { configured: false, persistent: true });
+  assert.deepEqual(await deleteResponse.json(), { configured: false, fallbackKeyCount: 0, persistent: true });
   assert.equal(savedApiKey, null);
 
   const invalid = await fetch(`${baseUrl}/api/applicability/search`, {
@@ -493,7 +516,7 @@ test("HTTP server can be constructed without opening a listening socket", () => 
   assert.equal(server.listening, false);
 });
 
-test("HTTP server serves applicability save icons as PNG files", async () => {
+test("HTTP server serves applicability action icons as PNG files", async () => {
   const application = createApplication();
   const { baseUrl } = await listen(application);
 
@@ -502,4 +525,9 @@ test("HTTP server serves applicability save icons as PNG files", async () => {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("content-type"), "image/png");
   assert.equal((await response.arrayBuffer()).byteLength > 0, true);
+
+  const deleteIconResponse = await fetch(`${baseUrl}/applicability-key-delete.png`);
+  assert.equal(deleteIconResponse.status, 200);
+  assert.equal(deleteIconResponse.headers.get("content-type"), "image/png");
+  assert.equal((await deleteIconResponse.arrayBuffer()).byteLength > 0, true);
 });

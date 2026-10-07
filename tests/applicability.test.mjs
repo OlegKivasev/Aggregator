@@ -82,13 +82,26 @@ test("PartsAPI key is stored encrypted and can only be removed explicitly", () =
     const store = new EncryptedApplicabilityApiKeyStore(filePath, encryptionKey);
     store.set("test-key");
     assert.equal(store.get(), "test-key");
+    assert.equal(store.getFallbackKeyCount(), 0);
+    store.addFallbackKey("first-fallback-key");
+    store.addFallbackKey("second-fallback-key");
+    assert.equal(store.getFallbackKeyCount(), 2);
     assert.equal(store.isPersistent(), true);
 
     const restoredStore = new EncryptedApplicabilityApiKeyStore(filePath, encryptionKey);
     assert.equal(restoredStore.get(), "test-key");
+    assert.equal(restoredStore.getFallbackKeyCount(), 2);
     restoredStore.delete();
     assert.equal(restoredStore.get(), null);
+    assert.equal(restoredStore.getFallbackKeyCount(), 2);
+    restoredStore.deleteFallbackKey(0);
+    assert.equal(restoredStore.getFallbackKeyCount(), 1);
+    const storeWithOnlyFallbackKey = new EncryptedApplicabilityApiKeyStore(filePath, encryptionKey);
+    assert.equal(storeWithOnlyFallbackKey.get(), null);
+    assert.equal(storeWithOnlyFallbackKey.getFallbackKeyCount(), 1);
+    storeWithOnlyFallbackKey.deleteFallbackKey(0);
     assert.equal(new EncryptedApplicabilityApiKeyStore(filePath, encryptionKey).get(), null);
+    assert.equal(new EncryptedApplicabilityApiKeyStore(filePath, encryptionKey).getFallbackKeyCount(), 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -114,6 +127,7 @@ test("applicability cache persists real PartsAPI responses", () => {
 
 test("applicability service returns cached results without repeating the PartsAPI request", async () => {
   let savedKey = null;
+  const fallbackKeys = [];
   let receivedQuery = null;
   let calls = 0;
   const entries = new Map();
@@ -121,6 +135,9 @@ test("applicability service returns cached results without repeating the PartsAP
     get: () => savedKey,
     set: (apiKey) => { savedKey = apiKey; },
     delete: () => { savedKey = null; },
+    getFallbackKeyCount: () => fallbackKeys.length,
+    addFallbackKey: (apiKey) => { fallbackKeys.push(apiKey); },
+    deleteFallbackKey: (index) => { fallbackKeys.splice(index, 1); },
     isPersistent: () => true,
   };
   const service = new ApplicabilityApplicationService({
@@ -135,8 +152,9 @@ test("applicability service returns cached results without repeating the PartsAP
     set: (query, results) => entries.set(`${query.sku}\u0000${query.brand}`, results),
   });
 
-  assert.deepEqual(service.getApiKeyState(), { configured: false, persistent: true });
+  assert.deepEqual(service.getApiKeyState(), { configured: false, fallbackKeyCount: 0, persistent: true });
   service.saveApiKey("test-key");
+  assert.deepEqual(service.addFallbackApiKey("fallback-key"), { configured: true, fallbackKeyCount: 1, persistent: true });
   assert.deepEqual(
     await service.search({ sku: "11182905003", brand: "LADA" }, new AbortController().signal),
     { results: [vehicle], cacheHit: false },
@@ -147,7 +165,8 @@ test("applicability service returns cached results without repeating the PartsAP
   );
   assert.deepEqual(receivedQuery, { sku: "11182905003", brand: "LADA", apiKey: "test-key" });
   assert.equal(calls, 1);
-  assert.deepEqual(service.deleteApiKey(), { configured: false, persistent: true });
+  assert.deepEqual(service.deleteFallbackApiKey(0), { configured: true, fallbackKeyCount: 0, persistent: true });
+  assert.deepEqual(service.deleteApiKey(), { configured: false, fallbackKeyCount: 0, persistent: true });
 });
 
 test("applicability service refuses to save an API key without encrypted persistence", () => {
@@ -155,6 +174,9 @@ test("applicability service refuses to save an API key without encrypted persist
     get: () => null,
     set: () => { throw new Error("must not save"); },
     delete: () => {},
+    getFallbackKeyCount: () => 0,
+    addFallbackKey: () => { throw new Error("must not save"); },
+    deleteFallbackKey: () => {},
     isPersistent: () => false,
   };
   const service = new ApplicabilityApplicationService({ search: async () => [] }, repository, {

@@ -18,6 +18,9 @@ const settingsClose = document.querySelector("#applicability-settings-close");
 const settingsBackdrop = document.querySelector("#applicability-settings-backdrop");
 const apiKeyStatus = document.querySelector("#applicability-api-key-status");
 const deleteApiKeyButton = document.querySelector("#applicability-api-key-delete");
+const fallbackKeyList = document.querySelector("#applicability-fallback-key-list");
+const addFallbackKeyButton = document.querySelector("#applicability-fallback-key-add");
+const fallbackKeyStatus = document.querySelector("#applicability-fallback-key-status");
 const tabContextMenu = document.querySelector("#applicability-tab-context-menu");
 const renameTabButton = document.querySelector("#applicability-rename-tab-button");
 const resultContextMenu = document.querySelector("#applicability-result-context-menu");
@@ -44,6 +47,7 @@ let activeTabId = null;
 let tabSequence = 1;
 let activeRequest = null;
 let hasStoredApiKey = false;
+let fallbackKeyCount = 0;
 let activeMakeIndex = -1;
 let contextMenuTabId = null;
 let contextMenuTabAnchor = null;
@@ -190,16 +194,119 @@ const restoreApplicabilityState = () => {
 const setApiKeyStatus = (message, configured) => {
   apiKeyStatus.textContent = message;
   apiKeyStatus.hidden = !message;
-  deleteApiKeyButton.hidden = !configured;
   hasStoredApiKey = configured;
 };
 
 const readApiKeyState = async (response) => {
   const payload = await response.json();
-  if (!response.ok || typeof payload?.configured !== "boolean") {
+  if (
+    !response.ok
+    || typeof payload?.configured !== "boolean"
+    || !Number.isSafeInteger(payload?.fallbackKeyCount)
+    || payload.fallbackKeyCount < 0
+  ) {
     throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось сохранить API-ключ.");
   }
   return payload;
+};
+
+const setFallbackKeyStatus = (message) => {
+  fallbackKeyStatus.textContent = message;
+  fallbackKeyStatus.hidden = !message;
+};
+
+const setPasswordVisibility = (input, button) => {
+  const visible = input.type === "text";
+  input.type = visible ? "password" : "text";
+  button.setAttribute("aria-label", visible ? "Показать запасной ключ" : "Скрыть запасной ключ");
+};
+
+const createFallbackKeyRow = ({ index = null, value = "" } = {}) => {
+  const row = document.createElement("div");
+  row.className = "password-field applicability-key-field";
+  if (index !== null) row.dataset.fallbackKeyIndex = String(index);
+
+  const input = document.createElement("input");
+  input.type = "password";
+  input.autocomplete = "off";
+  input.maxLength = 512;
+  input.placeholder = index === null ? "Введите запасной API-ключ" : "Сохранённый ключ";
+  input.value = value;
+  input.readOnly = index !== null;
+  input.setAttribute("aria-label", index === null ? "Запасной API-ключ" : `Сохранённый запасной API-ключ ${index + 1}`);
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "password-toggle";
+  toggle.setAttribute("aria-label", "Показать запасной ключ");
+  const toggleIcon = document.createElement("span");
+  toggleIcon.setAttribute("aria-hidden", "true");
+  toggleIcon.textContent = "👁";
+  toggle.append(toggleIcon);
+  toggle.addEventListener("click", () => setPasswordVisibility(input, toggle));
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "applicability-key-delete";
+  remove.setAttribute("aria-label", "Удалить запасной API-ключ");
+  remove.title = "Удалить запасной API-ключ";
+  const icon = document.createElement("img");
+  icon.src = "/applicability-key-delete.png";
+  icon.alt = "";
+  remove.append(icon);
+  remove.addEventListener("click", async () => {
+    const storedIndex = row.dataset.fallbackKeyIndex;
+    if (storedIndex === undefined) {
+      row.remove();
+      return;
+    }
+    try {
+      const state = await readApiKeyState(await fetch(`/api/applicability/api-key/fallbacks/${storedIndex}`, {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      }));
+      fallbackKeyCount = state.fallbackKeyCount;
+      renderFallbackKeyRows();
+      setFallbackKeyStatus("Запасной ключ удалён");
+    } catch (error) {
+      setFallbackKeyStatus(error instanceof Error ? error.message : "Не удалось удалить запасной ключ.");
+    }
+  });
+
+  input.addEventListener("keydown", async (event) => {
+    if (event.key !== "Enter" || row.dataset.fallbackKeyIndex !== undefined) return;
+    event.preventDefault();
+    const apiKey = input.value.trim();
+    if (!apiKey) {
+      setFallbackKeyStatus("Укажите запасной API-ключ.");
+      return;
+    }
+    try {
+      const state = await readApiKeyState(await fetch("/api/applicability/api-key/fallbacks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ apiKey }),
+      }));
+      input.readOnly = true;
+      input.placeholder = "Сохранённый ключ";
+      input.setAttribute("aria-label", `Сохранённый запасной API-ключ ${state.fallbackKeyCount}`);
+      row.dataset.fallbackKeyIndex = String(state.fallbackKeyCount - 1);
+      fallbackKeyCount = state.fallbackKeyCount;
+      setFallbackKeyStatus("Запасной ключ сохранён");
+    } catch (error) {
+      setFallbackKeyStatus(error instanceof Error ? error.message : "Не удалось сохранить запасной ключ.");
+    }
+  });
+
+  row.append(input, toggle, remove);
+  return row;
+};
+
+const renderFallbackKeyRows = () => {
+  fallbackKeyList.replaceChildren(...Array.from(
+    { length: fallbackKeyCount },
+    (_, index) => createFallbackKeyRow({ index }),
+  ));
 };
 
 const saveApiKey = async () => {
@@ -213,6 +320,7 @@ const saveApiKey = async () => {
     body: JSON.stringify({ apiKey }),
   }));
   setApiKeyStatus("Ключ сохранён", state.configured);
+  fallbackKeyCount = state.fallbackKeyCount;
   return state;
 };
 
@@ -220,6 +328,8 @@ const loadApiKeyState = async () => {
   try {
     const state = await readApiKeyState(await fetch("/api/applicability/api-key", { headers: { Accept: "application/json" } }));
     setApiKeyStatus(state.configured ? "Ключ сохранён" : "", state.configured);
+    fallbackKeyCount = state.fallbackKeyCount;
+    renderFallbackKeyRows();
   } catch {
     setFeedback("Не удалось проверить настройки API-ключа.");
   }
@@ -744,9 +854,15 @@ deleteApiKeyButton.addEventListener("click", async () => {
     }));
     apiKeyInput.value = "";
     setApiKeyStatus(state.configured ? "Ключ сохранён" : "Ключ удалён", state.configured);
+    fallbackKeyCount = state.fallbackKeyCount;
   } catch (error) {
     setApiKeyStatus(error instanceof Error ? error.message : "Не удалось удалить API-ключ.", hasStoredApiKey);
   }
+});
+addFallbackKeyButton.addEventListener("click", () => {
+  const row = createFallbackKeyRow();
+  fallbackKeyList.append(row);
+  row.querySelector("input")?.focus();
 });
 
 applicabilityTabsList.addEventListener("click", (event) => {

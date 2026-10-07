@@ -4,6 +4,7 @@ import { readPort } from "./config.ts";
 import { createAggregatorServer, type AggregatorApplication } from "./http/create-server.ts";
 import {
   authorizeArmtek,
+  addApplicabilityFallbackApiKey,
   authorizeForumAuto,
   authorizeMotorDetal,
   authorizeMladov,
@@ -11,6 +12,7 @@ import {
   authorizeRossko,
   authorizeStparts,
   deleteApplicabilityApiKey,
+  deleteApplicabilityFallbackApiKey,
   getApplicabilityApiKeyState,
   getApplicabilityCachedBrands,
   listSupplierSessions,
@@ -36,6 +38,7 @@ const port = readPort();
 
 const application: AggregatorApplication = {
   authorizeArmtek,
+  addApplicabilityFallbackApiKey,
   authorizeForumAuto,
   authorizeMotorDetal,
   authorizeMladov,
@@ -43,6 +46,7 @@ const application: AggregatorApplication = {
   authorizeRossko,
   authorizeStparts,
   deleteApplicabilityApiKey,
+  deleteApplicabilityFallbackApiKey,
   getApplicabilityApiKeyState,
   getApplicabilityCachedBrands,
   listSupplierSessions,

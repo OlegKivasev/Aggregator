@@ -9,6 +9,9 @@ export interface ApplicabilityApiKeyRepository {
   get(): string | null;
   set(apiKey: string): void;
   delete(): void;
+  getFallbackKeyCount(): number;
+  addFallbackKey(apiKey: string): void;
+  deleteFallbackKey(index: number): void;
   isPersistent(): boolean;
 }
 
@@ -44,7 +47,11 @@ export class ApplicabilityApplicationService {
   }
 
   getApiKeyState(): ApplicabilityApiKeyState {
-    return { configured: this.apiKeyRepository.get() !== null, persistent: this.apiKeyRepository.isPersistent() };
+    return {
+      configured: this.apiKeyRepository.get() !== null,
+      fallbackKeyCount: this.apiKeyRepository.getFallbackKeyCount(),
+      persistent: this.apiKeyRepository.isPersistent(),
+    };
   }
 
   saveApiKey(apiKey: string): ApplicabilityApiKeyState {
@@ -59,6 +66,21 @@ export class ApplicabilityApplicationService {
 
   deleteApiKey(): ApplicabilityApiKeyState {
     this.apiKeyRepository.delete();
+    return this.getApiKeyState();
+  }
+
+  addFallbackApiKey(apiKey: string): ApplicabilityApiKeyState {
+    if (!this.apiKeyRepository.isPersistent()) {
+      throw new SupplierIntegrationError("PartsAPI key persistence is not configured", {
+        publicMessage: "Защищённое хранение API-ключа не настроено.",
+      });
+    }
+    this.apiKeyRepository.addFallbackKey(apiKey);
+    return this.getApiKeyState();
+  }
+
+  deleteFallbackApiKey(index: number): ApplicabilityApiKeyState {
+    this.apiKeyRepository.deleteFallbackKey(index);
     return this.getApiKeyState();
   }
 }

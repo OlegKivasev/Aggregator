@@ -171,6 +171,8 @@ export function getApplicabilityCachedBrands(sku: string) {
 export const getApplicabilityApiKeyState = () => applicabilityService.getApiKeyState();
 export const saveApplicabilityApiKey = (apiKey: string) => applicabilityService.saveApiKey(apiKey);
 export const deleteApplicabilityApiKey = () => applicabilityService.deleteApiKey();
+export const addApplicabilityFallbackApiKey = (apiKey: string) => applicabilityService.addFallbackApiKey(apiKey);
+export const deleteApplicabilityFallbackApiKey = (index: number) => applicabilityService.deleteFallbackApiKey(index);
 
 export async function shutdownSearchService(): Promise<void> {
   closeSiteHttpAgent();

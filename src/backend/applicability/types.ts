@@ -16,6 +16,7 @@ export interface ApplicabilitySearchResult {
 
 export interface ApplicabilityApiKeyState {
   configured: boolean;
+  fallbackKeyCount: number;
   persistent: boolean;
 }
 

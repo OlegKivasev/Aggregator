@@ -371,6 +371,24 @@ input {
 .settings-drawer__hint { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
 .settings-drawer__status { margin: 10px 0 0; color: #18794e; font-size: 12px; font-weight: 700; }
 .settings-drawer__status[hidden] { display: none; }
+.applicability-key-method { border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.applicability-key-method > summary,
+.applicability-fallback-keys > summary { padding: 13px 15px; color: var(--ink); cursor: pointer; font-size: 13px; font-weight: 800; }
+.applicability-key-method__content { padding: 0 15px 15px; }
+.applicability-key-field input { padding-right: 76px; }
+.applicability-key-field .password-toggle { right: 40px; }
+.applicability-key-delete { position: absolute; top: 50%; right: 8px; display: grid; width: 28px; height: 28px; place-items: center; transform: translateY(-50%); border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+.applicability-key-delete:hover,
+.applicability-key-delete:focus-visible { background: #fff1eb; outline: 0; }
+.applicability-key-delete img { width: 16px; height: 16px; object-fit: contain; }
+.applicability-fallback-keys { margin-top: 14px; border-top: 1px solid var(--line); }
+.applicability-fallback-keys > summary { padding-right: 0; padding-left: 0; }
+.applicability-fallback-keys__content { padding-bottom: 2px; }
+.applicability-fallback-key-list { display: grid; gap: 8px; margin-top: 12px; }
+.applicability-fallback-key-add { margin-top: 12px; border-color: var(--accent) !important; color: #fff !important; background: var(--accent) !important; }
+.applicability-fallback-key-add:hover,
+.applicability-fallback-key-add:focus-visible { border-color: var(--accent-dark) !important; background: var(--accent-dark) !important; outline: 0; }
+.applicability-fallback-key-add span { display: inline-block; margin-right: 5px; font-size: 16px; line-height: 1; }
 
 @media (max-width: 720px) {
   .applicability-search-form { flex-wrap: wrap; }

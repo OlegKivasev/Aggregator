@@ -598,11 +598,17 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-makes" role="listbox" aria-multiselectable="true"/);
   assert.match(html, /id="applicability-api-key-status"/);
   assert.match(html, /id="applicability-api-key-delete"/);
+  assert.match(html, /Get Application Method/);
+  assert.match(html, /id="applicability-fallback-keys"/);
+  assert.match(html, /id="applicability-fallback-key-list"/);
+  assert.match(html, /id="applicability-fallback-key-add"/);
+  assert.match(html, /src="\/applicability-key-delete\.png"/);
   assert.match(html, /aria-label="Показать API-ключ"/);
   assert.match(html, /OEM-артикул[\s\S]*?Производитель[\s\S]*?Количество/);
   assert.match(html, /id="applicability-list-button"/);
   assert.match(styles, /\.applicability-list-button\s*\{[^}]*--bs-btn-active-bg: var\(--accent-dark\);[^}]*--bs-btn-focus-shadow-rgb: 255, 75, 19;/s);
   assert.match(styles, /\.applicability-list-button:hover[^}]*\.applicability-list-button:focus-visible[^}]*\.applicability-list-button:active[^}]*background: var\(--accent-dark\);/s);
+  assert.match(styles, /\.applicability-fallback-key-add\s*\{[^}]*background: var\(--accent\) !important;/s);
   assert.match(html, /id="applicability-toast"/);
   assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
   assert.match(html, /id="applicability-document-save"[\s\S]*?src="\/applicability-save\.png"/);
@@ -613,6 +619,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.doesNotMatch(html, /id="applicability-result-summary"/);
   assert.match(html, /id="applicability-tab-context-menu"[\s\S]*?id="applicability-rename-tab-button"/);
   assert.match(html, /id="applicability-result-context-menu"[\s\S]*?id="applicability-result-delete-button"/);
+  assert.match(applicability, /\/api\/applicability\/api-key\/fallbacks/);
   assert.match(html, /class="search-row applicability-search-row"/);
   assert.ok(html.indexOf('class="function-content"') < html.indexOf('id="applicability-function"'));
   assert.ok(html.indexOf('id="applicability-function"') < html.indexOf("</main>"));
