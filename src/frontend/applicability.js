@@ -286,7 +286,7 @@ const createFallbackKeyRow = ({ index = null, value = "" } = {}) => {
       }));
       fallbackKeyCount = state.fallbackKeyCount;
       renderFallbackKeyRows();
-      setFallbackKeyStatus("Запасной ключ удалён");
+      setFallbackKeyStatus("");
     } catch (error) {
       setFallbackKeyStatus(error instanceof Error ? error.message : "Не удалось удалить запасной ключ.");
     }

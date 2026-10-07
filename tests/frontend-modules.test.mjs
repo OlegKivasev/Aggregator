@@ -602,6 +602,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-fallback-keys"/);
   assert.match(html, /id="applicability-fallback-key-list"/);
   assert.match(html, /id="applicability-fallback-key-add"/);
+  assert.match(html, /id="applicability-fallback-key-status"[\s\S]*?id="applicability-fallback-key-add"/);
   assert.doesNotMatch(html, /Нажмите Enter, чтобы сохранить введённый ключ/);
   assert.match(html, /src="\/applicability-key-delete\.png"/);
   assert.match(html, /aria-label="Показать API-ключ"/);
@@ -684,6 +685,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /deleteApiKeyButton\.addEventListener\("click"/);
   assert.match(applicability, /state\.configured \? "Ключ сохранён" : ""/);
   assert.doesNotMatch(applicability, /"Ключ удалён"/);
+  assert.doesNotMatch(applicability, /"Запасной ключ удалён"/);
   assert.match(applicability, /const createTab/);
   assert.match(applicability, /const renderTabs/);
   assert.match(applicability, /appendCell\(row, entry\.makeName\)/);
