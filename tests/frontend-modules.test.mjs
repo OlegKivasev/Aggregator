@@ -626,7 +626,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /fetch\("\/api\/applicability\/api-key"/);
   assert.match(applicability, /JSON\.stringify\(\{ sku, brand \}\)/);
   assert.match(applicability, /className = "applicability-expand"/);
-  assert.match(applicability, /JSON\.stringify\(entry\.results, null, 2\)/);
+  assert.match(applicability, /JSON\.stringify\(\{ sku: entry\.sku, results: entry\.results \}\)/);
   assert.match(applicability, /const buildApplicabilityDocument/);
   assert.match(applicability, /let documentFormat = "structured"/);
   assert.match(applicability, /const visibleDocumentColumns/);
@@ -636,7 +636,9 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /renderApplicabilityDocument\(\{ preserveTextState: true \}\)/);
   assert.match(applicability, /import \{ formatApplicabilityVehicle \} from "\.\/applicability-formatting\.js"/);
   assert.match(applicability, /entry\.hasSearched && entry\.results\.length/);
-  assert.match(applicability, /documentText\.select\(\)/);
+  assert.match(applicability, /documentText\.setSelectionRange\(0, 0\)/);
+  assert.match(applicability, /documentText\.scrollTop = 0/);
+  assert.match(applicability, /documentModal\.focus\(\)/);
   assert.match(applicability, /appendCell\(row, "Не найдено"\)/);
   assert.match(applicability, /tab\.searches\.push\(\.\.\.entries\)/);
   assert.match(applicability, /Promise\.all\(entries\.map/);

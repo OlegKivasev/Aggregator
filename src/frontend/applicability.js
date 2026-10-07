@@ -403,13 +403,16 @@ const executeApplicabilitySearch = async (sku, brand, signal) => {
 const duplicateSearch = (tab, sku, brand) => tab.searches.find((entry) => searchIdentity(entry.sku, entry.makeName) === searchIdentity(sku, brand));
 
 const buildApplicabilityDocument = (entries, format = documentFormat) => {
+  if (format === "raw") {
+    return entries
+      .map((entry) => JSON.stringify({ sku: entry.sku, results: entry.results }))
+      .join("\n");
+  }
   const visibleColumns = visibleDocumentColumns();
   return entries
     .map((entry) => {
-    const contents = format === "structured"
-      ? entry.results.map((vehicle) => formatApplicabilityVehicle(vehicle, visibleColumns)).join("\n")
-      : JSON.stringify(entry.results, null, 2);
-    return format !== "structured" || visibleColumns.has("article")
+    const contents = entry.results.map((vehicle) => formatApplicabilityVehicle(vehicle, visibleColumns)).join("\n");
+    return visibleColumns.has("article")
       ? `Артикул: ${entry.sku}\n${contents}`
       : contents;
   })
@@ -525,8 +528,10 @@ const openDocumentModal = () => {
   documentModalReturnFocus = document.activeElement;
   renderApplicabilityDocument();
   documentModal.hidden = false;
-  documentText.focus();
-  documentText.select();
+  documentText.setSelectionRange(0, 0);
+  documentText.scrollLeft = 0;
+  documentText.scrollTop = 0;
+  documentModal.focus();
 };
 
 const renderTabs = () => {
