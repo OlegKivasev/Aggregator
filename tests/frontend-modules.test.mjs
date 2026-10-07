@@ -608,6 +608,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /aria-label="Показать API-ключ"/);
   assert.match(html, /OEM-артикул[\s\S]*?Производитель[\s\S]*?Количество/);
   assert.match(html, /id="applicability-list-button"/);
+  assert.match(html, /id="applicability-multi-list-button"[\s\S]*?Сформировать мультисписок/);
   assert.match(styles, /\.applicability-list-button\s*\{[^}]*--bs-btn-active-bg: var\(--accent-dark\);[^}]*--bs-btn-focus-shadow-rgb: 255, 75, 19;/s);
   assert.match(styles, /\.applicability-list-button:hover[^}]*\.applicability-list-button:focus-visible[^}]*\.applicability-list-button:active[^}]*background: var\(--accent-dark\);/s);
   assert.match(styles, /\.applicability-fallback-key-add\s*\{[^}]*background: var\(--accent\) !important;/s);
@@ -615,6 +616,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-toast"/);
   assert.match(html, /id="applicability-article-name-modal"[\s\S]*?id="applicability-article-name-form"[\s\S]*?id="applicability-article-name-input"/);
   assert.doesNotMatch(html, /Это наименование будет показано во вкладке и в сформированном списке\./);
+  assert.match(html, /id="applicability-multi-list-modal"[\s\S]*?id="applicability-multi-list-form"[\s\S]*?id="applicability-multi-list-tabs"[\s\S]*?id="applicability-multi-list-submit"/);
   assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
   assert.match(html, /id="applicability-document-save"[\s\S]*?src="\/applicability-save\.png"/);
   assert.match(html, /id="applicability-document-text"[^>]*wrap="off"/);
@@ -647,6 +649,9 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(styles, /\.applicability-article\s*\{[^}]*user-select: text;/s);
   assert.match(applicability, /JSON\.stringify\(entry\.results, null, 2\)/);
   assert.match(applicability, /const buildApplicabilityDocument/);
+  assert.match(applicability, /const openMultiListModal/);
+  assert.match(applicability, /const openMultiDocument/);
+  assert.match(applicability, /multiListButton\.addEventListener\("click", \(\) => openMultiListModal\(\)\);/);
   assert.match(applicability, /const groupSearchesBySku/);
   assert.match(applicability, /OEM-артикул: \$\{sku\}/);
   assert.match(applicability, /const openArticleNameModal/);

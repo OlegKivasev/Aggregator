@@ -29,11 +29,17 @@ const submitButton = document.querySelector("#applicability-submit");
 const feedback = document.querySelector("#applicability-feedback");
 const resultsBody = document.querySelector("#applicability-results-body");
 const listButton = document.querySelector("#applicability-list-button");
+const multiListButton = document.querySelector("#applicability-multi-list-button");
 const applicabilityToast = document.querySelector("#applicability-toast");
 const articleNameModal = document.querySelector("#applicability-article-name-modal");
 const articleNameForm = document.querySelector("#applicability-article-name-form");
 const articleNameInput = document.querySelector("#applicability-article-name-input");
 const closeArticleNameButtons = [...document.querySelectorAll("[data-close-applicability-article-name]")];
+const multiListModal = document.querySelector("#applicability-multi-list-modal");
+const multiListForm = document.querySelector("#applicability-multi-list-form");
+const multiListTabs = document.querySelector("#applicability-multi-list-tabs");
+const multiListSubmit = document.querySelector("#applicability-multi-list-submit");
+const closeMultiListButtons = [...document.querySelectorAll("[data-close-applicability-multi-list]")];
 const documentModal = document.querySelector("#applicability-document-modal");
 const documentText = document.querySelector("#applicability-document-text");
 const documentSaveButton = document.querySelector("#applicability-document-save");
@@ -60,10 +66,10 @@ let contextMenuEntryAnchor = null;
 let articleNameModalReturnFocus = null;
 let articleNameModalTabId = null;
 let openDocumentAfterArticleNaming = false;
+let multiDocumentTabIds = null;
 let documentModalReturnFocus = null;
 let documentFormat = "structured";
-let documentEntries = [];
-let documentSourceArticleName = "";
+let documentSections = [];
 let applicabilityToastTimer = null;
 let cachedBrandLookupTimer = null;
 let cachedBrandLookupController = null;
@@ -543,18 +549,19 @@ const groupSearchesBySku = (entries) => [...entries.reduce((groups, entry) => {
   return groups;
 }, new Map()).entries()];
 
-const buildApplicabilityDocument = (entries, format = documentFormat) => {
+const buildApplicabilityDocument = (sections, format = documentFormat) => {
   const visibleColumns = visibleDocumentColumns();
-  if (format !== "structured") {
-    return entries
-      .map((entry) => `Артикул: ${entry.sku}\n${JSON.stringify(entry.results, null, 2)}`)
+  return sections.map(({ articleName, entries }) => {
+    if (format !== "structured") {
+      return `Артикул: ${articleName}\n\n${entries
+        .map((entry) => `OEM-артикул: ${entry.sku}\n${JSON.stringify(entry.results, null, 2)}`)
+        .join("\n\n")}`;
+    }
+    const oemSections = groupSearchesBySku(entries)
+      .map(([sku, entriesForSku]) => `OEM-артикул: ${sku}\n${formatApplicabilityVehicles(entriesForSku.flatMap((entry) => entry.results), visibleColumns)}`)
       .join("\n\n");
-  }
-
-  const oemSections = groupSearchesBySku(entries)
-    .map(([sku, entriesForSku]) => `OEM-артикул: ${sku}\n${formatApplicabilityVehicles(entriesForSku.flatMap((entry) => entry.results), visibleColumns)}`)
-    .join("\n\n");
-  return `Артикул: ${documentSourceArticleName}\n\n${oemSections}`;
+    return `Артикул: ${articleName}\n\n${oemSections}`;
+  }).join("\n\n");
 };
 
 const renderApplicabilityDocument = ({ preserveTextState = false } = {}) => {
@@ -565,7 +572,7 @@ const renderApplicabilityDocument = ({ preserveTextState = false } = {}) => {
     scrollLeft: documentText.scrollLeft,
     scrollTop: documentText.scrollTop,
   } : null;
-  documentText.value = buildApplicabilityDocument(documentEntries);
+  documentText.value = buildApplicabilityDocument(documentSections);
   if (textState) {
     const length = documentText.value.length;
     documentText.setSelectionRange(
@@ -634,6 +641,9 @@ const updateListButton = (tab) => {
   const hasResults = successfulSearches(tab).length > 0;
   listButton.disabled = !hasResults;
   listButton.title = hasResults ? "Сформировать список найденной применимости" : "Нет найденной применимости для списка";
+  const hasResultsInAnyTab = tabs.some((item) => successfulSearches(item).length > 0);
+  multiListButton.disabled = !hasResultsInAnyTab;
+  multiListButton.title = hasResultsInAnyTab ? "Выбрать вкладки для мультисписка" : "Нет найденной применимости для мультисписка";
 };
 
 const renderResults = (tab) => {
@@ -712,6 +722,7 @@ const closeArticleNameModal = (restoreFocus = true) => {
   articleNameModalReturnFocus = null;
   articleNameModalTabId = null;
   openDocumentAfterArticleNaming = false;
+  multiDocumentTabIds = null;
 };
 
 const openArticleNameModal = (tabId, { openDocument = false, returnFocus = document.activeElement } = {}) => {
@@ -727,15 +738,12 @@ const openArticleNameModal = (tabId, { openDocument = false, returnFocus = docum
   articleNameInput.select();
 };
 
-const openDocumentModal = (tab = getActiveTab(), returnFocus = document.activeElement) => {
-  if (!tab) return;
-  if (!tab.name) {
-    openArticleNameModal(tab.id, { openDocument: true, returnFocus });
-    return;
-  }
-  documentEntries = successfulSearches(tab);
-  if (!documentEntries.length) return;
-  documentSourceArticleName = tab.name;
+const openDocumentModalForTabs = (selectedTabs, returnFocus = document.activeElement) => {
+  const sections = selectedTabs
+    .map((tab) => ({ articleName: tab.name, entries: successfulSearches(tab) }))
+    .filter((section) => section.entries.length);
+  if (!sections.length) return;
+  documentSections = sections;
   documentModalReturnFocus = returnFocus;
   renderApplicabilityDocument();
   documentModal.hidden = false;
@@ -743,6 +751,74 @@ const openDocumentModal = (tab = getActiveTab(), returnFocus = document.activeEl
   documentText.scrollLeft = 0;
   documentText.scrollTop = 0;
   documentModal.focus();
+};
+
+const openDocumentModal = (tab = getActiveTab(), returnFocus = document.activeElement) => {
+  if (!tab) return;
+  if (!tab.name) {
+    openArticleNameModal(tab.id, { openDocument: true, returnFocus });
+    return;
+  }
+  openDocumentModalForTabs([tab], returnFocus);
+};
+
+const closeMultiListModal = (restoreFocus = true) => {
+  multiListModal.hidden = true;
+  if (restoreFocus && multiListModalReturnFocus?.isConnected) multiListModalReturnFocus.focus();
+  multiListModalReturnFocus = null;
+};
+
+let multiListModalReturnFocus = null;
+
+const selectedMultiListTabs = () => [...multiListTabs.querySelectorAll("input:checked")]
+  .map((input) => tabs.find((tab) => tab.id === input.value))
+  .filter((tab) => tab && successfulSearches(tab).length);
+
+const updateMultiListSubmit = () => {
+  multiListSubmit.disabled = selectedMultiListTabs().length === 0;
+};
+
+const renderMultiListTabs = () => {
+  multiListTabs.replaceChildren();
+  tabs.forEach((tab, index) => {
+    const entries = successfulSearches(tab);
+    const label = document.createElement("label");
+    label.className = "applicability-multi-list-modal__tab";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = tab.id;
+    input.disabled = !entries.length;
+    input.setAttribute("aria-label", tab.name || `Новая применимость ${index + 1}`);
+    input.addEventListener("change", updateMultiListSubmit);
+    const name = document.createElement("span");
+    name.className = "applicability-multi-list-modal__tab-name";
+    name.textContent = tab.name || `Новая применимость ${index + 1}`;
+    const status = document.createElement("span");
+    status.className = "applicability-multi-list-modal__tab-status";
+    status.textContent = entries.length ? `OEM: ${entries.length}` : "Нет данных";
+    label.append(input, name, status);
+    multiListTabs.append(label);
+  });
+  updateMultiListSubmit();
+};
+
+const openMultiListModal = (returnFocus = document.activeElement) => {
+  syncActiveTab();
+  renderMultiListTabs();
+  multiListModalReturnFocus = returnFocus;
+  multiListModal.hidden = false;
+  multiListModal.focus();
+};
+
+const openMultiDocument = (selectedTabs, returnFocus) => {
+  multiDocumentTabIds = selectedTabs.map((tab) => tab.id);
+  const unnamedTab = selectedTabs.find((tab) => !tab.name);
+  if (unnamedTab) {
+    openArticleNameModal(unnamedTab.id, { returnFocus });
+    return;
+  }
+  multiDocumentTabIds = null;
+  openDocumentModalForTabs(selectedTabs, returnFocus);
 };
 
 const renderTabs = () => {
@@ -846,6 +922,7 @@ markupTab.addEventListener("click", () => setActiveFunction("markup"));
 applicabilityTab.addEventListener("click", () => setActiveFunction("applicability"));
 newApplicabilityTabButton.addEventListener("click", addTab);
 listButton.addEventListener("click", () => openDocumentModal());
+multiListButton.addEventListener("click", () => openMultiListModal());
 closeArticleNameButtons.forEach((button) => button.addEventListener("click", () => closeArticleNameModal()));
 articleNameForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -859,14 +936,32 @@ articleNameForm.addEventListener("submit", (event) => {
   articleNameInput.setCustomValidity("");
   const returnFocus = articleNameModalReturnFocus;
   const shouldOpenDocument = openDocumentAfterArticleNaming;
+  const selectedMultiTabIds = multiDocumentTabIds;
   tab.name = articleName;
   renderTabs();
   saveApplicabilityState();
   closeArticleNameModal(false);
-  if (shouldOpenDocument) openDocumentModal(tab, returnFocus);
+  if (selectedMultiTabIds) {
+    const selectedTabs = selectedMultiTabIds.map((id) => tabs.find((item) => item.id === id)).filter(Boolean);
+    const nextUnnamedTab = selectedTabs.find((item) => !item.name);
+    if (nextUnnamedTab) {
+      multiDocumentTabIds = selectedMultiTabIds;
+      openArticleNameModal(nextUnnamedTab.id, { returnFocus });
+    }
+    else openDocumentModalForTabs(selectedTabs, returnFocus);
+  } else if (shouldOpenDocument) openDocumentModal(tab, returnFocus);
   else if (returnFocus?.isConnected) returnFocus.focus();
 });
 articleNameInput.addEventListener("input", () => articleNameInput.setCustomValidity(""));
+closeMultiListButtons.forEach((button) => button.addEventListener("click", () => closeMultiListModal()));
+multiListForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const selectedTabs = selectedMultiListTabs();
+  if (!selectedTabs.length) return;
+  const returnFocus = multiListModalReturnFocus;
+  closeMultiListModal(false);
+  openMultiDocument(selectedTabs, returnFocus);
+});
 closeDocumentButtons.forEach((button) => button.addEventListener("click", () => closeDocumentModal()));
 documentSaveButton.addEventListener("click", async () => {
   try {
@@ -1093,6 +1188,25 @@ document.addEventListener("click", (event) => {
   if (!resultContextMenu.hidden && !resultContextMenu.contains(event.target)) hideResultContextMenu();
 });
 document.addEventListener("keydown", (event) => {
+  if (!multiListModal.hidden && event.key === "Tab") {
+    const focusable = [...multiListModal.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex='0']")]
+      .filter((element) => element.offsetParent !== null);
+    if (!focusable.length) {
+      event.preventDefault();
+      multiListModal.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === multiListModal)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+    return;
+  }
   if (!articleNameModal.hidden && event.key === "Tab") {
     const focusable = [...articleNameModal.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex='0']")]
       .filter((element) => element.offsetParent !== null);
@@ -1132,6 +1246,10 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key !== "Escape") return;
+  if (!multiListModal.hidden) {
+    closeMultiListModal();
+    return;
+  }
   if (!articleNameModal.hidden) {
     closeArticleNameModal();
     return;

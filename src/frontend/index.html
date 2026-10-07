@@ -296,10 +296,13 @@
               </table>
             </div>
             <footer class="applicability-results-footer">
-              <button type="button" class="btn btn-primary applicability-list-button" id="applicability-list-button" disabled>
-                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3.75h7l3.25 3.25v13.25H7z" /><path d="M14 3.75V7h3.25M9.75 11h4.5M9.75 14.25h4.5M9.75 17.5h3" /></svg>
-                <span>Сформировать список</span>
-              </button>
+              <div class="applicability-results-actions">
+                <button type="button" class="btn btn-primary applicability-list-button" id="applicability-list-button" disabled>
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3.75h7l3.25 3.25v13.25H7z" /><path d="M14 3.75V7h3.25M9.75 11h4.5M9.75 14.25h4.5M9.75 17.5h3" /></svg>
+                  <span>Сформировать список</span>
+                </button>
+                <button type="button" class="btn btn-light applicability-multi-list-button" id="applicability-multi-list-button" disabled>Сформировать мультисписок</button>
+              </div>
             </footer>
           </div>
         </div>
@@ -713,6 +716,23 @@
           <footer class="analogs-modal__footer applicability-article-name-modal__footer">
             <button type="button" class="btn btn-light" data-close-applicability-article-name>Отмена</button>
             <button type="submit" class="btn btn-primary">Сохранить</button>
+          </footer>
+        </form>
+      </section>
+    </div>
+
+    <div class="analogs-modal applicability-multi-list-modal" id="applicability-multi-list-modal" role="dialog" aria-modal="true" aria-labelledby="applicability-multi-list-title" tabindex="-1" hidden>
+      <div class="analogs-modal__backdrop" data-close-applicability-multi-list></div>
+      <section class="analogs-modal__card card border-0 shadow-lg">
+        <header class="analogs-modal__header">
+          <div><h2 id="applicability-multi-list-title">Сформировать мультисписок</h2></div>
+          <button type="button" class="analogs-modal__close btn btn-light" data-close-applicability-multi-list aria-label="Закрыть окно">×</button>
+        </header>
+        <form class="applicability-multi-list-modal__form" id="applicability-multi-list-form">
+          <div class="applicability-multi-list-modal__content" id="applicability-multi-list-tabs"></div>
+          <footer class="analogs-modal__footer applicability-multi-list-modal__footer">
+            <button type="button" class="btn btn-light" data-close-applicability-multi-list>Отмена</button>
+            <button type="submit" class="btn btn-primary" id="applicability-multi-list-submit" disabled>Сформировать</button>
           </footer>
         </form>
       </section>

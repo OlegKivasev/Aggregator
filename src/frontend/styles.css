@@ -304,6 +304,7 @@ input {
 .applicability-results-table th,
 .applicability-results-table td { padding: 10px 12px; }
 .applicability-results-footer { display: flex; min-height: 58px; flex: 0 0 auto; align-items: center; justify-content: flex-end; padding: 9px 12px; border-top: 1px solid var(--line); background: #fff; }
+.applicability-results-actions { display: grid; justify-items: end; gap: 8px; }
 .applicability-list-button { --bs-btn-active-bg: var(--accent-dark); --bs-btn-active-border-color: var(--accent-dark); --bs-btn-focus-shadow-rgb: 255, 75, 19; display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 14px; border-color: var(--accent); color: #fff; background: var(--accent); font-weight: 800; }
 .applicability-list-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .applicability-list-button:hover, .applicability-list-button:focus-visible, .applicability-list-button:active, .applicability-list-button:active:focus { border-color: var(--accent-dark); background: var(--accent-dark); box-shadow: 0 0 0 .25rem rgb(255 75 19 / 24%); }
@@ -350,6 +351,20 @@ input {
 .applicability-article-name-modal .btn-primary:hover,
 .applicability-article-name-modal .btn-primary:focus-visible,
 .applicability-article-name-modal .btn-primary:active { border-color: var(--accent-dark) !important; background: var(--accent-dark) !important; box-shadow: 0 0 0 .25rem rgb(255 75 19 / 20%); outline: 0; }
+.applicability-multi-list-modal .analogs-modal__card { width: min(520px, calc(100vw - 24px)); height: auto; max-height: calc(100dvh - 24px); border-radius: 16px; }
+.applicability-multi-list-modal__form { display: flex; flex-direction: column; }
+.applicability-multi-list-modal__content { display: grid; gap: 8px; padding: 6px 22px 22px; overflow-y: auto; }
+.applicability-multi-list-modal__tab { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.applicability-multi-list-modal__tab:has(input:checked) { border-color: var(--accent); background: #fff7f3; }
+.applicability-multi-list-modal__tab:has(input:disabled) { color: var(--muted); background: #f8fafc; cursor: not-allowed; }
+.applicability-multi-list-modal__tab input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.applicability-multi-list-modal__tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 800; }
+.applicability-multi-list-modal__tab-status { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.applicability-multi-list-modal__footer { justify-content: flex-end; gap: 8px; padding: 12px 22px; }
+.applicability-multi-list-modal .btn-primary { border-color: var(--accent) !important; color: #fff !important; background: var(--accent) !important; }
+.applicability-multi-list-modal .btn-primary:hover,
+.applicability-multi-list-modal .btn-primary:focus-visible,
+.applicability-multi-list-modal .btn-primary:active { border-color: var(--accent-dark) !important; background: var(--accent-dark) !important; box-shadow: 0 0 0 .25rem rgb(255 75 19 / 20%); outline: 0; }
 .applicability-document-modal .analogs-modal__card { width: min(920px, calc(100vw - 24px)); height: min(720px, calc(100dvh - 24px)); }
 .applicability-document-modal__content { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 12px; padding: 0 22px 22px; }
 .applicability-document-modal__content p { flex: 0 0 auto; margin: 0; color: var(--muted); font-weight: 600; }
