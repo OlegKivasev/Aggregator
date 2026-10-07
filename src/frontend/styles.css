@@ -362,14 +362,13 @@ input {
 .applicability-multi-list-modal__oem { position: relative; margin-left: auto; color: var(--muted); outline: 0; }
 .applicability-multi-list-modal__oem:focus-visible .applicability-multi-list-modal__tab-status { color: var(--accent-dark); text-decoration: underline; text-underline-offset: 3px; }
 .applicability-multi-list-modal__tab-status { display: block; font-size: 12px; font-weight: 700; white-space: nowrap; }
-.applicability-multi-list-modal__oem-tooltip { position: absolute; z-index: 2; top: calc(100% + 9px); right: -8px; display: grid; min-width: 190px; max-width: min(320px, calc(100vw - 48px)); gap: 7px; padding: 10px; border: 1px solid #dce3ea; border-radius: 9px; color: #344054; background: #fff; box-shadow: 0 10px 24px rgb(16 24 40 / 18%); opacity: 0; pointer-events: none; transform: translateY(-4px); transition: opacity 120ms ease, transform 120ms ease; visibility: hidden; }
-.applicability-multi-list-modal__oem:hover .applicability-multi-list-modal__oem-tooltip,
-.applicability-multi-list-modal__oem:focus .applicability-multi-list-modal__oem-tooltip { opacity: 1; transform: translateY(0); visibility: visible; }
-.applicability-multi-list-modal__oem-tooltip-title { color: var(--muted); font-size: 11px; font-weight: 800; }
-.applicability-multi-list-modal__oem-tooltip-values { display: grid; gap: 5px; }
-.applicability-multi-list-modal__oem-tooltip-values > span { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 5px 7px; border: 1px solid #e6ebf0; border-radius: 5px; background: #f8fafc; }
-.applicability-multi-list-modal__oem-tooltip-sku { font: 700 11px/1.25 ui-monospace, SFMono-Regular, Consolas, monospace; }
-.applicability-multi-list-modal__oem-tooltip-brand { color: var(--muted); font-size: 11px; font-weight: 700; text-align: right; }
+.applicability-multi-list-modal__oem-popover { position: fixed; z-index: 3; display: grid; min-width: 190px; max-width: min(320px, calc(100vw - 24px)); gap: 7px; padding: 10px; border: 1px solid #dce3ea; border-radius: 9px; color: #344054; background: #fff; box-shadow: 0 10px 24px rgb(16 24 40 / 18%); pointer-events: none; }
+.applicability-multi-list-modal__oem-popover[hidden] { display: none; }
+.applicability-multi-list-modal__oem-popover-title { color: var(--muted); font-size: 11px; font-weight: 800; }
+.applicability-multi-list-modal__oem-popover-values { display: grid; gap: 5px; }
+.applicability-multi-list-modal__oem-popover-values > span { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 5px 7px; border: 1px solid #e6ebf0; border-radius: 5px; background: #f8fafc; }
+.applicability-multi-list-modal__oem-popover-sku { font: 700 11px/1.25 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.applicability-multi-list-modal__oem-popover-brand { color: var(--muted); font-size: 11px; font-weight: 700; text-align: right; }
 .applicability-multi-list-modal__footer { justify-content: flex-end; gap: 8px; padding: 12px 22px; }
 .applicability-multi-list-modal .btn-primary { border-color: var(--accent) !important; color: #fff !important; background: var(--accent) !important; }
 .applicability-multi-list-modal .btn-primary:hover,

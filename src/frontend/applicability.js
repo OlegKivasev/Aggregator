@@ -40,6 +40,7 @@ const multiListModal = document.querySelector("#applicability-multi-list-modal")
 const multiListForm = document.querySelector("#applicability-multi-list-form");
 const multiListTabs = document.querySelector("#applicability-multi-list-tabs");
 const multiListSubmit = document.querySelector("#applicability-multi-list-submit");
+const multiListOemPopover = document.querySelector("#applicability-multi-list-oem-popover");
 const closeMultiListButtons = [...document.querySelectorAll("[data-close-applicability-multi-list]")];
 const documentModal = document.querySelector("#applicability-document-modal");
 const documentText = document.querySelector("#applicability-document-text");
@@ -766,12 +767,55 @@ const openDocumentModal = (tab = getActiveTab(), returnFocus = document.activeEl
 };
 
 const closeMultiListModal = (restoreFocus = true) => {
+  hideMultiListOemPopover();
   multiListModal.hidden = true;
   if (restoreFocus && multiListModalReturnFocus?.isConnected) multiListModalReturnFocus.focus();
   multiListModalReturnFocus = null;
 };
 
 let multiListModalReturnFocus = null;
+
+const hideMultiListOemPopover = () => {
+  multiListOemPopover.hidden = true;
+  multiListOemPopover.replaceChildren();
+  multiListOemPopover.style.removeProperty("left");
+  multiListOemPopover.style.removeProperty("top");
+};
+
+const showMultiListOemPopover = (anchor, oemEntries) => {
+  multiListOemPopover.replaceChildren();
+  const title = document.createElement("span");
+  title.className = "applicability-multi-list-modal__oem-popover-title";
+  title.textContent = "OEM-артикулы";
+  const values = document.createElement("span");
+  values.className = "applicability-multi-list-modal__oem-popover-values";
+  oemEntries.forEach(({ sku, brands }) => {
+    const value = document.createElement("span");
+    const skuValue = document.createElement("span");
+    skuValue.className = "applicability-multi-list-modal__oem-popover-sku";
+    skuValue.textContent = sku;
+    value.append(skuValue);
+    if (brands.length) {
+      const brandValue = document.createElement("span");
+      brandValue.className = "applicability-multi-list-modal__oem-popover-brand";
+      brandValue.textContent = brands.join(", ");
+      value.append(brandValue);
+    }
+    values.append(value);
+  });
+  multiListOemPopover.append(title, values);
+  multiListOemPopover.hidden = false;
+  const anchorBounds = anchor.getBoundingClientRect();
+  const popoverBounds = multiListOemPopover.getBoundingClientRect();
+  const margin = 12;
+  const left = Math.max(margin, Math.min(anchorBounds.right - popoverBounds.width + 8, window.innerWidth - popoverBounds.width - margin));
+  const below = anchorBounds.bottom + 9;
+  const top = below + popoverBounds.height <= window.innerHeight - margin
+    ? below
+    : Math.max(margin, anchorBounds.top - popoverBounds.height - 9);
+  multiListOemPopover.style.left = `${left}px`;
+  multiListOemPopover.style.top = `${top}px`;
+};
 
 const selectedMultiListTabs = () => [...multiListTabs.querySelectorAll("input:checked")]
   .map((input) => tabs.find((tab) => tab.id === input.value))
@@ -808,30 +852,11 @@ const renderMultiListTabs = () => {
     const status = document.createElement("span");
     status.className = "applicability-multi-list-modal__tab-status";
     status.textContent = `OEM: ${oemEntries.length}`;
-    const tooltip = document.createElement("span");
-    tooltip.className = "applicability-multi-list-modal__oem-tooltip";
-    tooltip.setAttribute("role", "tooltip");
-    const tooltipTitle = document.createElement("span");
-    tooltipTitle.className = "applicability-multi-list-modal__oem-tooltip-title";
-    tooltipTitle.textContent = "OEM-артикулы";
-    const tooltipValues = document.createElement("span");
-    tooltipValues.className = "applicability-multi-list-modal__oem-tooltip-values";
-    oemEntries.forEach(({ sku, brands }) => {
-      const value = document.createElement("span");
-      const skuValue = document.createElement("span");
-      skuValue.className = "applicability-multi-list-modal__oem-tooltip-sku";
-      skuValue.textContent = sku;
-      value.append(skuValue);
-      if (brands.length) {
-        const brandValue = document.createElement("span");
-        brandValue.className = "applicability-multi-list-modal__oem-tooltip-brand";
-        brandValue.textContent = brands.join(", ");
-        value.append(brandValue);
-      }
-      tooltipValues.append(value);
-    });
-    tooltip.append(tooltipTitle, tooltipValues);
-    oem.append(status, tooltip);
+    oem.addEventListener("pointerenter", () => showMultiListOemPopover(oem, oemEntries));
+    oem.addEventListener("pointerleave", hideMultiListOemPopover);
+    oem.addEventListener("focus", () => showMultiListOemPopover(oem, oemEntries));
+    oem.addEventListener("blur", hideMultiListOemPopover);
+    oem.append(status);
     label.append(input, name, oem);
     multiListTabs.append(label);
   });
@@ -990,6 +1015,7 @@ articleNameForm.addEventListener("submit", (event) => {
 });
 articleNameInput.addEventListener("input", () => articleNameInput.setCustomValidity(""));
 closeMultiListButtons.forEach((button) => button.addEventListener("click", () => closeMultiListModal()));
+multiListTabs.addEventListener("scroll", hideMultiListOemPopover);
 multiListForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const selectedTabs = selectedMultiListTabs();
