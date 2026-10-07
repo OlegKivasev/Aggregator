@@ -222,6 +222,17 @@ const setFallbackKeyStatus = (message) => {
   fallbackKeyStatus.hidden = !message;
 };
 
+const pendingFallbackKeyInput = () => fallbackKeyList
+  .querySelector(".applicability-key-field:not([data-fallback-key-index]) input");
+
+const updateFallbackKeyAddButton = () => {
+  const pendingInput = pendingFallbackKeyInput();
+  addFallbackKeyButton.disabled = Boolean(pendingInput);
+  addFallbackKeyButton.title = pendingInput
+    ? "Сохраните или удалите текущий запасной ключ."
+    : "Добавить запасной ключ";
+};
+
 const setPasswordVisibility = (input, button) => {
   const visible = input.type === "text";
   input.type = visible ? "password" : "text";
@@ -265,6 +276,7 @@ const createFallbackKeyRow = ({ index = null, value = "" } = {}) => {
     const storedIndex = row.dataset.fallbackKeyIndex;
     if (storedIndex === undefined) {
       row.remove();
+      updateFallbackKeyAddButton();
       return;
     }
     try {
@@ -299,6 +311,7 @@ const createFallbackKeyRow = ({ index = null, value = "" } = {}) => {
       input.setAttribute("aria-label", `Сохранённый запасной API-ключ ${state.fallbackKeyCount}`);
       row.dataset.fallbackKeyIndex = String(state.fallbackKeyCount - 1);
       fallbackKeyCount = state.fallbackKeyCount;
+      updateFallbackKeyAddButton();
       setFallbackKeyStatus("Запасной ключ сохранён");
     } catch (error) {
       setFallbackKeyStatus(error instanceof Error ? error.message : "Не удалось сохранить запасной ключ.");
@@ -314,6 +327,7 @@ const renderFallbackKeyRows = () => {
     { length: fallbackKeyCount },
     (_, index) => createFallbackKeyRow({ index }),
   ));
+  updateFallbackKeyAddButton();
 };
 
 const saveApiKey = async () => {
@@ -744,7 +758,7 @@ const renderTabs = () => {
     status.setAttribute("aria-hidden", "true");
     const title = document.createElement("span");
     title.className = "search-tab__title";
-    const tabTitle = tab.name || tab.sku || `Новая применимость ${index + 1}`;
+    const tabTitle = tab.name || `Новая применимость ${index + 1}`;
     title.textContent = tabTitle;
     button.title = tabTitle;
     button.setAttribute("aria-label", tabTitle);
@@ -829,7 +843,7 @@ const loadMakes = async () => {
 markupTab.addEventListener("click", () => setActiveFunction("markup"));
 applicabilityTab.addEventListener("click", () => setActiveFunction("applicability"));
 newApplicabilityTabButton.addEventListener("click", addTab);
-listButton.addEventListener("click", openDocumentModal);
+listButton.addEventListener("click", () => openDocumentModal());
 closeArticleNameButtons.forEach((button) => button.addEventListener("click", () => closeArticleNameModal()));
 articleNameForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -903,8 +917,14 @@ deleteApiKeyButton.addEventListener("click", async () => {
   }
 });
 addFallbackKeyButton.addEventListener("click", () => {
+  const pendingInput = pendingFallbackKeyInput();
+  if (pendingInput) {
+    pendingInput.focus();
+    return;
+  }
   const row = createFallbackKeyRow();
   fallbackKeyList.append(row);
+  updateFallbackKeyAddButton();
   row.querySelector("input")?.focus();
 });
 

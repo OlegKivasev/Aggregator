@@ -646,6 +646,10 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /OEM-артикул: \$\{sku\}/);
   assert.match(applicability, /const openArticleNameModal/);
   assert.match(applicability, /openDocumentAfterArticleNaming/);
+  assert.match(applicability, /listButton\.addEventListener\("click", \(\) => openDocumentModal\(\)\);/);
+  assert.match(applicability, /const tabTitle = tab\.name \|\| `Новая применимость \$\{index \+ 1\}`;/);
+  assert.match(applicability, /const updateFallbackKeyAddButton =/);
+  assert.match(applicability, /addFallbackKeyButton\.disabled = Boolean\(pendingInput\);/);
   assert.doesNotMatch(applicability, /window\.prompt/);
   assert.match(applicability, /let documentFormat = "structured"/);
   assert.match(applicability, /const visibleDocumentColumns/);
