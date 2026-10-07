@@ -456,36 +456,7 @@ test("applicability canonicalizes exact technical aliases, drivetrain, and SANTA
   );
 });
 
-test("applicability detects only explicit transmission aliases with deterministic priority", () => {
-  const transmission = (carName) => formatApplicabilityVehicle({
-    carName,
-    makeName: "KIA",
-    modelName: "CEED (CD)",
-    yearEnd: null,
-    yearStart: "01.2020",
-  }, new Set(["transmission"]));
-
-  assert.equal(transmission("1.6 6M/T"), "Механика");
-  assert.equal(transmission("1.6 3-speed manual"), "Механика");
-  assert.equal(transmission("1.6 8AT"), "АКПП");
-  assert.equal(transmission("2.0 8-speed automatic"), "АКПП");
-  assert.equal(transmission("2.0 ZF 8HP"), "АКПП");
-  assert.equal(transmission("2.0 300 HP"), "отсутствует");
-  assert.equal(transmission("1.6 7DCT automatic"), "Робот");
-  assert.equal(transmission("1.6 5AMT"), "Робот");
-  assert.equal(transmission("1.6 CVT automatic"), "Вариатор");
-  assert.equal(transmission("1.6 C.V.T."), "Вариатор");
-  assert.equal(transmission("1.6 e-CVT"), "Вариатор");
-  assert.equal(transmission("1.6 Steptronic DCT"), "Робот");
-  assert.equal(transmission("1.6 7G-Tronic"), "АКПП");
-  assert.equal(transmission("1.6 AWD 4WD 4x4 HTRAC"), "отсутствует");
-  assert.equal(transmission("1.6 CVT DCT"), "отсутствует");
-  assert.equal(transmission("1.6 CVVT"), "отсутствует");
-  assert.equal(transmission("1.6 INVECS-III"), "отсутствует");
-  assert.equal(transmission("1.6 INVECS-III CVT"), "Вариатор");
-});
-
-test("applicability removes only recognized transmission aliases from the characteristic", () => {
+test("applicability retains transmission designations in the optional modification", () => {
   const vehicle = (carName) => ({
     carName,
     makeName: "KIA",
@@ -493,12 +464,10 @@ test("applicability removes only recognized transmission aliases from the charac
     yearEnd: null,
     yearStart: "01.2020",
   });
-  const columns = new Set(["capacity", "transmission", "carName"]);
+  const columns = new Set(["capacity", "carName"]);
 
-  assert.equal(formatApplicabilityVehicle(vehicle("1.6 T-GDI 7DCT Automatic GT"), columns), "1.6, Робот, T-GDI GT");
-  assert.equal(formatApplicabilityVehicle(vehicle("2.0 CRDi 8AT AWD"), columns), "2.0, АКПП, CRDi AWD");
-  assert.equal(formatApplicabilityVehicle(vehicle("1.6 MPI 6M/T"), columns), "1.6, Механика, MPI");
-  assert.equal(formatApplicabilityVehicle(vehicle("2.0 CVT AWD"), columns), "2.0, Вариатор, AWD");
-  assert.equal(formatApplicabilityVehicle(vehicle("1.6 7DCT Automatic GT"), columns), "1.6, Робот, GT");
-  assert.equal(formatApplicabilityVehicle(vehicle("1.6 CVT DCT AWD"), columns), "1.6, отсутствует, CVT DCT AWD");
+  assert.equal(formatApplicabilityVehicle(vehicle("1.6 T-GDI 7DCT Automatic GT"), columns), "1.6, T-GDI 7DCT Automatic GT");
+  assert.equal(formatApplicabilityVehicle(vehicle("2.0 CRDi 8AT AWD"), columns), "2.0, CRDi 8AT AWD");
+  assert.equal(formatApplicabilityVehicle(vehicle("1.6 MPI 6M/T"), columns), "1.6, MPI 6M/T");
+  assert.equal(formatApplicabilityVehicle(vehicle("2.0 CVT AWD"), columns), "2.0, CVT AWD");
 });

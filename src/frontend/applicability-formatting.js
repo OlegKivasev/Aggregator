@@ -1,4 +1,3 @@
-import { transmissionAliases } from "./transmission-aliases.js";
 import { normalizeElectrification } from "./electrification-normalizer.js";
 
 const combinedVanAndSuvPattern = /автофургон\s*\/\s*спортивно-утилитарный\s+автомобиль/i;
@@ -90,72 +89,6 @@ const codeFragments = (modelName) => {
 
 const canonicalizeTechnicalTokens = (value) => [...compoundTechnicalCanonicalizations, ...technicalTokenCanonicalizations]
   .reduce((normalized, [pattern, canonical]) => normalized.replace(pattern, canonical), normalizeElectrification(value));
-
-const normalizeTransmissionText = (value) => textValue(value)
-  .toLocaleLowerCase()
-  .replace(/[‐‑‒–—―-]/g, " ")
-  .replace(/[./]/g, " ")
-  .replace(/\s/g, " ");
-
-const escapeRegularExpression = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const aliasExpression = (normalizedAlias) => escapeRegularExpression(normalizedAlias).replaceAll(" ", "\\s+");
-
-const numericTransmissionPatterns = [
-  { canonicalType: "Робот", priority: 575, subtype: "DCT", conflictRelevant: true, pattern: /(?<![\p{L}\p{N}])(?:\d+\s*(?:dct|dsg|amt)|(?:dct|dsg|amt)\s*\d+)(?![\p{L}\p{N}])/giu },
-  { canonicalType: "Вариатор", priority: 525, subtype: "CVT", conflictRelevant: true, pattern: /(?<![\p{L}\p{N}])cvt\s*\d+(?![\p{L}\p{N}])/giu },
-  { canonicalType: "Механика", priority: 525, subtype: "manual", conflictRelevant: true, pattern: /(?<![\p{L}\p{N}])(?:\d+\s*(?:speed\s+)?(?:manual|mt|m\s*t|bvm)|(?:mt|m\s*t|bvm)\s*\d+)(?![\p{L}\p{N}])/giu },
-  { canonicalType: "АКПП", priority: 525, subtype: "torque_converter", conflictRelevant: true, pattern: /(?<![\p{L}\p{N}])(?:\d+\s*(?:speed\s+)?(?:automatic|at|a\s*t|bva|eat)|(?:at|a\s*t|bva|eat)\s*\d+)(?![\p{L}\p{N}])/giu },
-  { canonicalType: "АКПП", priority: 575, subtype: "torque_converter", pattern: /(?<![\p{L}\p{N}])zf\s*\d+\s*hp(?![\p{L}\p{N}])/giu },
-  { canonicalType: "АКПП", priority: 575, subtype: "torque_converter", pattern: /(?<![\p{L}\p{N}])(?:4|5|7|9)g\s*tronic(?:\s+plus)?(?![\p{L}\p{N}])/giu },
-];
-
-const aliasMatches = (normalized) => transmissionAliases.flatMap((alias) => {
-  const expression = new RegExp(`(^|\\s)(${aliasExpression(alias.normalizedAlias)})(?=$|\\s)`, "giu");
-  return [...normalized.matchAll(expression)].map((match) => ({
-    ...alias,
-    end: match.index + match[0].length,
-    start: match.index + match[1].length,
-  }));
-});
-
-const numericMatches = (normalized) => numericTransmissionPatterns.flatMap((definition) => {
-  definition.pattern.lastIndex = 0;
-  return [...normalized.matchAll(definition.pattern)].map((match) => ({
-    ...definition,
-    end: match.index + match[0].length,
-    start: match.index,
-  }));
-});
-
-const selectTransmissionMatches = (matches) => matches
-  .sort((first, second) => second.priority - first.priority || (second.end - second.start) - (first.end - first.start))
-  .reduce((selected, match) => selected.some((other) => match.start < other.end && other.start < match.end) ? selected : [...selected, match], []);
-
-const removeTransmissionAliases = (source, matches) => [...matches]
-  .sort((first, second) => second.start - first.start)
-  .reduce((remaining, match) => `${remaining.slice(0, match.start)} ${remaining.slice(match.end)}`, source)
-  .replace(/\s{2,}/g, " ")
-  .replace(/\s+([,;:/)])/g, "$1")
-  .replace(/([(/])\s+/g, "$1")
-  .replace(/(?:^|\s)[‐‑‒–—―-]+(?=\s|$)/gu, " ")
-  .trim() || "отсутствует";
-
-const extractTransmission = (carName) => {
-  const normalized = normalizeTransmissionText(carName);
-  if (normalized === "отсутствует") return { carName, transmission: "отсутствует" };
-  const matches = selectTransmissionMatches([...aliasMatches(normalized), ...numericMatches(normalized)]);
-  const concreteTypes = new Set(matches.filter(({ conflictRelevant }) => conflictRelevant).map(({ canonicalType }) => canonicalType));
-  if (concreteTypes.size > 1 || !matches.length) return { carName, transmission: "отсутствует" };
-
-  const highestPriority = Math.max(...matches.map(({ priority }) => priority));
-  const winningTypes = new Set(matches.filter(({ priority }) => priority === highestPriority).map(({ canonicalType }) => canonicalType));
-  if (winningTypes.size !== 1) return { carName, transmission: "отсутствует" };
-
-  const transmission = [...winningTypes][0];
-  const removableMatches = matches.filter((match) => match.canonicalType === transmission || match.removableWithWinner);
-  return { carName: removeTransmissionAliases(carName, removableMatches), transmission };
-};
 
 const compatibleBodyCode = (baseCodes, candidate) => {
   const normalizedCandidate = candidate.toLocaleUpperCase();
@@ -276,8 +209,7 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCod
   const codeVariants = refinedBodyCode.bodyCode
     ? [refinedBodyCode.bodyCode]
     : model === "SAMARA" && codes.length ? codes : [recoveredCode ?? bodyCode(modelName)];
-  const transmission = extractTransmission(refinedBodyCode.carName);
-  const modification = canonicalizeTechnicalTokens(transmission.carName);
+  const modification = canonicalizeTechnicalTokens(refinedBodyCode.carName);
 
   return codeVariants
     .map((code) => [
@@ -287,10 +219,9 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCod
       ["modelName", model === "SAMARA" && code !== "отсутствует" ? code : model],
       ["years", yearPeriod(record.yearStart, record.yearEnd)],
       ["capacity", capacity],
-      ["transmission", transmission.transmission],
       ["carName", modification],
     ]
-      .filter(([column]) => visibleColumns ? visibleColumns.has(column) : column !== "transmission")
+      .filter(([column]) => !visibleColumns || visibleColumns.has(column))
       .map(([, value]) => value)
       .join(", "))
     .join("\n");
