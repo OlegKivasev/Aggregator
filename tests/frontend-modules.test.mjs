@@ -640,6 +640,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /fetch\("\/api\/applicability\/api-key"/);
   assert.match(applicability, /JSON\.stringify\(\{ sku, brand \}\)/);
   assert.match(applicability, /className = "applicability-expand"/);
+  assert.match(applicability, /article\.className = "applicability-article"/);
+  assert.match(styles, /\.applicability-article\s*\{[^}]*user-select: text;/s);
   assert.match(applicability, /JSON\.stringify\(entry\.results, null, 2\)/);
   assert.match(applicability, /const buildApplicabilityDocument/);
   assert.match(applicability, /const groupSearchesBySku/);

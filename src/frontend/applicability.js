@@ -663,6 +663,7 @@ const renderResults = (tab) => {
     row.className = "applicability-summary-row";
     row.dataset.applicabilityEntryId = entry.id;
     const articleCell = document.createElement("td");
+    articleCell.className = "applicability-article-cell";
     const expandButton = document.createElement("button");
     expandButton.type = "button";
     expandButton.className = "applicability-expand";
@@ -674,9 +675,10 @@ const renderResults = (tab) => {
     arrow.setAttribute("aria-hidden", "true");
     arrow.textContent = "▸";
     const article = document.createElement("span");
+    article.className = "applicability-article";
     article.textContent = entry.sku;
-    expandButton.append(arrow, article);
-    articleCell.append(expandButton);
+    expandButton.append(arrow);
+    articleCell.append(expandButton, article);
     row.append(articleCell);
     appendCell(row, entry.makeName);
     appendCell(row, String(entry.results.length));
