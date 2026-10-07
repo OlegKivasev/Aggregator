@@ -52,6 +52,7 @@ let contextMenuEntryAnchor = null;
 let documentModalReturnFocus = null;
 let documentFormat = "structured";
 let documentEntries = [];
+let documentSourceArticleName = "";
 let applicabilityToastTimer = null;
 let cachedBrandLookupTimer = null;
 let cachedBrandLookupController = null;
@@ -404,18 +405,25 @@ const executeApplicabilitySearch = async (sku, brand, signal) => {
 
 const duplicateSearch = (tab, sku, brand) => tab.searches.find((entry) => searchIdentity(entry.sku, entry.makeName) === searchIdentity(sku, brand));
 
+const groupSearchesBySku = (entries) => [...entries.reduce((groups, entry) => {
+  const entriesForSku = groups.get(entry.sku) ?? [];
+  entriesForSku.push(entry);
+  groups.set(entry.sku, entriesForSku);
+  return groups;
+}, new Map()).entries()];
+
 const buildApplicabilityDocument = (entries, format = documentFormat) => {
   const visibleColumns = visibleDocumentColumns();
-  return entries
-    .map((entry) => {
-    const contents = format === "structured"
-      ? formatApplicabilityVehicles(entry.results, visibleColumns)
-      : JSON.stringify(entry.results, null, 2);
-    return format !== "structured" || visibleColumns.has("article")
-      ? `Артикул: ${entry.sku}\n${contents}`
-      : contents;
-  })
-  .join("\n\n");
+  if (format !== "structured") {
+    return entries
+      .map((entry) => `Артикул: ${entry.sku}\n${JSON.stringify(entry.results, null, 2)}`)
+      .join("\n\n");
+  }
+
+  const oemSections = groupSearchesBySku(entries)
+    .map(([sku, entriesForSku]) => `OEM-артикул: ${sku}\n${formatApplicabilityVehicles(entriesForSku.flatMap((entry) => entry.results), visibleColumns)}`)
+    .join("\n\n");
+  return `Артикул: ${documentSourceArticleName}\n\n${oemSections}`;
 };
 
 const renderApplicabilityDocument = ({ preserveTextState = false } = {}) => {
@@ -570,6 +578,16 @@ const openDocumentModal = () => {
   if (!tab) return;
   documentEntries = successfulSearches(tab);
   if (!documentEntries.length) return;
+  const sourceArticleName = window.prompt("Введите наименование исходного артикула", tab.name || tab.sku);
+  if (sourceArticleName === null) return;
+  documentSourceArticleName = normalizeTabName(sourceArticleName);
+  if (!documentSourceArticleName) {
+    showApplicabilityToast("Введите наименование исходного артикула.", "error");
+    return;
+  }
+  tab.name = documentSourceArticleName;
+  renderTabs();
+  saveApplicabilityState();
   documentModalReturnFocus = document.activeElement;
   renderApplicabilityDocument();
   documentModal.hidden = false;
@@ -764,7 +782,7 @@ const renameTab = (tabId) => {
   if (!tab) return;
   const index = tabs.indexOf(tab);
   const defaultName = tab.sku || `Новая применимость ${index + 1}`;
-  const name = window.prompt("Введите название вкладки", tab.name || defaultName);
+  const name = window.prompt("Введите наименование исходного артикула", tab.name || defaultName);
   if (name === null) return;
   tab.name = normalizeTabName(name);
   renderTabs();

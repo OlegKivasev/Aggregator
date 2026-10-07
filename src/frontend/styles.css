@@ -303,9 +303,9 @@ input {
 .applicability-results-table th,
 .applicability-results-table td { padding: 10px 12px; }
 .applicability-results-footer { display: flex; min-height: 58px; flex: 0 0 auto; align-items: center; justify-content: flex-end; padding: 9px 12px; border-top: 1px solid var(--line); background: #fff; }
-.applicability-list-button { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 14px; border-color: var(--accent); background: var(--accent); font-weight: 800; }
+.applicability-list-button { --bs-btn-active-bg: var(--accent-dark); --bs-btn-active-border-color: var(--accent-dark); --bs-btn-focus-shadow-rgb: 255, 75, 19; display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 14px; border-color: var(--accent); color: #fff; background: var(--accent); font-weight: 800; }
 .applicability-list-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
-.applicability-list-button:hover, .applicability-list-button:focus-visible { border-color: var(--accent-dark); background: var(--accent-dark); }
+.applicability-list-button:hover, .applicability-list-button:focus-visible, .applicability-list-button:active, .applicability-list-button:active:focus { border-color: var(--accent-dark); background: var(--accent-dark); box-shadow: 0 0 0 .25rem rgb(255 75 19 / 24%); }
 .applicability-list-button:disabled { border-color: var(--accent); color: #fff; background: var(--accent); opacity: 0.55; cursor: not-allowed; }
 .applicability-results-panel .results-panel__status[data-tone="empty"] { color: #b42318; }
 .applicability-summary-row td { background: #fff; }
@@ -343,7 +343,7 @@ input {
 .applicability-document-controls { display: flex; align-items: end; flex: 0 0 auto; gap: 10px; }
 .applicability-document-control { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 800; }
 .applicability-document-save { display: inline-grid; width: 36px; height: 36px; margin-left: auto; padding: 8px; place-items: center; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-.applicability-document-save:hover, .applicability-document-save:focus-visible { border-color: var(--accent); background: #fff1eb; outline: 0; }
+.applicability-document-save:hover, .applicability-document-save:focus-visible, .applicability-document-save:active { border-color: var(--accent); background: #fff1eb; outline: 0; box-shadow: 0 0 0 .25rem rgb(255 75 19 / 16%); }
 .applicability-document-save img { display: block; width: 18px; height: 18px; object-fit: contain; }
 .applicability-document-save-status { margin: -4px 0 0; color: #18794e; font-size: 12px; font-weight: 700; }
 .applicability-document-save-status[hidden] { display: none; }
