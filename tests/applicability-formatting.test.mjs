@@ -15,6 +15,32 @@ test("applicability compact list extracts body type, year and engine capacity", 
   );
 });
 
+test("applicability structured list keeps bare numeric EV variants as modifications", () => {
+  const cases = [
+    ["58", "2021", "58"],
+    ["58 AWD", "2021", "58 AWD"],
+    ["77", "2021", "77"],
+    ["77 GT AWD", "2021", "77 GT AWD"],
+    ["84", "2024", "84"],
+    ["84 GT AWD", "2024", "84 GT AWD"],
+    ["100 AWD", "2023", "100 AWD"],
+    ["58.0 AWD", "2021", "58.0 AWD"],
+  ];
+
+  cases.forEach(([carName, yearStart, expectedCarName]) => {
+    assert.equal(
+      formatApplicabilityVehicle({
+        carName,
+        makeName: "KIA",
+        modelName: carName === "100 AWD" ? "EV9" : "EV6",
+        yearEnd: null,
+        yearStart,
+      }),
+      `отсутствует, отсутствует, KIA, ${carName === "100 AWD" ? "EV9" : "EV6"}, ${yearStart}-н.в., отсутствует, ${expectedCarName}`,
+    );
+  });
+});
+
 test("applicability compact list uses present for an absent end year", () => {
   assert.equal(
     formatApplicabilityVehicle({

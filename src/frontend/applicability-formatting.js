@@ -1,4 +1,7 @@
 const combinedVanAndSuvPattern = /автофургон\s*\/\s*спортивно-утилитарный\s+автомобиль/i;
+const engineDisplacementPattern = /(?:^|\s)(\d{1,2}[.,]\d{1,2})(?=\s|$)/;
+const minimumEngineDisplacementLiters = 0.5;
+const maximumEngineDisplacementLiters = 10;
 
 const bodyTypePatterns = [
   ["SUV/Внедорожник", combinedVanAndSuvPattern],
@@ -79,9 +82,13 @@ const modelWithoutBodyType = (modelName) => {
 const splitCarName = (carName) => {
   const source = textValue(carName);
   if (source === "отсутствует") return { capacity: source, remaining: source };
-  const match = source.match(/(?:^|\s)(\d{1,2}(?:[.,]\d{1,2})?)(?=\s|$)/);
+  const match = source.match(engineDisplacementPattern);
   if (!match || match.index === undefined) return { capacity: "отсутствует", remaining: source };
   const capacity = match[1].replace(",", ".");
+  const capacityLiters = Number(capacity);
+  if (capacityLiters < minimumEngineDisplacementLiters || capacityLiters > maximumEngineDisplacementLiters) {
+    return { capacity: "отсутствует", remaining: source };
+  }
   const remaining = `${source.slice(0, match.index)} ${source.slice(match.index + match[0].length)}`.trim();
   return { capacity, remaining: remaining || "отсутствует" };
 };
