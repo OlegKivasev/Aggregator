@@ -386,7 +386,9 @@ input {
 .applicability-key-method > summary,
 .applicability-fallback-keys > summary { padding: 13px 15px; color: var(--ink); cursor: pointer; font-size: 13px; font-weight: 800; }
 .applicability-key-method__content { padding: 0 15px 15px; }
-.applicability-key-field input { padding-right: 76px; }
+.applicability-key-field { display: block; width: 100%; }
+.applicability-key-field input { width: 100%; padding: 9px 76px 9px 12px; border: 1px solid #dce3ea; border-radius: 8px; outline: 0; }
+.applicability-key-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 75, 19, .12); }
 .applicability-key-field .password-toggle { right: 40px; }
 .applicability-key-delete { position: absolute; top: 50%; right: 8px; display: grid; width: 28px; height: 28px; place-items: center; transform: translateY(-50%); border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
 .applicability-key-delete:hover,

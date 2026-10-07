@@ -602,6 +602,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-fallback-keys"/);
   assert.match(html, /id="applicability-fallback-key-list"/);
   assert.match(html, /id="applicability-fallback-key-add"/);
+  assert.doesNotMatch(html, /Нажмите Enter, чтобы сохранить введённый ключ/);
   assert.match(html, /src="\/applicability-key-delete\.png"/);
   assert.match(html, /aria-label="Показать API-ключ"/);
   assert.match(html, /OEM-артикул[\s\S]*?Производитель[\s\S]*?Количество/);
@@ -609,6 +610,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(styles, /\.applicability-list-button\s*\{[^}]*--bs-btn-active-bg: var\(--accent-dark\);[^}]*--bs-btn-focus-shadow-rgb: 255, 75, 19;/s);
   assert.match(styles, /\.applicability-list-button:hover[^}]*\.applicability-list-button:focus-visible[^}]*\.applicability-list-button:active[^}]*background: var\(--accent-dark\);/s);
   assert.match(styles, /\.applicability-fallback-key-add\s*\{[^}]*background: var\(--accent\) !important;/s);
+  assert.match(styles, /\.applicability-key-field input\s*\{[^}]*width: 100%;[^}]*border: 1px solid #dce3ea;/s);
   assert.match(html, /id="applicability-toast"/);
   assert.match(html, /id="applicability-article-name-modal"[\s\S]*?id="applicability-article-name-form"[\s\S]*?id="applicability-article-name-input"/);
   assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
@@ -673,6 +675,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /activeFunctionStorageKey/);
   assert.match(applicability, /apiKeyInput\.addEventListener\("keydown"/);
   assert.match(applicability, /deleteApiKeyButton\.addEventListener\("click"/);
+  assert.match(applicability, /state\.configured \? "Ключ сохранён" : ""/);
+  assert.doesNotMatch(applicability, /"Ключ удалён"/);
   assert.match(applicability, /const createTab/);
   assert.match(applicability, /const renderTabs/);
   assert.match(applicability, /appendCell\(row, entry\.makeName\)/);

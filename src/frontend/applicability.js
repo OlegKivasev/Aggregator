@@ -896,7 +896,7 @@ deleteApiKeyButton.addEventListener("click", async () => {
       headers: { Accept: "application/json" },
     }));
     apiKeyInput.value = "";
-    setApiKeyStatus(state.configured ? "Ключ сохранён" : "Ключ удалён", state.configured);
+    setApiKeyStatus(state.configured ? "Ключ сохранён" : "", state.configured);
     fallbackKeyCount = state.fallbackKeyCount;
   } catch (error) {
     setApiKeyStatus(error instanceof Error ? error.message : "Не удалось удалить API-ключ.", hasStoredApiKey);
