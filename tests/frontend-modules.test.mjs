@@ -601,6 +601,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /aria-label="Показать API-ключ"/);
   assert.match(html, /OEM-артикул[\s\S]*?Производитель[\s\S]*?Количество/);
   assert.match(html, /id="applicability-list-button"/);
+  assert.match(styles, /\.applicability-list-button:disabled\s*\{[^}]*background: var\(--accent\);/s);
   assert.match(html, /id="applicability-toast"/);
   assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
   assert.match(html, /id="applicability-document-save"[\s\S]*?src="\/applicability-save\.png"/);

@@ -306,7 +306,7 @@ input {
 .applicability-list-button { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 14px; border-color: var(--accent); background: var(--accent); font-weight: 800; }
 .applicability-list-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .applicability-list-button:hover, .applicability-list-button:focus-visible { border-color: var(--accent-dark); background: var(--accent-dark); }
-.applicability-list-button:disabled { opacity: 0.55; cursor: not-allowed; }
+.applicability-list-button:disabled { border-color: var(--accent); color: #fff; background: var(--accent); opacity: 0.55; cursor: not-allowed; }
 .applicability-results-panel .results-panel__status[data-tone="empty"] { color: #b42318; }
 .applicability-summary-row td { background: #fff; }
 .applicability-expand {
