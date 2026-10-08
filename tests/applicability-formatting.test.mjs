@@ -297,14 +297,35 @@ test("applicability promotes compatible car-name code groups regardless of cardi
     "отсутствует, (16V)",
   );
   const nissanEvidence = buildApplicabilityVariantCodeContext([
-    { carName: "1.5 dCi 110 (M20N, M20NN)", makeName: "NISSAN", modelName: "NV200 / EVALIA Фургон", yearEnd: null, yearStart: "01.2010" },
-    { carName: "1.5 dCi 90 (M20)", makeName: "NISSAN", modelName: "NV200 / EVALIA", yearEnd: null, yearStart: "01.2010" },
+    { carName: "1.5 dCi 90 (M20, M20M)", makeName: "NISSAN", modelName: "NV200 / EVALIA Bus (M2_)", yearEnd: null, yearStart: "01.2010" },
   ]);
   assert.equal(
     formatApplicabilityVehicles([
       { carName: "1.5 dCi 90 (M20, M20M)", makeName: "NISSAN", modelName: "NV200 / EVALIA Bus", yearEnd: null, yearStart: "01.2010" },
     ], columns, nissanEvidence),
     "M20/M20M, dCi 90",
+  );
+  const specificCodeEvidence = buildApplicabilityVariantCodeContext([
+    { carName: "3.0", makeName: "TOYOTA", modelName: "AVALON (MCX10R)", yearEnd: "12.2004", yearStart: "01.2000" },
+    { carName: "2.0", makeName: "MITSUBISHI", modelName: "L 300 III Фургон (P23W)", yearEnd: "12.1994", yearStart: "01.1986" },
+    { carName: "2.0", makeName: "MITSUBISHI", modelName: "L 300 III Фургон (P23V)", yearEnd: "12.1994", yearStart: "01.1986" },
+  ]);
+  assert.deepEqual(
+    formatApplicabilityVehicles([
+      { carName: "3.0 (MCX10R)", makeName: "TOYOTA", modelName: "AVALON (X2)", yearEnd: "12.2004", yearStart: "01.2000" },
+      { carName: "2.0 (P23W, P23V)", makeName: "MITSUBISHI", modelName: "L 300 III Фургон (P0_V, P1_V, P2_V)", yearEnd: "12.1994", yearStart: "01.1986" },
+    ], columns, specificCodeEvidence).split("\n"),
+    ["MCX10R, отсутствует", "P23W/P23V, отсутствует"],
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "2.0 (EBL, EBS, ECL, EDS, EDL, EGL, ESS, ESL, EUS)",
+      makeName: "FORD",
+      modelName: "TRANSIT Bus (E_ _)",
+      yearEnd: "12.1994",
+      yearStart: "01.1986",
+    }, columns),
+    "EBL/EBS/ECL/EDS/EDL/EGL/ESS/ESL/EUS, отсутствует",
   );
 });
 
@@ -329,6 +350,29 @@ test("applicability retains inferred body aliases in the model identity", () => 
     }),
     "Вэн, N68, CITROËN, XSARA PICASSO, 1999-н.в., 2.0, HDi",
   );
+});
+
+test("applicability keeps multiword body and marketing phrases atomic in model identity", () => {
+  const cases = [
+    ["MITSUBISHI", "SPACE WAGON (D0_V/W)", "Универсал", "SPACE WAGON"],
+    ["OPEL", "ASTRA J Sports Tourer (P10)", "Универсал", "ASTRA J Sports Tourer"],
+    ["FIAT", "STILO Multi Wagon (192)", "Универсал", "STILO Multi Wagon"],
+    ["BMW", "4 Gran Coupe (F36)", "Купе", "4 Gran Coupe"],
+    ["BMW", "2 Active Tourer (F45)", "Вэн", "2 Active Tourer"],
+  ];
+
+  cases.forEach(([makeName, modelName, expectedBodyType, expectedModelName]) => {
+    assert.equal(
+      formatApplicabilityVehicle({
+        carName: "1.6",
+        makeName,
+        modelName,
+        yearEnd: null,
+        yearStart: "01.2010",
+      }),
+      `${expectedBodyType}, ${modelName.match(/\(([^()]+)\)/)?.[1].replaceAll("_", "").replace(/\s+/g, "")}, ${makeName}, ${expectedModelName}, 2010-н.в., 1.6, отсутствует`,
+    );
+  });
 });
 
 test("applicability repairs syntax of truncated car names without inventing data", () => {

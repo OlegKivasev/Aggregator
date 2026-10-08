@@ -26,6 +26,14 @@ const compoundTechnicalCanonicalizations = [
 
 const bodyAliasRegistry = [
   { bodyType: "SUV/Внедорожник", pattern: combinedVanAndSuvPattern, removableIfTerminal: false, removeAnywhere: true },
+  { bodyType: "Универсал", pattern: /\bspace\s+wagon\b/i, removableIfTerminal: false },
+  { bodyType: "Универсал", pattern: /\bsports?\s+tourer\b/i, removableIfTerminal: false },
+  { bodyType: "Универсал", pattern: /\bcountry\s+tourer\b/i, removableIfTerminal: false },
+  { bodyType: "Универсал", pattern: /\bmulti\s+wagon\b/i, removableIfTerminal: false },
+  { bodyType: "Универсал", pattern: /\bstation\s+wagon\b/i, removableIfTerminal: false },
+  { bodyType: "Вэн", pattern: /\bactive\s+tourer\b/i, removableIfTerminal: false },
+  { bodyType: "Вэн", pattern: /\bgran\s+tourer\b/i, removableIfTerminal: false },
+  { bodyType: "Купе", pattern: /\bgran\s+coup[eé]\b/i, removableIfTerminal: false },
   { bodyType: "С бортовой платформой/ходовая часть", pattern: /[сc]\s+бортовой\s+платформой\s*\/\s*ходовая\s+часть|platform\/chassis/i, removableIfTerminal: true },
   { bodyType: "Фургон/универсал", pattern: /фургон\s*\/\s*универсал/i, removableIfTerminal: true },
   { bodyType: "Автофургон / микроавтобус", pattern: /\bhatchback\s+van\b|\bcombi\s+van\b|\bkombi\s+van\b/i, removableIfTerminal: true },
@@ -130,7 +138,9 @@ const parseVariantCodeExpression = (value) => {
 
 const parseModelCodeTemplates = (value) => {
   if (!parseCodeExpression(value)) return [];
-  const templates = explicitVariantCodeItems(value).flatMap((item) => expandCodeAlternatives(item) ?? []);
+  const templates = explicitVariantCodeItems(value)
+    .map((item) => item.replace(/\s+/g, ""))
+    .flatMap((item) => expandCodeAlternatives(item) ?? []);
   return [...new Set(templates.map((template) => template.toLocaleUpperCase()))];
 };
 
@@ -256,16 +266,54 @@ const commonPrefixLength = (first, second) => {
   return index;
 };
 
-export const buildApplicabilityVariantCodeContext = (vehicles) => vehicles.reduce((context, vehicle) => {
-  const candidate = terminalVariantCodeCandidate(textValue(vehicle?.carName));
-  if (!candidate.variantCodes.length) return context;
+const variantEvidenceEntry = (vehicle) => ({
+  bodyType: bodyType(vehicle?.modelName),
+  years: yearRange(vehicle),
+});
 
-  const key = normalizedVehicleFamilyIdentity(vehicle);
-  const familyCodes = context.get(key) ?? [];
-  familyCodes.push(...candidate.variantCodes);
-  context.set(key, familyCodes);
+const evidenceIsCompatibleWithVehicle = (evidence, vehicle) => {
+  const candidateBodyType = bodyType(vehicle?.modelName);
+  if (evidence.bodyType !== candidateBodyType) return false;
+
+  const candidateYears = yearRange(vehicle);
+  return candidateYears.start === null || evidence.years.start === null || yearsOverlap(candidateYears, evidence.years);
+};
+
+export const buildApplicabilityVariantCodeContext = (vehicles) => {
+  const records = Array.isArray(vehicles) ? vehicles : [];
+  const context = new Map();
+
+  records.forEach((vehicle) => {
+    const candidate = terminalVariantCodeCandidate(textValue(vehicle?.carName));
+    const concreteModelCodes = modelCodeTemplates(vehicle?.modelName).filter((code) => !code.includes("_"));
+    if (!candidate.variantCodes.length && !concreteModelCodes.length) return;
+
+    const key = normalizedVehicleFamilyIdentity(vehicle);
+    const family = context.get(key) ?? { candidateCodes: [], confirmedCodes: new Map() };
+    family.candidateCodes.push(...candidate.variantCodes);
+    context.set(key, family);
+  });
+
+  records.forEach((vehicle) => {
+    const candidate = terminalVariantCodeCandidate(textValue(vehicle?.carName));
+    const templates = modelCodeTemplates(vehicle?.modelName);
+    const family = context.get(normalizedVehicleFamilyIdentity(vehicle));
+    if (!family) return;
+    const evidence = variantEvidenceEntry(vehicle);
+    const confirmedCodes = templates.filter((template) => !template.includes("_"));
+    if (candidate.variantCodes.length && templates.length
+      && candidate.variantCodes.every((code) => templates.some((template) => variantMatchesTemplate(code, template)))) {
+      confirmedCodes.push(...candidate.variantCodes);
+    }
+    confirmedCodes.forEach((code) => {
+      const entries = family.confirmedCodes.get(code) ?? [];
+      entries.push(evidence);
+      family.confirmedCodes.set(code, entries);
+    });
+  });
+
   return context;
-}, new Map());
+};
 
 const hasRepeatedVariantMorphology = (variantCodes, familyCodes) => {
   const distinctFamilyCodes = new Set(familyCodes);
@@ -274,14 +322,18 @@ const hasRepeatedVariantMorphology = (variantCodes, familyCodes) => {
   ));
 };
 
-const extractCompatibleVariantCodes = (carName, templates, familyCodes) => {
+const extractCompatibleVariantCodes = (carName, templates, familyContext, vehicle) => {
   const candidate = terminalVariantCodeCandidate(carName);
   if (!candidate.variantCodes.length) return candidate;
 
   const matchesTemplate = templates.length > 0
     && candidate.variantCodes.every((variantCode) => templates.some((template) => variantMatchesTemplate(variantCode, template)));
-  const matchesFamily = templates.length === 0 && hasRepeatedVariantMorphology(candidate.variantCodes, familyCodes ?? []);
-  return matchesTemplate || matchesFamily ? candidate : { variantCodes: [], carName };
+  const matchesEvidence = candidate.variantCodes.every((variantCode) => (
+    familyContext?.confirmedCodes.get(variantCode)?.some((evidence) => evidenceIsCompatibleWithVehicle(evidence, vehicle))
+  ));
+  const matchesFamily = templates.length === 0
+    && hasRepeatedVariantMorphology(candidate.variantCodes, familyContext?.candidateCodes ?? []);
+  return matchesTemplate || matchesEvidence || matchesFamily ? candidate : { variantCodes: [], carName };
 };
 
 const terminalBodyDescriptor = (source, descriptor) => {
@@ -493,6 +545,7 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCod
     remaining,
     modelCodeTemplates(modelName),
     variantCodeContext?.get(normalizedVehicleFamilyIdentity(record)),
+    record,
   );
   const refinedBodyCode = compatibleVariantCodes.variantCodes.length
     ? { bodyCode: null, carName: compatibleVariantCodes.carName }
