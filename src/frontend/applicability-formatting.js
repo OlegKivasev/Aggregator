@@ -87,6 +87,12 @@ const codeItems = (expression) => expression
   .map(normalizedCodeToken)
   .filter(Boolean);
 
+const rawCodeItems = (expression) => expression
+  .split(/[,;|]+/)
+  .flatMap((item) => item.split(/\s+-\s+/))
+  .map((item) => item.replace(/\s+/g, "").trim())
+  .filter(Boolean);
+
 const parseCodeExpression = (value) => {
   if (!isCodeExpression(value)) return null;
   return {
@@ -129,6 +135,10 @@ const bodyCodes = (modelName) => {
 
   return parentheticalGroups(source).flatMap((group) => classifiedCodeTokens(group.value));
 };
+
+const modelCodeTemplates = (modelName) => parentheticalGroups(textValue(modelName)).flatMap((group) => (
+  parseCodeExpression(group.value) ? rawCodeItems(group.value) : []
+));
 
 const terminalCodeFragment = (modelName) => {
   const source = textValue(modelName);
@@ -181,18 +191,63 @@ const extractCompatibleBodyCode = (carName, baseCodes) => {
   };
 };
 
-const extractCompatibleVariantCodes = (carName, modelCodes) => {
+const terminalVariantCodeCandidate = (carName) => {
   const match = carName.match(/\s*\(([^()]*)\)\s*$/);
   const expression = match?.[1] ?? "";
   const parsed = parseCodeExpression(expression);
   const variantCodes = parsed?.codeItems ?? [];
-  if (!variantCodes.length || !variantCodes.every((code) => compatibleBodyCode(modelCodes, code))) {
+  if (!variantCodes.length) {
     return { variantCodes: [], carName };
   }
   return {
     variantCodes: [...new Set(variantCodes.map((code) => code.toLocaleUpperCase()))],
     carName: carName.slice(0, match.index).trim() || "отсутствует",
   };
+};
+
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const variantMatchesTemplate = (variantCode, template) => {
+  const normalizedVariant = variantCode.toLocaleUpperCase();
+  const normalizedTemplate = template.replace(/\s+/g, "").toLocaleUpperCase();
+  if (!normalizedTemplate.includes("_")) return normalizedVariant.startsWith(normalizedTemplate);
+  const pattern = normalizedTemplate.split("_").map(escapeRegex).join("[\\p{L}\\p{N}]*");
+  return new RegExp(`^${pattern}$`, "u").test(normalizedVariant);
+};
+
+const commonPrefixLength = (first, second) => {
+  const length = Math.min(first.length, second.length);
+  let index = 0;
+  while (index < length && first[index] === second[index]) index += 1;
+  return index;
+};
+
+const buildVariantCodeContext = (vehicles) => vehicles.reduce((context, vehicle) => {
+  const candidate = terminalVariantCodeCandidate(textValue(vehicle?.carName));
+  if (!candidate.variantCodes.length) return context;
+
+  const key = normalizedVehicleIdentity(vehicle);
+  const familyCodes = context.get(key) ?? [];
+  familyCodes.push(...candidate.variantCodes);
+  context.set(key, familyCodes);
+  return context;
+}, new Map());
+
+const hasRepeatedVariantMorphology = (variantCodes, familyCodes) => {
+  const distinctFamilyCodes = new Set(familyCodes);
+  return distinctFamilyCodes.size >= 3 && variantCodes.every((variantCode) => (
+    [...distinctFamilyCodes].some((familyCode) => familyCode !== variantCode && commonPrefixLength(variantCode, familyCode) >= 2)
+  ));
+};
+
+const extractCompatibleVariantCodes = (carName, templates, familyCodes) => {
+  const candidate = terminalVariantCodeCandidate(carName);
+  if (!candidate.variantCodes.length) return candidate;
+
+  const matchesTemplate = templates.length > 0
+    && candidate.variantCodes.every((variantCode) => templates.some((template) => variantMatchesTemplate(variantCode, template)));
+  const matchesFamily = templates.length === 0 && hasRepeatedVariantMorphology(candidate.variantCodes, familyCodes ?? []);
+  return matchesTemplate || matchesFamily ? candidate : { variantCodes: [], carName };
 };
 
 const terminalBodyDescriptor = (source, descriptor) => {
@@ -312,7 +367,7 @@ const formatCubicCentimeters = (cubicCentimeters) => {
   return Number.isInteger(liters) ? liters.toFixed(1) : String(liters);
 };
 
-const isHighConfidenceCcCandidate = (candidate) => candidate.cubicCentimeters >= 800
+const isUnambiguousIntegerCcCandidate = (candidate) => candidate.cubicCentimeters >= 1000
   && candidate.cubicCentimeters % 100 === 0;
 
 const decimalDisplacementCandidate = (source) => {
@@ -328,27 +383,19 @@ const decimalDisplacementCandidate = (source) => {
 const buildDisplacementContext = (vehicles) => vehicles.reduce((context, vehicle) => {
   const source = textValue(vehicle?.carName);
   const decimalCandidate = decimalDisplacementCandidate(source);
-  const candidate = decimalCandidate ?? integerCcCandidate(source);
-  if (!candidate) return context;
+  if (!decimalCandidate) return context;
 
   const key = normalizedVehicleFamilyIdentity(vehicle);
-  const family = context.get(key) ?? { candidates: [] };
-  family.candidates.push(candidate);
+  const family = context.get(key) ?? { decimalCandidates: [] };
+  family.decimalCandidates.push(decimalCandidate);
   context.set(key, family);
   return context;
 }, new Map());
 
-const familyClassifiesCcCandidate = (family) => {
-  if (!family) return false;
-  if (family.candidates.some((candidate) => "capacity" in candidate || isHighConfidenceCcCandidate(candidate))) return true;
-
-  const distinctCandidates = new Set(family.candidates.map((candidate) => candidate.cubicCentimeters));
-  const integerCandidates = family.candidates.filter((candidate) => "isCcAligned" in candidate);
-  const alignedCandidates = integerCandidates.filter((candidate) => candidate.isCcAligned);
-  const alignedFamily = distinctCandidates.size >= 3 && alignedCandidates.length / integerCandidates.length >= 0.75;
-  return alignedFamily || (distinctCandidates.size >= 2 && alignedCandidates.length === integerCandidates.length
-    && integerCandidates.some((candidate) => candidate.hasEngineContext));
-};
+const familyClassifiesCcCandidate = (family, candidate) => family?.decimalCandidates.some((decimalCandidate) => (
+  Math.abs(decimalCandidate.cubicCentimeters - candidate.cubicCentimeters)
+    <= Math.max(300, candidate.cubicCentimeters * 0.5)
+)) ?? false;
 
 const truncatedSourceParser = (value) => {
   const source = textValue(value);
@@ -378,7 +425,7 @@ const displacementCandidateParser = (source, family) => {
   }
 
   const integerCandidate = integerCcCandidate(source);
-  if (integerCandidate && (isHighConfidenceCcCandidate(integerCandidate) || familyClassifiesCcCandidate(family))) {
+  if (integerCandidate && (isUnambiguousIntegerCcCandidate(integerCandidate) || familyClassifiesCcCandidate(family, integerCandidate))) {
     return {
       type: "integerCc",
       capacity: formatCubicCentimeters(integerCandidate.cubicCentimeters),
@@ -402,13 +449,17 @@ const splitCarName = (carName, family) => {
   return { capacity: candidate.capacity, remaining: remaining || "отсутствует", sourceTruncated };
 };
 
-export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCodes = null, displacementContext = null) => {
+export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCodes = null, displacementContext = null, variantCodeContext = null) => {
   const record = vehicle && typeof vehicle === "object" && !Array.isArray(vehicle) ? vehicle : {};
   const modelName = textValue(record.modelName);
   const { capacity, remaining } = splitCarName(record.carName, displacementContext?.get(normalizedVehicleFamilyIdentity(record)));
   const model = modelWithoutBodyType(modelName);
   const modelCodes = recoveredCodes ?? bodyCodes(modelName);
-  const compatibleVariantCodes = extractCompatibleVariantCodes(remaining, modelCodes);
+  const compatibleVariantCodes = extractCompatibleVariantCodes(
+    remaining,
+    modelCodeTemplates(modelName),
+    variantCodeContext?.get(normalizedVehicleIdentity(record)),
+  );
   const refinedBodyCode = compatibleVariantCodes.variantCodes.length
     ? { bodyCode: null, carName: compatibleVariantCodes.carName }
     : extractCompatibleBodyCode(remaining, modelCodes);
@@ -439,12 +490,14 @@ export const formatApplicabilityVehicles = (vehicles, visibleColumns) => {
   const records = Array.isArray(vehicles) ? vehicles : [];
   const codeIndex = buildBodyCodeIndex(records);
   const displacementContext = buildDisplacementContext(records);
+  const variantCodeContext = buildVariantCodeContext(records);
   return records
     .map((vehicle) => formatApplicabilityVehicle(
       vehicle,
       visibleColumns,
       recoveredBodyCodes(vehicle, codeIndex),
       displacementContext,
+      variantCodeContext,
     ))
     .join("\n");
 };

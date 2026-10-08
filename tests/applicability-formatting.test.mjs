@@ -96,17 +96,17 @@ test("applicability classifies low integer cc designations from a vehicle family
   assert.deepEqual(
     formatApplicabilityVehicles([
       vehicle("950", "FORD", "ESCORT I"),
-      vehicle("1100", "FORD", "ESCORT I"),
-      vehicle("1300", "FORD", "ESCORT I"),
+      vehicle("1.1", "FORD", "ESCORT I"),
+      vehicle("1.3", "FORD", "ESCORT I"),
     ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
     ["0.95, отсутствует", "1.1, отсутствует", "1.3, отсутствует"],
   );
   assert.deepEqual(
     formatApplicabilityVehicles([
       vehicle("750", "FIAT", "PANDA (141_)"),
-      vehicle("900", "FIAT", "PANDA (141_)"),
+      vehicle("0.9", "FIAT", "PANDA (141_)"),
       vehicle("950 4x4", "FIAT", "PANDA (141_)"),
-      vehicle("1000", "FIAT", "PANDA (141_)"),
+      vehicle("1.0", "FIAT", "PANDA (141_)"),
     ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
     ["0.75, отсутствует", "0.9, отсутствует", "0.95, 4WD", "1.0, отсутствует"],
   );
@@ -114,7 +114,7 @@ test("applicability classifies low integer cc designations from a vehicle family
     formatApplicabilityVehicles([
       vehicle("550", "SUBARU", "REX"),
       vehicle("550 Turbo", "SUBARU", "REX"),
-      vehicle("700", "SUBARU", "REX"),
+      vehicle("0.7", "SUBARU", "REX"),
     ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
     ["0.55, отсутствует", "0.55, Turbo", "0.7, отсутствует"],
   );
@@ -123,10 +123,10 @@ test("applicability classifies low integer cc designations from a vehicle family
       vehicle("400 (K22)", "SUBARU", "REX I"),
       vehicle("500 (K23)", "SUBARU", "REX I"),
       vehicle("550 (K24)", "SUBARU", "REX I"),
-      vehicle("550 Turbo", "SUBARU", "REX II"),
+      vehicle("0.55", "SUBARU", "REX II"),
       vehicle("700", "SUBARU", "REX II"),
     ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
-    ["0.4, (K22)", "0.5, (K23)", "0.55, (K24)", "0.55, Turbo", "0.7, отсутствует"],
+    ["0.4, отсутствует", "0.5, отсутствует", "0.55, отсутствует", "0.55, отсутствует", "0.7, отсутствует"],
   );
   assert.deepEqual(
     formatApplicabilityVehicles([
@@ -148,6 +148,18 @@ test("applicability classifies low integer cc designations from a vehicle family
     formatApplicabilityVehicle(vehicle("400 E 4.2", "MERCEDES-BENZ", "E-CLASS (W124)"), new Set(["capacity", "carName"])),
     "4.2, 400 E",
   );
+  const sClassLines = formatApplicabilityVehicles([
+    vehicle("400 SE, SEL/S420", "MERCEDES-BENZ", "S-CLASS"),
+    vehicle("500 SE, SEL", "MERCEDES-BENZ", "S-CLASS"),
+    vehicle("S 420", "MERCEDES-BENZ", "S-CLASS"),
+    vehicle("S 500", "MERCEDES-BENZ", "S-CLASS"),
+    vehicle("4.2", "MERCEDES-BENZ", "S-CLASS"),
+  ]).split("\n");
+  assert.match(sClassLines[0], /, отсутствует, 400 SE, SEL\/S420$/);
+  assert.match(sClassLines[1], /, отсутствует, 500 SE, SEL$/);
+  assert.match(sClassLines[2], /, отсутствует, S 420$/);
+  assert.match(sClassLines[3], /, отсутствует, S 500$/);
+  assert.match(sClassLines[4], /, 4\.2, отсутствует$/);
 });
 
 test("applicability promotes compatible car-name code groups regardless of cardinality", () => {
@@ -171,6 +183,34 @@ test("applicability promotes compatible car-name code groups regardless of cardi
       yearStart: "01.2012",
     }, columns),
     "HSMC/HSMD, отсутствует",
+  );
+  assert.deepEqual(
+    formatApplicabilityVehicles([
+      { carName: "1.5 dCi (FEAJ)", makeName: "DACIA", modelName: "DOKKER Автофургон / микроавтобус", yearEnd: null, yearStart: "01.2012" },
+      { carName: "1.5 dCi (FEMW)", makeName: "DACIA", modelName: "DOKKER Автофургон / микроавтобус", yearEnd: null, yearStart: "01.2012" },
+      { carName: "1.5 dCi (FEJW, FEAH)", makeName: "DACIA", modelName: "DOKKER Автофургон / микроавтобус", yearEnd: null, yearStart: "01.2012" },
+    ], columns).split("\n"),
+    ["FEAJ, dCi", "FEMW, dCi", "FEJW/FEAH, dCi"],
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6 MIVEC (GA1W)",
+      makeName: "MITSUBISHI",
+      modelName: "ASX (GA_W_)",
+      yearEnd: null,
+      yearStart: "01.2010",
+    }, columns),
+    "GA1W, MIVEC",
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.8 DI-D (GA6W)",
+      makeName: "MITSUBISHI",
+      modelName: "ASX (GA_W_)",
+      yearEnd: null,
+      yearStart: "01.2010",
+    }, columns),
+    "GA6W, DI-D",
   );
 });
 
