@@ -20,7 +20,7 @@ const compoundTechnicalCanonicalizations = [
   [/\b4x4\b|\b4wd\b/gi, "4WD"],
 ];
 
-const bodyDescriptors = [
+const bodyAliasRegistry = [
   { bodyType: "SUV/Внедорожник", pattern: combinedVanAndSuvPattern, removableIfTerminal: false, removeAnywhere: true },
   { bodyType: "С бортовой платформой/ходовая часть", pattern: /с\s+бортовой\s+платформой\s*\/\s*ходовая\s+часть|platform\/chassis/i, removableIfTerminal: true },
   { bodyType: "Фургон/универсал", pattern: /фургон\s*\/\s*универсал/i, removableIfTerminal: true },
@@ -33,16 +33,16 @@ const bodyDescriptors = [
   { bodyType: "Пикап", pattern: /пикап|pick[ -]?up/i, removableIfTerminal: true },
   { bodyType: "SUV/Внедорожник", pattern: /спортивно-утилитарный|\bsuv\b|\b4x4\b|off[ -]?road/i, removableIfTerminal: true },
   { bodyType: "Седан", pattern: /седан|\bsaloon\b/i, removableIfTerminal: true },
-  { bodyType: "Универсал", pattern: /универсал|station wagon|\bestate\b|\btourer\b|\bturnier\b/i, removableIfTerminal: true },
+  { bodyType: "Универсал", pattern: /универсал|station wagon|\bestate\b|\btourer\b|\bturnier\b|\bvariant\b|\bavant\b|\btouring\b|\bbreak\b|\bsport(?:s)?wagon\b|\bwagon\b|\bcombi\b/i, removableIfTerminal: true },
   { bodyType: "Хэтчбэк", pattern: /хэтчбэк|хетчбэк|\bhatchback\b/i, removableIfTerminal: true },
   { bodyType: "Лифтбэк", pattern: /лифтбэк|\bliftback\b/i, removableIfTerminal: true },
   { bodyType: "Фастбэк", pattern: /\bfastback\b/i, removableIfTerminal: true },
   { bodyType: "Купе", pattern: /купе|\bcoup[eé]\b|\bkoup\b/i, removableIfTerminal: true },
-  { bodyType: "Кабриолет", pattern: /кабриолет|\bconvertible\b|\bcabrio\b/i, removableIfTerminal: true },
+  { bodyType: "Кабриолет", pattern: /кабриолет|\bconvertible\b|\bcabrio(?:let)?\b/i, removableIfTerminal: true },
   { bodyType: "Тарга", pattern: /тарга|\btarga\b/i, removableIfTerminal: true },
   { bodyType: "Родстер", pattern: /родстер|\broadster\b/i, removableIfTerminal: true },
   { bodyType: "Вэн", pattern: /вэн|\bmpv\b|minivan|active tourer|gran tourer|picasso/i, removableIfTerminal: true },
-  { bodyType: "Универсал", pattern: /\bsportswagon\b|\bsw\b/i, removableIfTerminal: false },
+  { bodyType: "Универсал", pattern: /\bsw\b/i, removableIfTerminal: false },
 ];
 
 const textValue = (value) => typeof value === "string" && value.trim() ? value.trim() : "отсутствует";
@@ -59,21 +59,38 @@ const yearPeriod = (yearStart, yearEnd) => {
   return /^\d{4}$/.test(start) && start === end ? start : `${start}-${end}`;
 };
 
-const bodyDescriptor = (modelName) => {
-  const source = textValue(modelName);
-  return bodyDescriptors.find((descriptor) => descriptor.pattern.test(source));
+const parentheticalGroups = (modelName) => [...textValue(modelName).matchAll(/\(([^()]*)\)/g)]
+  .map((match) => ({ value: match[1], index: match.index ?? 0 }));
+
+const normalizedCodeToken = (value) => value.replaceAll("_", "").replace(/\s+/g, " ").trim();
+
+const codeTokens = (value) => value
+  .replace(/\s+-\s+/g, "/")
+  .split(/[\/,;|]+/)
+  .map(normalizedCodeToken)
+  .filter(Boolean);
+
+const isCodeToken = (value) => {
+  if (!/^[\p{Lu}\p{Nd}][\p{Lu}\p{Nd}_.-]{1,15}$/u.test(value)) return false;
+  return /\p{Nd}/u.test(value) || /^[\p{Lu}]{2,4}$/u.test(value.replaceAll("_", ""));
 };
 
-const bodyType = (modelName) => bodyDescriptor(modelName)?.bodyType ?? "отсутствует";
+const classifiedCodeTokens = (group) => {
+  const tokens = codeTokens(group);
+  return tokens.length && tokens.every(isCodeToken) ? tokens : [];
+};
+
+const modelNameWithoutParentheticalGroups = (modelName) => textValue(modelName)
+  .replace(/\s*\([^()]*\)/g, "")
+  .replace(/\s*\([^()]*$/, "")
+  .replace(/\s{2,}/g, " ")
+  .trim();
 
 const bodyCodes = (modelName) => {
   const source = textValue(modelName);
   if (source === "отсутствует") return [];
 
-  return [...source.matchAll(/\(([^()]*)\)/g)]
-    .flatMap((match) => match[1].split(/[\/,;|]+/))
-    .map((code) => code.replaceAll("_", "").replace(/\s+/g, " ").trim())
-    .filter(Boolean);
+  return parentheticalGroups(source).flatMap((group) => classifiedCodeTokens(group.value));
 };
 
 const bodyCode = (modelName) => [...new Set(bodyCodes(modelName))].join("/") || "отсутствует";
@@ -81,10 +98,8 @@ const bodyCode = (modelName) => [...new Set(bodyCodes(modelName))].join("/") || 
 const codeFragments = (modelName) => {
   const source = textValue(modelName);
   const fragment = source.match(/\(([^()]*)$/)?.[1] ?? "";
-  return fragment
-    .split(/[\/,;|]+/)
-    .map((value) => value.replaceAll("_", "").replace(/\s+/g, " ").trim())
-    .filter((value) => /^[\p{L}\p{N}]{1,12}$/u.test(value));
+  return codeTokens(fragment)
+    .filter((value) => /^[\p{Lu}\p{Nd}][\p{Lu}\p{Nd}_.-]{0,15}$/u.test(value));
 };
 
 const canonicalizeTechnicalTokens = (value) => [...compoundTechnicalCanonicalizations, ...technicalTokenCanonicalizations]
@@ -119,23 +134,32 @@ const terminalBodyDescriptor = (source, descriptor) => {
   return { start, text: matchedText };
 };
 
-const modelWithoutBodyType = (modelName) => {
-  const source = textValue(modelName);
-  const withoutCodes = source.replace(/\s*\([^()]*\)/g, "").replace(/\s*\([^()]*$/, "");
-  const descriptor = bodyDescriptor(withoutCodes);
-  const terminalDescriptor = terminalBodyDescriptor(withoutCodes, descriptor);
-  const withoutBodyType = descriptor?.removeAnywhere
-    ? withoutCodes.replace(descriptor.pattern, "")
+const normalizeModelIdentity = (value) => value
+  .replace(/\s{2,}/g, " ")
+  .trim()
+  .replace(/(?<![\p{L}\p{N}])SANTA FÉ(?![\p{L}\p{N}])/giu, "SANTA FE") || "отсутствует";
+
+const parsedModelName = (modelName) => {
+  const source = modelNameWithoutParentheticalGroups(modelName);
+  const descriptor = bodyAliasRegistry.find((candidate) => candidate.pattern.test(source));
+  if (!descriptor) return { bodyDescriptor: null, modelIdentity: normalizeModelIdentity(source) };
+
+  const terminalDescriptor = terminalBodyDescriptor(source, descriptor);
+  const withoutDescriptor = descriptor.removeAnywhere
+    ? source.replace(descriptor.pattern, "")
     : terminalDescriptor
-      ? `${withoutCodes.slice(0, terminalDescriptor.start)}${withoutCodes.slice(terminalDescriptor.start + terminalDescriptor.text.length)}`
-      : withoutCodes;
-  const model = (descriptor?.removeAnywhere
-    ? withoutBodyType.replace(/\s*\([^()]*$/, "")
-    : withoutBodyType)
-    .replace(/\s{2,}/g, " ")
-    .trim();
-  return model.replace(/(?<![\p{L}\p{N}])SANTA FÉ(?![\p{L}\p{N}])/giu, "SANTA FE") || "отсутствует";
+      ? `${source.slice(0, terminalDescriptor.start)}${source.slice(terminalDescriptor.start + terminalDescriptor.text.length)}`
+      : source;
+  const modelIdentity = normalizeModelIdentity(withoutDescriptor);
+
+  return modelIdentity === "отсутствует"
+    ? { bodyDescriptor: null, modelIdentity: normalizeModelIdentity(source) }
+    : { bodyDescriptor: descriptor, modelIdentity };
 };
+
+const bodyType = (modelName) => parsedModelName(modelName).bodyDescriptor?.bodyType ?? "отсутствует";
+
+const modelWithoutBodyType = (modelName) => parsedModelName(modelName).modelIdentity;
 
 const normalizedVehicleIdentity = (vehicle) => `${textValue(vehicle?.makeName).toLocaleUpperCase()}\u0000${modelWithoutBodyType(vehicle?.modelName).toLocaleUpperCase()}`;
 

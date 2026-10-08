@@ -186,11 +186,11 @@ test("applicability recognizes SW as a wagon without removing it from the model"
   );
 });
 
-test("applicability recognizes Sportswagon as a wagon without removing it from the model", () => {
+test("applicability recognizes Sportswagon as a terminal wagon descriptor", () => {
   const cases = [
-    ["CEE'D Sportswagon (JD)", "JD", "CEE'D Sportswagon"],
-    ["CEED Sportswagon (CD)", "CD", "CEED Sportswagon"],
-    ["OPTIMA Sportswagon (JF)", "JF", "OPTIMA Sportswagon"],
+    ["CEE'D Sportswagon (JD)", "JD", "CEE'D"],
+    ["CEED Sportswagon (CD)", "CD", "CEED"],
+    ["OPTIMA Sportswagon (JF)", "JF", "OPTIMA"],
   ];
 
   cases.forEach(([modelName, bodyCode, expectedModel]) => {
@@ -327,6 +327,65 @@ test("applicability preserves a body-style word when it is part of a model name"
       yearStart: "01.2002",
     }),
     "Купе, GK, HYUNDAI, COUPE II, 2002-2009, 1.6, 16V",
+  );
+});
+
+test("applicability keeps a model whose entire name resembles a body style", () => {
+  const cases = [
+    ["NISSAN", "PICK UP (D22)", "D22", "PICK UP"],
+    ["HYUNDAI", "COUPE (GK)", "GK", "COUPE"],
+    ["TESLA", "ROADSTER (R1)", "R1", "ROADSTER"],
+  ];
+
+  cases.forEach(([makeName, modelName, bodyCode, expectedModel]) => {
+    assert.equal(
+      formatApplicabilityVehicle({ carName: "1.6", makeName, modelName, yearEnd: null, yearStart: "01.2010" }),
+      `отсутствует, ${bodyCode}, ${makeName}, ${expectedModel}, 2010-н.в., 1.6, отсутствует`,
+    );
+  });
+});
+
+test("applicability extracts common body aliases without consuming model identity", () => {
+  const cases = [
+    ["BORA Variant (1J6)", "Универсал", "1J6", "BORA"],
+    ["A4 Avant (8E)", "Универсал", "8E", "A4"],
+    ["3 Touring (E46)", "Универсал", "E46", "3"],
+    ["MEGANE Break (X84)", "Универсал", "X84", "MEGANE"],
+    ["OPTIMA Wagon (JF)", "Универсал", "JF", "OPTIMA"],
+    ["CEE'D Sportwagon (CD)", "Универсал", "CD", "CEE'D"],
+    ["OCTAVIA Combi (1Z)", "Универсал", "1Z", "OCTAVIA"],
+    ["GOLF Cabriolet (1E)", "Кабриолет", "1E", "GOLF"],
+  ];
+
+  cases.forEach(([modelName, expectedBodyType, bodyCode, expectedModel]) => {
+    assert.equal(
+      formatApplicabilityVehicle({ carName: "1.6", makeName: "VW", modelName, yearEnd: null, yearStart: "01.2010" }),
+      `${expectedBodyType}, ${bodyCode}, VW, ${expectedModel}, 2010-н.в., 1.6, отсутствует`,
+    );
+  });
+});
+
+test("applicability classifies parenthetical descriptions separately from body codes", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "2.0 CDI",
+      makeName: "MERCEDES-BENZ",
+      modelName: "VITO Mixto (Double Cabin) (W447)",
+      yearEnd: null,
+      yearStart: "01.2014",
+    }),
+    "отсутствует, W447, MERCEDES-BENZ, VITO Mixto, 2014-н.в., 2.0, CDI",
+  );
+
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6",
+      makeName: "TEST",
+      modelName: "MODEL (Long Wheelbase) (E11, NE11) (C5_ - C8_)",
+      yearEnd: null,
+      yearStart: "01.2014",
+    }),
+    "отсутствует, E11/NE11/C5/C8, TEST, MODEL, 2014-н.в., 1.6, отсутствует",
   );
 });
 
