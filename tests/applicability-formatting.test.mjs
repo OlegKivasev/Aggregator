@@ -334,6 +334,12 @@ test("applicability promotes compatible car-name code groups regardless of cardi
     ["NISSAN", "NOTE (E13)", "1.2 HYBRID E-POWER 4WD (SNE13)", "SNE13, HEV E-POWER 4WD"],
     ["NISSAN", "SERENA (C26)", "2.0 (C26, FC26)", "C26/FC26, отсутствует"],
     ["TEST", "MODEL (FB)", "1.6 (AFB242)", "AFB242, отсутствует"],
+    ["NISSAN", "X-TRAIL III (T32_, T32R, T32RR)", "2.0 (NT32)", "NT32, отсутствует"],
+    ["NISSAN", "X-TRAIL III (T32_, T32R, T32RR)", "2.0 Hybrid (HT32)", "HT32, HEV"],
+    ["NISSAN", "X-TRAIL III (T32_, T32R, T32RR)", "2.0 Hybrid (HNT32)", "HNT32, HEV"],
+    ["TOYOTA", "COROLLA LEVIN Coupe (E9_)", "1.5 (AE91)", "AE91, отсутствует"],
+    ["TOYOTA", "COROLLA Verso (ZER, ZZE12, R1_)", "1.6 (ZNR10_, ZNR10R)", "ZNR10/ZNR10R, отсутствует"],
+    ["TOYOTA", "COROLLA Verso (ZER, ZZE12, R1_)", "1.8 (ZNR11_, ZNR11R)", "ZNR11/ZNR11R, отсутствует"],
   ];
   embeddedBaseCodeCases.forEach(([makeName, modelName, carName, expected]) => {
     assert.equal(

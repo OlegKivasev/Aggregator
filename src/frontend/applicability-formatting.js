@@ -253,6 +253,8 @@ const variantEmbedsBaseCode = (variantCode, baseCode) => baseCode.length >= 2
   && variantCode.length > baseCode.length
   && variantCode.includes(baseCode);
 
+const templateFamilyCore = (template) => template.replace(/[^\p{L}\p{N}]/gu, "");
+
 const variantMatchesTemplate = (variantCode, template) => {
   const normalizedVariant = variantCode.toLocaleUpperCase();
   const normalizedTemplate = template.replace(/\s+/g, "").toLocaleUpperCase();
@@ -264,7 +266,8 @@ const variantMatchesTemplate = (variantCode, template) => {
     .replaceAll("\\.", "[-._]?")
     .replaceAll("-", "[-._]?");
   const pattern = normalizedTemplate.split("_").map(templatePartPattern).join("[\\p{L}\\p{N}._-]*");
-  return new RegExp(`^${pattern}$`, "u").test(normalizedVariant);
+  return new RegExp(`^${pattern}$`, "u").test(normalizedVariant)
+    || variantEmbedsBaseCode(normalizedVariant, templateFamilyCore(normalizedTemplate));
 };
 
 const commonPrefixLength = (first, second) => {
