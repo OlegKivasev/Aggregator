@@ -63,7 +63,6 @@ let fallbackKeyCount = 0;
 let activeMakeIndex = -1;
 let contextMenuTabId = null;
 let contextMenuTabAnchor = null;
-let contextMenuEntryId = null;
 let contextMenuEntryAnchor = null;
 let articleNameModalReturnFocus = null;
 let articleNameModalTabId = null;
@@ -75,6 +74,8 @@ let documentSections = [];
 let applicabilityToastTimer = null;
 let cachedBrandLookupTimer = null;
 let cachedBrandLookupController = null;
+let selectedEntryIds = new Set();
+let selectionAnchorEntryId = null;
 
 const applicabilityStateStorageKey = "autoservice.applicabilityState";
 const activeFunctionStorageKey = "autoservice.activeFunction";
@@ -426,6 +427,7 @@ const toggleMake = (make) => {
   setSelectedMakeNames(selected
     ? names.filter((name) => name.toLocaleUpperCase() !== make.name.toLocaleUpperCase())
     : [...names, make.name], { focus: true });
+  makeInput.value = "";
   renderMakeMenu();
 };
 
@@ -648,15 +650,62 @@ const updateListButton = (tab) => {
   multiListButton.title = hasResultsInAnyTab ? "Выбрать вкладки для мультисписка" : "Нет найденной применимости для мультисписка";
 };
 
+const clearSelectedEntries = () => {
+  selectedEntryIds = new Set();
+  selectionAnchorEntryId = null;
+};
+
+const pruneSelectedEntries = (tab) => {
+  const availableEntryIds = new Set(tab.searches.map((entry) => entry.id));
+  selectedEntryIds = new Set([...selectedEntryIds].filter((entryId) => availableEntryIds.has(entryId)));
+  if (!selectedEntryIds.has(selectionAnchorEntryId)) selectionAnchorEntryId = null;
+};
+
+const selectResultEntry = (entryId, { additive = false, range = false } = {}) => {
+  const tab = getActiveTab();
+  if (!tab || !tab.searches.some((entry) => entry.id === entryId)) return;
+
+  if (range && selectionAnchorEntryId) {
+    const entryIds = tab.searches.map((entry) => entry.id);
+    const anchorIndex = entryIds.indexOf(selectionAnchorEntryId);
+    const targetIndex = entryIds.indexOf(entryId);
+    if (anchorIndex >= 0 && targetIndex >= 0) {
+      selectedEntryIds = new Set(entryIds.slice(Math.min(anchorIndex, targetIndex), Math.max(anchorIndex, targetIndex) + 1));
+    }
+  } else if (additive) {
+    if (selectedEntryIds.has(entryId)) selectedEntryIds.delete(entryId);
+    else selectedEntryIds.add(entryId);
+    selectionAnchorEntryId = entryId;
+  } else {
+    selectedEntryIds = new Set([entryId]);
+    selectionAnchorEntryId = entryId;
+  }
+  renderResults(tab);
+};
+
+const deleteSelectedResults = () => {
+  const tab = getActiveTab();
+  if (!tab || !selectedEntryIds.size) return;
+  tab.searches = tab.searches.filter((entry) => !selectedEntryIds.has(entry.id));
+  clearSelectedEntries();
+  renderResults(tab);
+  saveApplicabilityState();
+};
+
 const renderResults = (tab) => {
+  pruneSelectedEntries(tab);
   resultsBody.replaceChildren();
   updateListButton(tab);
   if (!tab.searches.length) return;
   tab.searches.forEach((entry) => {
     const row = document.createElement("tr");
+    row.dataset.applicabilityEntryId = entry.id;
+    row.tabIndex = 0;
+    row.setAttribute("aria-selected", String(selectedEntryIds.has(entry.id)));
+    row.classList.toggle("is-selected", selectedEntryIds.has(entry.id));
     if (!entry.hasSearched) {
       row.className = "applicability-searching-row";
-      row.dataset.applicabilityEntryId = entry.id;
+      row.classList.toggle("is-selected", selectedEntryIds.has(entry.id));
       appendCell(row, entry.sku);
       appendCell(row, entry.makeName);
       appendCell(row, entry.status || "Ищем…");
@@ -665,7 +714,7 @@ const renderResults = (tab) => {
     }
     if (!entry.results.length) {
       row.className = "applicability-no-results";
-      row.dataset.applicabilityEntryId = entry.id;
+      row.classList.toggle("is-selected", selectedEntryIds.has(entry.id));
       appendCell(row, entry.sku);
       appendCell(row, entry.makeName);
       appendCell(row, "Не найдено");
@@ -673,7 +722,7 @@ const renderResults = (tab) => {
       return;
     }
     row.className = "applicability-summary-row";
-    row.dataset.applicabilityEntryId = entry.id;
+    row.classList.toggle("is-selected", selectedEntryIds.has(entry.id));
     const articleCell = document.createElement("td");
     articleCell.className = "applicability-article-cell";
     const expandButton = document.createElement("button");
@@ -700,6 +749,7 @@ const renderResults = (tab) => {
       const rawRow = document.createElement("tr");
       rawRow.className = "applicability-raw-row";
       rawRow.dataset.applicabilityEntryId = entry.id;
+      rawRow.classList.toggle("is-selected", selectedEntryIds.has(entry.id));
       const rawCell = document.createElement("td");
       rawCell.colSpan = 3;
       const raw = document.createElement("pre");
@@ -1146,14 +1196,15 @@ renameTabButton.addEventListener("click", () => {
 
 const hideResultContextMenu = (restoreFocus = false) => {
   resultContextMenu.hidden = true;
-  contextMenuEntryId = null;
   if (restoreFocus && contextMenuEntryAnchor?.isConnected) contextMenuEntryAnchor.focus();
   contextMenuEntryAnchor = null;
 };
 
 const showResultContextMenu = (entryId, clientX, clientY, anchor) => {
-  contextMenuEntryId = entryId;
   contextMenuEntryAnchor = anchor;
+  deleteResultButton.textContent = selectedEntryIds.size > 1
+    ? `Удалить строки (${selectedEntryIds.size})`
+    : "Удалить строку";
   resultContextMenu.hidden = false;
   const bounds = resultContextMenu.getBoundingClientRect();
   resultContextMenu.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - bounds.width - 8))}px`;
@@ -1165,28 +1216,39 @@ resultsBody.addEventListener("contextmenu", (event) => {
   const row = event.target.closest("[data-applicability-entry-id]");
   if (!row) return;
   event.preventDefault();
-  showResultContextMenu(row.dataset.applicabilityEntryId, event.clientX, event.clientY, row);
+  const entryId = row.dataset.applicabilityEntryId;
+  if (!selectedEntryIds.has(entryId)) selectResultEntry(entryId);
+  showResultContextMenu(entryId, event.clientX, event.clientY, row);
 });
 
 deleteResultButton.addEventListener("click", () => {
-  const tab = getActiveTab();
-  const entryId = contextMenuEntryId;
   hideResultContextMenu();
-  if (!tab || !entryId) return;
-  tab.searches = tab.searches.filter((entry) => entry.id !== entryId);
-  renderResults(tab);
-  saveApplicabilityState();
+  deleteSelectedResults();
 });
 
 resultsBody.addEventListener("click", (event) => {
   const expandButton = event.target.closest("[data-expand-entry-id]");
-  if (!expandButton) return;
-  const tab = getActiveTab();
-  const entry = tab?.searches.find((item) => item.id === expandButton.dataset.expandEntryId);
-  if (!tab || !entry || !entry.results.length) return;
-  entry.expanded = !entry.expanded;
-  renderResults(tab);
-  saveApplicabilityState();
+  if (expandButton) {
+    const tab = getActiveTab();
+    const entry = tab?.searches.find((item) => item.id === expandButton.dataset.expandEntryId);
+    if (!tab || !entry || !entry.results.length) return;
+    entry.expanded = !entry.expanded;
+    renderResults(tab);
+    saveApplicabilityState();
+    return;
+  }
+  const row = event.target.closest("tr[data-applicability-entry-id]");
+  if (!row || row.classList.contains("applicability-raw-row")) return;
+  selectResultEntry(row.dataset.applicabilityEntryId, {
+    additive: event.ctrlKey || event.metaKey,
+    range: event.shiftKey,
+  });
+});
+
+resultsBody.addEventListener("keydown", (event) => {
+  if (event.key !== "Delete" || !selectedEntryIds.size) return;
+  event.preventDefault();
+  deleteSelectedResults();
 });
 
 skuInput.addEventListener("input", () => {

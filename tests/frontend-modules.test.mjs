@@ -637,6 +637,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /const duplicateSearch =/);
   assert.match(applicability, /const selectedMakeNames/);
   assert.match(applicability, /const toggleMake/);
+  assert.match(applicability, /makeInput\.value = "";/);
   assert.match(applicability, /const cachedMakes = normalizeMakeNames\(brands\)/);
   assert.match(applicability, /setSelectedMakeNames\(\[\.\.\.selectedMakeNames\(\), \.\.\.cachedMakes\.map/);
   assert.match(applicability, /Некоторые пары «артикул \+ бренд» уже добавлены\./);
@@ -693,6 +694,11 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /data-applicability-entry-id/);
   assert.match(applicability, /applicabilityTabsList\.addEventListener\("contextmenu"/);
   assert.match(applicability, /resultsBody\.addEventListener\("contextmenu"/);
+  assert.match(applicability, /let selectedEntryIds = new Set\(\);/);
+  assert.match(applicability, /range: event\.shiftKey/);
+  assert.match(applicability, /additive: event\.ctrlKey \|\| event\.metaKey/);
+  assert.match(applicability, /resultsBody\.addEventListener\("keydown"/);
+  assert.match(applicability, /deleteSelectedResults\(\);/);
   assert.match(applicability, /saveApplicabilityState/);
   assert.match(applicability, /restoreApplicabilityState/);
   assert.match(applicability, /activeFunctionStorageKey/);
@@ -716,6 +722,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(styles, /\.function-content\s*\{[^}]*grid-column: 2;/s);
   assert.match(styles, /\.applicability-function\s*\{[\s\S]*min-height: calc\(100dvh - 140px\);/s);
   assert.match(styles, /\.applicability-results-footer\s*\{[^}]*flex: 0 0 auto;/s);
+  assert.match(styles, /@media \(min-width: 721px\)\s*\{[\s\S]*?\.applicability-function\s*\{[^}]*height: calc\(100dvh - 140px\);[^}]*overflow: hidden;/s);
+  assert.match(styles, /\.applicability-results-table tr\.is-selected > td\s*\{[^}]*background: #fff1eb !important;/s);
   assert.match(styles, /\.applicability-document-modal \.analogs-modal__card/);
   assert.match(styles, /\.applicability-article-name-modal \.analogs-modal__card/);
   assert.match(styles, /\.applicability-multi-list-modal__oem-popover\s*\{[^}]*position: fixed;[^}]*background: #fff;/s);
