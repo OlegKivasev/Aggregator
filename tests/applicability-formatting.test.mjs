@@ -232,6 +232,40 @@ test("applicability promotes compatible car-name code groups regardless of cardi
     }, columns),
     "CU, PureTech 130 (CUHNYM, INVALID)",
   );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.4 (182.BG)",
+      makeName: "FIAT",
+      modelName: "BRAVA (182_)",
+      yearEnd: null,
+      yearStart: "01.1995",
+    }, columns),
+    "182.BG, отсутствует",
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "2.0 16V (PA3V/W, PB3V, PA3W)",
+      makeName: "MITSUBISHI",
+      modelName: "L400 Bus (PD_W, PC_W, PA_V, PB_V, PA_W)",
+      yearEnd: null,
+      yearStart: "01.1994",
+    }, columns),
+    "PA3V/PA3W/PB3V, 16V",
+  );
+  assert.deepEqual(
+    formatApplicabilityVehicles([
+      { carName: "1.5 dCi 90 (M20, M20M)", makeName: "NISSAN", modelName: "NV200 / EVALIA Bus", yearEnd: null, yearStart: "01.2010" },
+      { carName: "1.5 dCi 110 (M20N, M20NN)", makeName: "NISSAN", modelName: "NV200 / EVALIA Фургон", yearEnd: null, yearStart: "01.2010" },
+      { carName: "1.5 dCi 90 (M20)", makeName: "NISSAN", modelName: "NV200 / EVALIA", yearEnd: null, yearStart: "01.2010" },
+    ], columns).split("\n"),
+    ["M20/M20M, dCi 90", "M20N/M20NN, dCi 110", "M20, dCi 90"],
+  );
+  assert.equal(
+    formatApplicabilityVehicles([
+      { carName: "1.6 (16V)", makeName: "PEUGEOT", modelName: "PARTNER", yearEnd: null, yearStart: "01.1996" },
+    ], columns),
+    "отсутствует, (16V)",
+  );
 });
 
 test("applicability retains inferred body aliases in the model identity", () => {

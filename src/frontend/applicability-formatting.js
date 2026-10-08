@@ -100,6 +100,9 @@ const explicitVariantCodeItems = (expression) => expression
   .map((item) => item.trim())
   .filter(Boolean);
 
+const variantCodeTokenPattern = /^[\p{Lu}\p{Nd}_.-]{2,12}$/u;
+const variantCodeSegmentPattern = /^[\p{Lu}\p{Nd}_.-]{1,12}$/u;
+
 const parseCodeExpression = (value) => {
   if (!isCodeExpression(value)) return null;
   return {
@@ -109,12 +112,23 @@ const parseCodeExpression = (value) => {
 };
 
 const parseVariantCodeExpression = (value) => {
-  const parsed = parseCodeExpression(value);
-  if (parsed) return parsed;
-
   const items = explicitVariantCodeItems(value);
-  if (!items.length || !items.every((item) => /^[\p{Lu}\p{Nd}_./-]{2,12}$/u.test(item))) return null;
-  return { rawCodeExpression: value.trim(), codeItems: items.map(normalizedCodeToken).filter(Boolean) };
+  if (!items.length || items.some((item) => engineContextPattern.test(item))) return null;
+  const codeItems = items.flatMap((item) => {
+    const parts = item.split("/");
+    if (!parts.length || !variantCodeTokenPattern.test(parts[0]) || !parts.slice(1).every((part) => variantCodeSegmentPattern.test(part))) return [];
+    if (parts.length === 1) return parts;
+
+    const [baseCode, ...alternatives] = parts;
+    const shorthandLength = alternatives[0]?.length ?? 0;
+    const isSlashShorthand = shorthandLength > 0
+      && alternatives.every((alternative) => alternative.length === shorthandLength && alternative.length < baseCode.length);
+    return isSlashShorthand
+      ? [baseCode, ...alternatives.map((alternative) => `${baseCode.slice(0, -shorthandLength)}${alternative}`)]
+      : parts.every((part) => variantCodeTokenPattern.test(part)) ? parts : [];
+  });
+  if (!codeItems.length || codeItems.length < items.length) return null;
+  return { rawCodeExpression: value.trim(), codeItems: [...new Set(codeItems.map(normalizedCodeToken).filter(Boolean))] };
 };
 
 const classifyParentheticalGroup = (value) => {
@@ -227,7 +241,7 @@ const variantMatchesTemplate = (variantCode, template) => {
   const normalizedVariant = variantCode.toLocaleUpperCase();
   const normalizedTemplate = template.replace(/\s+/g, "").toLocaleUpperCase();
   if (!normalizedTemplate.includes("_")) return normalizedVariant.startsWith(normalizedTemplate);
-  const pattern = normalizedTemplate.split("_").map(escapeRegex).join("[\\p{L}\\p{N}]*");
+  const pattern = normalizedTemplate.split("_").map(escapeRegex).join("[\\p{L}\\p{N}._-]*");
   return new RegExp(`^${pattern}$`, "u").test(normalizedVariant);
 };
 
@@ -242,7 +256,7 @@ const buildVariantCodeContext = (vehicles) => vehicles.reduce((context, vehicle)
   const candidate = terminalVariantCodeCandidate(textValue(vehicle?.carName));
   if (!candidate.variantCodes.length) return context;
 
-  const key = normalizedVehicleIdentity(vehicle);
+  const key = normalizedVehicleFamilyIdentity(vehicle);
   const familyCodes = context.get(key) ?? [];
   familyCodes.push(...candidate.variantCodes);
   context.set(key, familyCodes);
@@ -474,7 +488,7 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCod
   const compatibleVariantCodes = extractCompatibleVariantCodes(
     remaining,
     modelCodeTemplates(modelName),
-    variantCodeContext?.get(normalizedVehicleIdentity(record)),
+    variantCodeContext?.get(normalizedVehicleFamilyIdentity(record)),
   );
   const refinedBodyCode = compatibleVariantCodes.variantCodes.length
     ? { bodyCode: null, carName: compatibleVariantCodes.carName }
