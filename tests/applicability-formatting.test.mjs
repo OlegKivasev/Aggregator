@@ -212,6 +212,49 @@ test("applicability promotes compatible car-name code groups regardless of cardi
     }, columns),
     "GA6W, DI-D",
   );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "PureTech 130 (CUHNYM, CUHNSS)",
+      makeName: "PEUGEOT",
+      modelName: "308 (CU_)",
+      yearEnd: null,
+      yearStart: "01.2017",
+    }, columns),
+    "CUHNYM/CUHNSS, PureTech 130",
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "PureTech 130 (CUHNYM, INVALID)",
+      makeName: "PEUGEOT",
+      modelName: "308 (CU_)",
+      yearEnd: null,
+      yearStart: "01.2017",
+    }, columns),
+    "CU, PureTech 130 (CUHNYM, INVALID)",
+  );
+});
+
+test("applicability retains inferred body aliases in the model identity", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6 HDi",
+      makeName: "CITROËN",
+      modelName: "C3 PICASSO (SH_)",
+      yearEnd: null,
+      yearStart: "01.2009",
+    }),
+    "Вэн, SH, CITROËN, C3 PICASSO, 2009-н.в., 1.6, HDi",
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "2.0 HDi",
+      makeName: "CITROËN",
+      modelName: "XSARA PICASSO (N68)",
+      yearEnd: null,
+      yearStart: "01.1999",
+    }),
+    "Вэн, N68, CITROËN, XSARA PICASSO, 1999-н.в., 2.0, HDi",
+  );
 });
 
 test("applicability repairs syntax of truncated car names without inventing data", () => {

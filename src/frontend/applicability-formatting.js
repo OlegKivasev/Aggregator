@@ -45,7 +45,8 @@ const bodyAliasRegistry = [
   { bodyType: "Кабриолет", pattern: /кабриолет|\bconvertible\b|\bcabrio(?:let)?\b/i, removableIfTerminal: true },
   { bodyType: "Тарга", pattern: /тарга|\btarga\b/i, removableIfTerminal: true },
   { bodyType: "Родстер", pattern: /родстер|\broadster\b/i, removableIfTerminal: true },
-  { bodyType: "Вэн", pattern: /вэн|\bmpv\b|minivan|active tourer|gran tourer|picasso/i, removableIfTerminal: true },
+  { bodyType: "Вэн", pattern: /вэн|\bmpv\b|minivan|active tourer|gran tourer/i, removableIfTerminal: true },
+  { bodyType: "Вэн", pattern: /picasso/i, removableIfTerminal: false },
   { bodyType: "Универсал", pattern: /\bsw\b/i, removableIfTerminal: false },
 ];
 
@@ -93,12 +94,27 @@ const rawCodeItems = (expression) => expression
   .map((item) => item.replace(/\s+/g, "").trim())
   .filter(Boolean);
 
+const explicitVariantCodeItems = (expression) => expression
+  .split(/[,;|]+/)
+  .flatMap((item) => item.split(/\s+-\s+/))
+  .map((item) => item.trim())
+  .filter(Boolean);
+
 const parseCodeExpression = (value) => {
   if (!isCodeExpression(value)) return null;
   return {
     rawCodeExpression: value.trim(),
     codeItems: codeItems(value),
   };
+};
+
+const parseVariantCodeExpression = (value) => {
+  const parsed = parseCodeExpression(value);
+  if (parsed) return parsed;
+
+  const items = explicitVariantCodeItems(value);
+  if (!items.length || !items.every((item) => /^[\p{Lu}\p{Nd}_./-]{2,12}$/u.test(item))) return null;
+  return { rawCodeExpression: value.trim(), codeItems: items.map(normalizedCodeToken).filter(Boolean) };
 };
 
 const classifyParentheticalGroup = (value) => {
@@ -194,7 +210,7 @@ const extractCompatibleBodyCode = (carName, baseCodes) => {
 const terminalVariantCodeCandidate = (carName) => {
   const match = carName.match(/\s*\(([^()]*)\)\s*$/);
   const expression = match?.[1] ?? "";
-  const parsed = parseCodeExpression(expression);
+  const parsed = parseVariantCodeExpression(expression);
   const variantCodes = parsed?.codeItems ?? [];
   if (!variantCodes.length) {
     return { variantCodes: [], carName };
