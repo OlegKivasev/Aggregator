@@ -41,6 +41,49 @@ test("applicability structured list keeps bare numeric EV variants as modificati
   });
 });
 
+test("applicability normalizes standalone hundred-cc engine designations", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "2000",
+      makeName: "CITROËN",
+      modelName: "CX I",
+      yearEnd: "12.1979",
+      yearStart: "01.1974",
+    }),
+    "отсутствует, отсутствует, CITROËN, CX I, 1974-1979, 2.0, отсутствует",
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1000 (KA5)",
+      makeName: "SUBARU",
+      modelName: "JUSTY I",
+      yearEnd: null,
+      yearStart: "01.1984",
+    }),
+    "отсутствует, отсутствует, SUBARU, JUSTY I, 1984-н.в., 1.0, (KA5)",
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "2000 GTi",
+      makeName: "TEST",
+      modelName: "MODEL (X1)",
+      yearEnd: null,
+      yearStart: "01.2000",
+    }),
+    "отсутствует, X1, TEST, MODEL, 2000-н.в., 2.0, GTi",
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "650 i",
+      makeName: "BMW",
+      modelName: "7 (E65)",
+      yearEnd: null,
+      yearStart: "01.2000",
+    }),
+    "отсутствует, E65, BMW, 7, 2000-н.в., отсутствует, 650 i",
+  );
+});
+
 test("applicability compact list uses present for an absent end year", () => {
   assert.equal(
     formatApplicabilityVehicle({
@@ -365,7 +408,7 @@ test("applicability extracts common body aliases without consuming model identit
   });
 });
 
-test("applicability classifies parenthetical descriptions separately from body codes", () => {
+test("applicability classifies parenthetical groups without losing descriptions", () => {
   assert.equal(
     formatApplicabilityVehicle({
       carName: "2.0 CDI",
@@ -374,7 +417,7 @@ test("applicability classifies parenthetical descriptions separately from body c
       yearEnd: null,
       yearStart: "01.2014",
     }),
-    "отсутствует, W447, MERCEDES-BENZ, VITO Mixto, 2014-н.в., 2.0, CDI",
+    "отсутствует, W447, MERCEDES-BENZ, VITO Mixto (Double Cabin), 2014-н.в., 2.0, CDI",
   );
 
   assert.equal(
@@ -385,7 +428,18 @@ test("applicability classifies parenthetical descriptions separately from body c
       yearEnd: null,
       yearStart: "01.2014",
     }),
-    "отсутствует, E11/NE11/C5/C8, TEST, MODEL, 2014-н.в., 1.6, отсутствует",
+    "отсутствует, E11/NE11/C5/C8, TEST, MODEL (Long Wheelbase), 2014-н.в., 1.6, отсутствует",
+  );
+
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6",
+      makeName: "TEST",
+      modelName: "MODEL (Saloon) (E11)",
+      yearEnd: null,
+      yearStart: "01.2014",
+    }),
+    "Седан, E11, TEST, MODEL, 2014-н.в., 1.6, отсутствует",
   );
 });
 

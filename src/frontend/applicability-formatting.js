@@ -1,9 +1,12 @@
 import { normalizeElectrification } from "./electrification-normalizer.js";
 
 const combinedVanAndSuvPattern = /автофургон\s*\/\s*спортивно-утилитарный\s+автомобиль/i;
-const engineDisplacementPattern = /(?:^|\s)(\d{1,2}[.,]\d{1,2})(?=\s|$)/;
+const decimalDisplacementPattern = /(?:^|\s)(\d{1,2}[.,]\d{1,2})(?=\s|$)/;
+const integerCcDisplacementPattern = /(?:^|\s)(\d{3,4})(?=\s|$)/;
 const minimumEngineDisplacementLiters = 0.5;
 const maximumEngineDisplacementLiters = 10;
+const minimumEngineDisplacementCc = 800;
+const maximumEngineDisplacementCc = 8000;
 const technicalTokenCanonicalizations = [
   [/\bt-gdi\b/gi, "T-GDI"],
   [/\btgdi\b/gi, "T-GDI"],
@@ -91,12 +94,30 @@ const parseCodeExpression = (value) => {
   };
 };
 
+const classifyParentheticalGroup = (value) => {
+  const codeExpression = parseCodeExpression(value);
+  if (codeExpression) return { type: "CODE", codeItems: codeExpression.codeItems };
+
+  const descriptor = bodyAliasRegistry.find((candidate) => candidate.pattern.test(value));
+  if (descriptor) return { type: "BODY_DESCRIPTOR" };
+
+  if (/\b(?:crew|double|single)\s+cab(?:in)?\b|\b(?:long|short)\s+wheelbase\b/i.test(value)) {
+    return { type: "MODEL_QUALIFIER" };
+  }
+  return { type: "UNKNOWN_DESCRIPTOR" };
+};
+
 const classifiedCodeTokens = (group) => {
-  return parseCodeExpression(group)?.codeItems ?? [];
+  const classification = classifyParentheticalGroup(group);
+  return classification.type === "CODE" ? classification.codeItems : [];
 };
 
 const modelNameWithoutParentheticalGroups = (modelName) => textValue(modelName)
-  .replace(/\s*\([^()]*\)/g, "")
+  .replace(/\(([^()]*)\)/g, (group, value) => {
+    const classification = classifyParentheticalGroup(value);
+    if (classification.type === "CODE") return "";
+    return classification.type === "BODY_DESCRIPTOR" ? ` ${value}` : group;
+  })
   .replace(/\s*\([^()]*$/, "")
   .replace(/\s{2,}/g, " ")
   .trim();
@@ -244,18 +265,52 @@ const recoveredBodyCodes = (vehicle, codeIndex) => {
   return codes.length ? codes : null;
 };
 
+const isValidDisplacementLiters = (value) => Number.isFinite(value)
+  && value >= minimumEngineDisplacementLiters
+  && value <= maximumEngineDisplacementLiters;
+
+const displacementCandidateParser = (source) => {
+  const decimalMatch = source.match(decimalDisplacementPattern);
+  if (decimalMatch && decimalMatch.index !== undefined) {
+    const capacity = decimalMatch[1].replace(",", ".");
+    if (isValidDisplacementLiters(Number(capacity))) {
+      return {
+        type: "decimalLiters",
+        capacity,
+        index: decimalMatch.index,
+        length: decimalMatch[0].length,
+      };
+    }
+  }
+
+  const integerCcMatch = source.match(integerCcDisplacementPattern);
+  if (integerCcMatch && integerCcMatch.index !== undefined) {
+    const cubicCentimeters = Number(integerCcMatch[1]);
+    if (Number.isInteger(cubicCentimeters)
+      && cubicCentimeters % 100 === 0
+      && cubicCentimeters >= minimumEngineDisplacementCc
+      && cubicCentimeters <= maximumEngineDisplacementCc
+      && isValidDisplacementLiters(cubicCentimeters / 1000)) {
+      return {
+        type: "integerCc",
+        capacity: (cubicCentimeters / 1000).toFixed(1),
+        index: integerCcMatch.index,
+        length: integerCcMatch[0].length,
+      };
+    }
+  }
+
+  return { type: "modelBadge/unknownNumber" };
+};
+
 const splitCarName = (carName) => {
   const source = textValue(carName);
   if (source === "отсутствует") return { capacity: source, remaining: source };
-  const match = source.match(engineDisplacementPattern);
-  if (!match || match.index === undefined) return { capacity: "отсутствует", remaining: source };
-  const capacity = match[1].replace(",", ".");
-  const capacityLiters = Number(capacity);
-  if (capacityLiters < minimumEngineDisplacementLiters || capacityLiters > maximumEngineDisplacementLiters) {
-    return { capacity: "отсутствует", remaining: source };
-  }
-  const remaining = `${source.slice(0, match.index)} ${source.slice(match.index + match[0].length)}`.trim();
-  return { capacity, remaining: remaining || "отсутствует" };
+  const candidate = displacementCandidateParser(source);
+  if (candidate.type === "modelBadge/unknownNumber") return { capacity: "отсутствует", remaining: source };
+
+  const remaining = `${source.slice(0, candidate.index)} ${source.slice(candidate.index + candidate.length)}`.trim();
+  return { capacity: candidate.capacity, remaining: remaining || "отсутствует" };
 };
 
 export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCodes = null) => {
