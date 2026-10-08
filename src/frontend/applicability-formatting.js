@@ -7,6 +7,7 @@ const minimumEngineDisplacementLiters = 0.4;
 const maximumEngineDisplacementLiters = 10;
 const minimumEngineDisplacementCc = 400;
 const maximumEngineDisplacementCc = 8000;
+const applicabilityDocumentFieldSeparator = " | ";
 const engineContextPattern = /\b(?:4wd|4x4|awd|turbo|kompressor|supercharger|16v|8v|vtec|gti|gtd|diesel|petrol)\b/i;
 const technicalTokenCanonicalizations = [
   [/\bt-gdi\b/gi, "T-GDI"],
@@ -266,15 +267,9 @@ const commonPrefixLength = (first, second) => {
   return index;
 };
 
-const variantEvidenceEntry = (vehicle) => ({
-  bodyType: bodyType(vehicle?.modelName),
-  years: yearRange(vehicle),
-});
+const variantEvidenceEntry = (vehicle) => ({ years: yearRange(vehicle) });
 
 const evidenceIsCompatibleWithVehicle = (evidence, vehicle) => {
-  const candidateBodyType = bodyType(vehicle?.modelName);
-  if (evidence.bodyType !== candidateBodyType) return false;
-
   const candidateYears = yearRange(vehicle);
   return candidateYears.start === null || evidence.years.start === null || yearsOverlap(candidateYears, evidence.years);
 };
@@ -535,7 +530,7 @@ const splitCarName = (carName, family) => {
   return { capacity: candidate.capacity, remaining: remaining || "отсутствует", sourceTruncated };
 };
 
-export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCodes = null, displacementContext = null, variantCodeContext = null) => {
+export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCodes = null, displacementContext = null, variantCodeContext = null, fieldSeparator = ", ") => {
   const record = vehicle && typeof vehicle === "object" && !Array.isArray(vehicle) ? vehicle : {};
   const modelName = textValue(record.modelName);
   const { capacity, remaining } = splitCarName(record.carName, displacementContext?.get(normalizedVehicleFamilyIdentity(record)));
@@ -569,7 +564,7 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCod
     ]
       .filter(([column]) => !visibleColumns || visibleColumns.has(column))
       .map(([, value]) => value)
-      .join(", "))
+      .join(fieldSeparator))
     .join("\n");
 };
 
@@ -585,6 +580,7 @@ export const formatApplicabilityVehicles = (vehicles, visibleColumns, variantCod
       recoveredBodyCodes(vehicle, codeIndex),
       displacementContext,
       localVariantCodeContext,
+      applicabilityDocumentFieldSeparator,
     ))
     .join("\n");
 };

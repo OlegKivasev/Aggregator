@@ -98,8 +98,8 @@ test("applicability classifies low integer cc designations from a vehicle family
       vehicle("950", "FORD", "ESCORT I"),
       vehicle("1.1", "FORD", "ESCORT I"),
       vehicle("1.3", "FORD", "ESCORT I"),
-    ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
-    ["0.95, отсутствует", "1.1, отсутствует", "1.3, отсутствует"],
+    ]).split("\n").map((line) => line.split(" | ").slice(-2).join(" | ")),
+    ["0.95 | отсутствует", "1.1 | отсутствует", "1.3 | отсутствует"],
   );
   assert.deepEqual(
     formatApplicabilityVehicles([
@@ -107,16 +107,16 @@ test("applicability classifies low integer cc designations from a vehicle family
       vehicle("0.9", "FIAT", "PANDA (141_)"),
       vehicle("950 4x4", "FIAT", "PANDA (141_)"),
       vehicle("1.0", "FIAT", "PANDA (141_)"),
-    ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
-    ["0.75, отсутствует", "0.9, отсутствует", "0.95, 4WD", "1.0, отсутствует"],
+    ]).split("\n").map((line) => line.split(" | ").slice(-2).join(" | ")),
+    ["0.75 | отсутствует", "0.9 | отсутствует", "0.95 | 4WD", "1.0 | отсутствует"],
   );
   assert.deepEqual(
     formatApplicabilityVehicles([
       vehicle("550", "SUBARU", "REX"),
       vehicle("550 Turbo", "SUBARU", "REX"),
       vehicle("0.7", "SUBARU", "REX"),
-    ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
-    ["0.55, отсутствует", "0.55, Turbo", "0.7, отсутствует"],
+    ]).split("\n").map((line) => line.split(" | ").slice(-2).join(" | ")),
+    ["0.55 | отсутствует", "0.55 | Turbo", "0.7 | отсутствует"],
   );
   assert.deepEqual(
     formatApplicabilityVehicles([
@@ -125,15 +125,15 @@ test("applicability classifies low integer cc designations from a vehicle family
       vehicle("550 (K24)", "SUBARU", "REX I"),
       vehicle("0.55", "SUBARU", "REX II"),
       vehicle("700", "SUBARU", "REX II"),
-    ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
-    ["0.4, отсутствует", "0.5, отсутствует", "0.55, отсутствует", "0.55, отсутствует", "0.7, отсутствует"],
+    ]).split("\n").map((line) => line.split(" | ").slice(-2).join(" | ")),
+    ["0.4 | отсутствует", "0.5 | отсутствует", "0.55 | отсутствует", "0.55 | отсутствует", "0.7 | отсутствует"],
   );
   assert.deepEqual(
     formatApplicabilityVehicles([
       vehicle("660 4WD", "SUBARU", "VIVIO"),
       vehicle("0.7", "SUBARU", "VIVIO"),
-    ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
-    ["0.66, 4WD", "0.7, отсутствует"],
+    ]).split("\n").map((line) => line.split(" | ").slice(-2).join(" | ")),
+    ["0.66 | 4WD", "0.7 | отсутствует"],
   );
   assert.equal(
     formatApplicabilityVehicles([
@@ -141,8 +141,8 @@ test("applicability classifies low integer cc designations from a vehicle family
       vehicle("525 i", "BMW", "5 (E39)"),
       vehicle("530 i", "BMW", "5 (E39)"),
       vehicle("550 i", "BMW", "5 (E39)"),
-    ]).split("\n").at(-1).split(", ").slice(-2).join(", "),
-    "отсутствует, 550 i",
+    ]).split("\n").at(-1).split(" | ").slice(-2).join(" | "),
+    "отсутствует | 550 i",
   );
   assert.equal(
     formatApplicabilityVehicle(vehicle("400 E 4.2", "MERCEDES-BENZ", "E-CLASS (W124)"), new Set(["capacity", "carName"])),
@@ -155,11 +155,11 @@ test("applicability classifies low integer cc designations from a vehicle family
     vehicle("S 500", "MERCEDES-BENZ", "S-CLASS"),
     vehicle("4.2", "MERCEDES-BENZ", "S-CLASS"),
   ]).split("\n");
-  assert.match(sClassLines[0], /, отсутствует, 400 SE, SEL\/S420$/);
-  assert.match(sClassLines[1], /, отсутствует, 500 SE, SEL$/);
-  assert.match(sClassLines[2], /, отсутствует, S 420$/);
-  assert.match(sClassLines[3], /, отсутствует, S 500$/);
-  assert.match(sClassLines[4], /, 4\.2, отсутствует$/);
+  assert.match(sClassLines[0], /\| отсутствует \| 400 SE, SEL\/S420$/);
+  assert.match(sClassLines[1], /\| отсутствует \| 500 SE, SEL$/);
+  assert.match(sClassLines[2], /\| отсутствует \| S 420$/);
+  assert.match(sClassLines[3], /\| отсутствует \| S 500$/);
+  assert.match(sClassLines[4], /\| 4\.2 \| отсутствует$/);
 });
 
 test("applicability promotes compatible car-name code groups regardless of cardinality", () => {
@@ -190,7 +190,7 @@ test("applicability promotes compatible car-name code groups regardless of cardi
       { carName: "1.5 dCi (FEMW)", makeName: "DACIA", modelName: "DOKKER Автофургон / микроавтобус", yearEnd: null, yearStart: "01.2012" },
       { carName: "1.5 dCi (FEJW, FEAH)", makeName: "DACIA", modelName: "DOKKER Автофургон / микроавтобус", yearEnd: null, yearStart: "01.2012" },
     ], columns).split("\n"),
-    ["FEAJ, dCi", "FEMW, dCi", "FEJW/FEAH, dCi"],
+    ["FEAJ | dCi", "FEMW | dCi", "FEJW/FEAH | dCi"],
   );
   assert.equal(
     formatApplicabilityVehicle({
@@ -288,13 +288,13 @@ test("applicability promotes compatible car-name code groups regardless of cardi
       { carName: "1.5 dCi 110 (M20N, M20NN)", makeName: "NISSAN", modelName: "NV200 / EVALIA Фургон", yearEnd: null, yearStart: "01.2010" },
       { carName: "1.5 dCi 90 (M20)", makeName: "NISSAN", modelName: "NV200 / EVALIA", yearEnd: null, yearStart: "01.2010" },
     ], columns).split("\n"),
-    ["M20/M20M, dCi 90", "M20N/M20NN, dCi 110", "M20, dCi 90"],
+    ["M20/M20M | dCi 90", "M20N/M20NN | dCi 110", "M20 | dCi 90"],
   );
   assert.equal(
     formatApplicabilityVehicles([
       { carName: "1.6 (16V)", makeName: "PEUGEOT", modelName: "PARTNER", yearEnd: null, yearStart: "01.1996" },
     ], columns),
-    "отсутствует, (16V)",
+    "отсутствует | (16V)",
   );
   const nissanEvidence = buildApplicabilityVariantCodeContext([
     { carName: "1.5 dCi 90 (M20, M20M)", makeName: "NISSAN", modelName: "NV200 / EVALIA Bus (M2_)", yearEnd: null, yearStart: "01.2010" },
@@ -303,7 +303,7 @@ test("applicability promotes compatible car-name code groups regardless of cardi
     formatApplicabilityVehicles([
       { carName: "1.5 dCi 90 (M20, M20M)", makeName: "NISSAN", modelName: "NV200 / EVALIA Bus", yearEnd: null, yearStart: "01.2010" },
     ], columns, nissanEvidence),
-    "M20/M20M, dCi 90",
+    "M20/M20M | dCi 90",
   );
   const specificCodeEvidence = buildApplicabilityVariantCodeContext([
     { carName: "3.0", makeName: "TOYOTA", modelName: "AVALON (MCX10R)", yearEnd: "12.2004", yearStart: "01.2000" },
@@ -315,7 +315,7 @@ test("applicability promotes compatible car-name code groups regardless of cardi
       { carName: "3.0 (MCX10R)", makeName: "TOYOTA", modelName: "AVALON (X2)", yearEnd: "12.2004", yearStart: "01.2000" },
       { carName: "2.0 (P23W, P23V)", makeName: "MITSUBISHI", modelName: "L 300 III Фургон (P0_V, P1_V, P2_V)", yearEnd: "12.1994", yearStart: "01.1986" },
     ], columns, specificCodeEvidence).split("\n"),
-    ["MCX10R, отсутствует", "P23W/P23V, отсутствует"],
+    ["MCX10R | отсутствует", "P23W/P23V | отсутствует"],
   );
   assert.equal(
     formatApplicabilityVehicle({
@@ -326,6 +326,34 @@ test("applicability promotes compatible car-name code groups regardless of cardi
       yearStart: "01.1986",
     }, columns),
     "EBL/EBS/ECL/EDS/EDL/EGL/ESS/ESL/EUS, отсутствует",
+  );
+  const crossBodyEvidence = buildApplicabilityVariantCodeContext([
+    { carName: "1.6", makeName: "SUBARU", modelName: "IMPREZA (GC4)", yearEnd: "12.2000", yearStart: "01.1992" },
+    { carName: "2.0", makeName: "SUBARU", modelName: "IMPREZA (GC8)", yearEnd: "12.2000", yearStart: "01.1992" },
+    { carName: "2.0", makeName: "MITSUBISHI", modelName: "L 300 III Bus (P23W)", yearEnd: "12.1994", yearStart: "01.1986" },
+    { carName: "2.0", makeName: "MITSUBISHI", modelName: "L 300 III Bus (P23V)", yearEnd: "12.1994", yearStart: "01.1986" },
+  ]);
+  assert.deepEqual(
+    formatApplicabilityVehicles([
+      { carName: "2.0 (GC4, GC8)", makeName: "SUBARU", modelName: "IMPREZA Coupe (GFC)", yearEnd: "12.2000", yearStart: "01.1992" },
+      { carName: "2.0 (P23W, P23V)", makeName: "MITSUBISHI", modelName: "L 300 III Фургон (P0_V, P1_V, P2_V)", yearEnd: "12.1994", yearStart: "01.1986" },
+    ], columns, crossBodyEvidence).split("\n"),
+    ["GC4/GC8 | отсутствует", "P23W/P23V | отсутствует"],
+  );
+});
+
+test("applicability document rows use a pipe field separator", () => {
+  assert.equal(
+    formatApplicabilityVehicles([
+      {
+        carName: "отсутствует",
+        makeName: "MERCEDES-BENZ",
+        modelName: "SPRINTER 3,5-t (B906)",
+        yearEnd: "12.2019",
+        yearStart: "01.2012",
+      },
+    ]),
+    "отсутствует | B906 | MERCEDES-BENZ | SPRINTER 3,5-t | 2012-2019 | отсутствует | отсутствует",
   );
 });
 
@@ -822,13 +850,13 @@ test("applicability reconciles only unambiguous truncated body-code fragments in
       vehicle("SANTA FÉ III Автофургон / спортивно-утилитарный автомобиль ("),
     ]),
     [
-      "SUV/Внедорожник, SM, HYUNDAI, SANTA FE I, 2000-2020, 1.6, отсутствует",
-      "отсутствует, SM, HYUNDAI, SANTA FE I, 2000-2020, 1.6, отсутствует",
-      "SUV/Внедорожник, CM, HYUNDAI, SANTA FE II, 2018-2020, 1.6, отсутствует",
-      "отсутствует, CM, HYUNDAI, SANTA FE II, 2018-2020, 1.6, отсутствует",
-      "SUV/Внедорожник, OS/OSE, HYUNDAI, KONA, 2018-2020, 1.6, отсутствует",
-      "отсутствует, OS/OSE, HYUNDAI, KONA, 2018-2020, 1.6, отсутствует",
-      "SUV/Внедорожник, отсутствует, HYUNDAI, SANTA FE III, 2018-2020, 1.6, отсутствует",
+      "SUV/Внедорожник | SM | HYUNDAI | SANTA FE I | 2000-2020 | 1.6 | отсутствует",
+      "отсутствует | SM | HYUNDAI | SANTA FE I | 2000-2020 | 1.6 | отсутствует",
+      "SUV/Внедорожник | CM | HYUNDAI | SANTA FE II | 2018-2020 | 1.6 | отсутствует",
+      "отсутствует | CM | HYUNDAI | SANTA FE II | 2018-2020 | 1.6 | отсутствует",
+      "SUV/Внедорожник | OS/OSE | HYUNDAI | KONA | 2018-2020 | 1.6 | отсутствует",
+      "отсутствует | OS/OSE | HYUNDAI | KONA | 2018-2020 | 1.6 | отсутствует",
+      "SUV/Внедорожник | отсутствует | HYUNDAI | SANTA FE III | 2018-2020 | 1.6 | отсутствует",
     ].join("\n"),
   );
 
@@ -838,7 +866,7 @@ test("applicability reconciles only unambiguous truncated body-code fragments in
       vehicle("SANTA FÉ I (CM)"),
       vehicle("SANTA FÉ I (CN)"),
     ]).split("\n")[0],
-    "SUV/Внедорожник, отсутствует, HYUNDAI, SANTA FE I, 2018-2020, 1.6, отсутствует",
+    "SUV/Внедорожник | отсутствует | HYUNDAI | SANTA FE I | 2018-2020 | 1.6 | отсутствует",
   );
 });
 
@@ -857,8 +885,8 @@ test("applicability keeps complete codes from truncated terminal groups", () => 
       vehicle("JUMPY I (BU_, BV_, BW_,"),
     ]),
     [
-      "С бортовой платформой/ходовая часть, 70E/70L, VW, TRANSPORTER T4, 2010-н.в., 1.6, отсутствует",
-      "отсутствует, BU/BV/BW, VW, JUMPY I, 2010-н.в., 1.6, отсутствует",
+      "С бортовой платформой/ходовая часть | 70E/70L | VW | TRANSPORTER T4 | 2010-н.в. | 1.6 | отсутствует",
+      "отсутствует | BU/BV/BW | VW | JUMPY I | 2010-н.в. | 1.6 | отсутствует",
     ].join("\n"),
   );
 });
@@ -877,7 +905,7 @@ test("applicability recovers only unambiguous incomplete terminal code tails", (
       vehicle("SPRINTER 3-t (B910)"),
       vehicle("SPRINTER 3-t (B907, B9"),
     ]).split("\n")[1],
-    "отсутствует, B907/B910, MERCEDES-BENZ, SPRINTER 3-t, 2018-н.в., 1.6, отсутствует",
+    "отсутствует | B907/B910 | MERCEDES-BENZ | SPRINTER 3-t | 2018-н.в. | 1.6 | отсутствует",
   );
 
   assert.equal(
@@ -886,7 +914,7 @@ test("applicability recovers only unambiguous incomplete terminal code tails", (
       vehicle("SPRINTER 3-t (B910)"),
       vehicle("SPRINTER 3-t (B9"),
     ]).split("\n")[2],
-    "отсутствует, отсутствует, MERCEDES-BENZ, SPRINTER 3-t, 2018-н.в., 1.6, отсутствует",
+    "отсутствует | отсутствует | MERCEDES-BENZ | SPRINTER 3-t | 2018-н.в. | 1.6 | отсутствует",
   );
 });
 
