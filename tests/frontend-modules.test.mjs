@@ -619,6 +619,9 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-multi-list-modal"[\s\S]*?id="applicability-multi-list-form"[\s\S]*?id="applicability-multi-list-tabs"[\s\S]*?id="applicability-multi-list-submit"/);
   assert.match(html, /id="applicability-document-modal"[\s\S]*?id="applicability-document-text"/);
   assert.match(html, /id="applicability-document-save"[\s\S]*?src="\/applicability-save\.png"/);
+  assert.doesNotMatch(html, /id="applicability-document-save-status"/);
+  assert.doesNotMatch(applicability, /setDocumentSaveStatus|documentSaveStatus/);
+  assert.match(applicability, /showApplicabilityToast\("Список сохранён\.", "success"\)/);
   assert.match(html, /id="applicability-document-text"[^>]*wrap="off"/);
   assert.match(html, /id="applicability-document-format"[\s\S]*?Структурированный список[\s\S]*?Сырые данные/);
   assert.match(html, /id="applicability-document-columns"[\s\S]*?data-applicability-document-column="bodyType"[\s\S]*?data-applicability-document-column="bodyCode"[\s\S]*?data-applicability-document-column="carName"(?! checked)/);

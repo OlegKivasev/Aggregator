@@ -395,8 +395,6 @@ input {
 .applicability-document-save { display: inline-grid; width: 36px; height: 36px; margin-left: auto; padding: 8px; place-items: center; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .applicability-document-save:hover, .applicability-document-save:focus-visible, .applicability-document-save:active { border-color: var(--accent); background: #fff1eb; outline: 0; box-shadow: 0 0 0 .25rem rgb(255 75 19 / 16%); }
 .applicability-document-save img { display: block; width: 18px; height: 18px; object-fit: contain; }
-.applicability-document-save-status { margin: -4px 0 0; color: #18794e; font-size: 12px; font-weight: 700; }
-.applicability-document-save-status[hidden] { display: none; }
 .applicability-document-format, .applicability-document-columns { position: relative; }
 .applicability-document-format > summary, .applicability-document-columns > summary { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; cursor: pointer; font-size: 12px; font-weight: 700; list-style: none; }
 .applicability-document-format > summary { min-width: 230px; }

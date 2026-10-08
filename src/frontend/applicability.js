@@ -45,7 +45,6 @@ const closeMultiListButtons = [...document.querySelectorAll("[data-close-applica
 const documentModal = document.querySelector("#applicability-document-modal");
 const documentText = document.querySelector("#applicability-document-text");
 const documentSaveButton = document.querySelector("#applicability-document-save");
-const documentSaveStatus = document.querySelector("#applicability-document-save-status");
 const closeDocumentButtons = [...document.querySelectorAll("[data-close-applicability-document]")];
 const documentFormatControl = document.querySelector("#applicability-document-format");
 const documentFormatValue = document.querySelector("#applicability-document-format-value");
@@ -595,11 +594,6 @@ const renderApplicabilityDocument = ({ preserveTextState = false } = {}) => {
   if (documentFormat !== "structured") documentColumnsControl.open = false;
 };
 
-const setDocumentSaveStatus = (message) => {
-  documentSaveStatus.textContent = message;
-  documentSaveStatus.hidden = !message;
-};
-
 const applicabilityDocumentFileName = (date = new Date()) => {
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
@@ -610,7 +604,6 @@ const applicabilityDocumentFileName = (date = new Date()) => {
 const saveApplicabilityDocument = async () => {
   const suggestedName = applicabilityDocumentFileName();
   const contents = new Blob([documentText.value], { type: "text/plain;charset=utf-8" });
-  setDocumentSaveStatus("");
 
   if (typeof window.showSaveFilePicker === "function") {
     const fileHandle = await window.showSaveFilePicker({
@@ -625,7 +618,7 @@ const saveApplicabilityDocument = async () => {
       await writable.abort();
       throw error;
     }
-    setDocumentSaveStatus("Список сохранён.");
+    showApplicabilityToast("Список сохранён.", "success");
     return;
   }
 
@@ -638,7 +631,7 @@ const saveApplicabilityDocument = async () => {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-  setDocumentSaveStatus("Список скачан.");
+  showApplicabilityToast("Список скачан.", "success");
 };
 
 const updateListButton = (tab) => {
@@ -1080,7 +1073,7 @@ documentSaveButton.addEventListener("click", async () => {
     await saveApplicabilityDocument();
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") return;
-    setDocumentSaveStatus("Не удалось сохранить список.");
+    showApplicabilityToast("Не удалось сохранить список.", "error");
   }
 });
 documentFormatButtons.forEach((button) => button.addEventListener("click", () => {
