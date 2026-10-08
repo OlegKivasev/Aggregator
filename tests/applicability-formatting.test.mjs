@@ -340,6 +340,52 @@ test("applicability promotes compatible car-name code groups regardless of cardi
     ], columns, crossBodyEvidence).split("\n"),
     ["GC4/GC8 | отсутствует", "P23W/P23V | отсутствует"],
   );
+  const identicalSourceEvidence = buildApplicabilityVariantCodeContext([
+    { carName: "2.4", makeName: "HONDA", modelName: "ODYSSEY (RB3)", yearEnd: "12.2004", yearStart: "01.2000" },
+    { carName: "2.0", makeName: "MITSUBISHI", modelName: "L 300 III Фургон (P23W, P23V)", yearEnd: "12.1994", yearStart: "01.1986" },
+  ]);
+  assert.deepEqual(
+    formatApplicabilityVehicles([
+      { carName: "2.4 (RB3)", makeName: "HONDA", modelName: "ODYSSEY (RL1, RA6, RA_)", yearEnd: "12.1994", yearStart: "01.1990" },
+      { carName: "2.4 (RB3)", makeName: "HONDA", modelName: "ODYSSEY (RL1, RA6, RA_)", yearEnd: "12.2020", yearStart: "01.2010" },
+      { carName: "2.0 (P23W, P23V)", makeName: "MITSUBISHI", modelName: "L 300 III Фургон (P0_V, P1_V, P2_V)", yearEnd: "12.2020", yearStart: "01.2010" },
+    ], columns, identicalSourceEvidence).split("\n"),
+    ["RB3 | отсутствует", "RB3 | отсутствует", "P23W/P23V | отсутствует"],
+  );
+});
+
+test("applicability consumes repeated leading displacement tokens", () => {
+  const columns = new Set(["capacity", "carName"]);
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.2 1,20 HYBRID E-POWER (E13)",
+      makeName: "NISSAN",
+      modelName: "NOTE (E13)",
+      yearEnd: null,
+      yearStart: "01.2020",
+    }, columns),
+    "1.2, HEV E-POWER",
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.5 1.50 DOHC i-VTEC (GN5)",
+      makeName: "HONDA",
+      modelName: "CITY VII (GN5)",
+      yearEnd: null,
+      yearStart: "01.2023",
+    }, columns),
+    "1.5, DOHC i-VTEC",
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.5 DOHC 1.5 i-VTEC (GN5)",
+      makeName: "HONDA",
+      modelName: "CITY VII (GN5)",
+      yearEnd: null,
+      yearStart: "01.2023",
+    }, columns),
+    "1.5, DOHC 1.5 i-VTEC",
+  );
 });
 
 test("applicability document rows use a pipe field separator", () => {

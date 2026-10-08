@@ -267,13 +267,6 @@ const commonPrefixLength = (first, second) => {
   return index;
 };
 
-const variantEvidenceEntry = (vehicle) => ({ years: yearRange(vehicle) });
-
-const evidenceIsCompatibleWithVehicle = (evidence, vehicle) => {
-  const candidateYears = yearRange(vehicle);
-  return candidateYears.start === null || evidence.years.start === null || yearsOverlap(candidateYears, evidence.years);
-};
-
 export const buildApplicabilityVariantCodeContext = (vehicles) => {
   const records = Array.isArray(vehicles) ? vehicles : [];
   const context = new Map();
@@ -284,7 +277,7 @@ export const buildApplicabilityVariantCodeContext = (vehicles) => {
     if (!candidate.variantCodes.length && !concreteModelCodes.length) return;
 
     const key = normalizedVehicleFamilyIdentity(vehicle);
-    const family = context.get(key) ?? { candidateCodes: [], confirmedCodes: new Map() };
+    const family = context.get(key) ?? { candidateCodes: [], confirmedCodes: new Set() };
     family.candidateCodes.push(...candidate.variantCodes);
     context.set(key, family);
   });
@@ -294,16 +287,13 @@ export const buildApplicabilityVariantCodeContext = (vehicles) => {
     const templates = modelCodeTemplates(vehicle?.modelName);
     const family = context.get(normalizedVehicleFamilyIdentity(vehicle));
     if (!family) return;
-    const evidence = variantEvidenceEntry(vehicle);
     const confirmedCodes = templates.filter((template) => !template.includes("_"));
     if (candidate.variantCodes.length && templates.length
       && candidate.variantCodes.every((code) => templates.some((template) => variantMatchesTemplate(code, template)))) {
       confirmedCodes.push(...candidate.variantCodes);
     }
     confirmedCodes.forEach((code) => {
-      const entries = family.confirmedCodes.get(code) ?? [];
-      entries.push(evidence);
-      family.confirmedCodes.set(code, entries);
+      family.confirmedCodes.add(code);
     });
   });
 
@@ -317,15 +307,13 @@ const hasRepeatedVariantMorphology = (variantCodes, familyCodes) => {
   ));
 };
 
-const extractCompatibleVariantCodes = (carName, templates, familyContext, vehicle) => {
+const extractCompatibleVariantCodes = (carName, templates, familyContext) => {
   const candidate = terminalVariantCodeCandidate(carName);
   if (!candidate.variantCodes.length) return candidate;
 
   const matchesTemplate = templates.length > 0
     && candidate.variantCodes.every((variantCode) => templates.some((template) => variantMatchesTemplate(variantCode, template)));
-  const matchesEvidence = candidate.variantCodes.every((variantCode) => (
-    familyContext?.confirmedCodes.get(variantCode)?.some((evidence) => evidenceIsCompatibleWithVehicle(evidence, vehicle))
-  ));
+  const matchesEvidence = candidate.variantCodes.every((variantCode) => familyContext?.confirmedCodes.has(variantCode));
   const matchesFamily = templates.length === 0
     && hasRepeatedVariantMorphology(candidate.variantCodes, familyContext?.candidateCodes ?? []);
   return matchesTemplate || matchesEvidence || matchesFamily ? candidate : { variantCodes: [], carName };
@@ -518,6 +506,17 @@ const displacementCandidateParser = (source, family) => {
   return { type: "modelBadge/unknownNumber" };
 };
 
+const consumeRepeatedLeadingDisplacement = (source, capacity) => {
+  const canonicalCapacity = Number(capacity.replace(",", "."));
+  let remaining = source.trimStart();
+  while (true) {
+    const match = remaining.match(/^(\d{1,2}[.,]\d{1,2})(?=\s|$)/);
+    if (!match || Number(match[1].replace(",", ".")) !== canonicalCapacity) break;
+    remaining = remaining.slice(match[0].length).trimStart();
+  }
+  return remaining.trim();
+};
+
 const splitCarName = (carName, family) => {
   const { source, sourceTruncated } = truncatedSourceParser(carName);
   if (source === "отсутствует") return { capacity: source, remaining: source };
@@ -526,7 +525,10 @@ const splitCarName = (carName, family) => {
     return { capacity: "отсутствует", remaining: source, sourceTruncated };
   }
 
-  const remaining = `${source.slice(0, candidate.index)} ${source.slice(candidate.index + candidate.length)}`.trim();
+  const remaining = consumeRepeatedLeadingDisplacement(
+    `${source.slice(0, candidate.index)} ${source.slice(candidate.index + candidate.length)}`,
+    candidate.capacity,
+  );
   return { capacity: candidate.capacity, remaining: remaining || "отсутствует", sourceTruncated };
 };
 
@@ -540,7 +542,6 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCod
     remaining,
     modelCodeTemplates(modelName),
     variantCodeContext?.get(normalizedVehicleFamilyIdentity(record)),
-    record,
   );
   const refinedBodyCode = compatibleVariantCodes.variantCodes.length
     ? { bodyCode: null, carName: compatibleVariantCodes.carName }
