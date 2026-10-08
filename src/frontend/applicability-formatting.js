@@ -88,12 +88,6 @@ const codeItems = (expression) => expression
   .map(normalizedCodeToken)
   .filter(Boolean);
 
-const rawCodeItems = (expression) => expression
-  .split(/[,;|]+/)
-  .flatMap((item) => item.split(/\s+-\s+/))
-  .map((item) => item.replace(/\s+/g, "").trim())
-  .filter(Boolean);
-
 const explicitVariantCodeItems = (expression) => expression
   .split(/[,;|]+/)
   .flatMap((item) => item.split(/\s+-\s+/))
@@ -111,24 +105,33 @@ const parseCodeExpression = (value) => {
   };
 };
 
+const expandCodeAlternatives = (item) => {
+  const parts = item.split("/");
+  if (!parts.length || !variantCodeTokenPattern.test(parts[0]) || !parts.slice(1).every((part) => variantCodeSegmentPattern.test(part))) return null;
+  if (parts.length === 1) return parts;
+
+  const [baseCode, ...alternatives] = parts;
+  const shorthandLength = alternatives[0]?.length ?? 0;
+  const isSlashShorthand = shorthandLength > 0
+    && alternatives.every((alternative) => alternative.length === shorthandLength && alternative.length < baseCode.length);
+  if (isSlashShorthand) {
+    return [baseCode, ...alternatives.map((alternative) => `${baseCode.slice(0, -shorthandLength)}${alternative}`)];
+  }
+  return parts.every((part) => variantCodeTokenPattern.test(part)) ? parts : null;
+};
+
 const parseVariantCodeExpression = (value) => {
   const items = explicitVariantCodeItems(value);
   if (!items.length || items.some((item) => engineContextPattern.test(item))) return null;
-  const codeItems = items.flatMap((item) => {
-    const parts = item.split("/");
-    if (!parts.length || !variantCodeTokenPattern.test(parts[0]) || !parts.slice(1).every((part) => variantCodeSegmentPattern.test(part))) return [];
-    if (parts.length === 1) return parts;
-
-    const [baseCode, ...alternatives] = parts;
-    const shorthandLength = alternatives[0]?.length ?? 0;
-    const isSlashShorthand = shorthandLength > 0
-      && alternatives.every((alternative) => alternative.length === shorthandLength && alternative.length < baseCode.length);
-    return isSlashShorthand
-      ? [baseCode, ...alternatives.map((alternative) => `${baseCode.slice(0, -shorthandLength)}${alternative}`)]
-      : parts.every((part) => variantCodeTokenPattern.test(part)) ? parts : [];
-  });
+  const codeItems = items.flatMap((item) => expandCodeAlternatives(item) ?? []);
   if (!codeItems.length || codeItems.length < items.length) return null;
   return { rawCodeExpression: value.trim(), codeItems: [...new Set(codeItems.map(normalizedCodeToken).filter(Boolean))] };
+};
+
+const parseModelCodeTemplates = (value) => {
+  if (!parseCodeExpression(value)) return [];
+  const templates = explicitVariantCodeItems(value).flatMap((item) => expandCodeAlternatives(item) ?? []);
+  return [...new Set(templates.map((template) => template.toLocaleUpperCase()))];
 };
 
 const classifyParentheticalGroup = (value) => {
@@ -166,9 +169,7 @@ const bodyCodes = (modelName) => {
   return parentheticalGroups(source).flatMap((group) => classifiedCodeTokens(group.value));
 };
 
-const modelCodeTemplates = (modelName) => parentheticalGroups(textValue(modelName)).flatMap((group) => (
-  parseCodeExpression(group.value) ? rawCodeItems(group.value) : []
-));
+const modelCodeTemplates = (modelName) => parentheticalGroups(textValue(modelName)).flatMap((group) => parseModelCodeTemplates(group.value));
 
 const terminalCodeFragment = (modelName) => {
   const source = textValue(modelName);
@@ -241,7 +242,10 @@ const variantMatchesTemplate = (variantCode, template) => {
   const normalizedVariant = variantCode.toLocaleUpperCase();
   const normalizedTemplate = template.replace(/\s+/g, "").toLocaleUpperCase();
   if (!normalizedTemplate.includes("_")) return normalizedVariant.startsWith(normalizedTemplate);
-  const pattern = normalizedTemplate.split("_").map(escapeRegex).join("[\\p{L}\\p{N}._-]*");
+  const templatePartPattern = (part) => escapeRegex(part)
+    .replaceAll("\\.", "[-._]?")
+    .replaceAll("-", "[-._]?");
+  const pattern = normalizedTemplate.split("_").map(templatePartPattern).join("[\\p{L}\\p{N}._-]*");
   return new RegExp(`^${pattern}$`, "u").test(normalizedVariant);
 };
 
@@ -252,7 +256,7 @@ const commonPrefixLength = (first, second) => {
   return index;
 };
 
-const buildVariantCodeContext = (vehicles) => vehicles.reduce((context, vehicle) => {
+export const buildApplicabilityVariantCodeContext = (vehicles) => vehicles.reduce((context, vehicle) => {
   const candidate = terminalVariantCodeCandidate(textValue(vehicle?.carName));
   if (!candidate.variantCodes.length) return context;
 
@@ -516,18 +520,18 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCod
     .join("\n");
 };
 
-export const formatApplicabilityVehicles = (vehicles, visibleColumns) => {
+export const formatApplicabilityVehicles = (vehicles, visibleColumns, variantCodeContext = null) => {
   const records = Array.isArray(vehicles) ? vehicles : [];
   const codeIndex = buildBodyCodeIndex(records);
   const displacementContext = buildDisplacementContext(records);
-  const variantCodeContext = buildVariantCodeContext(records);
+  const localVariantCodeContext = variantCodeContext ?? buildApplicabilityVariantCodeContext(records);
   return records
     .map((vehicle) => formatApplicabilityVehicle(
       vehicle,
       visibleColumns,
       recoveredBodyCodes(vehicle, codeIndex),
       displacementContext,
-      variantCodeContext,
+      localVariantCodeContext,
     ))
     .join("\n");
 };

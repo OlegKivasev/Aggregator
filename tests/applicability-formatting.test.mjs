@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatApplicabilityVehicle, formatApplicabilityVehicles } from "../src/frontend/applicability-formatting.js";
+import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicle, formatApplicabilityVehicles } from "../src/frontend/applicability-formatting.js";
 
 test("applicability compact list extracts body type, year and engine capacity", () => {
   assert.equal(
@@ -252,6 +252,36 @@ test("applicability promotes compatible car-name code groups regardless of cardi
     }, columns),
     "PA3V/PA3W/PB3V, 16V",
   );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.3 Sport (ZAM4A)",
+      makeName: "CITROËN",
+      modelName: "AX (ZA-_)",
+      yearEnd: null,
+      yearStart: "01.1987",
+    }, columns),
+    "ZAM4A, Sport",
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.8 4WD (D05V, D05W)",
+      makeName: "MITSUBISHI",
+      modelName: "SPACE WAGON (D0_V/W)",
+      yearEnd: null,
+      yearStart: "01.1983",
+    }, columns),
+    "D05V/D05W, 4WD",
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "2.5 TD (L035P, L037G)",
+      makeName: "MITSUBISHI",
+      modelName: "L 300 / DELICA II (L03_P/G)",
+      yearEnd: null,
+      yearStart: "01.1986",
+    }, columns),
+    "L035P/L037G, TD",
+  );
   assert.deepEqual(
     formatApplicabilityVehicles([
       { carName: "1.5 dCi 90 (M20, M20M)", makeName: "NISSAN", modelName: "NV200 / EVALIA Bus", yearEnd: null, yearStart: "01.2010" },
@@ -265,6 +295,16 @@ test("applicability promotes compatible car-name code groups regardless of cardi
       { carName: "1.6 (16V)", makeName: "PEUGEOT", modelName: "PARTNER", yearEnd: null, yearStart: "01.1996" },
     ], columns),
     "отсутствует, (16V)",
+  );
+  const nissanEvidence = buildApplicabilityVariantCodeContext([
+    { carName: "1.5 dCi 110 (M20N, M20NN)", makeName: "NISSAN", modelName: "NV200 / EVALIA Фургон", yearEnd: null, yearStart: "01.2010" },
+    { carName: "1.5 dCi 90 (M20)", makeName: "NISSAN", modelName: "NV200 / EVALIA", yearEnd: null, yearStart: "01.2010" },
+  ]);
+  assert.equal(
+    formatApplicabilityVehicles([
+      { carName: "1.5 dCi 90 (M20, M20M)", makeName: "NISSAN", modelName: "NV200 / EVALIA Bus", yearEnd: null, yearStart: "01.2010" },
+    ], columns, nissanEvidence),
+    "M20/M20M, dCi 90",
   );
 });
 

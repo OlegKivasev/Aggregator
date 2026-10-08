@@ -1,4 +1,4 @@
-import { formatApplicabilityVehicles } from "./applicability-formatting.js";
+import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicles } from "./applicability-formatting.js";
 
 const markupFunction = document.querySelector("#markup-function");
 const applicabilityFunction = document.querySelector("#applicability-function");
@@ -554,6 +554,9 @@ const groupSearchesBySku = (entries) => [...entries.reduce((groups, entry) => {
 
 const buildApplicabilityDocument = (sections, format = documentFormat) => {
   const visibleColumns = visibleDocumentColumns();
+  const variantCodeContext = format === "structured"
+    ? buildApplicabilityVariantCodeContext(sections.flatMap(({ entries }) => entries.flatMap((entry) => entry.results)))
+    : null;
   return sections.map(({ articleName, entries }) => {
     if (format !== "structured") {
       return `Артикул: ${articleName}\n\n${entries
@@ -561,7 +564,7 @@ const buildApplicabilityDocument = (sections, format = documentFormat) => {
         .join("\n\n")}`;
     }
     const oemSections = groupSearchesBySku(entries)
-      .map(([sku, entriesForSku]) => `OEM-артикул: ${sku}\n${formatApplicabilityVehicles(entriesForSku.flatMap((entry) => entry.results), visibleColumns)}`)
+      .map(([sku, entriesForSku]) => `OEM-артикул: ${sku}\n${formatApplicabilityVehicles(entriesForSku.flatMap((entry) => entry.results), visibleColumns, variantCodeContext)}`)
       .join("\n\n");
     return `Артикул: ${articleName}\n\n${oemSections}`;
   }).join("\n\n");
