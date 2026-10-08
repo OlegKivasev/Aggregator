@@ -118,6 +118,23 @@ test("applicability classifies low integer cc designations from a vehicle family
     ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
     ["0.55, отсутствует", "0.55, Turbo", "0.7, отсутствует"],
   );
+  assert.deepEqual(
+    formatApplicabilityVehicles([
+      vehicle("400 (K22)", "SUBARU", "REX I"),
+      vehicle("500 (K23)", "SUBARU", "REX I"),
+      vehicle("550 (K24)", "SUBARU", "REX I"),
+      vehicle("550 Turbo", "SUBARU", "REX II"),
+      vehicle("700", "SUBARU", "REX II"),
+    ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
+    ["0.4, (K22)", "0.5, (K23)", "0.55, (K24)", "0.55, Turbo", "0.7, отсутствует"],
+  );
+  assert.deepEqual(
+    formatApplicabilityVehicles([
+      vehicle("660 4WD", "SUBARU", "VIVIO"),
+      vehicle("0.7", "SUBARU", "VIVIO"),
+    ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
+    ["0.66, 4WD", "0.7, отсутствует"],
+  );
   assert.equal(
     formatApplicabilityVehicles([
       vehicle("520 i", "BMW", "5 (E39)"),
@@ -126,6 +143,34 @@ test("applicability classifies low integer cc designations from a vehicle family
       vehicle("550 i", "BMW", "5 (E39)"),
     ]).split("\n").at(-1).split(", ").slice(-2).join(", "),
     "отсутствует, 550 i",
+  );
+  assert.equal(
+    formatApplicabilityVehicle(vehicle("400 E 4.2", "MERCEDES-BENZ", "E-CLASS (W124)"), new Set(["capacity", "carName"])),
+    "4.2, 400 E",
+  );
+});
+
+test("applicability promotes compatible car-name code groups regardless of cardinality", () => {
+  const vehicle = (carName) => ({
+    carName,
+    makeName: "DACIA",
+    modelName: "DOKKER вэн (KE_)",
+    yearEnd: null,
+    yearStart: "01.2012",
+  });
+  const columns = new Set(["bodyCode", "carName"]);
+
+  assert.equal(formatApplicabilityVehicle(vehicle("1.5 dCi (KEMW)"), columns), "KEMW, dCi");
+  assert.equal(formatApplicabilityVehicle(vehicle("1.5 dCi (KEAJ, KEAH)"), columns), "KEAJ/KEAH, dCi");
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "1.6 (HSMC, HSMD)",
+      makeName: "DACIA",
+      modelName: "DUSTER (HS_)",
+      yearEnd: null,
+      yearStart: "01.2012",
+    }, columns),
+    "HSMC/HSMD, отсутствует",
   );
 });
 
