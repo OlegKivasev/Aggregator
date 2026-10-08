@@ -84,6 +84,74 @@ test("applicability normalizes standalone hundred-cc engine designations", () =>
   );
 });
 
+test("applicability classifies low integer cc designations from a vehicle family", () => {
+  const vehicle = (carName, makeName, modelName) => ({
+    carName,
+    makeName,
+    modelName,
+    yearEnd: null,
+    yearStart: "01.1980",
+  });
+
+  assert.deepEqual(
+    formatApplicabilityVehicles([
+      vehicle("950", "FORD", "ESCORT I"),
+      vehicle("1100", "FORD", "ESCORT I"),
+      vehicle("1300", "FORD", "ESCORT I"),
+    ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
+    ["0.95, отсутствует", "1.1, отсутствует", "1.3, отсутствует"],
+  );
+  assert.deepEqual(
+    formatApplicabilityVehicles([
+      vehicle("750", "FIAT", "PANDA (141_)"),
+      vehicle("900", "FIAT", "PANDA (141_)"),
+      vehicle("950 4x4", "FIAT", "PANDA (141_)"),
+      vehicle("1000", "FIAT", "PANDA (141_)"),
+    ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
+    ["0.75, отсутствует", "0.9, отсутствует", "0.95, 4WD", "1.0, отсутствует"],
+  );
+  assert.deepEqual(
+    formatApplicabilityVehicles([
+      vehicle("550", "SUBARU", "REX"),
+      vehicle("550 Turbo", "SUBARU", "REX"),
+      vehicle("700", "SUBARU", "REX"),
+    ]).split("\n").map((line) => line.split(", ").slice(-2).join(", ")),
+    ["0.55, отсутствует", "0.55, Turbo", "0.7, отсутствует"],
+  );
+  assert.equal(
+    formatApplicabilityVehicles([
+      vehicle("520 i", "BMW", "5 (E39)"),
+      vehicle("525 i", "BMW", "5 (E39)"),
+      vehicle("530 i", "BMW", "5 (E39)"),
+      vehicle("550 i", "BMW", "5 (E39)"),
+    ]).split("\n").at(-1).split(", ").slice(-2).join(", "),
+    "отсутствует, 550 i",
+  );
+});
+
+test("applicability repairs syntax of truncated car names without inventing data", () => {
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "16V (LS09, LS0L, LS0M, LS0P, LS0V, LS18, LS1S, LS1V,...",
+      makeName: "TEST",
+      modelName: "MODEL (X1)",
+      yearEnd: null,
+      yearStart: "01.2000",
+    }, new Set(["carName"])),
+    "16V (LS09, LS0L, LS0M, LS0P, LS0V, LS18, LS1S, LS1V, …)",
+  );
+  assert.equal(
+    formatApplicabilityVehicle({
+      carName: "16V (LS09, LS0L",
+      makeName: "TEST",
+      modelName: "MODEL (X1)",
+      yearEnd: null,
+      yearStart: "01.2000",
+    }, new Set(["carName"])),
+    "16V (LS09, LS0L, …)",
+  );
+});
+
 test("applicability compact list uses present for an absent end year", () => {
   assert.equal(
     formatApplicabilityVehicle({

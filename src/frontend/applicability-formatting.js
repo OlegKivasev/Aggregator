@@ -5,8 +5,9 @@ const decimalDisplacementPattern = /(?:^|\s)(\d{1,2}[.,]\d{1,2})(?=\s|$)/;
 const integerCcDisplacementPattern = /(?:^|\s)(\d{3,4})(?=\s|$)/;
 const minimumEngineDisplacementLiters = 0.5;
 const maximumEngineDisplacementLiters = 10;
-const minimumEngineDisplacementCc = 800;
+const minimumEngineDisplacementCc = 500;
 const maximumEngineDisplacementCc = 8000;
+const engineContextPattern = /\b(?:4wd|4x4|awd|turbo|kompressor|supercharger|16v|8v|vtec|gti|gtd|diesel|petrol)\b/i;
 const technicalTokenCanonicalizations = [
   [/\bt-gdi\b/gi, "T-GDI"],
   [/\btgdi\b/gi, "T-GDI"],
@@ -269,7 +270,69 @@ const isValidDisplacementLiters = (value) => Number.isFinite(value)
   && value >= minimumEngineDisplacementLiters
   && value <= maximumEngineDisplacementLiters;
 
-const displacementCandidateParser = (source) => {
+const integerCcCandidate = (source) => {
+  const match = source.match(integerCcDisplacementPattern);
+  if (!match || match.index === undefined) return null;
+
+  const cubicCentimeters = Number(match[1]);
+  if (!Number.isInteger(cubicCentimeters)
+    || cubicCentimeters % 50 !== 0
+    || cubicCentimeters < minimumEngineDisplacementCc
+    || cubicCentimeters > maximumEngineDisplacementCc
+    || !isValidDisplacementLiters(cubicCentimeters / 1000)) return null;
+
+  return {
+    cubicCentimeters,
+    index: match.index,
+    length: match[0].length,
+    hasEngineContext: engineContextPattern.test(source.slice(match.index + match[0].length)),
+  };
+};
+
+const formatCubicCentimeters = (cubicCentimeters) => {
+  const liters = cubicCentimeters / 1000;
+  return Number.isInteger(liters) ? liters.toFixed(1) : String(liters);
+};
+
+const isHighConfidenceCcCandidate = (candidate) => candidate.cubicCentimeters >= 800
+  && candidate.cubicCentimeters % 100 === 0;
+
+const buildDisplacementContext = (vehicles) => vehicles.reduce((context, vehicle) => {
+  const candidate = integerCcCandidate(textValue(vehicle?.carName));
+  if (!candidate) return context;
+
+  const key = normalizedVehicleIdentity(vehicle);
+  const family = context.get(key) ?? { candidates: [] };
+  family.candidates.push(candidate);
+  context.set(key, family);
+  return context;
+}, new Map());
+
+const familyClassifiesCcCandidate = (family) => {
+  if (!family) return false;
+  if (family.candidates.some(isHighConfidenceCcCandidate)) return true;
+
+  const distinctCandidates = new Set(family.candidates.map((candidate) => candidate.cubicCentimeters));
+  return distinctCandidates.size >= 2 && family.candidates.some((candidate) => candidate.hasEngineContext);
+};
+
+const truncatedSourceParser = (value) => {
+  const source = textValue(value);
+  const openingParentheses = [...source].filter((character) => character === "(").length;
+  const closingParentheses = [...source].filter((character) => character === ")").length;
+  const unmatchedOpeningParentheses = Math.max(openingParentheses - closingParentheses, 0);
+  const sourceTruncated = /(?:\.\.\.|…)/.test(source) || unmatchedOpeningParentheses > 0;
+  if (!sourceTruncated) return { source, sourceTruncated };
+
+  let repaired = source.replace(/\.\.\./g, "…").replace(/,\s*…/g, ", …").trim();
+  if (unmatchedOpeningParentheses > 0 && !repaired.endsWith("…")) {
+    repaired = repaired.replace(/[\s,]+$/, "");
+    repaired = `${repaired}${repaired.endsWith("(") ? "" : ","} …`;
+  }
+  return { source: `${repaired}${")".repeat(unmatchedOpeningParentheses)}`, sourceTruncated };
+};
+
+const displacementCandidateParser = (source, family) => {
   const decimalMatch = source.match(decimalDisplacementPattern);
   if (decimalMatch && decimalMatch.index !== undefined) {
     const capacity = decimalMatch[1].replace(",", ".");
@@ -283,40 +346,35 @@ const displacementCandidateParser = (source) => {
     }
   }
 
-  const integerCcMatch = source.match(integerCcDisplacementPattern);
-  if (integerCcMatch && integerCcMatch.index !== undefined) {
-    const cubicCentimeters = Number(integerCcMatch[1]);
-    if (Number.isInteger(cubicCentimeters)
-      && cubicCentimeters % 100 === 0
-      && cubicCentimeters >= minimumEngineDisplacementCc
-      && cubicCentimeters <= maximumEngineDisplacementCc
-      && isValidDisplacementLiters(cubicCentimeters / 1000)) {
-      return {
-        type: "integerCc",
-        capacity: (cubicCentimeters / 1000).toFixed(1),
-        index: integerCcMatch.index,
-        length: integerCcMatch[0].length,
-      };
-    }
+  const integerCandidate = integerCcCandidate(source);
+  if (integerCandidate && (isHighConfidenceCcCandidate(integerCandidate) || familyClassifiesCcCandidate(family))) {
+    return {
+      type: "integerCc",
+      capacity: formatCubicCentimeters(integerCandidate.cubicCentimeters),
+      index: integerCandidate.index,
+      length: integerCandidate.length,
+    };
   }
 
   return { type: "modelBadge/unknownNumber" };
 };
 
-const splitCarName = (carName) => {
-  const source = textValue(carName);
+const splitCarName = (carName, family) => {
+  const { source, sourceTruncated } = truncatedSourceParser(carName);
   if (source === "отсутствует") return { capacity: source, remaining: source };
-  const candidate = displacementCandidateParser(source);
-  if (candidate.type === "modelBadge/unknownNumber") return { capacity: "отсутствует", remaining: source };
+  const candidate = displacementCandidateParser(source, family);
+  if (candidate.type === "modelBadge/unknownNumber") {
+    return { capacity: "отсутствует", remaining: source, sourceTruncated };
+  }
 
   const remaining = `${source.slice(0, candidate.index)} ${source.slice(candidate.index + candidate.length)}`.trim();
-  return { capacity: candidate.capacity, remaining: remaining || "отсутствует" };
+  return { capacity: candidate.capacity, remaining: remaining || "отсутствует", sourceTruncated };
 };
 
-export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCodes = null) => {
+export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCodes = null, displacementContext = null) => {
   const record = vehicle && typeof vehicle === "object" && !Array.isArray(vehicle) ? vehicle : {};
   const modelName = textValue(record.modelName);
-  const { capacity, remaining } = splitCarName(record.carName);
+  const { capacity, remaining } = splitCarName(record.carName, displacementContext?.get(normalizedVehicleIdentity(record)));
   const model = modelWithoutBodyType(modelName);
   const codes = recoveredCodes ?? bodyCodes(modelName);
   const refinedBodyCode = extractCompatibleBodyCode(remaining, codes);
@@ -344,7 +402,13 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCod
 export const formatApplicabilityVehicles = (vehicles, visibleColumns) => {
   const records = Array.isArray(vehicles) ? vehicles : [];
   const codeIndex = buildBodyCodeIndex(records);
+  const displacementContext = buildDisplacementContext(records);
   return records
-    .map((vehicle) => formatApplicabilityVehicle(vehicle, visibleColumns, recoveredBodyCodes(vehicle, codeIndex)))
+    .map((vehicle) => formatApplicabilityVehicle(
+      vehicle,
+      visibleColumns,
+      recoveredBodyCodes(vehicle, codeIndex),
+      displacementContext,
+    ))
     .join("\n");
 };
