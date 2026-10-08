@@ -327,6 +327,20 @@ test("applicability promotes compatible car-name code groups regardless of cardi
     }, columns),
     "EBL/EBS/ECL/EDS/EDL/EGL/ESS/ESL/EUS, отсутствует",
   );
+  const embeddedBaseCodeCases = [
+    ["NISSAN", "350Z Coupe (Z33)", "3.5 (AAZ33)", "AAZ33, отсутствует"],
+    ["NISSAN", "350Z Coupe (Z33)", "3.5 (BAZ33)", "BAZ33, отсутствует"],
+    ["NISSAN", "CARAVAN Bus (E25)", "2.0 i (VWE25)", "VWE25, i"],
+    ["NISSAN", "NOTE (E13)", "1.2 HYBRID E-POWER 4WD (SNE13)", "SNE13, HEV E-POWER 4WD"],
+    ["NISSAN", "SERENA (C26)", "2.0 (C26, FC26)", "C26/FC26, отсутствует"],
+    ["TEST", "MODEL (FB)", "1.6 (AFB242)", "AFB242, отсутствует"],
+  ];
+  embeddedBaseCodeCases.forEach(([makeName, modelName, carName, expected]) => {
+    assert.equal(
+      formatApplicabilityVehicle({ carName, makeName, modelName, yearEnd: null, yearStart: "01.2010" }, columns),
+      expected,
+    );
+  });
   const crossBodyEvidence = buildApplicabilityVariantCodeContext([
     { carName: "1.6", makeName: "SUBARU", modelName: "IMPREZA (GC4)", yearEnd: "12.2000", yearStart: "01.1992" },
     { carName: "2.0", makeName: "SUBARU", modelName: "IMPREZA (GC8)", yearEnd: "12.2000", yearStart: "01.1992" },

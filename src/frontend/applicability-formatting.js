@@ -249,10 +249,17 @@ const terminalVariantCodeCandidate = (carName) => {
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const variantEmbedsBaseCode = (variantCode, baseCode) => baseCode.length >= 2
+  && variantCode.length > baseCode.length
+  && variantCode.includes(baseCode);
+
 const variantMatchesTemplate = (variantCode, template) => {
   const normalizedVariant = variantCode.toLocaleUpperCase();
   const normalizedTemplate = template.replace(/\s+/g, "").toLocaleUpperCase();
-  if (!normalizedTemplate.includes("_")) return normalizedVariant.startsWith(normalizedTemplate);
+  if (!normalizedTemplate.includes("_")) {
+    return normalizedVariant.startsWith(normalizedTemplate)
+      || variantEmbedsBaseCode(normalizedVariant, normalizedTemplate);
+  }
   const templatePartPattern = (part) => escapeRegex(part)
     .replaceAll("\\.", "[-._]?")
     .replaceAll("-", "[-._]?");
