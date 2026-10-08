@@ -389,6 +389,31 @@ test("applicability classifies parenthetical descriptions separately from body c
   );
 });
 
+test("applicability preserves compact terminal code expressions", () => {
+  const cases = [
+    ["PEUGEOT", "205 I (741A/C)", "741A/C"],
+    ["HONDA", "ACCORD (20A/C)", "20A/C"],
+    ["MITSUBISHI", "MODEL (2E/K)", "2E/K"],
+    ["MERCEDES-BENZ", "MODEL (638/2)", "638/2"],
+    ["TEST", "MODEL (XB-_)", "XB-"],
+    ["TEST", "MODEL (ZA-_)", "ZA-"],
+    ["TEST", "MODEL (V_)", "V"],
+    ["TEST", "MODEL (M_)", "M"],
+    ["TEST", "MODEL (G_)", "G"],
+    ["TEST", "MODEL (P)", "P"],
+    ["TEST", "MODEL (DBA-RG_)", "DBA-RG"],
+    ["TEST", "MODEL (LA-RF_)", "LA-RF"],
+    ["TEST", "MODEL (L03_P/G, L0_2P)", "L03P/G/L02P"],
+  ];
+
+  cases.forEach(([makeName, modelName, expectedCode]) => {
+    assert.equal(
+      formatApplicabilityVehicle({ carName: "1.6", makeName, modelName, yearEnd: null, yearStart: "01.2010" }),
+      `отсутствует, ${expectedCode}, ${makeName}, ${modelName.slice(0, modelName.indexOf(" ("))}, 2010-н.в., 1.6, отсутствует`,
+    );
+  });
+});
+
 test("applicability removes a terminal Coupe body descriptor", () => {
   const cases = [
     ["GENESIS Coupe (BK)", "BK", "GENESIS"],
@@ -446,6 +471,54 @@ test("applicability reconciles only unambiguous truncated body-code fragments in
       vehicle("SANTA FÉ I (CN)"),
     ]).split("\n")[0],
     "SUV/Внедорожник, отсутствует, HYUNDAI, SANTA FE I, 2018-2020, 1.6, отсутствует",
+  );
+});
+
+test("applicability keeps complete codes from truncated terminal groups", () => {
+  const vehicle = (modelName) => ({
+    carName: "1.6",
+    makeName: "VW",
+    modelName,
+    yearEnd: null,
+    yearStart: "01.2010",
+  });
+
+  assert.equal(
+    formatApplicabilityVehicles([
+      vehicle("TRANSPORTER T4 c бортовой платформой/ходовая часть (70E, 70L"),
+      vehicle("JUMPY I (BU_, BV_, BW_,"),
+    ]),
+    [
+      "С бортовой платформой/ходовая часть, 70E/70L, VW, TRANSPORTER T4, 2010-н.в., 1.6, отсутствует",
+      "отсутствует, BU/BV/BW, VW, JUMPY I, 2010-н.в., 1.6, отсутствует",
+    ].join("\n"),
+  );
+});
+
+test("applicability recovers only unambiguous incomplete terminal code tails", () => {
+  const vehicle = (modelName) => ({
+    carName: "1.6",
+    makeName: "MERCEDES-BENZ",
+    modelName,
+    yearEnd: null,
+    yearStart: "01.2018",
+  });
+
+  assert.equal(
+    formatApplicabilityVehicles([
+      vehicle("SPRINTER 3-t (B910)"),
+      vehicle("SPRINTER 3-t (B907, B9"),
+    ]).split("\n")[1],
+    "отсутствует, B907/B910, MERCEDES-BENZ, SPRINTER 3-t, 2018-н.в., 1.6, отсутствует",
+  );
+
+  assert.equal(
+    formatApplicabilityVehicles([
+      vehicle("SPRINTER 3-t (B907)"),
+      vehicle("SPRINTER 3-t (B910)"),
+      vehicle("SPRINTER 3-t (B9"),
+    ]).split("\n")[2],
+    "отсутствует, отсутствует, MERCEDES-BENZ, SPRINTER 3-t, 2018-н.в., 1.6, отсутствует",
   );
 });
 
