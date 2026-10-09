@@ -23,6 +23,7 @@ export function bootstrapApplicabilityOemSidebar({ addArticle, notify }) {
   const viewButtons = [...document.querySelectorAll("[data-oem-view]")];
   const widthStorageKey = "autoservice-applicability-oem-width-v1";
   let articles = [];
+  let brandCounts = new Map();
   let view = "brand";
   let offset = 0;
   let hasMore = false;
@@ -82,7 +83,7 @@ export function bootstrapApplicabilityOemSidebar({ addArticle, notify }) {
     loadController?.abort();
     render();
     try {
-      const payload = await api("/api/applicability/saved-articles", { method: "DELETE", body: JSON.stringify(article) });
+      const payload = await api("/api/applicability/saved-articles", { method: "DELETE", body: JSON.stringify({ sku: article.sku, brand: article.brand }) });
       if (typeof payload?.deleted !== "boolean") throw new Error("Сервис вернул некорректный ответ.");
       deletingArticle = null;
       notify(payload.deleted ? "OEM-артикул удалён из базы." : "OEM-артикул уже удалён из базы.", "success");
@@ -94,13 +95,18 @@ export function bootstrapApplicabilityOemSidebar({ addArticle, notify }) {
       render();
     }
   };
-  const appendArticle = (parent, article) => {
+  const appendArticle = (parent, article, showBrand = true) => {
     const row = element("li", undefined, "garage-vehicles__item");
     const button = element("button", undefined, "garage-vehicles__button applicability-oem-article");
     button.type = "button";
     button.dataset.oemIdentity = identity(article);
     button.title = `Добавить ${article.sku}, ${article.brand} в активную вкладку`;
-    button.append(element("span", article.sku), element("small", article.brand));
+    button.classList.toggle("is-not-found", !article.hasResults);
+    button.append(element("span", article.sku));
+    const meta = element("span", undefined, "applicability-oem-article-meta");
+    if (showBrand) meta.append(element("small", article.brand));
+    if (!article.hasResults) meta.append(element("small", "не найдено"));
+    if (meta.childElementCount) button.append(meta);
     row.append(button);
     if (deletingArticle && identity(deletingArticle) === identity(article)) {
       const confirmation = element("div", undefined, "garage-vehicle-delete");
@@ -133,9 +139,15 @@ export function bootstrapApplicabilityOemSidebar({ addArticle, notify }) {
         const group = element("details", undefined, "applicability-oem-brand");
         group.dataset.brand = brand;
         group.open = openBrands.has(brand) || Boolean(search.value.trim());
-        group.append(element("summary", brand, "garage-vehicles__button"));
+        const summary = element("summary", undefined, "garage-vehicles__button");
+        const heading = element("span", undefined, "applicability-oem-brand-heading");
+        const counts = brandCounts.get(brand);
+        const countText = `${counts.found} найдено${includeNotFound.checked ? ` · ${counts.notFound} не найдено` : ""}`;
+        heading.append(element("span", brand), element("small", countText, "applicability-oem-brand-counts"));
+        summary.append(heading);
+        group.append(summary);
         const children = element("ul", undefined, "garage-vehicles");
-        entries.forEach((article) => appendArticle(children, article));
+        entries.forEach((article) => appendArticle(children, article, false));
         group.append(children);
         row.append(group);
         list.append(row);
@@ -154,7 +166,7 @@ export function bootstrapApplicabilityOemSidebar({ addArticle, notify }) {
     loadController?.abort();
     const controller = new AbortController();
     loadController = controller;
-    if (!append) { articles = []; offset = 0; hasMore = false; }
+    if (!append) { articles = []; brandCounts = new Map(); offset = 0; hasMore = false; }
     const query = new URLSearchParams({ search: search.value.trim(), offset: String(offset), order: view, includeNotFound: String(includeNotFound.checked) });
     setStatus("Загружаем OEM-артикулы…");
     render();
@@ -164,7 +176,13 @@ export function bootstrapApplicabilityOemSidebar({ addArticle, notify }) {
       if (!Array.isArray(payload?.articles) || payload.articles.length > 100 || typeof payload.hasMore !== "boolean"
         || payload.articles.some((article) => !article || typeof article.sku !== "string" || !article.sku.trim()
           || article.sku.length > 128 || typeof article.brand !== "string" || !article.brand.trim()
-          || article.brand.length > 150)) throw new Error("Сервис вернул некорректный список OEM-артикулов.");
+          || article.brand.length > 150 || typeof article.hasResults !== "boolean")
+        || !Array.isArray(payload.brandCounts) || payload.brandCounts.some((counts) => !counts || typeof counts.brand !== "string"
+          || !counts.brand.trim() || counts.brand.length > 150 || !Number.isSafeInteger(counts.found) || counts.found < 0
+          || !Number.isSafeInteger(counts.notFound) || counts.notFound < 0)) throw new Error("Сервис вернул некорректный список OEM-артикулов.");
+      const nextCounts = new Map(payload.brandCounts.map((counts) => [counts.brand, counts]));
+      if (payload.articles.some((article) => !nextCounts.has(article.brand))) throw new Error("Сервис вернул некорректные счётчики OEM-артикулов.");
+      brandCounts = append ? new Map([...brandCounts, ...nextCounts]) : nextCounts;
       const existing = new Set(articles.map(identity));
       articles.push(...payload.articles.filter((article) => !existing.has(identity(article))));
       offset += payload.articles.length;

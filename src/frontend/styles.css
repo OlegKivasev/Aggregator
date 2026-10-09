@@ -293,6 +293,11 @@ input {
 .applicability-oem-status { margin: 8px 0; color: var(--muted); font-size: 12px; }
 .applicability-oem-article { display: flex; align-items: center; justify-content: space-between; gap: 8px; overflow-wrap: anywhere; }
 .applicability-oem-article small { color: var(--muted); font-size: 11px; }
+.applicability-oem-article-meta { display: grid; min-width: 0; max-width: 50%; flex: 0 1 auto; text-align: right; font-weight: 500; }
+.applicability-oem-article.is-not-found { color: var(--muted); background: #f8fafc; font-weight: 500; }
+.applicability-oem-article.is-not-found:hover, .applicability-oem-article.is-not-found:focus-visible { color: var(--ink); background: #eef2f6; }
+.applicability-oem-brand-heading { display: flex; min-width: 0; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; overflow-wrap: anywhere; }
+.applicability-oem-brand-counts { color: var(--muted); font-size: 11px; font-weight: 500; }
 .applicability-oem-brand > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .applicability-oem-brand > summary::after { content: "⌄"; color: var(--muted); }
 .applicability-oem-brand[open] > summary::after { transform: rotate(180deg); }

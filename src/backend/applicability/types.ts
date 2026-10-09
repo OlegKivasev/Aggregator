@@ -17,6 +17,13 @@ export interface ApplicabilitySearchResult {
 export interface ApplicabilitySavedArticle {
   sku: string;
   brand: string;
+  hasResults: boolean;
+}
+
+export interface ApplicabilitySavedBrandCounts {
+  brand: string;
+  found: number;
+  notFound: number;
 }
 
 export interface ApplicabilitySavedArticlesQuery {
@@ -28,6 +35,7 @@ export interface ApplicabilitySavedArticlesQuery {
 
 export interface ApplicabilitySavedArticlesPage {
   articles: ApplicabilitySavedArticle[];
+  brandCounts: ApplicabilitySavedBrandCounts[];
   hasMore: boolean;
 }
 

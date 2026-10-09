@@ -39,7 +39,7 @@ function createApplication(overrides = {}) {
     streamSearch: async () => {},
     searchApplicability: async () => ({ results: [], cacheHit: false }),
     getApplicabilityCachedBrands: () => [],
-    listApplicabilitySavedArticles: () => ({ articles: [], hasMore: false }),
+    listApplicabilitySavedArticles: () => ({ articles: [], brandCounts: [], hasMore: false }),
     getApplicabilitySavedArticle: () => null,
     deleteApplicabilitySavedArticle: () => false,
     getApplicabilityApiKeyState: () => ({ configured: false, fallbackKeyCount: 0, persistent: true }),
@@ -210,13 +210,15 @@ test("HTTP server returns cached applicability brands for an article", async () 
 
 test("HTTP server lists, opens and deletes saved OEM pairs without external searches", async () => {
   const article = { sku: "OEM/1", brand: "VOLVO" };
+  const savedArticle = { ...article, hasResults: true };
+  const brandCounts = [{ brand: "VOLVO", found: 1, notFound: 0 }];
   const vehicle = { carId: 1, carName: "2.0", carType: "PC", makeName: "VOLVO", modelName: "Test", yearStart: null, yearEnd: null };
   let saved = true;
   const { baseUrl } = await listen(createApplication({
     searchApplicability: async () => { throw new Error("must not call PartsAPI"); },
     listApplicabilitySavedArticles: (query) => {
       assert.deepEqual(query, { search: "OEM", offset: 0, order: "sku", includeNotFound: false });
-      return { articles: saved ? [article] : [], hasMore: false };
+      return { articles: saved ? [savedArticle] : [], brandCounts: saved ? brandCounts : [], hasMore: false };
     },
     getApplicabilitySavedArticle: (query) => {
       assert.deepEqual(query, article);
@@ -230,20 +232,20 @@ test("HTTP server lists, opens and deletes saved OEM pairs without external sear
     },
   }));
   const listPath = `${baseUrl}/api/applicability/saved-articles?search=OEM&order=sku`;
-  assert.deepEqual(await (await fetch(listPath)).json(), { articles: [article], hasMore: false });
+  assert.deepEqual(await (await fetch(listPath)).json(), { articles: [savedArticle], brandCounts, hasMore: false });
   const resultPath = `${baseUrl}/api/applicability/saved-articles/result?${new URLSearchParams(article)}`;
   assert.deepEqual(await (await fetch(resultPath)).json(), { results: [vehicle] });
   const deleteOptions = { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(article) };
   assert.deepEqual(await (await fetch(`${baseUrl}/api/applicability/saved-articles`, deleteOptions)).json(), { deleted: true });
   assert.deepEqual(await (await fetch(`${baseUrl}/api/applicability/saved-articles`, deleteOptions)).json(), { deleted: false });
   assert.equal((await fetch(resultPath)).status, 404);
-  assert.deepEqual(await (await fetch(listPath)).json(), { articles: [], hasMore: false });
+  assert.deepEqual(await (await fetch(listPath)).json(), { articles: [], brandCounts: [], hasMore: false });
 });
 
 test("HTTP server hides OEM entries without results by default and accepts an explicit opt-in", async () => {
   const queries = [];
   const { baseUrl } = await listen(createApplication({
-    listApplicabilitySavedArticles: (query) => { queries.push(query); return { articles: [], hasMore: false }; },
+    listApplicabilitySavedArticles: (query) => { queries.push(query); return { articles: [], brandCounts: [], hasMore: false }; },
   }));
   for (const query of ["", "?includeNotFound=true", "?includeNotFound=false"]) {
     assert.equal((await fetch(`${baseUrl}/api/applicability/saved-articles${query}`)).status, 200);

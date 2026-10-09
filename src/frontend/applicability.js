@@ -572,7 +572,7 @@ const addSavedOemArticle = async (article, signal) => {
     showApplicabilityToast("Артикул и бренд уже добавлены в активную вкладку.", "notice");
     return;
   }
-  const query = new URLSearchParams(article);
+  const query = new URLSearchParams({ sku: article.sku, brand: article.brand });
   const response = await fetch(`/api/applicability/saved-articles/result?${query}`, { headers: { Accept: "application/json" }, signal });
   const payload = await response.json();
   signal.throwIfAborted();

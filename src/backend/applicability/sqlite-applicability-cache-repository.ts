@@ -13,6 +13,12 @@ function text(row: SqlRow, key: string): string {
   return value;
 }
 
+function count(row: SqlRow, key: string): number {
+  const value = row[key];
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error(`Invalid SQLite ${key}`);
+  return value;
+}
+
 function cacheKey(query: ApplicabilitySearchRequest): [string, string] {
   return [query.sku.toLocaleUpperCase(), query.brand.toLocaleUpperCase()];
 }
@@ -69,12 +75,17 @@ export class SqliteApplicabilityCacheRepository implements ApplicabilityCacheRep
   list(query: ApplicabilitySavedArticlesQuery): ApplicabilitySavedArticlesPage {
     const search = query.search.toLocaleUpperCase();
     const order = query.order === "brand" ? "brand, sku" : "sku, brand";
-    const rows = this.database.prepare(`SELECT sku, brand FROM applicability_search_cache
+    const hasResults = "CASE WHEN json_valid(results_json) THEN json_array_length(results_json) > 0 ELSE 0 END";
+    const rows = this.database.prepare(`SELECT sku, brand, ${hasResults} AS has_results FROM applicability_search_cache
       WHERE (instr(sku, ?) > 0 OR instr(brand, ?) > 0)
-        AND (? = 1 OR CASE WHEN json_valid(results_json) THEN json_array_length(results_json) > 0 ELSE 0 END)
+        AND (? = 1 OR ${hasResults})
       ORDER BY ${order} LIMIT 101 OFFSET ?`).all(search, search, query.includeNotFound ? 1 : 0, query.offset) as SqlRow[];
+    const brands = this.database.prepare(`SELECT brand, SUM(${hasResults}) AS found, COUNT(*) - SUM(${hasResults}) AS not_found
+      FROM applicability_search_cache WHERE instr(sku, ?) > 0 OR instr(brand, ?) > 0
+      GROUP BY brand HAVING (? = 1 OR found > 0) ORDER BY brand`).all(search, search, query.includeNotFound ? 1 : 0) as SqlRow[];
     return {
-      articles: rows.slice(0, 100).map((row) => ({ sku: text(row, "sku"), brand: text(row, "brand") })),
+      articles: rows.slice(0, 100).map((row) => ({ sku: text(row, "sku"), brand: text(row, "brand"), hasResults: row.has_results === 1 })),
+      brandCounts: brands.map((row) => ({ brand: text(row, "brand"), found: count(row, "found"), notFound: count(row, "not_found") })),
       hasMore: rows.length > 100,
     };
   }
