@@ -560,11 +560,14 @@ const buildApplicabilityDocument = (sections, format = documentFormat) => {
   return sections.map(({ articleName, entries }) => {
     if (format !== "structured") {
       return `Артикул: ${articleName}\n\n${entries
-        .map((entry) => `OEM-артикул: ${entry.sku}\n${JSON.stringify(entry.results, null, 2)}`)
+        .map((entry) => `OEM-артикул: ${entry.sku}${entry.makeName ? ` | ${entry.makeName}` : ""}\n${JSON.stringify(entry.results, null, 2)}`)
         .join("\n\n")}`;
     }
     const oemSections = groupSearchesBySku(entries)
-      .map(([sku, entriesForSku]) => `OEM-артикул: ${sku}\n${formatApplicabilityVehicles(entriesForSku.flatMap((entry) => entry.results), visibleColumns, variantCodeContext)}`)
+      .map(([sku, entriesForSku]) => {
+        const brands = normalizeMakeNames(entriesForSku.map((entry) => entry.makeName));
+        return `OEM-артикул: ${sku}${brands.length ? ` | ${brands.join(", ")}` : ""}\n${formatApplicabilityVehicles(entriesForSku.flatMap((entry) => entry.results), visibleColumns, variantCodeContext)}`;
+      })
       .join("\n\n");
     return `Артикул: ${articleName}\n\n${oemSections}`;
   }).join("\n\n");
