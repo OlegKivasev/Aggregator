@@ -542,7 +542,7 @@ const splitCarName = (carName, family) => {
   return { capacity: candidate.capacity, remaining: remaining || "отсутствует", sourceTruncated };
 };
 
-export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCodes = null, displacementContext = null, variantCodeContext = null, fieldSeparator = ", ") => {
+export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCodes = null, displacementContext = null, variantCodeContext = null, fieldSeparator = ", ", seenRows = null) => {
   const record = vehicle && typeof vehicle === "object" && !Array.isArray(vehicle) ? vehicle : {};
   const modelName = textValue(record.modelName);
   const { capacity, remaining } = splitCarName(record.carName, displacementContext?.get(normalizedVehicleFamilyIdentity(record)));
@@ -572,14 +572,22 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCod
       ["years", yearPeriod(record.yearStart, record.yearEnd)],
       ["capacity", capacity],
       ["carName", modification],
-    ]
+    ])
+    .filter((fields) => {
+      if (!seenRows) return true;
+      const identity = JSON.stringify(fields.filter(([column]) => column !== "carName").map(([, value]) => value));
+      if (seenRows.has(identity)) return false;
+      seenRows.add(identity);
+      return true;
+    })
+    .map((fields) => fields
       .filter(([column]) => !visibleColumns || visibleColumns.has(column))
       .map(([, value]) => value)
       .join(fieldSeparator))
     .join("\n");
 };
 
-export const formatApplicabilityVehicles = (vehicles, visibleColumns, variantCodeContext = null) => {
+export const formatApplicabilityVehicles = (vehicles, visibleColumns, variantCodeContext = null, seenRows = null) => {
   const records = Array.isArray(vehicles) ? vehicles : [];
   const codeIndex = buildBodyCodeIndex(records);
   const displacementContext = buildDisplacementContext(records);
@@ -592,6 +600,8 @@ export const formatApplicabilityVehicles = (vehicles, visibleColumns, variantCod
       displacementContext,
       localVariantCodeContext,
       applicabilityDocumentFieldSeparator,
+      seenRows,
     ))
+    .filter((line) => !seenRows || line !== "")
     .join("\n");
 };

@@ -2,6 +2,77 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicle, formatApplicabilityVehicles } from "../src/frontend/applicability-formatting.js";
 
+test("structured applicability removes repeats within and across OEM groups", () => {
+  const vehicle = {
+    carName: "2.0",
+    makeName: "RENAULT",
+    modelName: "DUSTER (HS)",
+    yearStart: "01.2011",
+    yearEnd: "12.2018",
+  };
+  const seenRows = new Set();
+  const columns = new Set(["bodyType", "bodyCode", "makeName", "modelName", "years", "capacity"]);
+  assert.equal(
+    formatApplicabilityVehicles([vehicle, { ...vehicle }], columns, null, seenRows),
+    "отсутствует | HS | RENAULT | DUSTER | 2011-2018 | 2.0",
+  );
+  assert.equal(formatApplicabilityVehicles([{ ...vehicle }], columns, null, seenRows), "");
+  assert.equal(formatApplicabilityVehicles([vehicle], columns, null, new Set()).split("\n").length, 1);
+});
+
+test("structured applicability identity retains all six fields when columns are hidden", () => {
+  const vehicle = {
+    carName: "1.6",
+    makeName: "LADA",
+    modelName: "VESTA (GFL11)",
+    yearStart: "01.2015",
+    yearEnd: null,
+  };
+  const variations = [
+    { ...vehicle, makeName: "TEST" },
+    { ...vehicle, modelName: "MODEL (GFL11)" },
+    { ...vehicle, modelName: "VESTA универсал (GFL11)" },
+    { ...vehicle, modelName: "VESTA (GFL44)" },
+    { ...vehicle, yearStart: "01.2018" },
+    { ...vehicle, yearEnd: "12.2021" },
+    { ...vehicle, carName: "1.8" },
+  ];
+  const rows = [vehicle, ...variations, { ...vehicle }];
+  const fullRows = formatApplicabilityVehicles(rows, undefined, null, new Set()).split("\n");
+  assert.equal(fullRows.length, 8);
+  assert.ok(fullRows.some((row) => row.includes("GFL11 | LADA | VESTA | 2015-н.в.")));
+  assert.ok(fullRows.some((row) => row.includes("GFL11 | LADA | VESTA | 2018-н.в.")));
+  const hiddenRows = formatApplicabilityVehicles(rows, new Set(["makeName"]), null, new Set()).split("\n");
+  assert.deepEqual(hiddenRows, ["LADA", "TEST", "LADA", "LADA", "LADA", "LADA", "LADA", "LADA"]);
+});
+
+test("structured applicability expands body codes before removing repeats", () => {
+  const vehicle = {
+    carName: "1.5",
+    makeName: "LADA",
+    modelName: "SAMARA (2108/2109/2113/2114)",
+    yearStart: "01.1996",
+    yearEnd: "12.2013",
+  };
+  assert.deepEqual(
+    formatApplicabilityVehicles([vehicle, { ...vehicle }], new Set(["bodyCode"]), null, new Set()).split("\n"),
+    ["2108", "2109", "2113", "2114"],
+  );
+});
+
+test("structured applicability identity excludes modification and preserves the first row", () => {
+  const vehicle = { carName: "1.6 MPI", makeName: "TEST", modelName: "MODEL (X1)", yearStart: "01.2000", yearEnd: null };
+  const rows = [vehicle, { ...vehicle, carName: "1.6 Turbo" }];
+  const original = structuredClone(rows);
+  assert.equal(
+    formatApplicabilityVehicles(rows, new Set(["carName"]), null, new Set()),
+    "MPI",
+  );
+  assert.equal(formatApplicabilityVehicles(rows, new Set(["carName"])), "MPI\nTurbo");
+  assert.deepEqual(rows, original);
+  assert.equal(formatApplicabilityVehicles([], undefined, null, new Set()), "");
+});
+
 test("applicability compact list extracts body type, year and engine capacity", () => {
   assert.equal(
     formatApplicabilityVehicle({

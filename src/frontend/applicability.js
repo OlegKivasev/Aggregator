@@ -566,10 +566,11 @@ const buildApplicabilityDocument = (sections, format = documentFormat) => {
         .map((entry) => `OEM-артикул: ${entry.sku}${entry.makeName ? ` | ${entry.makeName}` : ""}\n${JSON.stringify(entry.results, null, 2)}`)
         .join("\n\n")}`;
     }
+    const seenRows = new Set();
     const oemSections = groupSearchesBySku(entries)
       .map(([sku, entriesForSku]) => {
         const brands = normalizeMakeNames(entriesForSku.map((entry) => entry.makeName));
-        const vehiclesText = formatApplicabilityVehicles(entriesForSku.flatMap((entry) => entry.results), visibleColumns, variantCodeContext);
+        const vehiclesText = formatApplicabilityVehicles(entriesForSku.flatMap((entry) => entry.results), visibleColumns, variantCodeContext, seenRows);
         vehicleRowCount += vehiclesText.split("\n").filter((line) => line.trim()).length;
         return `OEM-артикул: ${sku}${brands.length ? ` | ${brands.join(", ")}` : ""}\n${vehiclesText}`;
       })
