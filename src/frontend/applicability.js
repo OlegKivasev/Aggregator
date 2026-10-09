@@ -630,11 +630,12 @@ const renderApplicabilityDocument = ({ preserveTextState = false } = {}) => {
   if (documentFormat !== "structured") documentColumnsControl.open = false;
 };
 
-const applicabilityDocumentFileName = (date = new Date()) => {
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const label = documentFormat === "raw" ? "Сырые_данные" : "Структурированный_список";
-  return `${label}_${hours}_${minutes}.txt`;
+const applicabilityDocumentFileName = () => {
+  let name = documentSections.map(({ articleName }) => articleName).join("_")
+    .replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, "_")
+    .trim().slice(0, 180).replace(/[. ]+$/g, "") || "Список применимости";
+  if (/^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(name)) name = `_${name}`;
+  return `${name}${documentFormat === "raw" ? "_сырые" : ""}.txt`;
 };
 
 const saveApplicabilityDocument = async () => {

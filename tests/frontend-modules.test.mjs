@@ -691,8 +691,8 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /documentText\.scrollTop = 0/);
   assert.match(applicability, /documentModal\.focus\(\)/);
   assert.match(applicability, /window\.showSaveFilePicker/);
-  assert.match(applicability, /Сырые_данные/);
-  assert.match(applicability, /Структурированный_список/);
+  assert.match(applicability, /documentSections\.map\(\(\{ articleName \}\) => articleName\)\.join\("_"\)/);
+  assert.match(applicability, /documentFormat === "raw" \? "_сырые" : ""/);
   assert.match(applicability, /documentSaveButton\.addEventListener\("click"/);
   assert.match(applicability, /appendCell\(row, "Не найдено"\)/);
   assert.match(applicability, /tab\.searches\.push\(\.\.\.entries\)/);
