@@ -624,7 +624,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /showApplicabilityToast\("Список сохранён\.", "success"\)/);
   assert.match(html, /id="applicability-document-text"[^>]*wrap="off"/);
   assert.match(html, /id="applicability-document-format"[\s\S]*?Структурированный список[\s\S]*?Сырые данные/);
-  assert.match(html, /id="applicability-document-columns"[\s\S]*?data-applicability-document-column="bodyType"[\s\S]*?data-applicability-document-column="bodyCode"[\s\S]*?data-applicability-document-column="carName"(?! checked)/);
+  assert.match(html, /id="applicability-document-columns"[\s\S]*?data-applicability-document-column="bodyType"[\s\S]*?data-applicability-document-column="bodyCode"[\s\S]*?data-applicability-document-column="carName" checked/);
   assert.doesNotMatch(html, /data-applicability-document-column="transmission"/);
   assert.doesNotMatch(html, /data-applicability-document-column="article"/);
   assert.doesNotMatch(html, /id="applicability-result-summary"/);

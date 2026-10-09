@@ -599,11 +599,11 @@ const applicabilityGroupRows = (vehicles, variantCodeContext) => {
       recoveredBodyCodes(vehicle, codeIndex),
       displacementContext,
       localVariantCodeContext,
-    ));
+    ).map((fields) => ({ fields, carType: textValue(vehicle?.carType) })));
 };
 
 export const formatApplicabilityVehicles = (vehicles, visibleColumns, variantCodeContext = null) => formatApplicabilityRows(
-  applicabilityGroupRows(vehicles, variantCodeContext),
+  applicabilityGroupRows(vehicles, variantCodeContext).map(({ fields }) => fields),
   visibleColumns,
   applicabilityDocumentFieldSeparator,
 );
@@ -622,11 +622,11 @@ export const formatApplicabilityVehicleGroups = (groups, visibleColumns, variant
   const identities = new Map();
   let order = 0;
   vehicleGroups.forEach((vehicles, groupIndex) => {
-    applicabilityGroupRows(vehicles, variantCodeContext).forEach((fields) => {
+    applicabilityGroupRows(vehicles, variantCodeContext).forEach(({ fields, carType }) => {
       const period = applicabilityPeriod(fields.find(([column]) => column === "years")[1]);
-      const identity = JSON.stringify(fields
-        .filter(([column]) => column !== "carName" && (period === null || column !== "years"))
-        .map(([, value]) => value));
+      const identity = JSON.stringify([groupIndex, carType, ...fields
+        .filter(([column]) => period === null || column !== "years")
+        .map(([, value]) => value)]);
       const candidates = identities.get(identity) ?? [];
       candidates.push({ fields, period, groupIndex, order: order++ });
       identities.set(identity, candidates);
