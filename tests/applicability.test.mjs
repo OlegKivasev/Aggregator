@@ -200,27 +200,58 @@ test("saved OEM library pages, searches, reads and deletes only the selected art
     cache.set({ sku: "SKU", brand: "VOLVO" }, [vehicle]);
     cache.set({ sku: "SKU", brand: "LADA" }, []);
     for (let index = 0; index < 103; index += 1) cache.set({ sku: `TEST${String(index).padStart(3, "0")}`, brand: "VOLVO" }, [vehicle]);
-    const first = cache.list({ search: "", offset: 0, order: "brand" });
+    const first = cache.list({ search: "", offset: 0, order: "brand", includeNotFound: true });
     assert.equal(first.articles.length, 100);
     assert.equal(first.hasMore, true);
     assert.deepEqual(first.articles[0], { sku: "SKU", brand: "LADA" });
-    const second = cache.list({ search: "", offset: 100, order: "brand" });
+    const second = cache.list({ search: "", offset: 100, order: "brand", includeNotFound: true });
     assert.equal(second.articles.length, 5);
     assert.equal(second.hasMore, false);
     assert.equal(new Set([...first.articles, ...second.articles].map((article) => JSON.stringify(article))).size, 105);
-    assert.deepEqual(cache.list({ search: "sku", offset: 0, order: "sku" }).articles,
+    assert.deepEqual(cache.list({ search: "sku", offset: 0, order: "sku", includeNotFound: true }).articles,
       [{ sku: "SKU", brand: "LADA" }, { sku: "SKU", brand: "VOLVO" }]);
-    assert.deepEqual(cache.list({ search: "lada", offset: 0, order: "brand" }).articles, [{ sku: "SKU", brand: "LADA" }]);
-    assert.deepEqual(cache.list({ search: "%' OR 1=1", offset: 0, order: "sku" }), { articles: [], hasMore: false });
+    assert.deepEqual(cache.list({ search: "lada", offset: 0, order: "brand", includeNotFound: true }).articles, [{ sku: "SKU", brand: "LADA" }]);
+    assert.deepEqual(cache.list({ search: "%' OR 1=1", offset: 0, order: "sku", includeNotFound: true }), { articles: [], hasMore: false });
     assert.equal(cache.delete({ sku: "sku", brand: "volvo" }), true);
     assert.equal(cache.delete({ sku: "SKU", brand: "VOLVO" }), false);
     assert.equal(cache.get({ sku: "SKU", brand: "VOLVO" }), null);
     assert.deepEqual(cache.get({ sku: "SKU", brand: "LADA" }), []);
-    assert.equal(cache.list({ search: "", offset: 0, order: "sku" }).hasMore, true);
+    assert.equal(cache.list({ search: "", offset: 0, order: "sku", includeNotFound: true }).hasMore, true);
     const database = new DatabaseSync(filePath);
     try {
       database.prepare("UPDATE applicability_search_cache SET results_json = ? WHERE sku = ? AND brand = ?").run('{"invalid":true}', "SKU", "LADA");
       assert.equal(cache.get({ sku: "SKU", brand: "LADA" }), null);
+    } finally { database.close(); }
+  } finally {
+    cache.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("saved OEM list filters empty results before paging and keeps them available on request", () => {
+  const directory = mkdtempSync(join(tmpdir(), "partsapi-library-filter-"));
+  const filePath = join(directory, "cache.sqlite");
+  const cache = new SqliteApplicabilityCacheRepository(filePath);
+  try {
+    for (let index = 0; index < 103; index += 1) {
+      cache.set({ sku: `EMPTY${index}`, brand: "LADA" }, []);
+      cache.set({ sku: `FOUND${String(index).padStart(3, "0")}`, brand: "VOLVO" }, [vehicle]);
+    }
+    const query = { search: "", offset: 0, order: "brand", includeNotFound: false };
+    const first = cache.list(query);
+    assert.equal(first.articles.length, 100);
+    assert.equal(first.hasMore, true);
+    assert.ok(first.articles.every((article) => article.brand === "VOLVO"));
+    assert.deepEqual(cache.list({ ...query, offset: 100 }), {
+      articles: [100, 101, 102].map((index) => ({ sku: `FOUND${index}`, brand: "VOLVO" })), hasMore: false,
+    });
+    assert.deepEqual(cache.list({ ...query, search: "EMPTY", order: "sku" }), { articles: [], hasMore: false });
+    assert.equal(cache.list({ ...query, search: "LADA", includeNotFound: true }).articles.length, 100);
+    assert.deepEqual(cache.get({ sku: "EMPTY0", brand: "LADA" }), []);
+    const database = new DatabaseSync(filePath);
+    try {
+      database.prepare("UPDATE applicability_search_cache SET results_json = ? WHERE sku = ? AND brand = ?").run("invalid", "EMPTY0", "LADA");
+      assert.deepEqual(cache.list({ ...query, search: "EMPTY0" }), { articles: [], hasMore: false });
     } finally { database.close(); }
   } finally {
     cache.close();
@@ -237,7 +268,7 @@ test("saved OEM results are accessible without an API key and deletion persists 
     cache.set({ sku: "SKU", brand: "VOLVO" }, [vehicle]);
     const service = new ApplicabilityApplicationService({ search: async () => { throw new Error("must not call PartsAPI"); } }, keyRepository, cache);
     assert.deepEqual(service.getSavedArticle({ sku: "SKU", brand: "VOLVO" }), [vehicle]);
-    assert.deepEqual(service.listSavedArticles({ search: "", offset: 0, order: "sku" }), {
+    assert.deepEqual(service.listSavedArticles({ search: "", offset: 0, order: "sku", includeNotFound: false }), {
       articles: [{ sku: "SKU", brand: "VOLVO" }], hasMore: false,
     });
     assert.equal(service.deleteSavedArticle({ sku: "SKU", brand: "VOLVO" }), true);

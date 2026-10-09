@@ -123,12 +123,13 @@ export function parseApplicabilitySavedArticlesQuery(parameters: URLSearchParams
   const rawOffset = parameters.get("offset") ?? "0";
   const offset = Number(rawOffset);
   const order = parameters.get("order") ?? "brand";
+  const includeNotFound = parameters.get("includeNotFound") ?? "false";
   if (search.length > articleLengthLimit || /[\u0000-\u001f\u007f]/.test(search)
     || !/^\d+$/.test(rawOffset) || !Number.isSafeInteger(offset) || offset > 1_000_000
-    || (order !== "brand" && order !== "sku")) {
+    || (order !== "brand" && order !== "sku") || !["true", "false"].includes(includeNotFound)) {
     throw new RequestBodyError(400, "Saved article query is invalid");
   }
-  return { search, offset, order };
+  return { search, offset, order, includeNotFound: includeNotFound === "true" };
 }
 
 export function parseApplicabilityApiKeyPayload(payload: unknown): { apiKey: string } {

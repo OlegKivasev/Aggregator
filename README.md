@@ -67,6 +67,8 @@ The frontend uses native browser modules without a bundler. `src/frontend/app.js
 Она скрыта при загрузке страницы и оформлена как гараж: ширина 260 px,
 изменение в пределах 180–420 px. Панель показывает сохранённые пары
 «OEM-артикул + бренд», поддерживает поиск и виды «По брендам» и «По артикулам».
+По умолчанию отображаются только записи с найденной применимостью;
+пустые результаты можно включить опцией «Показывать не найденные».
 Нажмите артикул или выберите «Добавить в активную вкладку» в контекстном меню,
 чтобы загрузить сохранённую применимость без PartsAPI и API-ключа.
 «Удалить из базы» удаляет выбранную пару после подтверждения в панели;
@@ -74,7 +76,7 @@ The frontend uses native browser modules without a bundler. `src/frontend/app.js
 может заново сохранить удалённую пару. Список загружается страницами по 100 записей.
 
 Новые HTTP-операции панели: `GET /api/applicability/saved-articles`
-(`search`, `offset`, `order=brand|sku`),
+(`search`, `offset`, `order=brand|sku`, `includeNotFound=true|false`, по умолчанию `false`),
 `GET /api/applicability/saved-articles/result` (`sku`, `brand`) и
 `DELETE /api/applicability/saved-articles` (JSON `{ sku, brand }`).
 

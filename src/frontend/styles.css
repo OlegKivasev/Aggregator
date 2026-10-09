@@ -288,6 +288,8 @@ input {
 .applicability-workspace:has(.applicability-oem-sidebar:not([hidden])) > .applicability-oem-control { display: none; }
 .applicability-oem-view { display: flex; gap: 6px; margin-bottom: 8px; }
 .applicability-oem-view button[aria-pressed="true"] { color: var(--accent-dark); background: #fff3ed; }
+.applicability-oem-filter { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; color: var(--muted); font-size: 12px; cursor: pointer; }
+.applicability-oem-filter input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
 .applicability-oem-status { margin: 8px 0; color: var(--muted); font-size: 12px; }
 .applicability-oem-article { display: flex; align-items: center; justify-content: space-between; gap: 8px; overflow-wrap: anywhere; }
 .applicability-oem-article small { color: var(--muted); font-size: 11px; }

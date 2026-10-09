@@ -215,7 +215,7 @@ test("HTTP server lists, opens and deletes saved OEM pairs without external sear
   const { baseUrl } = await listen(createApplication({
     searchApplicability: async () => { throw new Error("must not call PartsAPI"); },
     listApplicabilitySavedArticles: (query) => {
-      assert.deepEqual(query, { search: "OEM", offset: 0, order: "sku" });
+      assert.deepEqual(query, { search: "OEM", offset: 0, order: "sku", includeNotFound: false });
       return { articles: saved ? [article] : [], hasMore: false };
     },
     getApplicabilitySavedArticle: (query) => {
@@ -240,12 +240,23 @@ test("HTTP server lists, opens and deletes saved OEM pairs without external sear
   assert.deepEqual(await (await fetch(listPath)).json(), { articles: [], hasMore: false });
 });
 
+test("HTTP server hides OEM entries without results by default and accepts an explicit opt-in", async () => {
+  const queries = [];
+  const { baseUrl } = await listen(createApplication({
+    listApplicabilitySavedArticles: (query) => { queries.push(query); return { articles: [], hasMore: false }; },
+  }));
+  for (const query of ["", "?includeNotFound=true", "?includeNotFound=false"]) {
+    assert.equal((await fetch(`${baseUrl}/api/applicability/saved-articles${query}`)).status, 200);
+  }
+  assert.deepEqual(queries.map((query) => query.includeNotFound), [false, true, false]);
+});
+
 test("HTTP server validates saved OEM queries and redacts storage errors", async () => {
   const reports = [];
   const { baseUrl } = await listen(createApplication({
     listApplicabilitySavedArticles: () => { throw new Error("secret internal path"); },
   }), (event) => reports.push(event));
-  for (const query of ["offset=-1", "offset=1.5", "offset=1000001", "order=unknown", `search=${"a".repeat(129)}`, "search=%00"]) {
+  for (const query of ["offset=-1", "offset=1.5", "offset=1000001", "order=unknown", `search=${"a".repeat(129)}`, "search=%00", "includeNotFound=1", "includeNotFound=TRUE", "includeNotFound="]) {
     const response = await fetch(`${baseUrl}/api/applicability/saved-articles?${query}`);
     assert.equal(response.status, 400);
   }

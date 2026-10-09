@@ -23,6 +23,7 @@ export interface ApplicabilitySavedArticlesQuery {
   search: string;
   offset: number;
   order: "brand" | "sku";
+  includeNotFound: boolean;
 }
 
 export interface ApplicabilitySavedArticlesPage {

@@ -70,8 +70,9 @@ export class SqliteApplicabilityCacheRepository implements ApplicabilityCacheRep
     const search = query.search.toLocaleUpperCase();
     const order = query.order === "brand" ? "brand, sku" : "sku, brand";
     const rows = this.database.prepare(`SELECT sku, brand FROM applicability_search_cache
-      WHERE instr(sku, ?) > 0 OR instr(brand, ?) > 0
-      ORDER BY ${order} LIMIT 101 OFFSET ?`).all(search, search, query.offset) as SqlRow[];
+      WHERE (instr(sku, ?) > 0 OR instr(brand, ?) > 0)
+        AND (? = 1 OR CASE WHEN json_valid(results_json) THEN json_array_length(results_json) > 0 ELSE 0 END)
+      ORDER BY ${order} LIMIT 101 OFFSET ?`).all(search, search, query.includeNotFound ? 1 : 0, query.offset) as SqlRow[];
     return {
       articles: rows.slice(0, 100).map((row) => ({ sku: text(row, "sku"), brand: text(row, "brand") })),
       hasMore: rows.length > 100,

@@ -11,6 +11,7 @@ export function bootstrapApplicabilityOemSidebar({ addArticle, notify }) {
   const toggle = document.querySelector("#applicability-oem-toggle");
   const close = document.querySelector("#applicability-oem-close");
   const search = document.querySelector("#applicability-oem-search");
+  const includeNotFound = document.querySelector("#applicability-oem-include-not-found");
   const searchForm = document.querySelector("#applicability-oem-search-form");
   const list = document.querySelector("#applicability-oem-articles");
   const more = document.querySelector("#applicability-oem-more");
@@ -143,6 +144,7 @@ export function bootstrapApplicabilityOemSidebar({ addArticle, notify }) {
     more.hidden = !hasMore;
     more.disabled = Boolean(loadController || deleting);
     search.disabled = deleting;
+    includeNotFound.disabled = deleting;
     viewButtons.forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.oemView === view));
       button.disabled = deleting;
@@ -153,7 +155,7 @@ export function bootstrapApplicabilityOemSidebar({ addArticle, notify }) {
     const controller = new AbortController();
     loadController = controller;
     if (!append) { articles = []; offset = 0; hasMore = false; }
-    const query = new URLSearchParams({ search: search.value.trim(), offset: String(offset), order: view });
+    const query = new URLSearchParams({ search: search.value.trim(), offset: String(offset), order: view, includeNotFound: String(includeNotFound.checked) });
     setStatus("Загружаем OEM-артикулы…");
     render();
     try {
@@ -167,7 +169,8 @@ export function bootstrapApplicabilityOemSidebar({ addArticle, notify }) {
       articles.push(...payload.articles.filter((article) => !existing.has(identity(article))));
       offset += payload.articles.length;
       hasMore = payload.hasMore;
-      setStatus(articles.length ? "" : search.value.trim() ? "Ничего не найдено." : "В базе пока нет сохранённых OEM-артикулов.");
+      setStatus(articles.length ? "" : search.value.trim() ? "Ничего не найдено." : includeNotFound.checked
+        ? "В базе пока нет сохранённых OEM-артикулов." : "Нет OEM-артикулов с найденной применимостью.");
     } catch (error) {
       if (!controller.signal.aborted) setStatus(error instanceof Error ? error.message : "Не удалось загрузить OEM-артикулы.");
     } finally {
@@ -203,6 +206,11 @@ export function bootstrapApplicabilityOemSidebar({ addArticle, notify }) {
   toggle.addEventListener("click", () => setOpen(sidebar.hidden));
   close.addEventListener("click", () => setOpen(false));
   searchForm.addEventListener("submit", (event) => { event.preventDefault(); void load(); });
+  includeNotFound.addEventListener("change", () => {
+    hideMenu();
+    deletingArticle = null;
+    void load();
+  });
   search.addEventListener("input", () => {
     loadController?.abort();
     if (searchTimer !== null) window.clearTimeout(searchTimer);
