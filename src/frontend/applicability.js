@@ -44,6 +44,7 @@ const multiListOemPopover = document.querySelector("#applicability-multi-list-oe
 const closeMultiListButtons = [...document.querySelectorAll("[data-close-applicability-multi-list]")];
 const documentModal = document.querySelector("#applicability-document-modal");
 const documentText = document.querySelector("#applicability-document-text");
+const documentCount = document.querySelector("#applicability-document-count");
 const documentSaveButton = document.querySelector("#applicability-document-save");
 const closeDocumentButtons = [...document.querySelectorAll("[data-close-applicability-document]")];
 const documentFormatControl = document.querySelector("#applicability-document-format");
@@ -554,11 +555,13 @@ const groupSearchesBySku = (entries) => [...entries.reduce((groups, entry) => {
 
 const buildApplicabilityDocument = (sections, format = documentFormat) => {
   const visibleColumns = visibleDocumentColumns();
+  let vehicleRowCount = 0;
   const variantCodeContext = format === "structured"
     ? buildApplicabilityVariantCodeContext(sections.flatMap(({ entries }) => entries.flatMap((entry) => entry.results)))
     : null;
-  return sections.map(({ articleName, entries }) => {
+  const text = sections.map(({ articleName, entries }) => {
     if (format !== "structured") {
+      vehicleRowCount += entries.reduce((count, entry) => count + entry.results.length, 0);
       return `Артикул: ${articleName}\n\n${entries
         .map((entry) => `OEM-артикул: ${entry.sku}${entry.makeName ? ` | ${entry.makeName}` : ""}\n${JSON.stringify(entry.results, null, 2)}`)
         .join("\n\n")}`;
@@ -566,11 +569,14 @@ const buildApplicabilityDocument = (sections, format = documentFormat) => {
     const oemSections = groupSearchesBySku(entries)
       .map(([sku, entriesForSku]) => {
         const brands = normalizeMakeNames(entriesForSku.map((entry) => entry.makeName));
-        return `OEM-артикул: ${sku}${brands.length ? ` | ${brands.join(", ")}` : ""}\n${formatApplicabilityVehicles(entriesForSku.flatMap((entry) => entry.results), visibleColumns, variantCodeContext)}`;
+        const vehiclesText = formatApplicabilityVehicles(entriesForSku.flatMap((entry) => entry.results), visibleColumns, variantCodeContext);
+        vehicleRowCount += vehiclesText.split("\n").filter((line) => line.trim()).length;
+        return `OEM-артикул: ${sku}${brands.length ? ` | ${brands.join(", ")}` : ""}\n${vehiclesText}`;
       })
       .join("\n\n");
     return `Артикул: ${articleName}\n\n${oemSections}`;
   }).join("\n\n");
+  return { text, vehicleRowCount };
 };
 
 const renderApplicabilityDocument = ({ preserveTextState = false } = {}) => {
@@ -581,7 +587,9 @@ const renderApplicabilityDocument = ({ preserveTextState = false } = {}) => {
     scrollLeft: documentText.scrollLeft,
     scrollTop: documentText.scrollTop,
   } : null;
-  documentText.value = buildApplicabilityDocument(documentSections);
+  const { text, vehicleRowCount } = buildApplicabilityDocument(documentSections);
+  documentText.value = text;
+  documentCount.textContent = `Строк с автомобилями: ${vehicleRowCount}`;
   if (textState) {
     const length = documentText.value.length;
     documentText.setSelectionRange(
