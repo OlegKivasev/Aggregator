@@ -642,9 +642,13 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /const toggleMake/);
   assert.match(applicability, /makeInput\.value = "";/);
   assert.match(applicability, /const cachedMakes = normalizeMakeNames\(brands\)/);
+  assert.match(applicability, /if \(skus\.length !== 1\) return null;/);
+  assert.match(applicability, /if \(skus\.length === 1 && !selectedMakes\(\)\.length\) await applyCachedBrand/);
+  assert.match(html, /id="applicability-sku"[^>]*placeholder="Введите OEM-артикулы через запятую"/);
+  assert.doesNotMatch(html, /id="applicability-cached/);
   assert.match(applicability, /setSelectedMakeNames\(\[\.\.\.selectedMakeNames\(\), \.\.\.cachedMakes\.map/);
   assert.match(applicability, /Некоторые пары «артикул \+ бренд» уже добавлены\./);
-  assert.match(applicability, /const normalizeApplicabilitySku = \(sku\) => sku\.replace\(/);
+  assert.match(applicability, /import \{ normalizeApplicabilitySku, parseApplicabilitySkus, runApplicabilityBatch \} from "\.\/applicability-search-input\.js"/);
   assert.match(applicability, /Артикул «\$\{sku\}» изменён на «\$\{normalizedOutcome\.result\.normalizedSku\}» и успешно найден\./);
   assert.match(applicability, /fetch\("\/api\/applicability\/api-key"/);
   assert.match(applicability, /JSON\.stringify\(\{ sku, brand \}\)/);
@@ -692,7 +696,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /documentSaveButton\.addEventListener\("click"/);
   assert.match(applicability, /appendCell\(row, "Не найдено"\)/);
   assert.match(applicability, /tab\.searches\.push\(\.\.\.entries\)/);
-  assert.match(applicability, /Promise\.all\(entries\.map/);
+  assert.match(applicability, /runApplicabilityBatch\(entries,/);
   assert.match(applicability, /tab\.searches\.forEach/);
   assert.match(applicability, /data-expand-entry-id/);
   assert.match(applicability, /data-applicability-entry-id/);

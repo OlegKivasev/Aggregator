@@ -54,6 +54,15 @@ Dependencies flow from HTTP transport through application services to supplier a
 
 The frontend uses native browser modules without a bundler. `src/frontend/app.js` owns DOM state and event wiring, while `result-formatting.js`, `search-stream.js`, and `supplier-search-summary.js` isolate result safety, SSE transport, and summary formatting respectively.
 
+В разделе «Применимость» можно вводить до 50 OEM-артикулов через запятую,
+например `30676484, 30780376, 30780377`. Каждый артикул проверяется отдельно
+для каждого выбранного бренда: сначала используется сохранённый результат,
+при его отсутствии выполняется запрос PartsAPI. Повторы артикула и бренда
+не добавляются повторно. Пробелы внутри артикула не разделяют список.
+Бренд автоматически подставляется из базы только для одного артикула;
+для нескольких артикулов выберите бренды вручную. Одновременно выполняется
+не более четырёх запросов применимости.
+
 ## Инструкция для AI-агентов и будущих правок
 
 Этот раздел является maintenance contract проекта. Перед изменением кода AI-агент обязан прочитать `AGENTS.md`, этот раздел, `package.json`, `tsconfig.json`, связанные production-файлы и тесты. Нельзя исправлять симптом, не установив фактическую причину по коду, документации поставщика и воспроизводимому ответу приложения.

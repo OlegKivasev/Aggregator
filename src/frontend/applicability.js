@@ -1,4 +1,5 @@
 import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicleGroups } from "./applicability-formatting.js";
+import { normalizeApplicabilitySku, parseApplicabilitySkus, runApplicabilityBatch } from "./applicability-search-input.js";
 
 const markupFunction = document.querySelector("#markup-function");
 const applicabilityFunction = document.querySelector("#applicability-function");
@@ -486,25 +487,40 @@ const visibleDocumentColumns = () => new Set(
     .map((input) => input.dataset.applicabilityDocumentColumn),
 );
 
-const normalizeApplicabilitySku = (sku) => sku.replace(/[^\p{L}\p{N}]/gu, "");
-
 const lookupCachedBrands = async (sku, signal) => {
   const response = await fetch(`/api/applicability/cached-brands?sku=${encodeURIComponent(sku)}`, {
     headers: { Accept: "application/json" },
     signal,
   });
   const payload = await response.json();
-  if (!response.ok || !Array.isArray(payload?.brands)) return [];
+  if (!response.ok || !Array.isArray(payload?.brands)) throw new Error("Не удалось проверить сохранённые артикулы.");
   return payload.brands.filter((brand) => typeof brand === "string" && brand.trim());
 };
 
-const applyCachedBrand = async (sku, { force = false } = {}) => {
-  if (!normalizeApplicabilitySku(sku)) return null;
+const cancelCachedLookup = () => {
+  if (cachedBrandLookupTimer !== null) window.clearTimeout(cachedBrandLookupTimer);
+  cachedBrandLookupTimer = null;
   cachedBrandLookupController?.abort();
+  cachedBrandLookupController = null;
+};
+
+const applyCachedBrand = async (sku, { force = false } = {}) => {
+  cancelCachedLookup();
+  const tab = getActiveTab();
+  const inputValue = skuInput.value;
+  let skus;
+  try {
+    skus = parseApplicabilitySkus(sku);
+  } catch {
+    // Invalid input is reported when the user submits the search.
+    return null;
+  }
+  if (skus.length !== 1) return null;
   const controller = new AbortController();
   cachedBrandLookupController = controller;
   try {
-    const brands = await lookupCachedBrands(sku, controller.signal);
+    const brands = await lookupCachedBrands(skus[0], controller.signal);
+    if (controller.signal.aborted || tab !== getActiveTab() || inputValue !== skuInput.value) return null;
     if (!force && selectedMakeNames().length) return null;
     const cachedMakes = normalizeMakeNames(brands)
       .map((brand) => makesByName.get(brand.toLocaleUpperCase()))
@@ -512,8 +528,8 @@ const applyCachedBrand = async (sku, { force = false } = {}) => {
     if (!cachedMakes.length) return null;
     setSelectedMakeNames([...selectedMakeNames(), ...cachedMakes.map((make) => make.name)]);
     return cachedMakes;
-  } catch (error) {
-    if (error.name !== "AbortError") return null;
+  } catch {
+    // Brand suggestion is optional; explicit search still reports service errors.
     return null;
   } finally {
     if (cachedBrandLookupController === controller) cachedBrandLookupController = null;
@@ -986,6 +1002,7 @@ const syncActiveTab = () => {
 const renderActiveTab = () => {
   const tab = getActiveTab();
   if (!tab) return;
+  cancelCachedLookup();
   skuInput.value = tab.sku;
   makeInput.value = "";
   renderSelectedMakes();
@@ -1267,7 +1284,7 @@ resultsBody.addEventListener("keydown", (event) => {
 skuInput.addEventListener("input", () => {
   syncActiveTab();
   saveApplicabilityState();
-  if (cachedBrandLookupTimer !== null) window.clearTimeout(cachedBrandLookupTimer);
+  cancelCachedLookup();
   cachedBrandLookupTimer = window.setTimeout(() => {
     cachedBrandLookupTimer = null;
     void applyCachedBrand(skuInput.value.trim());
@@ -1401,66 +1418,70 @@ document.addEventListener("keydown", (event) => {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (activeRequest) return;
   const tab = getActiveTab();
   if (!tab) return;
   syncActiveTab();
-  const sku = tab.sku;
-  if (!sku) return;
-  if (!selectedMakes().length) await applyCachedBrand(sku, { force: true });
+  const inputSku = tab.sku;
+  let skus;
+  try {
+    skus = parseApplicabilitySkus(inputSku);
+  } catch (error) {
+    setFeedback(error.message);
+    skuInput.focus();
+    return;
+  }
+  if (!skus.length) return;
+  if (skus.length === 1 && !selectedMakes().length) await applyCachedBrand(skus[0], { force: true });
+  if (tab !== getActiveTab() || inputSku !== skuInput.value.trim()) return;
   const makes = selectedMakes();
   if (!makes.length) {
     setFeedback("Выберите хотя бы один бренд из списка.");
     makeInput.focus();
     return;
   }
-  const duplicateMakes = makes.filter((make) => duplicateSearch(tab, sku, make.name));
-  const requestedMakes = makes.filter((make) => !duplicateSearch(tab, sku, make.name));
-  if (duplicateMakes.length) {
+  const pairs = skus.flatMap((sku) => makes.map((make) => ({ sku, brand: make.name })));
+  const duplicatePairs = pairs.filter((pair) => duplicateSearch(tab, pair.sku, pair.brand));
+  const requestedPairs = pairs.filter((pair) => !duplicateSearch(tab, pair.sku, pair.brand));
+  if (duplicatePairs.length) {
     setFeedback("");
     showApplicabilityToast(
-      duplicateMakes.length === 1
-        ? `Артикул и бренд «${duplicateMakes[0].name}» уже добавлены.`
+      duplicatePairs.length === 1
+        ? `Артикул и бренд «${duplicatePairs[0].brand}» уже добавлены.`
         : "Некоторые пары «артикул + бренд» уже добавлены.",
       "error",
     );
   }
-  if (!requestedMakes.length) return;
-  if (apiKeyInput.value.trim()) {
-    try {
-      await saveApiKey();
-    } catch (error) {
-      settingsDrawer.hidden = false;
-      setFeedback(error instanceof Error ? error.message : "Не удалось сохранить API-ключ.");
-      return;
-    }
-  }
-  if (!hasStoredApiKey) {
-    settingsDrawer.hidden = false;
-    setFeedback("Укажите API-ключ PartsAPI в настройках.");
-    apiKeyInput.focus();
-    return;
-  }
-
-  const entries = requestedMakes.map((make) => createSearchEntry({ sku, makeName: make.name, status: "Ищем применимость…" }));
-  tab.searches.push(...entries);
-  activeRequest?.abort();
+  if (!requestedPairs.length) return;
+  const entries = requestedPairs.map((pair) => createSearchEntry({ sku: pair.sku, makeName: pair.brand, status: "Ищем применимость…" }));
   const controller = new AbortController();
   activeRequest = controller;
   submitButton.disabled = true;
   submitButton.querySelector("span").textContent = "Ищем…";
-  setFeedback("", "notice");
-  renderResults(tab);
-  renderTabs();
-  saveApplicabilityState();
   try {
-    const outcomes = await Promise.all(entries.map(async (entry) => {
+    if (apiKeyInput.value.trim()) {
       try {
-        const result = await executeApplicabilitySearch(sku, entry.makeName, controller.signal);
-        return { entry, result };
+        await saveApiKey();
       } catch (error) {
-        return { entry, error };
+        settingsDrawer.hidden = false;
+        setFeedback(error instanceof Error ? error.message : "Не удалось сохранить API-ключ.");
+        return;
       }
-    }));
+    }
+    if (!hasStoredApiKey) {
+      settingsDrawer.hidden = false;
+      setFeedback("Укажите API-ключ PartsAPI в настройках.");
+      apiKeyInput.focus();
+      return;
+    }
+    if (controller.signal.aborted) return;
+    tab.searches.push(...entries);
+    setFeedback("", "notice");
+    renderResults(tab);
+    renderTabs();
+    saveApplicabilityState();
+    const outcomes = await runApplicabilityBatch(entries,
+      (entry, signal) => executeApplicabilitySearch(entry.sku, entry.makeName, signal), controller.signal);
     if (controller.signal.aborted) {
       tab.searches = tab.searches.filter((item) => !entries.includes(item));
       if (activeTabId === tab.id) renderResults(tab);
@@ -1470,8 +1491,10 @@ form.addEventListener("submit", async (event) => {
     }
     const failed = outcomes.filter((outcome) => outcome.error);
     const completed = outcomes.filter((outcome) => outcome.result);
+    const normalizedOutcome = completed.find(({ result }) => result.usedNormalizedSku);
+    const sku = normalizedOutcome?.entry.sku;
     completed.forEach(({ entry, result }) => {
-      entry.sku = result.usedNormalizedSku ? result.normalizedSku : sku;
+      if (result.usedNormalizedSku) entry.sku = result.normalizedSku;
       entry.results = result.results;
       entry.hasSearched = true;
       entry.status = result.results.length ? `Найдено автомобилей: ${result.results.length}` : "Не найдено";
@@ -1479,9 +1502,8 @@ form.addEventListener("submit", async (event) => {
     if (failed.length) {
       tab.searches = tab.searches.filter((item) => !failed.some((outcome) => outcome.entry === item));
       const failure = failed[0].error;
-      setFeedback(failure instanceof Error ? failure.message : "Не удалось выполнить поиск применимости.");
+      if (activeTabId === tab.id) setFeedback(failure instanceof Error ? failure.message : "Не удалось выполнить поиск применимости.");
     }
-    const normalizedOutcome = completed.find(({ result }) => result.usedNormalizedSku);
     const cachedOutcome = completed.find(({ result }) => result.cacheHit);
     if (normalizedOutcome) {
       showApplicabilityToast(
@@ -1501,7 +1523,7 @@ form.addEventListener("submit", async (event) => {
     if (activeTabId === tab.id) renderResults(tab);
     renderTabs();
     saveApplicabilityState();
-    if (error?.name !== "AbortError") setFeedback(error instanceof Error ? error.message : "Не удалось выполнить поиск применимости.");
+    if (error?.name !== "AbortError" && activeTabId === tab.id) setFeedback(error instanceof Error ? error.message : "Не удалось выполнить поиск применимости.");
   } finally {
     if (activeRequest === controller) {
       activeRequest = null;
