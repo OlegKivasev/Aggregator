@@ -1,4 +1,4 @@
-import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicles } from "./applicability-formatting.js";
+import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicleGroups } from "./applicability-formatting.js";
 
 const markupFunction = document.querySelector("#markup-function");
 const applicabilityFunction = document.querySelector("#applicability-function");
@@ -566,11 +566,16 @@ const buildApplicabilityDocument = (sections, format = documentFormat) => {
         .map((entry) => `OEM-артикул: ${entry.sku}${entry.makeName ? ` | ${entry.makeName}` : ""}\n${JSON.stringify(entry.results, null, 2)}`)
         .join("\n\n")}`;
     }
-    const seenRows = new Set();
-    const oemSections = groupSearchesBySku(entries)
-      .map(([sku, entriesForSku]) => {
+    const oemGroups = groupSearchesBySku(entries);
+    const vehiclesTexts = formatApplicabilityVehicleGroups(
+      oemGroups.map(([, entriesForSku]) => entriesForSku.flatMap((entry) => entry.results)),
+      visibleColumns,
+      variantCodeContext,
+    );
+    const oemSections = oemGroups
+      .map(([sku, entriesForSku], index) => {
         const brands = normalizeMakeNames(entriesForSku.map((entry) => entry.makeName));
-        const vehiclesText = formatApplicabilityVehicles(entriesForSku.flatMap((entry) => entry.results), visibleColumns, variantCodeContext, seenRows);
+        const vehiclesText = vehiclesTexts[index];
         vehicleRowCount += vehiclesText.split("\n").filter((line) => line.trim()).length;
         return `OEM-артикул: ${sku}${brands.length ? ` | ${brands.join(", ")}` : ""}\n${vehiclesText}`;
       })

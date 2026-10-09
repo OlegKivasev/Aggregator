@@ -542,7 +542,7 @@ const splitCarName = (carName, family) => {
   return { capacity: candidate.capacity, remaining: remaining || "отсутствует", sourceTruncated };
 };
 
-export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCodes = null, displacementContext = null, variantCodeContext = null, fieldSeparator = ", ", seenRows = null) => {
+const applicabilityVehicleRows = (vehicle, recoveredCodes = null, displacementContext = null, variantCodeContext = null) => {
   const record = vehicle && typeof vehicle === "object" && !Array.isArray(vehicle) ? vehicle : {};
   const modelName = textValue(record.modelName);
   const { capacity, remaining } = splitCarName(record.carName, displacementContext?.get(normalizedVehicleFamilyIdentity(record)));
@@ -572,36 +572,93 @@ export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCod
       ["years", yearPeriod(record.yearStart, record.yearEnd)],
       ["capacity", capacity],
       ["carName", modification],
-    ])
-    .filter((fields) => {
-      if (!seenRows) return true;
-      const identity = JSON.stringify(fields.filter(([column]) => column !== "carName").map(([, value]) => value));
-      if (seenRows.has(identity)) return false;
-      seenRows.add(identity);
-      return true;
-    })
+    ]);
+};
+
+const formatApplicabilityRows = (rows, visibleColumns, fieldSeparator) => rows
     .map((fields) => fields
       .filter(([column]) => !visibleColumns || visibleColumns.has(column))
       .map(([, value]) => value)
       .join(fieldSeparator))
     .join("\n");
-};
 
-export const formatApplicabilityVehicles = (vehicles, visibleColumns, variantCodeContext = null, seenRows = null) => {
+export const formatApplicabilityVehicle = (vehicle, visibleColumns, recoveredCodes = null, displacementContext = null, variantCodeContext = null, fieldSeparator = ", ") => formatApplicabilityRows(
+  applicabilityVehicleRows(vehicle, recoveredCodes, displacementContext, variantCodeContext),
+  visibleColumns,
+  fieldSeparator,
+);
+
+const applicabilityGroupRows = (vehicles, variantCodeContext) => {
   const records = Array.isArray(vehicles) ? vehicles : [];
   const codeIndex = buildBodyCodeIndex(records);
   const displacementContext = buildDisplacementContext(records);
   const localVariantCodeContext = variantCodeContext ?? buildApplicabilityVariantCodeContext(records);
   return records
-    .map((vehicle) => formatApplicabilityVehicle(
+    .flatMap((vehicle) => applicabilityVehicleRows(
       vehicle,
-      visibleColumns,
       recoveredBodyCodes(vehicle, codeIndex),
       displacementContext,
       localVariantCodeContext,
-      applicabilityDocumentFieldSeparator,
-      seenRows,
-    ))
-    .filter((line) => !seenRows || line !== "")
-    .join("\n");
+    ));
+};
+
+export const formatApplicabilityVehicles = (vehicles, visibleColumns, variantCodeContext = null) => formatApplicabilityRows(
+  applicabilityGroupRows(vehicles, variantCodeContext),
+  visibleColumns,
+  applicabilityDocumentFieldSeparator,
+);
+
+const applicabilityPeriod = (value) => {
+  const match = value.match(/^(\d{4})(?:-(\d{4}|н\.в\.))?$/);
+  if (!match) return null;
+  const start = Number(match[1]);
+  const end = match[2] === "н.в." ? null : Number(match[2] ?? match[1]);
+  return start > 0 && (end === null || end >= start) ? { start, end } : null;
+};
+
+export const formatApplicabilityVehicleGroups = (groups, visibleColumns, variantCodeContext = null) => {
+  const vehicleGroups = Array.isArray(groups) ? groups : [];
+  const output = vehicleGroups.map(() => []);
+  const identities = new Map();
+  let order = 0;
+  vehicleGroups.forEach((vehicles, groupIndex) => {
+    applicabilityGroupRows(vehicles, variantCodeContext).forEach((fields) => {
+      const period = applicabilityPeriod(fields.find(([column]) => column === "years")[1]);
+      const identity = JSON.stringify(fields
+        .filter(([column]) => column !== "carName" && (period === null || column !== "years"))
+        .map(([, value]) => value));
+      const candidates = identities.get(identity) ?? [];
+      candidates.push({ fields, period, groupIndex, order: order++ });
+      identities.set(identity, candidates);
+    });
+  });
+  identities.forEach((candidates) => {
+    if (candidates[0].period === null) {
+      output[candidates[0].groupIndex].push(candidates[0]);
+      return;
+    }
+    const ranges = [];
+    [...candidates].sort((first, second) => first.period.start - second.period.start).forEach((candidate) => {
+      const previous = ranges.at(-1);
+      if (previous && (previous.end === null || candidate.period.start <= previous.end + 1)) {
+        previous.end = previous.end === null || candidate.period.end === null
+          ? null : Math.max(previous.end, candidate.period.end);
+        if (candidate.order < previous.first.order) previous.first = candidate;
+      } else {
+        ranges.push({ ...candidate.period, first: candidate });
+      }
+    });
+    ranges.forEach(({ start, end, first }) => {
+      const years = yearPeriod(String(start), end === null ? null : String(end));
+      output[first.groupIndex].push({
+        ...first,
+        fields: first.fields.map(([column, value]) => [column, column === "years" ? years : value]),
+      });
+    });
+  });
+  return output.map((rows) => formatApplicabilityRows(
+    rows.sort((first, second) => first.order - second.order).map(({ fields }) => fields),
+    visibleColumns,
+    applicabilityDocumentFieldSeparator,
+  ));
 };

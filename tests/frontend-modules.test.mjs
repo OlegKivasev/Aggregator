@@ -680,7 +680,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /typeof payload\.cacheHit !== "boolean"/);
   assert.match(applicability, /Использован сохранённый результат из базы\./);
   assert.match(applicability, /renderApplicabilityDocument\(\{ preserveTextState: true \}\)/);
-  assert.match(applicability, /import \{ buildApplicabilityVariantCodeContext, formatApplicabilityVehicles \} from "\.\/applicability-formatting\.js"/);
+  assert.match(applicability, /import \{ buildApplicabilityVariantCodeContext, formatApplicabilityVehicleGroups \} from "\.\/applicability-formatting\.js"/);
   assert.match(applicability, /buildApplicabilityVariantCodeContext\(sections\.flatMap/);
   assert.match(applicability, /entry\.hasSearched && entry\.results\.length/);
   assert.match(applicability, /documentText\.setSelectionRange\(0, 0\)/);
