@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ApplicabilityCacheRepository } from "./applicability-application-service.ts";
-import type { ApplicabilitySearchRequest, ApplicabilityVehicle } from "./types.ts";
+import type { ApplicabilitySavedArticlesPage, ApplicabilitySavedArticlesQuery, ApplicabilitySearchRequest, ApplicabilityVehicle } from "./types.ts";
 import { normalizeApplicabilitySku, parseApplicabilityVehicles } from "./vehicle-records.ts";
 
 type SqlRow = Record<string, string | number | bigint | Uint8Array | null>;
@@ -64,6 +64,24 @@ export class SqliteApplicabilityCacheRepository implements ApplicabilityCacheRep
     this.database.prepare(`INSERT INTO applicability_search_cache (sku, brand, results_json, created_at) VALUES (?, ?, ?, ?)
       ON CONFLICT(sku, brand) DO UPDATE SET results_json = excluded.results_json, created_at = excluded.created_at`)
       .run(sku, brand, JSON.stringify(results), new Date().toISOString());
+  }
+
+  list(query: ApplicabilitySavedArticlesQuery): ApplicabilitySavedArticlesPage {
+    const search = query.search.toLocaleUpperCase();
+    const order = query.order === "brand" ? "brand, sku" : "sku, brand";
+    const rows = this.database.prepare(`SELECT sku, brand FROM applicability_search_cache
+      WHERE instr(sku, ?) > 0 OR instr(brand, ?) > 0
+      ORDER BY ${order} LIMIT 101 OFFSET ?`).all(search, search, query.offset) as SqlRow[];
+    return {
+      articles: rows.slice(0, 100).map((row) => ({ sku: text(row, "sku"), brand: text(row, "brand") })),
+      hasMore: rows.length > 100,
+    };
+  }
+
+  delete(query: ApplicabilitySearchRequest): boolean {
+    const [sku, brand] = cacheKey(query);
+    return this.database.prepare("DELETE FROM applicability_search_cache WHERE sku = ? AND brand = ?")
+      .run(sku, brand).changes > 0;
   }
 
   close(): void { this.database.close(); }

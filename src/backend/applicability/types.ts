@@ -14,6 +14,22 @@ export interface ApplicabilitySearchResult {
   cacheHit: boolean;
 }
 
+export interface ApplicabilitySavedArticle {
+  sku: string;
+  brand: string;
+}
+
+export interface ApplicabilitySavedArticlesQuery {
+  search: string;
+  offset: number;
+  order: "brand" | "sku";
+}
+
+export interface ApplicabilitySavedArticlesPage {
+  articles: ApplicabilitySavedArticle[];
+  hasMore: boolean;
+}
+
 export interface ApplicabilityApiKeyState {
   configured: boolean;
   fallbackKeyCount: number;

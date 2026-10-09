@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type { RosskoApiCredentials, SupplierId } from "../types.ts";
+import type { ApplicabilitySavedArticlesQuery } from "../applicability/types.ts";
 
 const requestBodyLimitBytes = 16 * 1024;
 export const articleLengthLimit = 128;
@@ -115,6 +116,19 @@ export function parseApplicabilitySkuQuery(value: string | null): string {
     throw new RequestBodyError(400, "sku must be a string within the allowed length");
   }
   return normalizedSku;
+}
+
+export function parseApplicabilitySavedArticlesQuery(parameters: URLSearchParams): ApplicabilitySavedArticlesQuery {
+  const search = (parameters.get("search") ?? "").trim();
+  const rawOffset = parameters.get("offset") ?? "0";
+  const offset = Number(rawOffset);
+  const order = parameters.get("order") ?? "brand";
+  if (search.length > articleLengthLimit || /[\u0000-\u001f\u007f]/.test(search)
+    || !/^\d+$/.test(rawOffset) || !Number.isSafeInteger(offset) || offset > 1_000_000
+    || (order !== "brand" && order !== "sku")) {
+    throw new RequestBodyError(400, "Saved article query is invalid");
+  }
+  return { search, offset, order };
 }
 
 export function parseApplicabilityApiKeyPayload(payload: unknown): { apiKey: string } {

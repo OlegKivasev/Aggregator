@@ -39,6 +39,9 @@ function createApplication(overrides = {}) {
     streamSearch: async () => {},
     searchApplicability: async () => ({ results: [], cacheHit: false }),
     getApplicabilityCachedBrands: () => [],
+    listApplicabilitySavedArticles: () => ({ articles: [], hasMore: false }),
+    getApplicabilitySavedArticle: () => null,
+    deleteApplicabilitySavedArticle: () => false,
     getApplicabilityApiKeyState: () => ({ configured: false, fallbackKeyCount: 0, persistent: true }),
     saveApplicabilityApiKey: () => ({ configured: true, fallbackKeyCount: 0, persistent: true }),
     deleteApplicabilityApiKey: () => ({ configured: false, fallbackKeyCount: 0, persistent: true }),
@@ -203,6 +206,57 @@ test("HTTP server returns cached applicability brands for an article", async () 
   const response = await fetch(`${baseUrl}/api/applicability/cached-brands?sku=2170-2915004`);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { brands: ["LADA"] });
+});
+
+test("HTTP server lists, opens and deletes saved OEM pairs without external searches", async () => {
+  const article = { sku: "OEM/1", brand: "VOLVO" };
+  const vehicle = { carId: 1, carName: "2.0", carType: "PC", makeName: "VOLVO", modelName: "Test", yearStart: null, yearEnd: null };
+  let saved = true;
+  const { baseUrl } = await listen(createApplication({
+    searchApplicability: async () => { throw new Error("must not call PartsAPI"); },
+    listApplicabilitySavedArticles: (query) => {
+      assert.deepEqual(query, { search: "OEM", offset: 0, order: "sku" });
+      return { articles: saved ? [article] : [], hasMore: false };
+    },
+    getApplicabilitySavedArticle: (query) => {
+      assert.deepEqual(query, article);
+      return saved ? [vehicle] : null;
+    },
+    deleteApplicabilitySavedArticle: (query) => {
+      assert.deepEqual(query, article);
+      const deleted = saved;
+      saved = false;
+      return deleted;
+    },
+  }));
+  const listPath = `${baseUrl}/api/applicability/saved-articles?search=OEM&order=sku`;
+  assert.deepEqual(await (await fetch(listPath)).json(), { articles: [article], hasMore: false });
+  const resultPath = `${baseUrl}/api/applicability/saved-articles/result?${new URLSearchParams(article)}`;
+  assert.deepEqual(await (await fetch(resultPath)).json(), { results: [vehicle] });
+  const deleteOptions = { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(article) };
+  assert.deepEqual(await (await fetch(`${baseUrl}/api/applicability/saved-articles`, deleteOptions)).json(), { deleted: true });
+  assert.deepEqual(await (await fetch(`${baseUrl}/api/applicability/saved-articles`, deleteOptions)).json(), { deleted: false });
+  assert.equal((await fetch(resultPath)).status, 404);
+  assert.deepEqual(await (await fetch(listPath)).json(), { articles: [], hasMore: false });
+});
+
+test("HTTP server validates saved OEM queries and redacts storage errors", async () => {
+  const reports = [];
+  const { baseUrl } = await listen(createApplication({
+    listApplicabilitySavedArticles: () => { throw new Error("secret internal path"); },
+  }), (event) => reports.push(event));
+  for (const query of ["offset=-1", "offset=1.5", "offset=1000001", "order=unknown", `search=${"a".repeat(129)}`, "search=%00"]) {
+    const response = await fetch(`${baseUrl}/api/applicability/saved-articles?${query}`);
+    assert.equal(response.status, 400);
+  }
+  assert.equal((await fetch(`${baseUrl}/api/applicability/saved-articles/result?sku=SKU`)).status, 400);
+  assert.equal((await fetch(`${baseUrl}/api/applicability/saved-articles`, {
+    method: "DELETE", headers: { "Content-Type": "application/json" }, body: "{invalid",
+  })).status, 400);
+  const failure = await fetch(`${baseUrl}/api/applicability/saved-articles`);
+  assert.equal(failure.status, 500);
+  assert.equal((await failure.json()).message, "Applicability search failed");
+  assert.equal(reports.length, 1);
 });
 
 test("HTTP server delegates Forum-Auto authorization without exposing credentials", async () => {

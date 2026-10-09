@@ -15,11 +15,12 @@ import type {
   SupplierSessionValidationResult,
   SupplierSearchQuery,
 } from "../types.ts";
-import type { ApplicabilityApiKeyState, ApplicabilitySearchRequest, ApplicabilitySearchResult } from "../applicability/types.ts";
+import type { ApplicabilityApiKeyState, ApplicabilitySavedArticlesPage, ApplicabilitySavedArticlesQuery, ApplicabilitySearchRequest, ApplicabilitySearchResult, ApplicabilityVehicle } from "../applicability/types.ts";
 import {
   articleLengthLimit,
   parseApplicabilityApiKeyPayload,
   parseApplicabilitySkuQuery,
+  parseApplicabilitySavedArticlesQuery,
   parseApplicabilitySearchPayload,
   parseCredentials,
   parseRosskoApiCredentials,
@@ -57,6 +58,9 @@ export interface AggregatorApplication {
   streamSearch(query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal): Promise<void>;
   searchApplicability(query: ApplicabilitySearchRequest, signal: AbortSignal): Promise<ApplicabilitySearchResult>;
   getApplicabilityCachedBrands(sku: string): string[];
+  listApplicabilitySavedArticles(query: ApplicabilitySavedArticlesQuery): ApplicabilitySavedArticlesPage;
+  getApplicabilitySavedArticle(query: ApplicabilitySearchRequest): ApplicabilityVehicle[] | null;
+  deleteApplicabilitySavedArticle(query: ApplicabilitySearchRequest): boolean;
   getApplicabilityApiKeyState(): ApplicabilityApiKeyState;
   saveApplicabilityApiKey(apiKey: string): ApplicabilityApiKeyState;
   deleteApplicabilityApiKey(): ApplicabilityApiKeyState;
@@ -232,6 +236,35 @@ export function createAggregatorServer({
     if (request.method === "GET" && url.pathname === "/api/applicability/cached-brands") {
       try {
         serveJson(response, 200, { brands: application.getApplicabilityCachedBrands(parseApplicabilitySkuQuery(url.searchParams.get("sku"))) });
+      } catch (error) {
+        serveApplicabilityError(response, error, reportError);
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/applicability/saved-articles") {
+      try {
+        if (request.method === "GET") {
+          serveJson(response, 200, application.listApplicabilitySavedArticles(parseApplicabilitySavedArticlesQuery(url.searchParams)));
+          return;
+        }
+        if (request.method === "DELETE") {
+          const query = parseApplicabilitySearchPayload(await readJsonBody(request));
+          serveJson(response, 200, { deleted: application.deleteApplicabilitySavedArticle(query) });
+          return;
+        }
+      } catch (error) {
+        serveApplicabilityError(response, error, reportError);
+        return;
+      }
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/applicability/saved-articles/result") {
+      try {
+        const query = parseApplicabilitySearchPayload({ sku: url.searchParams.get("sku"), brand: url.searchParams.get("brand") });
+        const results = application.getApplicabilitySavedArticle(query);
+        if (results === null) serveJson(response, 404, { message: "Сохранённый OEM-артикул не найден." });
+        else serveJson(response, 200, { results });
       } catch (error) {
         serveApplicabilityError(response, error, reportError);
       }

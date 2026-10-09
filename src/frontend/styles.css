@@ -282,6 +282,26 @@ input {
   box-shadow: none !important;
 }
 
+.applicability-workspace { display: grid; min-width: 0; min-height: 0; flex: 1 1 auto; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.applicability-workspace > .applicability-shell { grid-column: 1; min-width: 0; }
+.applicability-workspace > .applicability-oem-control, .applicability-workspace > .applicability-oem-sidebar { grid-column: 2; grid-row: 1; }
+.applicability-workspace:has(.applicability-oem-sidebar:not([hidden])) > .applicability-oem-control { display: none; }
+.applicability-oem-view { display: flex; gap: 6px; margin-bottom: 8px; }
+.applicability-oem-view button[aria-pressed="true"] { color: var(--accent-dark); background: #fff3ed; }
+.applicability-oem-status { margin: 8px 0; color: var(--muted); font-size: 12px; }
+.applicability-oem-article { display: flex; align-items: center; justify-content: space-between; gap: 8px; overflow-wrap: anywhere; }
+.applicability-oem-article small { color: var(--muted); font-size: 11px; }
+.applicability-oem-brand > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.applicability-oem-brand > summary::after { content: "⌄"; color: var(--muted); }
+.applicability-oem-brand[open] > summary::after { transform: rotate(180deg); }
+.applicability-oem-brand > summary::-webkit-details-marker { display: none; }
+.applicability-oem-brand > ul { padding-left: 10px; }
+.applicability-oem-brand > summary { list-style: none; }
+
+@media (max-width: 800px) {
+  .applicability-workspace > .applicability-oem-sidebar { height: min(70dvh, 600px); }
+}
+
 .applicability-tabs { flex: 0 0 auto; margin-bottom: 0 !important; }
 .applicability-search-row { flex: 0 0 auto; }
 .applicability-search-shell { display: grid; gap: 8px; }

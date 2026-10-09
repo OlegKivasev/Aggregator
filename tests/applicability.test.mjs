@@ -8,6 +8,7 @@ import { EncryptedApplicabilityApiKeyStore } from "../src/backend/applicability/
 import { SupplierAuthError, SupplierIntegrationError } from "../src/backend/errors.ts";
 import { PartsApiApplicabilityClient } from "../src/backend/applicability/partsapi-client.ts";
 import { SqliteApplicabilityCacheRepository } from "../src/backend/applicability/sqlite-applicability-cache-repository.ts";
+import { DatabaseSync } from "node:sqlite";
 
 const vehicle = {
   carId: 31251,
@@ -149,6 +150,8 @@ test("applicability service returns cached results without repeating the PartsAP
   }, repository, {
     get: (query) => entries.get(`${query.sku}\u0000${query.brand}`) ?? null,
     findBrands: () => [],
+    list: () => ({ articles: [], hasMore: false }),
+    delete: () => false,
     set: (query, results) => entries.set(`${query.sku}\u0000${query.brand}`, results),
   });
 
@@ -182,7 +185,89 @@ test("applicability service refuses to save an API key without encrypted persist
   const service = new ApplicabilityApplicationService({ search: async () => [] }, repository, {
     get: () => null,
     findBrands: () => [],
+    list: () => ({ articles: [], hasMore: false }),
+    delete: () => false,
     set: () => {},
   });
   assert.throws(() => service.saveApiKey("test-key"), SupplierIntegrationError);
+});
+
+test("saved OEM library pages, searches, reads and deletes only the selected article and brand", () => {
+  const directory = mkdtempSync(join(tmpdir(), "partsapi-library-"));
+  const filePath = join(directory, "cache.sqlite");
+  const cache = new SqliteApplicabilityCacheRepository(filePath);
+  try {
+    cache.set({ sku: "SKU", brand: "VOLVO" }, [vehicle]);
+    cache.set({ sku: "SKU", brand: "LADA" }, []);
+    for (let index = 0; index < 103; index += 1) cache.set({ sku: `TEST${String(index).padStart(3, "0")}`, brand: "VOLVO" }, [vehicle]);
+    const first = cache.list({ search: "", offset: 0, order: "brand" });
+    assert.equal(first.articles.length, 100);
+    assert.equal(first.hasMore, true);
+    assert.deepEqual(first.articles[0], { sku: "SKU", brand: "LADA" });
+    const second = cache.list({ search: "", offset: 100, order: "brand" });
+    assert.equal(second.articles.length, 5);
+    assert.equal(second.hasMore, false);
+    assert.equal(new Set([...first.articles, ...second.articles].map((article) => JSON.stringify(article))).size, 105);
+    assert.deepEqual(cache.list({ search: "sku", offset: 0, order: "sku" }).articles,
+      [{ sku: "SKU", brand: "LADA" }, { sku: "SKU", brand: "VOLVO" }]);
+    assert.deepEqual(cache.list({ search: "lada", offset: 0, order: "brand" }).articles, [{ sku: "SKU", brand: "LADA" }]);
+    assert.deepEqual(cache.list({ search: "%' OR 1=1", offset: 0, order: "sku" }), { articles: [], hasMore: false });
+    assert.equal(cache.delete({ sku: "sku", brand: "volvo" }), true);
+    assert.equal(cache.delete({ sku: "SKU", brand: "VOLVO" }), false);
+    assert.equal(cache.get({ sku: "SKU", brand: "VOLVO" }), null);
+    assert.deepEqual(cache.get({ sku: "SKU", brand: "LADA" }), []);
+    assert.equal(cache.list({ search: "", offset: 0, order: "sku" }).hasMore, true);
+    const database = new DatabaseSync(filePath);
+    try {
+      database.prepare("UPDATE applicability_search_cache SET results_json = ? WHERE sku = ? AND brand = ?").run('{"invalid":true}', "SKU", "LADA");
+      assert.equal(cache.get({ sku: "SKU", brand: "LADA" }), null);
+    } finally { database.close(); }
+  } finally {
+    cache.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("saved OEM results are accessible without an API key and deletion persists after reopening", () => {
+  const directory = mkdtempSync(join(tmpdir(), "partsapi-library-service-"));
+  const path = join(directory, "cache.sqlite");
+  let cache = new SqliteApplicabilityCacheRepository(path);
+  const keyRepository = { get: () => null };
+  try {
+    cache.set({ sku: "SKU", brand: "VOLVO" }, [vehicle]);
+    const service = new ApplicabilityApplicationService({ search: async () => { throw new Error("must not call PartsAPI"); } }, keyRepository, cache);
+    assert.deepEqual(service.getSavedArticle({ sku: "SKU", brand: "VOLVO" }), [vehicle]);
+    assert.deepEqual(service.listSavedArticles({ search: "", offset: 0, order: "sku" }), {
+      articles: [{ sku: "SKU", brand: "VOLVO" }], hasMore: false,
+    });
+    assert.equal(service.deleteSavedArticle({ sku: "SKU", brand: "VOLVO" }), true);
+    cache.close();
+    cache = new SqliteApplicabilityCacheRepository(path);
+    assert.equal(cache.get({ sku: "SKU", brand: "VOLVO" }), null);
+  } finally {
+    cache.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("deletion prevents a late applicability search from restoring the deleted OEM pair", async () => {
+  let finish;
+  let written = false;
+  const service = new ApplicabilityApplicationService({ search: () => new Promise((resolve) => { finish = resolve; }) },
+    { get: () => "test-key" }, { get: () => null, set: () => { written = true; }, delete: () => false });
+  const query = { sku: "SKU", brand: "VOLVO" };
+  const pending = service.search(query, new AbortController().signal);
+  assert.equal(service.deleteSavedArticle({ sku: "sku", brand: "volvo" }), false);
+  finish([vehicle]);
+  await assert.rejects(pending, SupplierIntegrationError);
+  assert.equal(written, false);
+});
+
+test("an aborted applicability lookup cannot write saved OEM results", async () => {
+  const controller = new AbortController();
+  let written = false;
+  const service = new ApplicabilityApplicationService({ search: async () => { controller.abort(); return [vehicle]; } },
+    { get: () => "test-key" }, { get: () => null, set: () => { written = true; } });
+  await assert.rejects(service.search({ sku: "SKU", brand: "VOLVO" }, controller.signal), { name: "AbortError" });
+  assert.equal(written, false);
 });

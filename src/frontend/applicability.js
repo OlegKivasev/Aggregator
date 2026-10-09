@@ -1,5 +1,6 @@
 import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicleGroups } from "./applicability-formatting.js";
 import { normalizeApplicabilitySku, parseApplicabilitySkus, runApplicabilityBatch } from "./applicability-search-input.js";
+import { bootstrapApplicabilityOemSidebar } from "./applicability-oem-sidebar.js";
 
 const markupFunction = document.querySelector("#markup-function");
 const applicabilityFunction = document.querySelector("#applicability-function");
@@ -77,6 +78,7 @@ let cachedBrandLookupTimer = null;
 let cachedBrandLookupController = null;
 let selectedEntryIds = new Set();
 let selectionAnchorEntryId = null;
+let oemSidebar = null;
 
 const applicabilityStateStorageKey = "autoservice.applicabilityState";
 const activeFunctionStorageKey = "autoservice.activeFunction";
@@ -131,6 +133,7 @@ const getActiveTab = () => tabs.find((tab) => tab.id === activeTabId);
 
 const setActiveFunction = (name) => {
   const isApplicability = name === "applicability";
+  if (!isApplicability) oemSidebar?.hide();
   markupFunction.hidden = isApplicability;
   applicabilityFunction.hidden = !isApplicability;
   markupTab.classList.toggle("active", !isApplicability);
@@ -561,6 +564,34 @@ const executeApplicabilitySearch = async (sku, brand, signal) => {
 };
 
 const duplicateSearch = (tab, sku, brand) => tab.searches.find((entry) => searchIdentity(entry.sku, entry.makeName) === searchIdentity(sku, brand));
+
+const addSavedOemArticle = async (article, signal) => {
+  const tab = getActiveTab();
+  if (!tab) return;
+  if (duplicateSearch(tab, article.sku, article.brand)) {
+    showApplicabilityToast("Артикул и бренд уже добавлены в активную вкладку.", "notice");
+    return;
+  }
+  const query = new URLSearchParams(article);
+  const response = await fetch(`/api/applicability/saved-articles/result?${query}`, { headers: { Accept: "application/json" }, signal });
+  const payload = await response.json();
+  signal.throwIfAborted();
+  if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось открыть сохранённую применимость.");
+  if (!Array.isArray(payload?.results) || payload.results.some((vehicle) => !vehicle || !Number.isSafeInteger(vehicle.carId)
+    || vehicle.carId <= 0 || ["carName", "carType", "makeName", "modelName", "yearStart", "yearEnd"]
+      .some((field) => vehicle[field] !== null && typeof vehicle[field] !== "string"))) {
+    throw new Error("Сервис вернул некорректную применимость.");
+  }
+  if (!tabs.includes(tab) || duplicateSearch(tab, article.sku, article.brand)) return;
+  tab.searches.push(createSearchEntry({
+    sku: article.sku, makeName: article.brand, results: payload.results, hasSearched: true,
+    status: payload.results.length ? `Найдено автомобилей: ${payload.results.length}` : "Не найдено",
+  }));
+  if (getActiveTab() === tab) renderResults(tab);
+  renderTabs();
+  saveApplicabilityState();
+  showApplicabilityToast(`OEM-артикул ${article.sku} (${article.brand}) добавлен во вкладку.`, "success");
+};
 
 const groupSearchesBySku = (entries) => [...entries.reduce((groups, entry) => {
   const entriesForSku = groups.get(entry.sku) ?? [];
@@ -1530,6 +1561,7 @@ form.addEventListener("submit", async (event) => {
       activeRequest = null;
       submitButton.disabled = false;
       submitButton.querySelector("span").textContent = "Поиск";
+      oemSidebar?.refresh();
     }
   }
 });
@@ -1537,6 +1569,7 @@ form.addEventListener("submit", async (event) => {
 restoreApplicabilityState();
 if (!tabs.length) tabs.push(createTab());
 if (!tabs.some((tab) => tab.id === activeTabId)) activeTabId = tabs[0].id;
+oemSidebar = bootstrapApplicabilityOemSidebar({ addArticle: addSavedOemArticle, notify: showApplicabilityToast });
 renderActiveTab();
 loadMakes();
 loadApiKeyState();

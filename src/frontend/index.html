@@ -265,6 +265,7 @@
           <div class="search-tabs__list" id="applicability-tabs-list" role="tablist"></div>
           <button type="button" class="new-tab-button btn btn-light" id="applicability-new-tab" aria-label="Открыть новую вкладку применимости">+</button>
         </nav>
+        <div class="applicability-workspace" id="applicability-workspace">
         <div class="applicability-shell card border-0 shadow-sm">
           <div class="search-row applicability-search-row">
             <form class="search-form applicability-search-form" id="applicability-search-form">
@@ -309,10 +310,36 @@
             </footer>
           </div>
         </div>
+        <div class="garage-control applicability-oem-control">
+          <button type="button" class="filters-toggle garage-toggle" id="applicability-oem-toggle" aria-controls="applicability-oem-sidebar" aria-expanded="false" aria-label="Открыть сохранённые OEM-артикулы" title="Открыть сохранённые OEM-артикулы">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" /></svg>
+          </button>
+        </div>
+        <aside class="garage-sidebar applicability-oem-sidebar card border-0 shadow-sm" id="applicability-oem-sidebar" hidden aria-label="Сохранённые OEM-артикулы">
+          <header class="garage-sidebar__header"><strong>OEM-артикулы</strong><button type="button" class="new-tab-button btn btn-light garage-create" id="applicability-oem-close" aria-label="Скрыть сохранённые OEM-артикулы" title="Скрыть сохранённые OEM-артикулы">×</button></header>
+          <form class="garage-search-form search-row" id="applicability-oem-search-form">
+            <label class="visually-hidden" for="applicability-oem-search">Поиск OEM-артикула или бренда</label>
+            <input class="search-input" id="applicability-oem-search" type="search" placeholder="Артикул или бренд" autocomplete="off" maxlength="128" />
+          </form>
+          <div class="applicability-oem-view" role="group" aria-label="Вид отображения OEM-артикулов">
+            <button type="button" class="btn btn-light garage-inline-action" data-oem-view="brand" aria-pressed="true">По брендам</button>
+            <button type="button" class="btn btn-light garage-inline-action" data-oem-view="sku" aria-pressed="false">По артикулам</button>
+          </div>
+          <p class="applicability-oem-status" id="applicability-oem-status" role="status" aria-live="polite" hidden></p>
+          <ul class="garage-vehicles" id="applicability-oem-articles"></ul>
+          <button type="button" class="garage-vehicles__button" id="applicability-oem-more" hidden>Показать ещё</button>
+          <div class="garage-sidebar__resize" id="applicability-oem-resize" role="separator" aria-label="Изменить ширину сохранённых OEM-артикулов" aria-orientation="vertical" tabindex="0"></div>
+        </aside>
+        </div>
       </section>
       </div>
       </div>
     </main>
+
+    <div class="garage-context-menu card border-0 shadow" id="applicability-oem-context-menu" role="menu" hidden>
+      <button type="button" id="applicability-oem-add" role="menuitem">Добавить в активную вкладку</button>
+      <button type="button" class="garage-context-menu__delete" id="applicability-oem-delete" role="menuitem">Удалить из базы</button>
+    </div>
 
     <aside class="settings-drawer" id="settings-drawer" hidden>
       <div class="settings-drawer__backdrop" id="settings-backdrop"></div>

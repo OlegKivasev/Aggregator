@@ -4,7 +4,7 @@ import { ApplicabilityApplicationService } from "./applicability/applicability-a
 import { EncryptedApplicabilityApiKeyStore } from "./applicability/encrypted-api-key-store.ts";
 import { PartsApiApplicabilityClient } from "./applicability/partsapi-client.ts";
 import { SqliteApplicabilityCacheRepository } from "./applicability/sqlite-applicability-cache-repository.ts";
-import type { ApplicabilitySearchRequest } from "./applicability/types.ts";
+import type { ApplicabilitySavedArticlesQuery, ApplicabilitySearchRequest } from "./applicability/types.ts";
 import { getArmtekApiConfig, getGarageDatabasePath, getStateFilePath, getStpartsApiConfig, supplierCredentialsEncryptionKey } from "./config.ts";
 import { EncryptedSupplierCredentialStore } from "./session/encrypted-credential-store.ts";
 import { SupplierSessionManager } from "./session/session-manager.ts";
@@ -167,6 +167,10 @@ export function searchApplicability(query: ApplicabilitySearchRequest, signal: A
 export function getApplicabilityCachedBrands(sku: string) {
   return applicabilityService.getCachedBrands(sku);
 }
+
+export const listApplicabilitySavedArticles = (query: ApplicabilitySavedArticlesQuery) => applicabilityService.listSavedArticles(query);
+export const getApplicabilitySavedArticle = (query: ApplicabilitySearchRequest) => applicabilityService.getSavedArticle(query);
+export const deleteApplicabilitySavedArticle = (query: ApplicabilitySearchRequest) => applicabilityService.deleteSavedArticle(query);
 
 export const getApplicabilityApiKeyState = () => applicabilityService.getApiKeyState();
 export const saveApplicabilityApiKey = (apiKey: string) => applicabilityService.saveApiKey(apiKey);
