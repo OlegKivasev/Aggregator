@@ -175,9 +175,6 @@ export const deleteApplicabilitySavedArticle = (query: ApplicabilitySearchReques
 export const getApplicabilityApiKeyState = () => applicabilityService.getApiKeyState();
 export const saveApplicabilityApiKey = (apiKey: string) => applicabilityService.saveApiKey(apiKey);
 export const deleteApplicabilityApiKey = () => applicabilityService.deleteApiKey();
-export const addApplicabilityFallbackApiKey = (apiKey: string) => applicabilityService.addFallbackApiKey(apiKey);
-export const deleteApplicabilityFallbackApiKey = (index: number) => applicabilityService.deleteFallbackApiKey(index);
-export const selectApplicabilityActiveApiKey = (index: number) => applicabilityService.selectActiveApiKey(index);
 
 export async function shutdownSearchService(): Promise<void> {
   closeSiteHttpAgent();

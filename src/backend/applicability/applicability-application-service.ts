@@ -1,6 +1,4 @@
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
-import { createBoundedAbortSignal } from "../abort.ts";
-import { PartsApiKeyError } from "./partsapi-key-error.ts";
 import type { ApplicabilityApiKeyState, ApplicabilitySavedArticlesPage, ApplicabilitySavedArticlesQuery, ApplicabilitySearchQuery, ApplicabilitySearchRequest, ApplicabilitySearchResult, ApplicabilityVehicle } from "./types.ts";
 
 export interface ApplicabilityClient {
@@ -8,15 +6,10 @@ export interface ApplicabilityClient {
 }
 
 export interface ApplicabilityApiKeyRepository {
-  getActiveKey(): string | null;
+  get(): string | null;
   getState(): ApplicabilityApiKeyState;
-  markLimited(apiKey: string): void;
-  recordRequest(apiKey: string): void;
-  selectActiveKey(index: number): void;
   set(apiKey: string): void;
   delete(): void;
-  addFallbackKey(apiKey: string): void;
-  deleteFallbackKey(index: number): void;
   isPersistent(): boolean;
 }
 
@@ -43,54 +36,26 @@ export class ApplicabilityApplicationService {
   async search(query: ApplicabilitySearchRequest, signal: AbortSignal): Promise<ApplicabilitySearchResult> {
     const cachedResults = this.cacheRepository.get(query);
     if (cachedResults) return { results: cachedResults, cacheHit: true };
+    signal.throwIfAborted();
+    const apiKey = this.apiKeyRepository.get();
+    if (!apiKey) throw new SupplierAuthError("PartsAPI key is not configured");
     const identity = this.cacheIdentity(query);
     const pending = { deleted: false };
     const writes = this.pendingWrites.get(identity) ?? new Set<{ deleted: boolean }>();
     writes.add(pending);
     this.pendingWrites.set(identity, writes);
-    const boundedSignal = createBoundedAbortSignal(signal, 30_000, "PartsAPI key rotation timed out");
     try {
-      const results = await this.searchWithAvailableKey(query, boundedSignal.signal);
-      boundedSignal.signal.throwIfAborted();
+      const results = await this.client.search({ ...query, apiKey }, signal);
+      signal.throwIfAborted();
       if (pending.deleted) throw new SupplierIntegrationError("Applicability entry was deleted during search", {
         publicMessage: "OEM-артикул удалён из базы во время поиска. Повторите поиск, чтобы сохранить его снова.",
       });
       this.cacheRepository.set(query, results);
       return { results, cacheHit: false };
     } finally {
-      boundedSignal.dispose();
       writes.delete(pending);
       if (!writes.size) this.pendingWrites.delete(identity);
     }
-  }
-
-  private async searchWithAvailableKey(query: ApplicabilitySearchRequest, signal: AbortSignal): Promise<ApplicabilityVehicle[]> {
-    const attemptedKeys = new Set<string>();
-    let lastLimitError: PartsApiKeyError | null = null;
-    // Snapshot the queue size so edits to settings cannot extend a running search indefinitely.
-    const maximumAttempts = this.apiKeyRepository.getState().fallbackKeyCount + 1;
-    for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
-      signal.throwIfAborted();
-      const apiKey = this.apiKeyRepository.getActiveKey();
-      if (!apiKey || attemptedKeys.has(apiKey)) {
-        if (lastLimitError) throw lastLimitError;
-        if (this.apiKeyRepository.getState().configured) throw new PartsApiKeyError(null, true);
-        throw new SupplierAuthError("PartsAPI key is not configured");
-      }
-      attemptedKeys.add(apiKey);
-      this.apiKeyRepository.recordRequest(apiKey);
-      try {
-        const results = await this.client.search({ ...query, apiKey }, signal);
-        signal.throwIfAborted();
-        return results;
-      } catch (error) {
-        signal.throwIfAborted();
-        if (!(error instanceof PartsApiKeyError) || !error.limitExceeded) throw error;
-        this.apiKeyRepository.markLimited(apiKey);
-        lastLimitError = error;
-      }
-    }
-    throw lastLimitError ?? new PartsApiKeyError(null, true);
   }
 
   private cacheIdentity(query: ApplicabilitySearchRequest): string {
@@ -131,26 +96,6 @@ export class ApplicabilityApplicationService {
 
   deleteApiKey(): ApplicabilityApiKeyState {
     this.apiKeyRepository.delete();
-    return this.getApiKeyState();
-  }
-
-  addFallbackApiKey(apiKey: string): ApplicabilityApiKeyState {
-    if (!this.apiKeyRepository.isPersistent()) {
-      throw new SupplierIntegrationError("PartsAPI key persistence is not configured", {
-        publicMessage: "Защищённое хранение API-ключа не настроено.",
-      });
-    }
-    this.apiKeyRepository.addFallbackKey(apiKey);
-    return this.getApiKeyState();
-  }
-
-  deleteFallbackApiKey(index: number): ApplicabilityApiKeyState {
-    this.apiKeyRepository.deleteFallbackKey(index);
-    return this.getApiKeyState();
-  }
-
-  selectActiveApiKey(index: number): ApplicabilityApiKeyState {
-    this.apiKeyRepository.selectActiveKey(index);
     return this.getApiKeyState();
   }
 }

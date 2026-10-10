@@ -599,10 +599,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /id="applicability-api-key-status"/);
   assert.match(html, /id="applicability-api-key-delete"/);
   assert.match(html, /Get Application Method/);
-  assert.match(html, /id="applicability-fallback-keys"/);
-  assert.match(html, /id="applicability-fallback-key-list"/);
-  assert.match(html, /id="applicability-fallback-key-add"/);
-  assert.match(html, /id="applicability-fallback-key-status"[\s\S]*?id="applicability-fallback-key-add"/);
+  assert.doesNotMatch(html, /applicability-fallback-key|applicability-primary-key-controls|Запасные ключи|Сделать основным|Запросов за 24 часа/);
   assert.doesNotMatch(html, /Нажмите Enter, чтобы сохранить введённый ключ/);
   assert.match(html, /src="\/applicability-key-delete\.png"/);
   assert.match(html, /aria-label="Показать API-ключ"/);
@@ -611,7 +608,6 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /class="[^"]*applicability-list-button[^"]*" id="applicability-multi-list-button"[\s\S]*?Сформировать мультисписок/);
   assert.match(styles, /\.applicability-list-button\s*\{[^}]*--bs-btn-active-bg: var\(--accent-dark\);[^}]*--bs-btn-focus-shadow-rgb: 255, 75, 19;/s);
   assert.match(styles, /\.applicability-list-button:hover[^}]*\.applicability-list-button:focus-visible[^}]*\.applicability-list-button:active[^}]*background: var\(--accent-dark\);/s);
-  assert.match(styles, /\.applicability-fallback-key-add\s*\{[^}]*background: var\(--accent\) !important;/s);
   assert.match(styles, /\.applicability-key-field input\s*\{[^}]*width: 100%;[^}]*border: 1px solid #dce3ea;/s);
   assert.match(html, /id="applicability-toast"/);
   assert.match(html, /id="applicability-article-name-modal"[\s\S]*?id="applicability-article-name-form"[\s\S]*?id="applicability-article-name-tab-context"[\s\S]*?id="applicability-article-name-input"/);
@@ -630,7 +626,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.doesNotMatch(html, /id="applicability-result-summary"/);
   assert.match(html, /id="applicability-tab-context-menu"[\s\S]*?id="applicability-rename-tab-button"/);
   assert.match(html, /id="applicability-result-context-menu"[\s\S]*?id="applicability-result-delete-button"/);
-  assert.match(applicability, /\/api\/applicability\/api-key\/fallbacks/);
+  assert.doesNotMatch(applicability, /\/api\/applicability\/api-key\/(?:fallbacks|active)/);
   assert.match(html, /class="search-row applicability-search-row"/);
   assert.ok(html.indexOf('class="function-content"') < html.indexOf('id="applicability-function"'));
   assert.ok(html.indexOf('id="applicability-function"') < html.indexOf("</main>"));
@@ -675,8 +671,6 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /openDocumentAfterArticleNaming/);
   assert.match(applicability, /listButton\.addEventListener\("click", \(\) => openDocumentModal\(\)\);/);
   assert.match(applicability, /const tabTitle = tab\.name \|\| `Новая применимость \$\{index \+ 1\}`;/);
-  assert.match(applicability, /const updateFallbackKeyAddButton =/);
-  assert.match(applicability, /addFallbackKeyButton\.disabled = Boolean\(pendingInput\);/);
   assert.doesNotMatch(applicability, /window\.prompt/);
   assert.match(applicability, /let documentFormat = "structured"/);
   assert.match(applicability, /const visibleDocumentColumns/);
@@ -712,7 +706,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /activeFunctionStorageKey/);
   assert.match(applicability, /apiKeyInput\.addEventListener\("keydown"/);
   assert.match(applicability, /deleteApiKeyButton\.addEventListener\("click"/);
-  assert.match(applicability, /state\.configured \? "Ключи сохранены" : ""/);
+  assert.match(applicability, /state\.configured \? "Ключ сохранён" : ""/);
   assert.doesNotMatch(applicability, /"Ключ удалён"/);
   assert.doesNotMatch(applicability, /"Запасной ключ удалён"/);
   assert.match(applicability, /const createTab/);

@@ -48,11 +48,9 @@ function createApplication(overrides = {}) {
     listApplicabilitySavedArticles: () => ({ articles: [], brandCounts: [], hasMore: false }),
     getApplicabilitySavedArticle: () => null,
     deleteApplicabilitySavedArticle: () => false,
-    getApplicabilityApiKeyState: () => ({ configured: false, fallbackKeyCount: 0, persistent: true }),
-    saveApplicabilityApiKey: () => ({ configured: true, fallbackKeyCount: 0, persistent: true }),
-    deleteApplicabilityApiKey: () => ({ configured: false, fallbackKeyCount: 0, persistent: true }),
-    addApplicabilityFallbackApiKey: () => ({ configured: false, fallbackKeyCount: 1, persistent: true }),
-    deleteApplicabilityFallbackApiKey: () => ({ configured: false, fallbackKeyCount: 0, persistent: true }),
+    getApplicabilityApiKeyState: () => ({ configured: false, persistent: true, maskedKey: null }),
+    saveApplicabilityApiKey: () => ({ configured: true, persistent: true, maskedKey: "…t-key" }),
+    deleteApplicabilityApiKey: () => ({ configured: false, persistent: true, maskedKey: null }),
     ...overrides,
   };
 }
@@ -115,7 +113,6 @@ test("HTTP server delegates authorization to the injected application", async ()
 test("HTTP server stores the applicability API key without exposing it to searches", async () => {
   let receivedQuery;
   let savedApiKey;
-  const fallbackApiKeys = [];
   const application = createApplication({
     searchApplicability: async (query) => {
       receivedQuery = query;
@@ -132,44 +129,28 @@ test("HTTP server stores the applicability API key without exposing it to search
         }],
       };
     },
-    getApplicabilityApiKeyState: () => ({ configured: Boolean(savedApiKey), fallbackKeyCount: fallbackApiKeys.length, persistent: true }),
+    getApplicabilityApiKeyState: () => ({ configured: Boolean(savedApiKey), persistent: true, maskedKey: savedApiKey ? "…t-key" : null }),
     saveApplicabilityApiKey: (apiKey) => {
       savedApiKey = apiKey;
-      return { configured: true, fallbackKeyCount: fallbackApiKeys.length, persistent: true };
+      return { configured: true, persistent: true, maskedKey: savedApiKey ? "…t-key" : null };
     },
     deleteApplicabilityApiKey: () => {
       savedApiKey = null;
-      return { configured: false, fallbackKeyCount: fallbackApiKeys.length, persistent: true };
-    },
-    addApplicabilityFallbackApiKey: (apiKey) => {
-      fallbackApiKeys.push(apiKey);
-      return { configured: Boolean(savedApiKey), fallbackKeyCount: fallbackApiKeys.length, persistent: true };
-    },
-    deleteApplicabilityFallbackApiKey: (index) => {
-      fallbackApiKeys.splice(index, 1);
-      return { configured: Boolean(savedApiKey), fallbackKeyCount: fallbackApiKeys.length, persistent: true };
+      return { configured: false, persistent: true, maskedKey: savedApiKey ? "…t-key" : null };
     },
   });
   const { baseUrl } = await listen(application);
 
   const initialState = await fetch(`${baseUrl}/api/applicability/api-key`);
-  assert.deepEqual(await initialState.json(), { configured: false, fallbackKeyCount: 0, persistent: true });
+  assert.deepEqual(await initialState.json(), { configured: false, persistent: true, maskedKey: null });
 
   const saveResponse = await fetch(`${baseUrl}/api/applicability/api-key`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ apiKey: " test-key " }),
   });
-  assert.deepEqual(await saveResponse.json(), { configured: true, fallbackKeyCount: 0, persistent: true });
+  assert.deepEqual(await saveResponse.json(), { configured: true, persistent: true, maskedKey: "…t-key" });
   assert.equal(savedApiKey, "test-key");
-
-  const addFallbackResponse = await fetch(`${baseUrl}/api/applicability/api-key/fallbacks`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ apiKey: " backup-key " }),
-  });
-  assert.deepEqual(await addFallbackResponse.json(), { configured: true, fallbackKeyCount: 1, persistent: true });
-  assert.deepEqual(fallbackApiKeys, ["backup-key"]);
 
   const response = await fetch(`${baseUrl}/api/applicability/search`, {
     method: "POST",
@@ -183,12 +164,8 @@ test("HTTP server stores the applicability API key without exposing it to search
   assert.equal(responsePayload.results[0].makeName, "LADA");
   assert.equal(responsePayload.cacheHit, false);
 
-  const deleteFallbackResponse = await fetch(`${baseUrl}/api/applicability/api-key/fallbacks/0`, { method: "DELETE" });
-  assert.deepEqual(await deleteFallbackResponse.json(), { configured: true, fallbackKeyCount: 0, persistent: true });
-  assert.deepEqual(fallbackApiKeys, []);
-
   const deleteResponse = await fetch(`${baseUrl}/api/applicability/api-key`, { method: "DELETE" });
-  assert.deepEqual(await deleteResponse.json(), { configured: false, fallbackKeyCount: 0, persistent: true });
+  assert.deepEqual(await deleteResponse.json(), { configured: false, persistent: true, maskedKey: null });
   assert.equal(savedApiKey, null);
 
   const invalid = await fetch(`${baseUrl}/api/applicability/search`, {
@@ -214,25 +191,21 @@ test("HTTP server returns cached applicability brands for an article", async () 
   assert.deepEqual(await response.json(), { brands: ["LADA"] });
 });
 
-test("HTTP applicability rotation and manual activation expose only key masks and local counters", async (t) => {
+test("HTTP applicability searches use one key and removed key management routes cannot be called", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "partsapi-http-"));
-  const primary = "fictional-http-primary-AAAAA";
-  const fallback = "fictional-http-fallback-BBBBB";
+  const apiKey = "fictional-http-key-AAAAA";
   const store = new EncryptedApplicabilityApiKeyStore(join(directory, "keys.enc.json"), Buffer.alloc(32, 9));
   const cache = new SqliteApplicabilityCacheRepository(join(directory, "cache.sqlite"));
-  store.set(primary);
-  store.addFallbackKey(fallback);
+  store.set(apiKey);
   const requests = [];
   const client = new PartsApiApplicabilityClient(async (url) => {
-    const key = url.searchParams.get("key");
-    requests.push(key);
-    return key === primary ? Response.json({ error_code: 5000, message: "Exceeded the number of requests from the current IP address.", status: 401 }, { status: 401 }) : Response.json([]);
+    requests.push(url.searchParams.get("key"));
+    return Response.json({ error_code: 5000, message: "Exceeded the number of requests from the current IP address.", status: 401 }, { status: 401 });
   });
   const service = new ApplicabilityApplicationService(client, store, cache);
   const { server, baseUrl } = await listen(createApplication({
     searchApplicability: (query, signal) => service.search(query, signal),
     getApplicabilityApiKeyState: () => service.getApiKeyState(),
-    selectApplicabilityActiveApiKey: (index) => service.selectActiveApiKey(index),
   }), () => {});
   t.after(async () => {
     server.closeAllConnections();
@@ -241,28 +214,22 @@ test("HTTP applicability rotation and manual activation expose only key masks an
     cache.close();
     rmSync(directory, { recursive: true, force: true });
   });
-  const search = await fetch(`${baseUrl}/api/applicability/search`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku: "OEM1", brand: "FORD" }) });
-  assert.equal(search.status, 200);
-  assert.deepEqual(await search.json(), { results: [], cacheHit: false });
-  assert.deepEqual(requests, [primary, fallback]);
-  const state = await (await fetch(`${baseUrl}/api/applicability/api-key`)).json();
-  assert.equal(state.primaryKey.limited, true);
-  assert.equal(state.primaryKey.requestCount, 1);
-  assert.equal(state.fallbackKeys[0].active, true);
-  assert.equal(state.fallbackKeys[0].requestCount, 1);
-  assert.ok(!JSON.stringify(state).includes(primary));
-  assert.ok(!JSON.stringify(state).includes(fallback));
-  for (const payload of [null, [], {}, { index: -1 }, { index: 1.5 }, { index: "1" }]) {
-    const response = await fetch(`${baseUrl}/api/applicability/api-key/active`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    assert.equal(response.status, 400);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const search = await fetch(`${baseUrl}/api/applicability/search`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku: "OEM1", brand: "FORD" }) });
+    assert.equal(search.status, 401);
+    assert.deepEqual(await search.json(), { message: "PartsAPI отклонил запрос для ключа …AAAAA. Проверьте ключ и подписку." });
   }
-  const activate = (index) => fetch(`${baseUrl}/api/applicability/api-key/active`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index }) });
-  const rejected = await activate(0);
-  assert.equal(rejected.status, 401);
-  assert.deepEqual(await rejected.json(), { message: "Закончились лимиты у ключа PartsAPI …AAAAA." });
-  const selected = await activate(1);
-  assert.equal(selected.status, 200);
-  assert.equal((await selected.json()).fallbackKeys[0].requestCount, 1);
+  assert.deepEqual(requests, [apiKey, apiKey]);
+  const state = await (await fetch(`${baseUrl}/api/applicability/api-key`)).json();
+  assert.deepEqual(state, { configured: true, persistent: true, maskedKey: "…AAAAA" });
+  for (const [path, method, payload] of [
+    ["fallbacks", "POST", { apiKey: "fictional-standby" }],
+    ["fallbacks/0", "DELETE", null],
+    ["active", "PUT", { index: 0 }],
+  ]) {
+    const response = await fetch(`${baseUrl}/api/applicability/api-key/${path}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    assert.equal(response.status, 405);
+  }
 });
 
 test("HTTP applicability failures expose a safe masked-key notice without raw rejection details", async () => {
@@ -286,9 +253,7 @@ test("HTTP applicability failures expose a safe masked-key notice without raw re
       body: JSON.stringify({ sku: "OEM1", brand: "FORD" }),
     });
     assert.equal(response.status, 401);
-    assert.deepEqual(await response.json(), { message: limitExceeded
-      ? "Закончились лимиты у ключа PartsAPI …ABCDE."
-      : "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт." });
+    assert.deepEqual(await response.json(), { message: "PartsAPI отклонил запрос для ключа …ABCDE. Проверьте ключ и подписку." });
   }
   assert.deepEqual(events, [
     { operation: "search-applicability", category: "authorization" },

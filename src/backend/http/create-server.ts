@@ -20,7 +20,6 @@ import { PartsApiKeyError } from "../applicability/partsapi-key-error.ts";
 import {
   articleLengthLimit,
   parseApplicabilityApiKeyPayload,
-  parseApplicabilityActiveKeyPayload,
   parseApplicabilitySkuQuery,
   parseApplicabilitySavedArticlesQuery,
   parseApplicabilitySearchPayload,
@@ -66,9 +65,6 @@ export interface AggregatorApplication {
   getApplicabilityApiKeyState(): ApplicabilityApiKeyState;
   saveApplicabilityApiKey(apiKey: string): ApplicabilityApiKeyState;
   deleteApplicabilityApiKey(): ApplicabilityApiKeyState;
-  addApplicabilityFallbackApiKey(apiKey: string): ApplicabilityApiKeyState;
-  deleteApplicabilityFallbackApiKey(index: number): ApplicabilityApiKeyState;
-  selectApplicabilityActiveApiKey(index: number): ApplicabilityApiKeyState;
 }
 
 interface CreateAggregatorServerOptions {
@@ -270,38 +266,6 @@ export function createAggregatorServer({
         const results = application.getApplicabilitySavedArticle(query);
         if (results === null) serveJson(response, 404, { message: "Сохранённый OEM-артикул не найден." });
         else serveJson(response, 200, { results });
-      } catch (error) {
-        serveApplicabilityError(response, error, reportError);
-      }
-      return;
-    }
-
-    if (request.method === "PUT" && url.pathname === "/api/applicability/api-key/active") {
-      try {
-        const { index } = parseApplicabilityActiveKeyPayload(await readJsonBody(request));
-        serveJson(response, 200, application.selectApplicabilityActiveApiKey(index));
-      } catch (error) {
-        serveApplicabilityError(response, error, reportError);
-      }
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/applicability/api-key/fallbacks") {
-      try {
-        const { apiKey } = parseApplicabilityApiKeyPayload(await readJsonBody(request));
-        serveJson(response, 200, application.addApplicabilityFallbackApiKey(apiKey));
-      } catch (error) {
-        serveApplicabilityError(response, error, reportError);
-      }
-      return;
-    }
-
-    const fallbackKeyMatch = /^\/api\/applicability\/api-key\/fallbacks\/(\d+)$/.exec(url.pathname);
-    if (request.method === "DELETE" && fallbackKeyMatch) {
-      try {
-        const index = Number(fallbackKeyMatch[1]);
-        if (!Number.isSafeInteger(index)) throw new RequestBodyError(400, "Fallback key index is invalid");
-        serveJson(response, 200, application.deleteApplicabilityFallbackApiKey(index));
       } catch (error) {
         serveApplicabilityError(response, error, reportError);
       }

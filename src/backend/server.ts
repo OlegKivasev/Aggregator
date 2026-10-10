@@ -4,7 +4,6 @@ import { readPort } from "./config.ts";
 import { createAggregatorServer, type AggregatorApplication } from "./http/create-server.ts";
 import {
   authorizeArmtek,
-  addApplicabilityFallbackApiKey,
   authorizeForumAuto,
   authorizeMotorDetal,
   authorizeMladov,
@@ -12,7 +11,6 @@ import {
   authorizeRossko,
   authorizeStparts,
   deleteApplicabilityApiKey,
-  deleteApplicabilityFallbackApiKey,
   getApplicabilityApiKeyState,
   getApplicabilityCachedBrands,
   listApplicabilitySavedArticles,
@@ -27,7 +25,6 @@ import {
   logoutRossko,
   logoutStparts,
   saveApplicabilityApiKey,
-  selectApplicabilityActiveApiKey,
   searchApplicability,
   shutdownSearchService,
   streamSearch,
@@ -42,7 +39,6 @@ const port = readPort();
 
 const application: AggregatorApplication = {
   authorizeArmtek,
-  addApplicabilityFallbackApiKey,
   authorizeForumAuto,
   authorizeMotorDetal,
   authorizeMladov,
@@ -50,7 +46,6 @@ const application: AggregatorApplication = {
   authorizeRossko,
   authorizeStparts,
   deleteApplicabilityApiKey,
-  deleteApplicabilityFallbackApiKey,
   getApplicabilityApiKeyState,
   getApplicabilityCachedBrands,
   listApplicabilitySavedArticles,
@@ -65,7 +60,6 @@ const application: AggregatorApplication = {
   logoutRossko,
   logoutStparts,
   saveApplicabilityApiKey,
-  selectApplicabilityActiveApiKey,
   searchApplicability,
   streamSearch,
   validateSupplierSessions,

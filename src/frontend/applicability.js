@@ -14,16 +14,12 @@ const makeInput = document.querySelector("#applicability-make");
 const selectedMakesContainer = document.querySelector("#applicability-selected-makes");
 const makesMenu = document.querySelector("#applicability-makes");
 const apiKeyInput = document.querySelector("#applicability-api-key");
-const apiKeyLabel = document.querySelector('label[for="applicability-api-key"] > span');
 const settingsDrawer = document.querySelector("#applicability-settings-drawer");
 const settingsToggle = document.querySelector("#applicability-settings-toggle");
 const settingsClose = document.querySelector("#applicability-settings-close");
 const settingsBackdrop = document.querySelector("#applicability-settings-backdrop");
 const apiKeyStatus = document.querySelector("#applicability-api-key-status");
 const deleteApiKeyButton = document.querySelector("#applicability-api-key-delete");
-const fallbackKeyList = document.querySelector("#applicability-fallback-key-list");
-const addFallbackKeyButton = document.querySelector("#applicability-fallback-key-add");
-const fallbackKeyStatus = document.querySelector("#applicability-fallback-key-status");
 const tabContextMenu = document.querySelector("#applicability-tab-context-menu");
 const renameTabButton = document.querySelector("#applicability-rename-tab-button");
 const resultContextMenu = document.querySelector("#applicability-result-context-menu");
@@ -62,9 +58,6 @@ let activeTabId = null;
 let tabSequence = 1;
 let activeRequest = null;
 let hasStoredApiKey = false;
-let fallbackKeyCount = 0;
-let apiKeyState = null;
-let apiKeyResetTimer = null;
 let activeMakeIndex = -1;
 let contextMenuTabId = null;
 let contextMenuTabAnchor = null;
@@ -222,218 +215,22 @@ const setApiKeyStatus = (message, configured) => {
 
 const readApiKeyState = async (response) => {
   const payload = await response.json();
-  const validKeyStatus = (key) => key && typeof key === "object"
-    && typeof key.maskedKey === "string" && /^….{0,5}$/u.test(key.maskedKey)
-    && typeof key.active === "boolean" && typeof key.limited === "boolean" && !(key.active && key.limited)
-    && Number.isSafeInteger(key.requestCount) && key.requestCount >= 0
-    && (key.resetAt === null || (Number.isSafeInteger(key.resetAt) && key.resetAt >= 0 && key.resetAt <= 8_640_000_000_000_000));
   if (
     !response.ok
     || typeof payload?.configured !== "boolean"
-    || !Number.isSafeInteger(payload?.fallbackKeyCount)
-    || payload.fallbackKeyCount < 0
-    || (payload.primaryKey !== null && !validKeyStatus(payload.primaryKey))
-    || !Array.isArray(payload.fallbackKeys) || payload.fallbackKeys.length !== payload.fallbackKeyCount
-    || !payload.fallbackKeys.every(validKeyStatus)
-    || [payload.primaryKey, ...payload.fallbackKeys].filter((key) => key?.active).length > 1
+    || typeof payload.persistent !== "boolean"
+    || (payload.configured
+      ? typeof payload.maskedKey !== "string" || !/^….{0,5}$/u.test(payload.maskedKey)
+      : payload.maskedKey !== null)
   ) {
     throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось сохранить API-ключ.");
   }
   return payload;
 };
 
-const setFallbackKeyStatus = (message) => {
-  fallbackKeyStatus.textContent = message;
-  fallbackKeyStatus.hidden = !message;
-};
-
-const pendingFallbackKeyInput = () => fallbackKeyList
-  .querySelector(".applicability-key-field:not([data-fallback-key-index]) input");
-
-const updateFallbackKeyAddButton = () => {
-  const pendingInput = pendingFallbackKeyInput();
-  addFallbackKeyButton.disabled = Boolean(pendingInput);
-  addFallbackKeyButton.title = pendingInput
-    ? "Сохраните или удалите текущий запасной ключ."
-    : "Добавить запасной ключ";
-};
-
-const setPasswordVisibility = (input, button) => {
-  const visible = input.type === "text";
-  input.type = visible ? "password" : "text";
-  button.setAttribute("aria-label", visible ? "Показать запасной ключ" : "Скрыть запасной ключ");
-};
-
-const createKeyUsageControls = (key, index) => {
-  const controls = document.createElement("div");
-  controls.className = "applicability-key-usage";
-  controls.hidden = !key;
-  if (!key) return controls;
-  const count = document.createElement("span");
-  count.textContent = `Запросов за 24 часа: ${key.requestCount}`;
-  count.title = "Количество обращений из этого приложения в текущем 24-часовом окне.";
-  controls.append(count);
-  if (key.resetAt !== null) {
-    const reset = document.createElement("span");
-    reset.textContent = `Сброс: ${new Date(key.resetAt).toLocaleString("ru-RU")}`;
-    controls.append(reset);
-  }
-  if (!key.active) {
-    const activate = document.createElement("button");
-    activate.type = "button";
-    activate.className = "btn btn-light applicability-key-activate";
-    activate.textContent = "Сделать основным";
-    activate.disabled = key.limited;
-    activate.title = key.limited ? "Ключ будет доступен после сброса лимита." : "Использовать этот ключ для следующих запросов";
-    activate.addEventListener("click", async () => {
-      activate.disabled = true;
-      try {
-        const state = await readApiKeyState(await fetch("/api/applicability/api-key/active", {
-          method: "PUT", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ index }),
-        }));
-        applyApiKeyState(state);
-      } catch (error) {
-        showApplicabilityToast(error instanceof Error ? error.message : "Не удалось переключить ключ.", "error");
-      } finally {
-        activate.disabled = key.limited;
-      }
-    });
-    controls.append(activate);
-  }
-  return controls;
-};
-
-const createFallbackKeyRow = ({ index = null, value = "" } = {}) => {
-  const field = document.createElement("label");
-  field.className = "field applicability-saved-key";
-  const caption = document.createElement("span");
-  const key = index === null ? null : apiKeyState?.fallbackKeys[index];
-  caption.textContent = key?.active ? "Основной API-ключ PartsAPI" : "Запасной API-ключ PartsAPI";
-  if (key?.limited) caption.textContent += " — лимит исчерпан";
-  field.append(caption);
-  const row = document.createElement("div");
-  row.className = "password-field applicability-key-field";
-  if (index !== null) row.dataset.fallbackKeyIndex = String(index);
-  row.dataset.limited = String(Boolean(key?.limited));
-
-  const input = document.createElement("input");
-  input.type = "password";
-  input.autocomplete = "off";
-  input.maxLength = 512;
-  input.placeholder = index === null ? "Введите запасной API-ключ" : key?.maskedKey ?? "Сохранённый ключ";
-  if (key?.limited && key.resetAt !== null) input.title = `Повторная попытка после ${new Date(key.resetAt).toLocaleString("ru-RU")}`;
-  input.value = value;
-  input.readOnly = index !== null;
-  input.setAttribute("aria-label", index === null ? "Запасной API-ключ" : `Сохранённый запасной API-ключ ${index + 1}`);
-
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "password-toggle";
-  toggle.setAttribute("aria-label", "Показать запасной ключ");
-  const toggleIcon = document.createElement("span");
-  toggleIcon.setAttribute("aria-hidden", "true");
-  toggleIcon.textContent = "👁";
-  toggle.append(toggleIcon);
-  toggle.addEventListener("click", () => setPasswordVisibility(input, toggle));
-
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.className = "applicability-key-delete";
-  remove.setAttribute("aria-label", "Удалить запасной API-ключ");
-  remove.title = "Удалить запасной API-ключ";
-  const icon = document.createElement("img");
-  icon.src = "/applicability-key-delete.png";
-  icon.alt = "";
-  remove.append(icon);
-  remove.addEventListener("click", async () => {
-    const storedIndex = row.dataset.fallbackKeyIndex;
-    if (storedIndex === undefined) {
-      field.remove();
-      updateFallbackKeyAddButton();
-      return;
-    }
-    try {
-      const state = await readApiKeyState(await fetch(`/api/applicability/api-key/fallbacks/${storedIndex}`, {
-        method: "DELETE",
-        headers: { Accept: "application/json" },
-      }));
-      applyApiKeyState(state);
-      setFallbackKeyStatus("");
-    } catch (error) {
-      setFallbackKeyStatus(error instanceof Error ? error.message : "Не удалось удалить запасной ключ.");
-    }
-  });
-
-  input.addEventListener("keydown", async (event) => {
-    if (event.key !== "Enter" || row.dataset.fallbackKeyIndex !== undefined) return;
-    event.preventDefault();
-    const apiKey = input.value.trim();
-    if (!apiKey) {
-      setFallbackKeyStatus("Укажите запасной API-ключ.");
-      return;
-    }
-    try {
-      const state = await readApiKeyState(await fetch("/api/applicability/api-key/fallbacks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ apiKey }),
-      }));
-      input.readOnly = true;
-      row.dataset.fallbackKeyIndex = String(state.fallbackKeyCount - 1);
-      input.value = "";
-      applyApiKeyState(state);
-      setFallbackKeyStatus("Запасной ключ сохранён");
-    } catch (error) {
-      setFallbackKeyStatus(error instanceof Error ? error.message : "Не удалось сохранить запасной ключ.");
-    }
-  });
-
-  row.append(input, toggle, remove);
-  field.append(row);
-  if (key) field.append(createKeyUsageControls(key, index + 1));
-  return field;
-};
-
-const renderFallbackKeyRows = () => {
-  const pendingField = pendingFallbackKeyInput()?.closest(".field");
-  fallbackKeyList.replaceChildren(...Array.from(
-    { length: fallbackKeyCount },
-    (_, index) => createFallbackKeyRow({ index }),
-  ));
-  if (pendingField) fallbackKeyList.append(pendingField);
-  updateFallbackKeyAddButton();
-};
-
-const applyApiKeyState = (state, notify = false) => {
-  const previous = [apiKeyState?.primaryKey, ...(apiKeyState?.fallbackKeys ?? [])];
-  const newlyLimited = [state.primaryKey, ...state.fallbackKeys].filter((key) => key?.limited
-    && !previous.some((old) => old?.limited && old.maskedKey === key.maskedKey && old.resetAt === key.resetAt));
-  apiKeyState = state;
-  if (apiKeyResetTimer !== null) window.clearTimeout(apiKeyResetTimer);
-  apiKeyResetTimer = null;
-  const nextResetAt = Math.min(...[state.primaryKey, ...state.fallbackKeys]
-    .filter((key) => key && key.resetAt !== null && key.resetAt > Date.now()).map((key) => key.resetAt));
-  if (Number.isFinite(nextResetAt)) {
-    apiKeyResetTimer = window.setTimeout(() => {
-      apiKeyResetTimer = null;
-      loadApiKeyState();
-    }, Math.min(nextResetAt - Date.now() + 100, 2_147_483_647));
-  }
-  fallbackKeyCount = state.fallbackKeyCount;
-  setApiKeyStatus(state.configured ? "Ключи сохранены" : "", state.configured);
-  apiKeyLabel.textContent = state.primaryKey?.active || !state.configured ? "Основной API-ключ PartsAPI" : "API-ключ PartsAPI";
-  if (state.primaryKey?.limited) apiKeyLabel.textContent += " — лимит исчерпан";
-  apiKeyInput.closest(".applicability-key-field").dataset.limited = String(Boolean(state.primaryKey?.limited));
-  apiKeyInput.placeholder = state.primaryKey?.maskedKey ?? "Введите API-ключ PartsAPI";
-  apiKeyInput.title = state.primaryKey?.limited && state.primaryKey.resetAt !== null
-    ? `Повторная попытка после ${new Date(state.primaryKey.resetAt).toLocaleString("ru-RU")}` : "";
-  renderFallbackKeyRows();
-  document.querySelector("#applicability-primary-key-controls").replaceChildren(createKeyUsageControls(state.primaryKey, 0));
-  if (state.fallbackKeys.some((key) => key.active)) document.querySelector("#applicability-fallback-keys").open = true;
-  if (notify && newlyLimited.length) {
-    const keys = [...new Set(newlyLimited.map((key) => key.maskedKey))].join(", ");
-    showApplicabilityToast(`Закончились лимиты у ${newlyLimited.length === 1 ? "ключа" : "ключей"} PartsAPI ${keys}.`, "error");
-  }
+const applyApiKeyState = (state) => {
+  setApiKeyStatus(state.configured ? "Ключ сохранён" : "", state.configured);
+  apiKeyInput.placeholder = state.maskedKey ?? "Введите API-ключ PartsAPI";
 };
 
 const saveApiKey = async () => {
@@ -451,12 +248,12 @@ const saveApiKey = async () => {
   return state;
 };
 
-const loadApiKeyState = async (notify = false) => {
+const loadApiKeyState = async () => {
   try {
     const state = await readApiKeyState(await fetch("/api/applicability/api-key", {
       headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5_000),
     }));
-    applyApiKeyState(state, notify);
+    applyApiKeyState(state);
   } catch {
     setApiKeyStatus("Не удалось проверить настройки API-ключа.", hasStoredApiKey);
   }
@@ -1284,18 +1081,6 @@ deleteApiKeyButton.addEventListener("click", async () => {
     setApiKeyStatus(error instanceof Error ? error.message : "Не удалось удалить API-ключ.", hasStoredApiKey);
   }
 });
-addFallbackKeyButton.addEventListener("click", () => {
-  const pendingInput = pendingFallbackKeyInput();
-  if (pendingInput) {
-    pendingInput.focus();
-    return;
-  }
-  const row = createFallbackKeyRow();
-  fallbackKeyList.append(row);
-  updateFallbackKeyAddButton();
-  row.querySelector("input")?.focus();
-});
-
 applicabilityTabsList.addEventListener("click", (event) => {
   const close = event.target.closest("[data-close-tab-id]");
   if (close) {
@@ -1664,7 +1449,6 @@ form.addEventListener("submit", async (event) => {
     if (error?.name !== "AbortError" && activeTabId === tab.id) setFeedback(error instanceof Error ? error.message : "Не удалось выполнить поиск применимости.");
   } finally {
     if (activeRequest === controller) {
-      await loadApiKeyState(!controller.signal.aborted);
       activeRequest = null;
       submitButton.disabled = false;
       submitButton.querySelector("span").textContent = "Поиск";

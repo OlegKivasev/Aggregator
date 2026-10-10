@@ -75,23 +75,22 @@ test("PartsAPI applicability client rejects malformed data and rejected API keys
   );
 });
 
-test("PartsAPI limit errors identify only the key suffix and keep other access failures ambiguous", async () => {
+test("PartsAPI rejections expose only a safe masked key and subscription notice", async () => {
   const apiKey = "private-test-key-ABCDE";
   const cases = [
-    { status: 429, body: "", limited: true },
-    { status: 403, body: JSON.stringify({ message: "Request limit exceeded" }), limited: true },
-    { status: 401, body: "Лимиты запросов исчерпаны", limited: true },
-    { status: 401, body: JSON.stringify({ error_code: 5000, message: "Exceeded the number of requests from the current IP address.", status: 401 }), limited: true },
-    { status: 403, body: "Forbidden", limited: false },
-    { status: 401, body: JSON.stringify({ error_code: 5000, message: `Invalid key ${apiKey}` }), limited: false },
-    { status: 403, body: "x".repeat(16 * 1024 + 1), limited: false },
+    { status: 429, body: "" },
+    { status: 403, body: JSON.stringify({ message: "Request limit exceeded" }) },
+    { status: 401, body: "Лимиты запросов исчерпаны" },
+    { status: 401, body: JSON.stringify({ error_code: 5000, message: "Exceeded the number of requests from the current IP address.", status: 401 }) },
+    { status: 403, body: "Forbidden" },
+    { status: 401, body: JSON.stringify({ error_code: 5000, message: `Invalid key ${apiKey}` }) },
+    { status: 403, body: "x".repeat(16 * 1024 + 1) },
   ];
-  for (const { status, body, limited } of cases) {
+  for (const { status, body } of cases) {
     const client = new PartsApiApplicabilityClient(async () => new Response(body, { status }));
     await assert.rejects(client.search({ sku: "OEM1", brand: "FORD", apiKey }, new AbortController().signal), (error) => {
       assert.ok(error instanceof SupplierAuthError);
-      assert.equal(error.publicMessage, limited ? "Закончились лимиты у ключа PartsAPI …ABCDE." : "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт.");
-      assert.equal(error.limitExceeded, limited);
+      assert.equal(error.publicMessage, "PartsAPI отклонил запрос для ключа …ABCDE. Проверьте ключ и подписку.");
       assert.doesNotMatch(JSON.stringify(error), /private-test-key/);
       assert.doesNotMatch(error.stack, /private-test-key/);
       return true;
@@ -104,7 +103,7 @@ test("PartsAPI rejection handling hides short keys, ignores key text and preserv
     const client = new PartsApiApplicabilityClient(async () => new Response(`Invalid key ${apiKey}`, { status: 403 }));
     await assert.rejects(client.search({ sku: "OEM1", brand: "FORD", apiKey }, new AbortController().signal), (error) => {
       assert.ok(error instanceof SupplierAuthError);
-      assert.match(error.publicMessage, /доступ/);
+      assert.match(error.publicMessage, /подписку/);
       assert.ok(!error.publicMessage.includes(apiKey));
       return true;
     });
@@ -126,26 +125,12 @@ test("PartsAPI key is stored encrypted and can only be removed explicitly", () =
     const store = new EncryptedApplicabilityApiKeyStore(filePath, encryptionKey);
     store.set("test-key");
     assert.equal(store.get(), "test-key");
-    assert.equal(store.getFallbackKeyCount(), 0);
-    store.addFallbackKey("first-fallback-key");
-    store.addFallbackKey("second-fallback-key");
-    assert.equal(store.getFallbackKeyCount(), 2);
     assert.equal(store.isPersistent(), true);
-
     const restoredStore = new EncryptedApplicabilityApiKeyStore(filePath, encryptionKey);
     assert.equal(restoredStore.get(), "test-key");
-    assert.equal(restoredStore.getFallbackKeyCount(), 2);
     restoredStore.delete();
     assert.equal(restoredStore.get(), null);
-    assert.equal(restoredStore.getFallbackKeyCount(), 2);
-    restoredStore.deleteFallbackKey(0);
-    assert.equal(restoredStore.getFallbackKeyCount(), 1);
-    const storeWithOnlyFallbackKey = new EncryptedApplicabilityApiKeyStore(filePath, encryptionKey);
-    assert.equal(storeWithOnlyFallbackKey.get(), null);
-    assert.equal(storeWithOnlyFallbackKey.getFallbackKeyCount(), 1);
-    storeWithOnlyFallbackKey.deleteFallbackKey(0);
     assert.equal(new EncryptedApplicabilityApiKeyStore(filePath, encryptionKey).get(), null);
-    assert.equal(new EncryptedApplicabilityApiKeyStore(filePath, encryptionKey).getFallbackKeyCount(), 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -171,19 +156,14 @@ test("applicability cache persists real PartsAPI responses", () => {
 
 test("applicability service returns cached results without repeating the PartsAPI request", async () => {
   let savedKey = null;
-  const fallbackKeys = [];
   let receivedQuery = null;
   let calls = 0;
   const entries = new Map();
   const repository = {
-    getActiveKey: () => savedKey,
-    getState: () => ({ configured: Boolean(savedKey), fallbackKeyCount: fallbackKeys.length, persistent: true, primaryKey: null, fallbackKeys: [] }),
-    recordRequest: () => {},
+    get: () => savedKey,
+    getState: () => ({ configured: Boolean(savedKey), persistent: true, maskedKey: savedKey ? "…t-key" : null }),
     set: (apiKey) => { savedKey = apiKey; },
     delete: () => { savedKey = null; },
-    getFallbackKeyCount: () => fallbackKeys.length,
-    addFallbackKey: (apiKey) => { fallbackKeys.push(apiKey); },
-    deleteFallbackKey: (index) => { fallbackKeys.splice(index, 1); },
     isPersistent: () => true,
   };
   const service = new ApplicabilityApplicationService({
@@ -200,9 +180,8 @@ test("applicability service returns cached results without repeating the PartsAP
     set: (query, results) => entries.set(`${query.sku}\u0000${query.brand}`, results),
   });
 
-  assert.deepEqual(service.getApiKeyState(), { configured: false, fallbackKeyCount: 0, persistent: true, primaryKey: null, fallbackKeys: [] });
+  assert.deepEqual(service.getApiKeyState(), { configured: false, persistent: true, maskedKey: null });
   service.saveApiKey("test-key");
-  assert.equal(service.addFallbackApiKey("fallback-key").fallbackKeyCount, 1);
   assert.deepEqual(
     await service.search({ sku: "11182905003", brand: "LADA" }, new AbortController().signal),
     { results: [vehicle], cacheHit: false },
@@ -213,7 +192,6 @@ test("applicability service returns cached results without repeating the PartsAP
   );
   assert.deepEqual(receivedQuery, { sku: "11182905003", brand: "LADA", apiKey: "test-key" });
   assert.equal(calls, 1);
-  assert.equal(service.deleteFallbackApiKey(0).fallbackKeyCount, 0);
   assert.equal(service.deleteApiKey().configured, false);
 });
 
@@ -222,9 +200,6 @@ test("applicability service refuses to save an API key without encrypted persist
     get: () => null,
     set: () => { throw new Error("must not save"); },
     delete: () => {},
-    getFallbackKeyCount: () => 0,
-    addFallbackKey: () => { throw new Error("must not save"); },
-    deleteFallbackKey: () => {},
     isPersistent: () => false,
   };
   const service = new ApplicabilityApplicationService({ search: async () => [] }, repository, {
@@ -357,7 +332,7 @@ test("deletion prevents a late applicability search from restoring the deleted O
   let finish;
   let written = false;
   const service = new ApplicabilityApplicationService({ search: () => new Promise((resolve) => { finish = resolve; }) },
-    { getActiveKey: () => "test-key", getState: () => ({ fallbackKeyCount: 0 }), recordRequest: () => {} }, { get: () => null, set: () => { written = true; }, delete: () => false });
+    { get: () => "test-key" }, { get: () => null, set: () => { written = true; }, delete: () => false });
   const query = { sku: "SKU", brand: "VOLVO" };
   const pending = service.search(query, new AbortController().signal);
   assert.equal(service.deleteSavedArticle({ sku: "sku", brand: "volvo" }), false);
@@ -370,7 +345,7 @@ test("an aborted applicability lookup cannot write saved OEM results", async () 
   const controller = new AbortController();
   let written = false;
   const service = new ApplicabilityApplicationService({ search: async () => { controller.abort(); return [vehicle]; } },
-    { getActiveKey: () => "test-key", getState: () => ({ fallbackKeyCount: 0 }), recordRequest: () => {} }, { get: () => null, set: () => { written = true; } });
+    { get: () => "test-key" }, { get: () => null, set: () => { written = true; } });
   await assert.rejects(service.search({ sku: "SKU", brand: "VOLVO" }, controller.signal), { name: "AbortError" });
   assert.equal(written, false);
 });

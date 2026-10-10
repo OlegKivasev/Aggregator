@@ -34,25 +34,15 @@ test("applicability key failures use a red toast and retain successful batch res
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     let mode = "limit";
-    const notice = "Закончились лимиты у ключа PartsAPI …ABCDE.";
+    const notice = "PartsAPI отклонил запрос для ключа …ABCDE. Проверьте ключ и подписку.";
     let saves = 0;
-    const activations = [];
-    let resetOnNextRead = false;
-    let keyState = {
-      configured: true, fallbackKeyCount: 2, persistent: true,
-      primaryKey: { maskedKey: "…ABCDE", active: true, limited: false, resetAt: null, requestCount: 0 },
-      fallbackKeys: ["…BBBBB", "…EEEEE"].map((maskedKey) => ({ maskedKey, active: false, limited: false, resetAt: null, requestCount: 0 })),
-    };
+    let keyState = { configured: true, persistent: true, maskedKey: "…ABCDE" };
+    const keyManagementRequests = [];
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
       if (path === "/api/applicability/search") {
         const { sku } = route.request().postDataJSON();
-        if (mode === "rotation") {
-          keyState = { ...keyState, primaryKey: { ...keyState.primaryKey, active: false, limited: true, resetAt: 1_900_000_000_000, requestCount: keyState.primaryKey.requestCount + 1 },
-            fallbackKeys: keyState.fallbackKeys.map((key, index) => ({ ...key, active: index === 0, requestCount: key.requestCount + (index === 0 ? 1 : 0) })) };
-          await route.fulfill({ json: { results: [{ carId: 1, makeName: "FORD", modelName: "TEST", carName: "2.0", carType: "PC", yearStart: null, yearEnd: null }], cacheHit: false } });
-        } else if (mode === "successful") {
-          for (const key of [keyState.primaryKey, ...keyState.fallbackKeys]) if (key.active) key.requestCount += 1;
+        if (mode === "successful") {
           await route.fulfill({ json: { results: [{ carId: 1, makeName: "FORD", modelName: "TEST", carName: "2.0", carType: "PC", yearStart: null, yearEnd: null }], cacheHit: false } });
         } else if (mode.startsWith("mixed") && sku === "CACHED1") {
           await route.fulfill({ json: { results: [{ carId: 1, makeName: "FORD", modelName: "TEST", carName: "2.0", carType: "PC", yearStart: null, yearEnd: null }], cacheHit: true } });
@@ -61,21 +51,18 @@ test("applicability key failures use a red toast and retain successful batch res
         } else {
           await route.fulfill({ status: mode === "integration" ? 502 : 401, json: { message: mode === "integration" ? "Applicability search failed" : notice } });
         }
-      } else if (path === "/api/applicability/api-key/active") {
-        const { index } = route.request().postDataJSON();
-        activations.push(index);
-        [keyState.primaryKey, ...keyState.fallbackKeys].forEach((key, candidate) => { key.active = candidate === index; });
-        await route.fulfill({ json: keyState });
       } else if (path === "/api/applicability/api-key") {
-        if (resetOnNextRead && route.request().method() === "GET") {
-          [keyState.primaryKey, ...keyState.fallbackKeys].forEach((key) => { key.requestCount = 0; key.limited = false; key.resetAt = null; });
-        }
         if (route.request().method() === "PUT") {
           saves += 1;
-          keyState = { ...keyState, primaryKey: { maskedKey: "…CCCCC", active: true, limited: false, resetAt: null, requestCount: 0 },
-            fallbackKeys: keyState.fallbackKeys.map((key) => ({ ...key, active: false })) };
+          assert.deepEqual(route.request().postDataJSON(), { apiKey: "fictional-new-key-CCCCC" });
+          keyState = { configured: true, persistent: true, maskedKey: "…CCCCC" };
+        } else if (route.request().method() === "DELETE") {
+          keyState = { configured: false, persistent: true, maskedKey: null };
         }
         await route.fulfill({ json: keyState });
+      } else if (path.startsWith("/api/applicability/api-key/")) {
+        keyManagementRequests.push(path);
+        await route.fulfill({ status: 404, json: { message: "Not found" } });
       } else if (path === "/api/applicability/cached-brands") {
         await route.fulfill({ json: { brands: [] } });
       } else if (path === "/api/suppliers/sessions") {
@@ -118,73 +105,42 @@ test("applicability key failures use a red toast and retain successful batch res
     assert.equal(await feedback.textContent(), "Applicability search failed");
     assert.equal(await feedback.isVisible(), true);
 
-    // Rotation updates settings, keeps a pending unsaved key and uses only a masked suffix.
-    await page.locator("#applicability-settings-toggle").click();
-    await page.locator("#applicability-fallback-keys").evaluate((node) => { node.open = true; });
-    await page.locator("#applicability-fallback-key-add").click();
-    await page.locator('#applicability-fallback-key-list .applicability-key-field:not([data-fallback-key-index]) input').fill("fictional-unsaved-DDDDD");
-    await page.locator("#applicability-settings-close").click();
-    mode = "rotation";
-    await page.locator("#applicability-sku").fill("ROTATE1");
-    await submit.click();
-    await page.waitForFunction(() => !document.querySelector("#applicability-submit").disabled);
-    assert.equal(await toast.textContent(), notice);
-    assert.equal(await toast.getAttribute("data-tone"), "error");
-    assert.equal(await feedback.isVisible(), false);
-    assert.match(await page.locator("#applicability-results-body").textContent(), /ROTATE1/);
+    // Settings expose one key, with no standby controls or local quota status.
     await page.locator("#applicability-settings-toggle").click();
     await page.waitForLoadState("networkidle");
-    assert.equal(await page.locator('#applicability-api-key').getAttribute("placeholder"), "…ABCDE");
-    assert.equal(await page.locator('#applicability-api-key').evaluate((node) => getComputedStyle(node).borderTopColor), "rgb(217, 45, 32)");
-    assert.equal(await page.locator('label[for="applicability-api-key"] > span').first().textContent(), "API-ключ PartsAPI — лимит исчерпан");
-    assert.equal(await page.locator('[data-fallback-key-index="0"]').locator('..').locator('span').first().textContent(), "Основной API-ключ PartsAPI");
-    assert.match(await page.locator("#applicability-primary-key-controls").textContent(), /Запросов за 24 часа: 1/);
-    assert.equal(await page.locator("#applicability-primary-key-controls button").isDisabled(), true);
-    assert.match(await page.locator('[data-fallback-key-index="0"]').locator('..').textContent(), /Запросов за 24 часа: 1/);
-    assert.equal(await page.locator('#applicability-fallback-key-list .applicability-key-field:not([data-fallback-key-index]) input').inputValue(), "fictional-unsaved-DDDDD");
-    assert.equal(await page.locator('#applicability-fallback-key-list .applicability-key-field:not([data-fallback-key-index]) input').count(), 1);
+    const drawer = page.locator("#applicability-settings-drawer");
+    assert.equal(await drawer.locator('input[type="password"]').count(), 1);
+    assert.equal(await page.locator("#applicability-fallback-key-add").count(), 0);
+    assert.equal(await page.locator("#applicability-primary-key-controls").count(), 0);
+    assert.doesNotMatch(await drawer.textContent(), /Запасные|Сделать основным|Запросов за 24 часа|Сброс:|лимит исчерпан/);
+    assert.equal(await page.locator("#applicability-api-key").getAttribute("placeholder"), "…ABCDE");
+    assert.equal(await page.locator('label[for="applicability-api-key"] > span').first().textContent(), "API-ключ PartsAPI");
 
-    // A saved original key must not be submitted again by the next search and reset rotation.
-    await page.locator("#applicability-api-key").fill("fictional-new-primary-CCCCC");
+    // Replacing the one key saves it once and does not submit it again on search.
+    await page.locator("#applicability-api-key").fill("fictional-new-key-CCCCC");
     await page.locator("#applicability-api-key").press("Enter");
     await page.waitForFunction(() => document.querySelector("#applicability-api-key").value === "");
     assert.equal(saves, 1);
+    assert.equal(await page.locator("#applicability-api-key").getAttribute("placeholder"), "…CCCCC");
     await page.locator("#applicability-settings-close").click();
-    await page.locator("#applicability-sku").fill("ROTATE2");
+    mode = "successful";
+    await page.locator("#applicability-sku").fill("SINGLE1");
     await submit.click();
     await page.waitForFunction(() => !document.querySelector("#applicability-submit").disabled);
     assert.equal(saves, 1);
-    assert.equal(await toast.textContent(), "Закончились лимиты у ключа PartsAPI …CCCCC.");
+    assert.match(await page.locator("#applicability-results-body").textContent(), /SINGLE1/);
 
+    // Explicit deletion leaves no hidden credential available for the next search.
     await page.locator("#applicability-settings-toggle").click();
     await page.waitForLoadState("networkidle");
-    await page.locator('[data-fallback-key-index="1"]').locator('..').getByRole("button", { name: "Сделать основным" }).click();
-    await page.waitForFunction(() => document.querySelector('[data-fallback-key-index="1"]').parentElement.firstChild.textContent === "Основной API-ключ PartsAPI");
-    assert.deepEqual(activations, [2]);
-    assert.match(await page.locator('[data-fallback-key-index="1"]').locator('..').textContent(), /Запросов за 24 часа: 0/);
+    await page.locator("#applicability-api-key-delete").click();
+    await page.waitForFunction(() => document.querySelector("#applicability-api-key").placeholder === "Введите API-ключ PartsAPI");
     await page.locator("#applicability-settings-close").click();
-    mode = "successful";
-    await page.locator("#applicability-sku").fill("MANUAL1");
+    await page.locator("#applicability-sku").fill("MISSING1");
     await submit.click();
     await page.waitForFunction(() => !document.querySelector("#applicability-submit").disabled);
-    await page.locator("#applicability-settings-toggle").click();
-    await page.waitForLoadState("networkidle");
-    assert.match(await page.locator('[data-fallback-key-index="1"]').locator('..').textContent(), /Запросов за 24 часа: 1/);
-    assert.match(await page.locator('[data-fallback-key-index="0"]').locator('..').textContent(), /Запросов за 24 часа: 2/);
-
-    // An open drawer refreshes its counters when the next reset boundary passes.
-    await page.clock.install();
-    const now = Date.now();
-    await page.clock.pauseAt(new Date(now));
-    [keyState.primaryKey, ...keyState.fallbackKeys].forEach((key) => { key.resetAt = now + 2_000; });
-    await page.locator("#applicability-settings-close").click();
-    await page.locator("#applicability-settings-toggle").click();
-    await page.waitForLoadState("networkidle");
-    resetOnNextRead = true;
-    await page.clock.fastForward(3_000);
-    await page.waitForFunction(() => document.querySelector("#applicability-primary-key-controls").textContent.includes("Запросов за 24 часа: 0"));
-    assert.match(await page.locator('[data-fallback-key-index="1"]').locator('..').textContent(), /Запросов за 24 часа: 0/);
-    assert.equal(await page.locator('#applicability-api-key').locator('..').getAttribute("data-limited"), "false");
+    assert.equal(await feedback.textContent(), "Укажите API-ключ PartsAPI в настройках.");
+    assert.deepEqual(keyManagementRequests, []);
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

@@ -8,35 +8,6 @@ import { parseApplicabilityVehicles } from "./vehicle-records.ts";
 const partsApiOrigin = "https://api.partsapi.ru";
 const timeoutMs = 8_000;
 const maximumResponseBytes = 2 * 1024 * 1024;
-const maximumErrorResponseBytes = 16 * 1024;
-
-async function isPartsApiLimitError(response: Response, apiKey: string, signal: AbortSignal): Promise<boolean> {
-  const reader = response.body?.getReader();
-  if (!reader) return false;
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      totalBytes += value.byteLength;
-      if (totalBytes > maximumErrorResponseBytes) {
-        await reader.cancel();
-        return false;
-      }
-      chunks.push(value);
-    }
-    const text = Buffer.concat(chunks).toString("utf8");
-    const classificationText = text.replaceAll(apiKey, "[ключ скрыт]");
-    return /(?:Exceeded the number of requests from the current IP address\.|лимит.{0,48}(?:исчерпан|законч|превыш)|(?:исчерпан|законч|превыш).{0,48}лимит|(?:quota|limit)[\s_-]*(?:exceeded|exhausted|reached)|(?:exceeded|exhausted)[\s_-]*(?:quota|limit)|too many requests)/iu.test(classificationText);
-  } catch {
-    if (signal.aborted) throw signal.reason;
-    // HTTP rejection remains authoritative when optional error details cannot be read.
-    return false;
-  } finally {
-    reader.releaseLock();
-  }
-}
 
 type FetchImplementation = (input: URL, init: RequestInit) => Promise<Response>;
 
@@ -67,9 +38,9 @@ export class PartsApiApplicabilityClient {
       }
 
       if (response.status === 401 || response.status === 403 || response.status === 429) {
-        const limitExceeded = await isPartsApiLimitError(response, query.apiKey, boundedSignal.signal);
+        await response.body?.cancel();
         boundedSignal.signal.throwIfAborted();
-        throw new PartsApiKeyError(query.apiKey, response.status === 429 || limitExceeded);
+        throw new PartsApiKeyError(query.apiKey);
       }
       if (!response.ok) {
         await response.body?.cancel();
