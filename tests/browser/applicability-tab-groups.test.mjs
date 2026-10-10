@@ -75,8 +75,19 @@ async function dragWithPreview(page, source, target, message) {
   await page.mouse.move(to.x + to.width / 2 + 1, to.y + to.height / 2);
   await page.waitForFunction(() => !document.querySelector("#applicability-tab-drop-feedback").hidden);
   assert.match(await page.locator("#applicability-tab-drop-feedback").textContent(), message);
-  assert.equal(await target.evaluate((element) => element.classList.contains("is-group-drop-target")), true);
+  assert.ok(await target.evaluate((element) => element.classList.contains("is-group-drop-target") || element.classList.contains("is-reorder-target")));
   if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-group-drop-preview.png") });
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelector("#applicability-tab-drop-feedback").hidden);
+}
+
+async function dragToPart(page, source, target, fraction = 0.2) {
+  const from = await source.boundingBox();
+  const to = await target.boundingBox();
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from.x + from.width / 2 + 12, from.y + from.height / 2, { steps: 4 });
+  await page.mouse.move(to.x + to.width * fraction, to.y + to.height / 2, { steps: 16 });
   await page.mouse.up();
   await page.waitForFunction(() => document.querySelector("#applicability-tab-drop-feedback").hidden);
 }
@@ -114,6 +125,8 @@ test("dragging tabs creates and moves groups, renames folders and forms only the
     if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-tab-groups.png") });
     await tabButton(page, "d").dragTo(tabButton(page, "e"));
     assert.equal(await groupHeader(page, "Группа 2").count(), 1);
+    await dragToPart(page, groupHeader(page, "Группа 2"), groupHeader(page, "Детали двигателя"), 0.15);
+    assert.deepEqual((await storedState(page)).groups.map((group) => group.name), ["Группа 2", "Детали двигателя"]);
     await tabButton(page, "c").dragTo(tabButton(page, "e"));
     const state = await storedState(page);
     const group2Id = state.groups.find((group) => group.name === "Группа 2").id;
@@ -121,12 +134,13 @@ test("dragging tabs creates and moves groups, renames folders and forms only the
     assert.equal(state.tabs.find((item) => item.id === "a").searches.length, 1);
     await tabButton(page, "c").dragTo(tabButton(page, "e"));
     assert.equal((await storedState(page)).groups.length, 2);
+    assert.deepEqual((await storedState(page)).tabs.filter((item) => item.groupId === group2Id).map((item) => item.id), ["c", "e", "d"]);
     await page.reload();
     await page.waitForLoadState("networkidle");
     assert.equal(await groupHeader(page, "Детали двигателя").count(), 1);
     assert.equal(await groupHeader(page, "Группа 2").count(), 1);
     await multiList.click();
-    assert.deepEqual([...(await documentText.inputValue()).matchAll(/^Артикул: (.+)$/gm)].map((match) => match[1]), ["Деталь E", "Деталь D", "Деталь C"]);
+    assert.deepEqual([...(await documentText.inputValue()).matchAll(/^Артикул: (.+)$/gm)].map((match) => match[1]), ["Деталь C", "Деталь E", "Деталь D"]);
     await page.keyboard.press("Escape");
 
     await tabButton(page, "b").click({ button: "right" });
@@ -143,7 +157,22 @@ test("dragging tabs creates and moves groups, renames folders and forms only the
     await page.locator("#applicability-new-tab").click();
     const unnamed = page.locator("#applicability-tabs-list [data-tab-id]").last();
     await unnamed.dragTo(tabButton(page, "a"));
-    assert.equal(await groupHeader(page, "Группа 3").count(), 1);
+    assert.equal(await groupHeader(page, "Группа 1").count(), 1);
+  });
+});
+
+test("dragging tab edges reorders tabs without grouping them", async () => {
+  await withGroupsPage({ activeTabId: "a", tabs: [tab("a", "Деталь A"), tab("b", "Деталь B"), tab("c", "Деталь C")] }, async (page) => {
+    await dragToPart(page, tabButton(page, "c"), tabButton(page, "a"), 0.15);
+    assert.deepEqual((await storedState(page)).tabs.map((item) => item.id), ["c", "a", "b"]);
+    assert.deepEqual((await storedState(page)).tabs.map((item) => item.groupId), [null, null, null]);
+    assert.equal(await page.locator(".applicability-tab-group").count(), 0);
+    assert.match(await page.locator("#applicability-tab-drop-feedback").textContent(), /^$/);
+
+    await dragToPart(page, tabButton(page, "a"), tabButton(page, "b"), 0.85);
+    assert.deepEqual((await storedState(page)).tabs.map((item) => item.id), ["c", "b", "a"]);
+    await tabButton(page, "a").click();
+    assert.match(await page.locator("#applicability-results-body").textContent(), /OEM-a/);
   });
 });
 

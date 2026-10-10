@@ -2,7 +2,7 @@ import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicleGroups 
 import { normalizeApplicabilitySku, parseApplicabilitySkus, runApplicabilityBatch } from "./applicability-search-input.js";
 import { bootstrapApplicabilityOemSidebar } from "./applicability-oem-sidebar.js";
 import { applicabilityFileMaxBytes, decodeApplicabilityFile, parseApplicabilityFile } from "./applicability-file-import.js";
-import { moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "./applicability-tab-groups.js";
+import { moveApplicabilityGroupRelative, moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, moveApplicabilityTabRelative, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "./applicability-tab-groups.js";
 
 const markupFunction = document.querySelector("#markup-function");
 const applicabilityFunction = document.querySelector("#applicability-function");
@@ -75,6 +75,7 @@ let tabs = [];
 let tabGroups = [];
 let groupSequence = 1;
 let draggedTabId = null;
+let draggedGroupId = null;
 let tabDropTarget = null;
 let activeTabId = null;
 let tabSequence = 1;
@@ -235,11 +236,16 @@ const restoreApplicabilityState = () => {
     if (!Array.isArray(state?.tabs) || !state.tabs.length) return;
     tabs = state.tabs.map((tab) => createTab(tab));
     tabGroups = restoreApplicabilityGroups(state.groups, tabs);
-    groupSequence = nextApplicabilityGroupNumber(state.nextGroupNumber, tabGroups);
+    groupSequence = tabGroups.length ? nextApplicabilityGroupNumber(state.nextGroupNumber, tabGroups) : 1;
     activeTabId = tabs.some((tab) => tab.id === state.activeTabId) ? state.activeTabId : tabs[0].id;
   } catch {
     localStorage.removeItem(applicabilityStateStorageKey);
   }
+};
+
+const pruneApplicabilityGroups = () => {
+  tabGroups = restoreApplicabilityGroups(tabGroups, tabs);
+  if (!tabGroups.length) groupSequence = 1;
 };
 
 const setApiKeyStatus = (message, configured) => {
@@ -1048,6 +1054,8 @@ const renderTabs = () => {
         header.type = "button";
         header.className = "applicability-tab-group__header";
         header.dataset.groupHeaderId = group.id;
+        header.draggable = true;
+        header.classList.toggle("is-dragging", draggedGroupId === group.id);
         header.title = `${group.name}. Двойной щелчок — переименовать группу.`;
         header.setAttribute("aria-label", group.name);
         const icon = document.createElement("img");
@@ -1092,7 +1100,7 @@ const renderTabs = () => {
 };
 
 const clearTabDropTarget = () => {
-  tabDropTarget?.classList.remove("is-group-drop-target");
+  tabDropTarget?.classList.remove("is-group-drop-target", "is-reorder-target");
   tabDropTarget = null;
   tabDropFeedback.hidden = true;
   tabDropFeedback.textContent = "";
@@ -1106,14 +1114,21 @@ const tabAtDropTarget = (element) => {
   return null;
 };
 
-const tabDropAction = (element) => {
+const tabDropAction = (element, event) => {
   const source = tabs.find((tab) => tab.id === draggedTabId);
   if (!source || !applicabilityTabs.contains(element)) return null;
   const target = tabAtDropTarget(element);
   if (target) {
-    return source !== target && (!target.groupId || target.groupId !== source.groupId)
-      ? { type: "group", target, anchor: element.closest("[data-tab-id], [data-group-header-id]") }
-      : null;
+    if (source === target) return null;
+    const anchor = element.closest("[data-tab-id], [data-group-header-id]");
+    const targetBounds = anchor.getBoundingClientRect();
+    const isTab = anchor.matches("[data-tab-id]");
+    const position = isTab && event.clientX < targetBounds.left + targetBounds.width / 2 ? "before" : "after";
+    const sameGroup = source.groupId === (target.groupId ?? null);
+    if (isTab && sameGroup && (source.groupId || event.clientX < targetBounds.left + targetBounds.width * 0.3 || event.clientX > targetBounds.right - targetBounds.width * 0.3)) {
+      return { type: "reorder-tab", target, position, anchor };
+    }
+    return { type: "group", target, anchor };
   }
   if (source.groupId && !element.closest(".applicability-tab-group, #applicability-new-tab")) {
     return { type: "ungroup", anchor: tabUngroupDrop };
@@ -1121,7 +1136,33 @@ const tabDropAction = (element) => {
   return null;
 };
 
+const groupDropAction = (element, event) => {
+  const source = tabGroups.find((group) => group.id === draggedGroupId);
+  const header = element.closest("[data-group-header-id]");
+  if (!source || !header || !applicabilityTabsList.contains(header) || header.dataset.groupHeaderId === source.id) return null;
+  const bounds = header.getBoundingClientRect();
+  return {
+    type: "reorder-group",
+    targetGroupId: header.dataset.groupHeaderId,
+    position: event.clientX < bounds.left + bounds.width / 2 ? "before" : "after",
+    anchor: header,
+  };
+};
+
 applicabilityTabsList.addEventListener("dragstart", (event) => {
+  const header = event.target.closest("[data-group-header-id]");
+  if (header) {
+    if (!event.dataTransfer) {
+      event.preventDefault();
+      return;
+    }
+    draggedGroupId = header.dataset.groupHeaderId;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", draggedGroupId);
+    header.classList.add("is-dragging");
+    hideTabContextMenu();
+    return;
+  }
   const button = event.target.closest("[data-tab-id]");
   if (!button || !event.dataTransfer || event.target.closest("[data-close-tab-id]")) {
     event.preventDefault();
@@ -1135,8 +1176,8 @@ applicabilityTabsList.addEventListener("dragstart", (event) => {
   hideTabContextMenu();
 });
 applicabilityTabs.addEventListener("dragover", (event) => {
-  if (!draggedTabId) return;
-  const action = tabDropAction(event.target);
+  if (!draggedTabId && !draggedGroupId) return;
+  const action = draggedGroupId ? groupDropAction(event.target, event) : tabDropAction(event.target, event);
   if (!action) {
     clearTabDropTarget();
     return;
@@ -1147,12 +1188,14 @@ applicabilityTabs.addEventListener("dragover", (event) => {
   if (tabDropTarget !== anchor) {
     clearTabDropTarget();
     tabDropTarget = anchor;
-    anchor.classList.add("is-group-drop-target");
+    anchor.classList.add(action.type === "reorder-tab" || action.type === "reorder-group" ? "is-reorder-target" : "is-group-drop-target");
   }
   const group = action.type === "group" ? tabGroups.find((item) => item.id === action.target.groupId) : null;
   tabDropFeedback.textContent = action.type === "ungroup"
     ? "Отпустите, чтобы вынести вкладку из группы"
-    : group ? `Добавить вкладку в группу «${group.name}»` : "Отпустите вкладку, чтобы создать группу";
+    : action.type === "reorder-tab" ? `Переместить вкладку ${action.position === "before" ? "перед" : "после"} выбранной`
+      : action.type === "reorder-group" ? `Переместить группу ${action.position === "before" ? "перед" : "после"} выбранной`
+        : group ? `Добавить вкладку в группу «${group.name}»` : "Отпустите вкладку, чтобы создать группу";
   tabDropFeedback.hidden = false;
   const bounds = applicabilityTabsList.getBoundingClientRect();
   if (event.clientX > bounds.right - 28) applicabilityTabsList.scrollLeft += 12;
@@ -1162,7 +1205,7 @@ applicabilityTabs.addEventListener("dragleave", (event) => {
   if (!event.relatedTarget || !applicabilityTabs.contains(event.relatedTarget)) clearTabDropTarget();
 });
 applicabilityTabs.addEventListener("drop", (event) => {
-  const action = tabDropAction(event.target);
+  const action = draggedGroupId ? groupDropAction(event.target, event) : tabDropAction(event.target, event);
   if (!action) return;
   event.preventDefault();
   syncActiveTab();
@@ -1170,19 +1213,27 @@ applicabilityTabs.addEventListener("drop", (event) => {
     id: `applicability-group-${Date.now()}-${tabSequence++}`,
     name: `Группа ${groupSequence++}`,
   })) : null;
+  const reorderedTab = action.type === "reorder-tab" && moveApplicabilityTabRelative(tabs, tabGroups, draggedTabId, action.target.id, action.position);
+  const reorderedGroup = action.type === "reorder-group" && moveApplicabilityGroupRelative(tabs, tabGroups, draggedGroupId, action.targetGroupId, action.position);
   const removedFromGroup = action.type === "ungroup" && moveApplicabilityTabOutOfGroup(tabs, tabGroups, draggedTabId);
   clearTabDropTarget();
   draggedTabId = null;
+  draggedGroupId = null;
   tabUngroupDrop.hidden = true;
-  if (!group && !removedFromGroup) return;
+  if (!group && !reorderedTab && !reorderedGroup && !removedFromGroup) return;
+  pruneApplicabilityGroups();
   renderTabs();
   updateListButton(getActiveTab());
   saveApplicabilityState();
-  showApplicabilityToast(group ? `Вкладка добавлена в группу «${group.name}».` : "Вкладка вынесена из группы.", "success");
+  showApplicabilityToast(
+    group ? `Вкладка добавлена в группу «${group.name}».` : reorderedTab ? "Вкладка перемещена." : reorderedGroup ? "Группа перемещена." : "Вкладка вынесена из группы.",
+    "success",
+  );
 });
 applicabilityTabs.addEventListener("dragend", () => {
   clearTabDropTarget();
   draggedTabId = null;
+  draggedGroupId = null;
   tabUngroupDrop.hidden = true;
   applicabilityTabsList.querySelectorAll(".is-dragging").forEach((button) => button.classList.remove("is-dragging"));
 });
@@ -1235,7 +1286,7 @@ const closeTab = (tabId) => {
   if (index < 0) return;
   if (fileImportTabId === tabId || (!fileImportRequest && activeTabId === tabId)) activeRequest?.abort();
   tabs.splice(index, 1);
-  tabGroups = restoreApplicabilityGroups(tabGroups, tabs);
+  pruneApplicabilityGroups();
   if (!tabs.length) tabs.push(createTab());
   if (!tabs.some((tab) => tab.id === activeTabId)) activeTabId = tabs[Math.min(index, tabs.length - 1)].id;
   renderActiveTab();
@@ -1420,7 +1471,7 @@ removeFromGroupButton.addEventListener("click", () => {
   hideTabContextMenu();
   if (!tab?.groupId) return;
   tab.groupId = null;
-  tabGroups = restoreApplicabilityGroups(tabGroups, tabs);
+  pruneApplicabilityGroups();
   renderTabs();
   updateListButton(getActiveTab());
   saveApplicabilityState();
@@ -1430,7 +1481,7 @@ dissolveGroupButton.addEventListener("click", () => {
   hideTabContextMenu();
   if (!groupId) return;
   tabs.forEach((tab) => { if (tab.groupId === groupId) tab.groupId = null; });
-  tabGroups = restoreApplicabilityGroups(tabGroups, tabs);
+  pruneApplicabilityGroups();
   renderTabs();
   updateListButton(getActiveTab());
   saveApplicabilityState();

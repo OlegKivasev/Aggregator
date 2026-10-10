@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "../src/frontend/applicability-tab-groups.js";
+import { moveApplicabilityGroupRelative, moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, moveApplicabilityTabRelative, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "../src/frontend/applicability-tab-groups.js";
 
 test("restoring tab groups migrates old tabs and discards invalid and empty group references", () => {
   const tabs = [{ id: "old" }, { id: "valid", groupId: "group" }, { id: "dangling", groupId: "missing" }];
@@ -84,4 +84,25 @@ test("dragging out an unknown or ungrouped tab leaves tabs and folders unchanged
   assert.equal(moveApplicabilityTabOutOfGroup(tabs, groups, "a"), false);
   assert.equal(moveApplicabilityTabOutOfGroup(tabs, groups, "missing"), false);
   assert.deepEqual({ tabs, groups }, snapshot);
+});
+
+test("moving tabs relative to each other reorders them and adopts the target group", () => {
+  const tabs = [{ id: "a", groupId: null }, { id: "b", groupId: "g1" }, { id: "c", groupId: "g1" }, { id: "d", groupId: null }];
+  const groups = [{ id: "g1", name: "Группа 1" }];
+  assert.equal(moveApplicabilityTabRelative(tabs, groups, "c", "b", "before"), true);
+  assert.deepEqual(tabs.map((tab) => tab.id), ["a", "c", "b", "d"]);
+  assert.equal(moveApplicabilityTabRelative(tabs, groups, "a", "d", "after"), true);
+  assert.deepEqual(tabs.map((tab) => tab.id), ["c", "b", "d", "a"]);
+  assert.equal(tabs.at(-1).groupId, null);
+  assert.deepEqual(groups, [{ id: "g1", name: "Группа 1" }]);
+});
+
+test("moving groups reorders their tab blocks and group persistence order", () => {
+  const tabs = [{ id: "a", groupId: "g1" }, { id: "b", groupId: "g2" }, { id: "c", groupId: "g1" }, { id: "d", groupId: "g2" }];
+  const groups = [{ id: "g1", name: "Группа 1" }, { id: "g2", name: "Группа 2" }];
+  assert.equal(moveApplicabilityGroupRelative(tabs, groups, "g2", "g1", "before"), true);
+  assert.deepEqual(tabs.map((tab) => tab.id), ["b", "d", "a", "c"]);
+  assert.deepEqual(groups.map((group) => group.id), ["g2", "g1"]);
+  assert.equal(moveApplicabilityGroupRelative(tabs, groups, "g1", "g2", "after"), true);
+  assert.deepEqual(tabs.map((tab) => tab.id), ["b", "d", "a", "c"]);
 });

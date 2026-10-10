@@ -52,3 +52,34 @@ export function moveApplicabilityTabOutOfGroup(tabs, groups, sourceId) {
   }
   return true;
 }
+
+export function moveApplicabilityTabRelative(tabs, groups, sourceId, targetId, position = "before") {
+  const source = tabs.find((tab) => tab.id === sourceId);
+  const target = tabs.find((tab) => tab.id === targetId);
+  if (!source || !target || source === target) return false;
+  source.groupId = target.groupId ?? null;
+  tabs.splice(tabs.indexOf(source), 1);
+  const targetIndex = tabs.indexOf(target);
+  tabs.splice(position === "after" ? targetIndex + 1 : targetIndex, 0, source);
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    if (!tabs.some((tab) => tab.groupId === groups[index].id)) groups.splice(index, 1);
+  }
+  return true;
+}
+
+export function moveApplicabilityGroupRelative(tabs, groups, sourceGroupId, targetGroupId, position = "before") {
+  const source = groups.find((group) => group.id === sourceGroupId);
+  const target = groups.find((group) => group.id === targetGroupId);
+  if (!source || !target || source === target) return false;
+  const members = tabs.filter((tab) => tab.groupId === source.id);
+  const remaining = tabs.filter((tab) => tab.groupId !== source.id);
+  const targetMembers = remaining.filter((tab) => tab.groupId === target.id);
+  if (!members.length || !targetMembers.length) return false;
+  const targetIndex = remaining.indexOf(position === "after" ? targetMembers.at(-1) : targetMembers[0]);
+  remaining.splice(position === "after" ? targetIndex + 1 : targetIndex, 0, ...members);
+  tabs.splice(0, tabs.length, ...remaining);
+  groups.splice(groups.indexOf(source), 1);
+  const adjustedTargetIndex = groups.indexOf(target);
+  groups.splice(position === "after" ? adjustedTargetIndex + 1 : adjustedTargetIndex, 0, source);
+  return true;
+}
