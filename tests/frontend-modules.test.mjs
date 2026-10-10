@@ -712,7 +712,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /activeFunctionStorageKey/);
   assert.match(applicability, /apiKeyInput\.addEventListener\("keydown"/);
   assert.match(applicability, /deleteApiKeyButton\.addEventListener\("click"/);
-  assert.match(applicability, /state\.configured \? "Ключ сохранён" : ""/);
+  assert.match(applicability, /state\.configured \? "Ключи сохранены" : ""/);
   assert.doesNotMatch(applicability, /"Ключ удалён"/);
   assert.doesNotMatch(applicability, /"Запасной ключ удалён"/);
   assert.match(applicability, /const createTab/);

@@ -454,6 +454,12 @@ input {
 .applicability-key-field { display: block; width: 100%; }
 .applicability-key-field input { width: 100%; padding: 9px 76px 9px 12px; border: 1px solid #dce3ea; border-radius: 8px; outline: 0; }
 .applicability-key-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 75, 19, .12); }
+.applicability-key-field[data-limited="true"] input { border-color: #d92d20; color: #b42318; background: #fff1f0; }
+.applicability-key-field[data-limited="true"] input:focus { border-color: #d92d20; box-shadow: 0 0 0 3px rgba(217, 45, 32, .12); }
+.applicability-key-field[data-limited="true"] input::placeholder { color: #b42318; opacity: 1; }
+.applicability-key-usage { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; color: var(--muted); font-size: 12px; }
+.applicability-key-usage[hidden] { display: none; }
+.applicability-key-activate { padding: 4px 8px; border: 1px solid var(--line); color: var(--accent-dark); font-size: 12px; }
 .applicability-key-field .password-toggle { right: 40px; }
 .applicability-key-delete { position: absolute; top: 50%; right: 8px; display: grid; width: 28px; height: 28px; place-items: center; transform: translateY(-50%); border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
 .applicability-key-delete:hover,

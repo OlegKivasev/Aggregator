@@ -20,6 +20,7 @@ import { PartsApiKeyError } from "../applicability/partsapi-key-error.ts";
 import {
   articleLengthLimit,
   parseApplicabilityApiKeyPayload,
+  parseApplicabilityActiveKeyPayload,
   parseApplicabilitySkuQuery,
   parseApplicabilitySavedArticlesQuery,
   parseApplicabilitySearchPayload,
@@ -67,6 +68,7 @@ export interface AggregatorApplication {
   deleteApplicabilityApiKey(): ApplicabilityApiKeyState;
   addApplicabilityFallbackApiKey(apiKey: string): ApplicabilityApiKeyState;
   deleteApplicabilityFallbackApiKey(index: number): ApplicabilityApiKeyState;
+  selectApplicabilityActiveApiKey(index: number): ApplicabilityApiKeyState;
 }
 
 interface CreateAggregatorServerOptions {
@@ -268,6 +270,16 @@ export function createAggregatorServer({
         const results = application.getApplicabilitySavedArticle(query);
         if (results === null) serveJson(response, 404, { message: "Сохранённый OEM-артикул не найден." });
         else serveJson(response, 200, { results });
+      } catch (error) {
+        serveApplicabilityError(response, error, reportError);
+      }
+      return;
+    }
+
+    if (request.method === "PUT" && url.pathname === "/api/applicability/api-key/active") {
+      try {
+        const { index } = parseApplicabilityActiveKeyPayload(await readJsonBody(request));
+        serveJson(response, 200, application.selectApplicabilityActiveApiKey(index));
       } catch (error) {
         serveApplicabilityError(response, error, reportError);
       }

@@ -78,18 +78,20 @@ test("PartsAPI applicability client rejects malformed data and rejected API keys
 test("PartsAPI limit errors identify only the key suffix and keep other access failures ambiguous", async () => {
   const apiKey = "private-test-key-ABCDE";
   const cases = [
-    { status: 429, body: "", message: "Закончились лимиты у ключа PartsAPI …ABCDE. Ошибка PartsAPI (HTTP 429): Пустой ответ." },
-    { status: 403, body: JSON.stringify({ message: "Request limit exceeded" }), message: "Закончились лимиты у ключа PartsAPI …ABCDE. Ошибка PartsAPI (HTTP 403): {\"message\":\"Request limit exceeded\"}" },
-    { status: 401, body: "Лимиты запросов исчерпаны", message: "Закончились лимиты у ключа PartsAPI …ABCDE. Ошибка PartsAPI (HTTP 401): Лимиты запросов исчерпаны" },
-    { status: 403, body: "Forbidden", message: "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт. Ошибка PartsAPI (HTTP 403): Forbidden" },
-    { status: 401, body: JSON.stringify({ message: `Invalid key ${apiKey}` }), message: "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт. Ошибка PartsAPI (HTTP 401): {\"message\":\"Invalid key [ключ скрыт]\"}" },
-    { status: 403, body: "x".repeat(16 * 1024 + 1), message: "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт. Ошибка PartsAPI (HTTP 403): Ответ превысил 16 КиБ." },
+    { status: 429, body: "", limited: true },
+    { status: 403, body: JSON.stringify({ message: "Request limit exceeded" }), limited: true },
+    { status: 401, body: "Лимиты запросов исчерпаны", limited: true },
+    { status: 401, body: JSON.stringify({ error_code: 5000, message: "Exceeded the number of requests from the current IP address.", status: 401 }), limited: true },
+    { status: 403, body: "Forbidden", limited: false },
+    { status: 401, body: JSON.stringify({ error_code: 5000, message: `Invalid key ${apiKey}` }), limited: false },
+    { status: 403, body: "x".repeat(16 * 1024 + 1), limited: false },
   ];
-  for (const { status, body, message } of cases) {
+  for (const { status, body, limited } of cases) {
     const client = new PartsApiApplicabilityClient(async () => new Response(body, { status }));
     await assert.rejects(client.search({ sku: "OEM1", brand: "FORD", apiKey }, new AbortController().signal), (error) => {
       assert.ok(error instanceof SupplierAuthError);
-      assert.equal(error.publicMessage, message);
+      assert.equal(error.publicMessage, limited ? "Закончились лимиты у ключа PartsAPI …ABCDE." : "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт.");
+      assert.equal(error.limitExceeded, limited);
       assert.doesNotMatch(JSON.stringify(error), /private-test-key/);
       assert.doesNotMatch(error.stack, /private-test-key/);
       return true;
@@ -174,7 +176,9 @@ test("applicability service returns cached results without repeating the PartsAP
   let calls = 0;
   const entries = new Map();
   const repository = {
-    get: () => savedKey,
+    getActiveKey: () => savedKey,
+    getState: () => ({ configured: Boolean(savedKey), fallbackKeyCount: fallbackKeys.length, persistent: true, primaryKey: null, fallbackKeys: [] }),
+    recordRequest: () => {},
     set: (apiKey) => { savedKey = apiKey; },
     delete: () => { savedKey = null; },
     getFallbackKeyCount: () => fallbackKeys.length,
@@ -196,9 +200,9 @@ test("applicability service returns cached results without repeating the PartsAP
     set: (query, results) => entries.set(`${query.sku}\u0000${query.brand}`, results),
   });
 
-  assert.deepEqual(service.getApiKeyState(), { configured: false, fallbackKeyCount: 0, persistent: true });
+  assert.deepEqual(service.getApiKeyState(), { configured: false, fallbackKeyCount: 0, persistent: true, primaryKey: null, fallbackKeys: [] });
   service.saveApiKey("test-key");
-  assert.deepEqual(service.addFallbackApiKey("fallback-key"), { configured: true, fallbackKeyCount: 1, persistent: true });
+  assert.equal(service.addFallbackApiKey("fallback-key").fallbackKeyCount, 1);
   assert.deepEqual(
     await service.search({ sku: "11182905003", brand: "LADA" }, new AbortController().signal),
     { results: [vehicle], cacheHit: false },
@@ -209,8 +213,8 @@ test("applicability service returns cached results without repeating the PartsAP
   );
   assert.deepEqual(receivedQuery, { sku: "11182905003", brand: "LADA", apiKey: "test-key" });
   assert.equal(calls, 1);
-  assert.deepEqual(service.deleteFallbackApiKey(0), { configured: true, fallbackKeyCount: 0, persistent: true });
-  assert.deepEqual(service.deleteApiKey(), { configured: false, fallbackKeyCount: 0, persistent: true });
+  assert.equal(service.deleteFallbackApiKey(0).fallbackKeyCount, 0);
+  assert.equal(service.deleteApiKey().configured, false);
 });
 
 test("applicability service refuses to save an API key without encrypted persistence", () => {
@@ -353,7 +357,7 @@ test("deletion prevents a late applicability search from restoring the deleted O
   let finish;
   let written = false;
   const service = new ApplicabilityApplicationService({ search: () => new Promise((resolve) => { finish = resolve; }) },
-    { get: () => "test-key" }, { get: () => null, set: () => { written = true; }, delete: () => false });
+    { getActiveKey: () => "test-key", getState: () => ({ fallbackKeyCount: 0 }), recordRequest: () => {} }, { get: () => null, set: () => { written = true; }, delete: () => false });
   const query = { sku: "SKU", brand: "VOLVO" };
   const pending = service.search(query, new AbortController().signal);
   assert.equal(service.deleteSavedArticle({ sku: "sku", brand: "volvo" }), false);
@@ -366,7 +370,7 @@ test("an aborted applicability lookup cannot write saved OEM results", async () 
   const controller = new AbortController();
   let written = false;
   const service = new ApplicabilityApplicationService({ search: async () => { controller.abort(); return [vehicle]; } },
-    { get: () => "test-key" }, { get: () => null, set: () => { written = true; } });
+    { getActiveKey: () => "test-key", getState: () => ({ fallbackKeyCount: 0 }), recordRequest: () => {} }, { get: () => null, set: () => { written = true; } });
   await assert.rejects(service.search({ sku: "SKU", brand: "VOLVO" }, controller.signal), { name: "AbortError" });
   assert.equal(written, false);
 });

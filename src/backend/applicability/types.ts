@@ -43,6 +43,16 @@ export interface ApplicabilityApiKeyState {
   configured: boolean;
   fallbackKeyCount: number;
   persistent: boolean;
+  primaryKey: ApplicabilityKeyStatus | null;
+  fallbackKeys: ApplicabilityKeyStatus[];
+}
+
+export interface ApplicabilityKeyStatus {
+  maskedKey: string;
+  active: boolean;
+  limited: boolean;
+  resetAt: number | null;
+  requestCount: number;
 }
 
 export interface ApplicabilityVehicle {

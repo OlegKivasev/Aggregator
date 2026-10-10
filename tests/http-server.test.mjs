@@ -6,6 +6,11 @@ import { afterEach, test } from "node:test";
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../src/backend/errors.ts";
 import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 import { PartsApiApplicabilityClient } from "../src/backend/applicability/partsapi-client.ts";
+import { ApplicabilityApplicationService } from "../src/backend/applicability/applicability-application-service.ts";
+import { EncryptedApplicabilityApiKeyStore } from "../src/backend/applicability/encrypted-api-key-store.ts";
+import { SqliteApplicabilityCacheRepository } from "../src/backend/applicability/sqlite-applicability-cache-repository.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const publicDir = join(process.cwd(), "src", "frontend");
 const openServers = new Set();
@@ -209,6 +214,57 @@ test("HTTP server returns cached applicability brands for an article", async () 
   assert.deepEqual(await response.json(), { brands: ["LADA"] });
 });
 
+test("HTTP applicability rotation and manual activation expose only key masks and local counters", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "partsapi-http-"));
+  const primary = "fictional-http-primary-AAAAA";
+  const fallback = "fictional-http-fallback-BBBBB";
+  const store = new EncryptedApplicabilityApiKeyStore(join(directory, "keys.enc.json"), Buffer.alloc(32, 9));
+  const cache = new SqliteApplicabilityCacheRepository(join(directory, "cache.sqlite"));
+  store.set(primary);
+  store.addFallbackKey(fallback);
+  const requests = [];
+  const client = new PartsApiApplicabilityClient(async (url) => {
+    const key = url.searchParams.get("key");
+    requests.push(key);
+    return key === primary ? Response.json({ error_code: 5000, message: "Exceeded the number of requests from the current IP address.", status: 401 }, { status: 401 }) : Response.json([]);
+  });
+  const service = new ApplicabilityApplicationService(client, store, cache);
+  const { server, baseUrl } = await listen(createApplication({
+    searchApplicability: (query, signal) => service.search(query, signal),
+    getApplicabilityApiKeyState: () => service.getApiKeyState(),
+    selectApplicabilityActiveApiKey: (index) => service.selectActiveApiKey(index),
+  }), () => {});
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    openServers.delete(server);
+    cache.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  const search = await fetch(`${baseUrl}/api/applicability/search`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku: "OEM1", brand: "FORD" }) });
+  assert.equal(search.status, 200);
+  assert.deepEqual(await search.json(), { results: [], cacheHit: false });
+  assert.deepEqual(requests, [primary, fallback]);
+  const state = await (await fetch(`${baseUrl}/api/applicability/api-key`)).json();
+  assert.equal(state.primaryKey.limited, true);
+  assert.equal(state.primaryKey.requestCount, 1);
+  assert.equal(state.fallbackKeys[0].active, true);
+  assert.equal(state.fallbackKeys[0].requestCount, 1);
+  assert.ok(!JSON.stringify(state).includes(primary));
+  assert.ok(!JSON.stringify(state).includes(fallback));
+  for (const payload of [null, [], {}, { index: -1 }, { index: 1.5 }, { index: "1" }]) {
+    const response = await fetch(`${baseUrl}/api/applicability/api-key/active`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    assert.equal(response.status, 400);
+  }
+  const activate = (index) => fetch(`${baseUrl}/api/applicability/api-key/active`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index }) });
+  const rejected = await activate(0);
+  assert.equal(rejected.status, 401);
+  assert.deepEqual(await rejected.json(), { message: "Закончились лимиты у ключа PartsAPI …AAAAA." });
+  const selected = await activate(1);
+  assert.equal(selected.status, 200);
+  assert.equal((await selected.json()).fallbackKeys[0].requestCount, 1);
+});
+
 test("HTTP applicability failures expose a safe masked-key notice without raw rejection details", async () => {
   const events = [];
   const apiKey = "private-test-key-ABCDE";
@@ -231,8 +287,8 @@ test("HTTP applicability failures expose a safe masked-key notice without raw re
     });
     assert.equal(response.status, 401);
     assert.deepEqual(await response.json(), { message: limitExceeded
-      ? `Закончились лимиты у ключа PartsAPI …ABCDE. Ошибка PartsAPI (HTTP ${status}): Request limit exceeded for [ключ скрыт]; internal diagnostic`
-      : "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт. Ошибка PartsAPI (HTTP 401): Invalid key [ключ скрыт]; internal diagnostic" });
+      ? "Закончились лимиты у ключа PartsAPI …ABCDE."
+      : "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт." });
   }
   assert.deepEqual(events, [
     { operation: "search-applicability", category: "authorization" },

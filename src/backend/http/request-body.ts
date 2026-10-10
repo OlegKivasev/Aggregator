@@ -147,6 +147,13 @@ export function parseApplicabilityApiKeyPayload(payload: unknown): { apiKey: str
   return { apiKey: normalizedApiKey };
 }
 
+export function parseApplicabilityActiveKeyPayload(payload: unknown): { index: number } {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new RequestBodyError(400, "API key index is required");
+  const { index } = payload as { index?: unknown };
+  if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0) throw new RequestBodyError(400, "API key index is invalid");
+  return { index };
+}
+
 export async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Uint8Array[] = [];
   let bodySize = 0;
