@@ -34,7 +34,7 @@ test("applicability key failures use a red toast and retain successful batch res
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     let mode = "limit";
-    const notice = "Закончились лимиты у ключа PartsAPI …ABCDE.";
+    const notice = "Закончились лимиты у ключа PartsAPI …ABCDE. Ошибка PartsAPI (HTTP 401): Лимит исчерпан";
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
       if (path === "/api/applicability/search") {

@@ -73,6 +73,9 @@ The frontend uses native browser modules without a bundler. `src/frontend/app.js
 полностью. Отказы 401/403 и лимит 429 PartsAPI возвращаются клиенту как ошибка
 доступа HTTP 401 с прежним форматом `{ message }`.
 
+Временно в уведомление также выводятся HTTP-код PartsAPI и первые 512 символов
+текста его ответа. Сам API-ключ заменяется на `[ключ скрыт]`.
+
 Отдельная браузерная regression-проверка уведомления:
 `node --test tests/browser/applicability-limit-notification.test.mjs`.
 Нужен Chromium Playwright либо путь к Chromium-совместимому браузеру в

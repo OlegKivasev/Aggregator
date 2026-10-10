@@ -78,12 +78,12 @@ test("PartsAPI applicability client rejects malformed data and rejected API keys
 test("PartsAPI limit errors identify only the key suffix and keep other access failures ambiguous", async () => {
   const apiKey = "private-test-key-ABCDE";
   const cases = [
-    { status: 429, body: "", message: "Закончились лимиты у ключа PartsAPI …ABCDE." },
-    { status: 403, body: JSON.stringify({ message: "Request limit exceeded" }), message: "Закончились лимиты у ключа PartsAPI …ABCDE." },
-    { status: 401, body: "Лимиты запросов исчерпаны", message: "Закончились лимиты у ключа PartsAPI …ABCDE." },
-    { status: 403, body: "Forbidden", message: "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт." },
-    { status: 401, body: JSON.stringify({ message: `Invalid key ${apiKey}` }), message: "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт." },
-    { status: 403, body: "x".repeat(16 * 1024 + 1), message: "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт." },
+    { status: 429, body: "", message: "Закончились лимиты у ключа PartsAPI …ABCDE. Ошибка PartsAPI (HTTP 429): Пустой ответ." },
+    { status: 403, body: JSON.stringify({ message: "Request limit exceeded" }), message: "Закончились лимиты у ключа PartsAPI …ABCDE. Ошибка PartsAPI (HTTP 403): {\"message\":\"Request limit exceeded\"}" },
+    { status: 401, body: "Лимиты запросов исчерпаны", message: "Закончились лимиты у ключа PartsAPI …ABCDE. Ошибка PartsAPI (HTTP 401): Лимиты запросов исчерпаны" },
+    { status: 403, body: "Forbidden", message: "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт. Ошибка PartsAPI (HTTP 403): Forbidden" },
+    { status: 401, body: JSON.stringify({ message: `Invalid key ${apiKey}` }), message: "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт. Ошибка PartsAPI (HTTP 401): {\"message\":\"Invalid key [ключ скрыт]\"}" },
+    { status: 403, body: "x".repeat(16 * 1024 + 1), message: "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт. Ошибка PartsAPI (HTTP 403): Ответ превысил 16 КиБ." },
   ];
   for (const { status, body, message } of cases) {
     const client = new PartsApiApplicabilityClient(async () => new Response(body, { status }));

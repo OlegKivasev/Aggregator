@@ -10,9 +10,15 @@ const timeoutMs = 8_000;
 const maximumResponseBytes = 2 * 1024 * 1024;
 const maximumErrorResponseBytes = 16 * 1024;
 
-async function hasLimitError(response: Response, apiKey: string, signal: AbortSignal): Promise<boolean> {
+function formatPartsApiErrorDetail(text: string, apiKey: string): string {
+  let detail = text.replaceAll(apiKey, "[ключ скрыт]");
+  detail = detail.replace(/[\u0000-\u001f\u007f]/gu, " ").replace(/\s+/gu, " ").trim();
+  return detail ? `${detail.slice(0, 512)}${detail.length > 512 ? "…" : ""}` : "Пустой ответ.";
+}
+
+async function readPartsApiError(response: Response, apiKey: string, signal: AbortSignal): Promise<{ limitExceeded: boolean; detail: string }> {
   const reader = response.body?.getReader();
-  if (!reader) return false;
+  if (!reader) return { limitExceeded: false, detail: "Пустой ответ." };
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
   try {
@@ -22,16 +28,20 @@ async function hasLimitError(response: Response, apiKey: string, signal: AbortSi
       totalBytes += value.byteLength;
       if (totalBytes > maximumErrorResponseBytes) {
         await reader.cancel();
-        return false;
+        return { limitExceeded: false, detail: "Ответ превысил 16 КиБ." };
       }
       chunks.push(value);
     }
-    const text = Buffer.concat(chunks).toString("utf8").replaceAll(apiKey, "[redacted]");
-    return /(?:лимит.{0,48}(?:исчерпан|законч|превыш)|(?:исчерпан|законч|превыш).{0,48}лимит|(?:quota|limit)[\s_-]*(?:exceeded|exhausted|reached)|(?:exceeded|exhausted)[\s_-]*(?:quota|limit)|too many requests)/iu.test(text);
+    const text = Buffer.concat(chunks).toString("utf8");
+    const classificationText = text.replaceAll(apiKey, "[ключ скрыт]");
+    return {
+      limitExceeded: /(?:лимит.{0,48}(?:исчерпан|законч|превыш)|(?:исчерпан|законч|превыш).{0,48}лимит|(?:quota|limit)[\s_-]*(?:exceeded|exhausted|reached)|(?:exceeded|exhausted)[\s_-]*(?:quota|limit)|too many requests)/iu.test(classificationText),
+      detail: formatPartsApiErrorDetail(text, apiKey),
+    };
   } catch {
     if (signal.aborted) throw signal.reason;
     // HTTP rejection remains authoritative when optional error details cannot be read.
-    return false;
+    return { limitExceeded: false, detail: "Не удалось прочитать тело ответа." };
   } finally {
     reader.releaseLock();
   }
@@ -66,9 +76,9 @@ export class PartsApiApplicabilityClient {
       }
 
       if (response.status === 401 || response.status === 403 || response.status === 429) {
-        const limitExceeded = await hasLimitError(response, query.apiKey, boundedSignal.signal);
+        const { limitExceeded, detail } = await readPartsApiError(response, query.apiKey, boundedSignal.signal);
         boundedSignal.signal.throwIfAborted();
-        throw new PartsApiKeyError(query.apiKey, response.status === 429 || limitExceeded);
+        throw new PartsApiKeyError(query.apiKey, response.status === 429 || limitExceeded, response.status, detail);
       }
       if (!response.ok) {
         await response.body?.cancel();

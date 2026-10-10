@@ -231,8 +231,8 @@ test("HTTP applicability failures expose a safe masked-key notice without raw re
     });
     assert.equal(response.status, 401);
     assert.deepEqual(await response.json(), { message: limitExceeded
-      ? "Закончились лимиты у ключа PartsAPI …ABCDE."
-      : "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт." });
+      ? `Закончились лимиты у ключа PartsAPI …ABCDE. Ошибка PartsAPI (HTTP ${status}): Request limit exceeded for [ключ скрыт]; internal diagnostic`
+      : "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт. Ошибка PartsAPI (HTTP 401): Invalid key [ключ скрыт]; internal diagnostic" });
   }
   assert.deepEqual(events, [
     { operation: "search-applicability", category: "authorization" },
