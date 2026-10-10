@@ -372,7 +372,7 @@ const appendCell = (row, text) => {
   row.append(cell);
 };
 
-const successfulSearches = (tab) => tab.searches.filter((entry) => entry.hasSearched && entry.results.length);
+const completedSearches = (tab) => tab.searches.filter((entry) => entry.hasSearched);
 
 const visibleDocumentColumns = () => new Set(
   documentColumnInputs
@@ -518,8 +518,13 @@ const buildApplicabilityDocument = (sections, format = documentFormat) => {
         const brands = normalizeMakeNames(entriesForSku.map((entry) => entry.makeName));
         const vehiclesText = vehiclesTexts[index];
         vehicleRowCount += vehiclesText.split("\n").filter((line) => line.trim()).length;
-        return `OEM-артикул: ${sku}${brands.length ? ` | ${brands.join(", ")}` : ""}\n${vehiclesText}`;
+        return {
+          text: `OEM-артикул: ${sku}${brands.length ? ` | ${brands.join(", ")}` : ""}\n${vehiclesText}`,
+          hasVehicles: Boolean(vehiclesText.trim()),
+        };
       })
+      .sort((first, second) => Number(second.hasVehicles) - Number(first.hasVehicles))
+      .map(({ text }) => text)
       .join("\n\n");
     return `Артикул: ${articleName}\n\n${oemSections}`;
   }).join("\n\n");
@@ -597,12 +602,12 @@ const saveApplicabilityDocument = async () => {
 };
 
 const updateListButton = (tab) => {
-  const hasResults = successfulSearches(tab).length > 0;
+  const hasResults = completedSearches(tab).length > 0;
   listButton.disabled = !hasResults;
-  listButton.title = hasResults ? "Сформировать список найденной применимости" : "Нет найденной применимости для списка";
-  const hasResultsInAnyTab = tabs.some((item) => successfulSearches(item).length > 0);
+  listButton.title = hasResults ? "Сформировать список применимости" : "Нет результатов поиска для списка";
+  const hasResultsInAnyTab = tabs.some((item) => completedSearches(item).length > 0);
   multiListButton.disabled = !hasResultsInAnyTab;
-  multiListButton.title = hasResultsInAnyTab ? "Выбрать вкладки для мультисписка" : "Нет найденной применимости для мультисписка";
+  multiListButton.title = hasResultsInAnyTab ? "Выбрать вкладки для мультисписка" : "Нет результатов поиска для мультисписка";
 };
 
 const clearSelectedEntries = () => {
@@ -749,7 +754,7 @@ const openArticleNameModal = (tabId, { openDocument = false, showTabContext = fa
 
 const openDocumentModalForTabs = (selectedTabs, returnFocus = document.activeElement) => {
   const sections = selectedTabs
-    .map((tab) => ({ articleName: tab.name, entries: successfulSearches(tab) }))
+    .map((tab) => ({ articleName: tab.name, entries: completedSearches(tab) }))
     .filter((section) => section.entries.length);
   if (!sections.length) return;
   documentSections = sections;
@@ -824,7 +829,7 @@ const showMultiListOemPopover = (anchor, oemEntries) => {
 
 const selectedMultiListTabs = () => [...multiListTabs.querySelectorAll("input:checked")]
   .map((input) => tabs.find((tab) => tab.id === input.value))
-  .filter((tab) => tab && successfulSearches(tab).length);
+  .filter((tab) => tab && completedSearches(tab).length);
 
 const updateMultiListSubmit = () => {
   multiListSubmit.disabled = selectedMultiListTabs().length === 0;
@@ -832,9 +837,9 @@ const updateMultiListSubmit = () => {
 
 const renderMultiListTabs = () => {
   multiListTabs.replaceChildren();
-  const tabsWithResults = tabs.filter((tab) => successfulSearches(tab).length);
+  const tabsWithResults = tabs.filter((tab) => completedSearches(tab).length);
   tabsWithResults.forEach((tab) => {
-    const entries = successfulSearches(tab);
+    const entries = completedSearches(tab);
     const index = tabs.indexOf(tab);
     const oemEntries = groupSearchesBySku(entries).map(([sku, entriesForSku]) => ({
       sku,

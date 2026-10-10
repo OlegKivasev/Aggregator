@@ -655,7 +655,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(applicability, /const buildApplicabilityDocument/);
   assert.match(applicability, /const openMultiListModal/);
   assert.match(applicability, /const openMultiDocument/);
-  assert.match(applicability, /const tabsWithResults = tabs\.filter\(\(tab\) => successfulSearches\(tab\)\.length\);/);
+  assert.match(applicability, /const tabsWithResults = tabs\.filter\(\(tab\) => completedSearches\(tab\)\.length\);/);
   assert.match(html, /id="applicability-multi-list-oem-popover"/);
   assert.match(applicability, /const showMultiListOemPopover/);
   assert.match(applicability, /multiListTabs\.addEventListener\("scroll", hideMultiListOemPopover\);/);
