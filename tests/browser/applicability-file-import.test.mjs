@@ -108,6 +108,7 @@ test("file import previews safe pairs, searches sequentially and appends increme
     assert.equal(calls.length, 1);
     assert.equal(await rows.locator('[data-state="searching"]').count(), 1);
     assert.equal(await page.locator("#applicability-results-body tr").count(), 2);
+    assert.deepEqual(await page.locator("#applicability-results-summary dd").allTextContents(), ["2", "1", "0"]);
     assert.equal(await page.locator("#applicability-submit").isDisabled(), true);
     assert.equal(await page.locator("#applicability-file-input").isDisabled(), true);
     releaseFirst();
@@ -134,6 +135,7 @@ test("file import previews safe pairs, searches sequentially and appends increme
     const state = await page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.applicabilityState")));
     assert.equal(state.tabs[0].searches.length, 6);
     assert.equal(state.tabs[1].searches.length, 0);
+    assert.deepEqual(await page.locator("#applicability-results-summary dd").allTextContents(), ["6", "5", "1"]);
     if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-file-results.png") });
   });
 });

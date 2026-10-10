@@ -374,11 +374,15 @@ input {
 .applicability-feedback[hidden] { display: none; }
 .applicability-results-panel { display: flex; min-height: 420px; flex: 1 1 auto; flex-direction: column; }
 .applicability-results-table { min-height: 0; flex: 1 1 auto; overflow: auto; }
-.applicability-results-table table { min-width: 560px; }
+.applicability-results-table table { width: 100%; min-width: 560px; }
 .applicability-results-table th,
-.applicability-results-table td { padding: 10px 12px; }
-.applicability-results-footer { display: flex; min-height: 58px; flex: 0 0 auto; align-items: center; justify-content: flex-end; padding: 9px 12px; border-top: 1px solid var(--line); background: #fff; }
-.applicability-results-actions { display: grid; justify-items: end; gap: 8px; }
+.applicability-results-table td { padding: 10px 12px; overflow-wrap: anywhere; }
+.applicability-results-footer { display: flex; min-height: 58px; flex: 0 0 auto; align-items: center; flex-wrap: wrap; gap: 12px 24px; padding: 9px 12px; border-top: 1px solid var(--line); background: #fff; }
+.applicability-results-summary { display: flex; min-width: 0; flex-wrap: wrap; gap: 6px 20px; margin: 0; font-size: 12px; }
+.applicability-results-summary > div { display: flex; gap: 5px; }
+.applicability-results-summary dt { color: var(--muted); font-weight: 500; }
+.applicability-results-summary dd { margin: 0; color: var(--ink); font-weight: 800; }
+.applicability-results-actions { display: grid; margin-left: auto; justify-items: end; gap: 8px; }
 .applicability-list-button { --bs-btn-active-bg: var(--accent-dark); --bs-btn-active-border-color: var(--accent-dark); --bs-btn-focus-shadow-rgb: 255, 75, 19; display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 14px; border-color: var(--accent); color: #fff; background: var(--accent); font-weight: 800; }
 .applicability-list-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .applicability-list-button:hover, .applicability-list-button:focus-visible, .applicability-list-button:active, .applicability-list-button:active:focus { border-color: var(--accent-dark); background: var(--accent-dark); box-shadow: 0 0 0 .25rem rgb(255 75 19 / 24%); }

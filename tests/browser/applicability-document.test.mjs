@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { resolve, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { test } from "node:test";
 import { chromium } from "playwright";
 
@@ -54,6 +54,7 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
           entry("MISS-C"), entry("FULL-C", [vehicle]),
         ] },
         { id: "failed", name: "Ошибка", searches: [entry("FAILED", [], "FORD", false)] },
+        { id: "many", name: "Много строк", searches: Array.from({ length: 36 }, (_, index) => entry(`LONG-${index}-${"A".repeat(100)}`, [vehicle], "B".repeat(100))) },
       ],
     };
     await page.addInitScript((storedState) => {
@@ -88,6 +89,15 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
     const documentCount = page.locator("#applicability-document-count");
     const oemSkus = (text) => [...text.matchAll(/^OEM-артикул: ([^ |\n]+)/gm)].map((match) => match[1]);
     const closeDocument = () => page.locator("#applicability-document-modal button[data-close-applicability-document]").click();
+    const summary = () => page.locator("#applicability-results-summary dd").allTextContents();
+    const assertTableFits = async () => {
+      const sizes = await page.locator(".applicability-results-table").evaluate((element) => ({ width: element.clientWidth, content: element.scrollWidth }));
+      assert.ok(sizes.content <= sizes.width, `Unnecessary horizontal overflow: ${sizes.content} > ${sizes.width}`);
+    };
+
+    // Three-column applicability results must not inherit the supplier table's minimum width.
+    await assertTableFits();
+    assert.deepEqual(await summary(), ["2", "0", "2"]);
 
     // A list containing only successful empty searches remains available.
     assert.equal(await listButton.isEnabled(), true);
@@ -102,6 +112,12 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
 
     // Deduplication, brand grouping and stable ordering of nonempty blocks are preserved.
     await page.locator('[data-tab-id="mixed"]').click();
+    assert.deepEqual(await summary(), ["6", "2", "3"]);
+    await assertTableFits();
+    await page.locator('[data-expand-entry-id="FULL-A1-FORD"]').click();
+    if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-results-summary.png") });
+    await assertTableFits();
+    await page.locator('[data-expand-entry-id="FULL-A1-FORD"]').click();
     await listButton.click();
     const mixedText = await documentText.inputValue();
     assert.deepEqual(oemSkus(mixedText), ["FULL-A1", "FULL-A2", "MISS-A1", "MISS-A2"]);
@@ -138,6 +154,7 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
 
     // Failed searches do not enable a list; a real successful empty response does.
     await page.locator('[data-tab-id="failed"]').click();
+    assert.deepEqual(await summary(), ["1", "0", "0"]);
     assert.equal(await listButton.isDisabled(), true);
     await page.locator("#applicability-make").fill("FORD");
     await page.getByRole("option", { name: "FORD", exact: true }).click();
@@ -146,13 +163,29 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
     await page.waitForFunction(() => !document.querySelector("#applicability-submit").disabled);
     assert.equal(await listButton.isDisabled(), true);
     assert.equal(await page.locator("#applicability-feedback").textContent(), "Applicability search failed");
+    assert.deepEqual(await summary(), ["1", "0", "0"]);
     await page.locator("#applicability-sku").fill("NOTFOUND1");
     await page.locator("#applicability-submit").click();
     await page.waitForFunction(() => !document.querySelector("#applicability-submit").disabled);
     assert.equal(await listButton.isEnabled(), true);
+    assert.deepEqual(await summary(), ["2", "0", "1"]);
     await listButton.click();
     assert.deepEqual(oemSkus(await documentText.inputValue()), ["NOTFOUND1"]);
     assert.equal(await documentCount.textContent(), "Строк с автомобилями: 0");
+    await closeDocument();
+    await page.locator('[data-tab-id="many"]').click();
+    assert.deepEqual(await summary(), ["36", "36", "0"]);
+    for (const width of [980, 1366, 1800]) {
+      await page.setViewportSize({ width, height: 768 });
+      await assertTableFits();
+      assert.ok(await page.locator(".applicability-results-table").evaluate((element) => element.scrollHeight > element.clientHeight), "Vertical scrolling remains available for many rows");
+      const summaryBounds = await page.locator("#applicability-results-summary").boundingBox();
+      const actionsBounds = await page.locator(".applicability-results-actions").boundingBox();
+      assert.ok(summaryBounds.x + summaryBounds.width <= actionsBounds.x, "Counts stay to the left of list actions");
+    }
+    await page.setViewportSize({ width: 320, height: 760 });
+    assert.ok(await page.locator(".applicability-results-table").evaluate((element) => element.scrollWidth > element.clientWidth), "Narrow screens retain necessary table scrolling");
+    assert.ok(await page.locator("#applicability-results-summary").evaluate((element) => element.getBoundingClientRect().right <= window.innerWidth), "Counts remain inside the viewport");
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

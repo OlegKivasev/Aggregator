@@ -32,6 +32,9 @@ const deleteResultButton = document.querySelector("#applicability-result-delete-
 const submitButton = document.querySelector("#applicability-submit");
 const feedback = document.querySelector("#applicability-feedback");
 const resultsBody = document.querySelector("#applicability-results-body");
+const resultsTotal = document.querySelector("#applicability-results-total");
+const resultsFound = document.querySelector("#applicability-results-found");
+const resultsNotFound = document.querySelector("#applicability-results-not-found");
 const listButton = document.querySelector("#applicability-list-button");
 const multiListButton = document.querySelector("#applicability-multi-list-button");
 const applicabilityToast = document.querySelector("#applicability-toast");
@@ -876,6 +879,11 @@ const renderResults = (tab) => {
   pruneSelectedEntries(tab);
   resultsBody.replaceChildren();
   updateListButton(tab);
+  const searches = completedSearches(tab);
+  const found = searches.filter((entry) => entry.results.length > 0).length;
+  resultsTotal.textContent = String(tab.searches.length);
+  resultsFound.textContent = String(found);
+  resultsNotFound.textContent = String(searches.length - found);
   if (!tab.searches.length) return;
   tab.searches.forEach((entry) => {
     const row = document.createElement("tr");
