@@ -1,6 +1,7 @@
 import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicleGroups } from "./applicability-formatting.js";
 import { normalizeApplicabilitySku, parseApplicabilitySkus, runApplicabilityBatch } from "./applicability-search-input.js";
 import { bootstrapApplicabilityOemSidebar } from "./applicability-oem-sidebar.js";
+import { applicabilityFileMaxBytes, decodeApplicabilityFile, parseApplicabilityFile } from "./applicability-file-import.js";
 
 const markupFunction = document.querySelector("#markup-function");
 const applicabilityFunction = document.querySelector("#applicability-function");
@@ -51,6 +52,19 @@ const documentFormatValue = document.querySelector("#applicability-document-form
 const documentFormatButtons = [...document.querySelectorAll("[data-applicability-document-format]")];
 const documentColumnsControl = document.querySelector("#applicability-document-columns");
 const documentColumnInputs = [...document.querySelectorAll("[data-applicability-document-column]")];
+const fileImportButton = document.querySelector("#applicability-file-toggle");
+const fileImportModal = document.querySelector("#applicability-file-modal");
+const fileImportForm = document.querySelector("#applicability-file-form");
+const fileImportInput = document.querySelector("#applicability-file-input");
+const fileImportTarget = document.querySelector("#applicability-file-target");
+const fileImportFeedback = document.querySelector("#applicability-file-feedback");
+const fileImportPreview = document.querySelector("#applicability-file-preview");
+const fileImportRowsBody = document.querySelector("#applicability-file-rows");
+const fileImportProgress = document.querySelector("#applicability-file-progress");
+const fileImportSummary = document.querySelector("#applicability-file-summary");
+const fileImportStart = document.querySelector("#applicability-file-start");
+const fileImportStop = document.querySelector("#applicability-file-stop");
+const closeFileImportButtons = [...document.querySelectorAll("[data-close-applicability-file]")];
 
 let makesByName = new Map();
 let tabs = [];
@@ -75,6 +89,12 @@ let cachedBrandLookupController = null;
 let selectedEntryIds = new Set();
 let selectionAnchorEntryId = null;
 let oemSidebar = null;
+let fileImportRows = [];
+let fileImportRequest = null;
+let fileImportTabId = null;
+let fileImportReturnFocus = null;
+let fileReadSequence = 0;
+let fileReading = false;
 
 const applicabilityStateStorageKey = "autoservice.applicabilityState";
 const activeFunctionStorageKey = "autoservice.activeFunction";
@@ -233,7 +253,7 @@ const applyApiKeyState = (state) => {
   apiKeyInput.placeholder = state.maskedKey ?? "Введите API-ключ PartsAPI";
 };
 
-const saveApiKey = async () => {
+const saveApiKey = async (signal) => {
   const apiKey = apiKeyInput.value.trim();
   if (!apiKey) {
     throw new Error("Укажите API-ключ PartsAPI.");
@@ -242,6 +262,7 @@ const saveApiKey = async () => {
     method: "PUT",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ apiKey }),
+    signal,
   }));
   apiKeyInput.value = "";
   applyApiKeyState(state);
@@ -458,6 +479,193 @@ const executeApplicabilitySearch = async (sku, brand, signal) => {
 };
 
 const duplicateSearch = (tab, sku, brand) => tab.searches.find((entry) => searchIdentity(entry.sku, entry.makeName) === searchIdentity(sku, brand));
+
+const applySearchResult = (entry, result) => {
+  if (result.usedNormalizedSku) entry.sku = result.normalizedSku;
+  entry.results = result.results;
+  entry.hasSearched = true;
+  entry.status = result.results.length ? `Найдено автомобилей: ${result.results.length}` : "Не найдено";
+};
+
+const setFileImportFeedback = (message) => {
+  fileImportFeedback.textContent = message;
+  fileImportFeedback.hidden = !message;
+};
+
+const updateFileImportControls = () => {
+  fileImportInput.disabled = Boolean(fileImportRequest);
+  fileImportStart.disabled = Boolean(activeRequest) || fileReading || !fileImportRows.some((row) => row.state === "pending" || row.state === "error");
+  fileImportStop.hidden = !fileImportRequest;
+  fileImportStop.disabled = Boolean(fileImportRequest?.signal.aborted);
+};
+
+const setFileImportRowStatus = (row, state, message) => {
+  row.state = state;
+  row.statusCell.textContent = message;
+  row.element.dataset.state = state;
+};
+
+const renderFileImportRows = () => {
+  fileImportRowsBody.replaceChildren();
+  fileImportRows.forEach((row) => {
+    row.element = document.createElement("tr");
+    appendCell(row.element, String(row.lineNumber));
+    appendCell(row.element, row.sku);
+    appendCell(row.element, row.brand);
+    row.statusCell = document.createElement("td");
+    row.element.append(row.statusCell);
+    setFileImportRowStatus(row, row.error ? "skipped" : "pending", row.error || "Ожидает поиска");
+    fileImportRowsBody.append(row.element);
+  });
+  fileImportPreview.hidden = !fileImportRows.length;
+  const ready = fileImportRows.filter((row) => row.state === "pending").length;
+  fileImportSummary.textContent = `Готово к поиску: ${ready}. Пропущено: ${fileImportRows.length - ready}.`;
+  updateFileImportControls();
+};
+
+const closeFileImportModal = () => {
+  fileImportModal.hidden = true;
+  if (fileImportReturnFocus?.isConnected) fileImportReturnFocus.focus();
+  fileImportReturnFocus = null;
+};
+
+fileImportButton.addEventListener("click", () => {
+  closeMakeMenu();
+  fileImportReturnFocus = document.activeElement;
+  const tab = fileImportRequest ? tabs.find((item) => item.id === fileImportTabId) : getActiveTab();
+  fileImportTarget.textContent = `Результаты добавляются во вкладку «${tab?.name || `Новая применимость ${tabs.indexOf(tab) + 1}`}».`;
+  fileImportModal.hidden = false;
+  updateFileImportControls();
+  (fileImportRequest ? fileImportStop : fileImportInput).focus();
+});
+closeFileImportButtons.forEach((button) => button.addEventListener("click", closeFileImportModal));
+fileImportStop.addEventListener("click", () => {
+  fileImportRequest?.abort();
+  updateFileImportControls();
+});
+
+fileImportInput.addEventListener("change", async () => {
+  const sequence = ++fileReadSequence;
+  const file = fileImportInput.files[0];
+  fileImportRows = [];
+  fileImportRowsBody.replaceChildren();
+  fileImportPreview.hidden = true;
+  fileImportProgress.hidden = true;
+  fileImportSummary.textContent = "";
+  setFileImportFeedback("");
+  fileReading = Boolean(file);
+  updateFileImportControls();
+  if (!file) return;
+  try {
+    if (!/\.txt$/iu.test(file.name)) throw new Error("Выберите текстовый файл с расширением .txt.");
+    if (file.size > applicabilityFileMaxBytes) throw new Error("Размер файла не должен превышать 1 МБ.");
+    const text = decodeApplicabilityFile(await file.arrayBuffer());
+    await makesReady;
+    if (sequence !== fileReadSequence) return;
+    if (!makesByName.size) throw new Error("Не удалось загрузить список брендов. Обновите страницу.");
+    fileImportRows = parseApplicabilityFile(text, [...makesByName.values()].map((make) => make.name));
+    renderFileImportRows();
+  } catch (error) {
+    if (sequence === fileReadSequence) setFileImportFeedback(error instanceof Error ? error.message : "Не удалось прочитать файл.");
+  } finally {
+    if (sequence === fileReadSequence) {
+      fileReading = false;
+      updateFileImportControls();
+    }
+  }
+});
+
+fileImportForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (activeRequest || fileReading) return;
+  const tab = getActiveTab();
+  const queue = fileImportRows.filter((row) => row.state === "pending" || row.state === "error");
+  if (!tab || !queue.length) return;
+  cancelCachedLookup();
+  syncActiveTab();
+  const controller = new AbortController();
+  activeRequest = controller;
+  fileImportRequest = controller;
+  fileImportTabId = tab.id;
+  submitButton.disabled = true;
+  setFeedback("");
+  setFileImportFeedback("");
+  updateFileImportControls();
+  fileImportStop.focus();
+  let completed = 0;
+  let added = fileImportRows.filter((row) => row.state === "done").length;
+  let failed = 0;
+  let skipped = fileImportRows.filter((row) => row.state === "skipped").length;
+  const updateProgress = () => {
+    fileImportProgress.value = completed;
+    fileImportSummary.textContent = `Обработано: ${completed} из ${queue.length}. Добавлено: ${added}. Ошибок: ${failed}. Пропущено: ${skipped}.`;
+  };
+  try {
+    await apiKeyReady;
+    controller.signal.throwIfAborted();
+    if (apiKeyInput.value.trim()) await saveApiKey(AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]));
+    if (!hasStoredApiKey) throw new Error("Укажите API-ключ PartsAPI в настройках рядом с кнопкой импорта.");
+    fileImportProgress.max = queue.length;
+    fileImportProgress.hidden = false;
+    updateProgress();
+    for (const row of queue) {
+      if (controller.signal.aborted || !tabs.includes(tab)) break;
+      if (duplicateSearch(tab, row.sku, row.brand)) {
+        setFileImportRowStatus(row, "skipped", "Уже есть во вкладке");
+        skipped += 1;
+        completed += 1;
+        updateProgress();
+        continue;
+      }
+      const entry = createSearchEntry({ sku: row.sku, makeName: row.brand, status: "Ищем применимость…" });
+      tab.searches.push(entry);
+      setFileImportRowStatus(row, "searching", "Ищем применимость…");
+      if (getActiveTab() === tab) renderResults(tab);
+      try {
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(35_000)]);
+        const result = await executeApplicabilitySearch(entry.sku, entry.makeName, signal);
+        signal.throwIfAborted();
+        if (!tabs.includes(tab)) break;
+        applySearchResult(entry, result);
+        setFileImportRowStatus(row, "done", `${entry.status}${result.cacheHit ? " · Из базы" : ""}`);
+        added += 1;
+      } catch (error) {
+        tab.searches = tab.searches.filter((item) => item !== entry);
+        if (controller.signal.aborted) {
+          setFileImportRowStatus(row, "pending", "Остановлено");
+          break;
+        }
+        const message = error?.name === "TimeoutError" ? "Время ожидания поиска истекло." : error instanceof Error ? error.message : "Не удалось выполнить поиск применимости.";
+        setFileImportRowStatus(row, "error", message);
+        failed += 1;
+        if (error?.status === 401) {
+          setFileImportFeedback(message);
+          showApplicabilityToast(message, "error");
+          controller.abort();
+        }
+      } finally {
+        if (getActiveTab() === tab) renderResults(tab);
+        renderTabs();
+        saveApplicabilityState();
+      }
+      completed += 1;
+      updateProgress();
+    }
+    if (controller.signal.aborted) fileImportSummary.textContent += " Очередь остановлена; готовые результаты сохранены.";
+  } catch (error) {
+    if (!controller.signal.aborted) setFileImportFeedback(error instanceof Error ? error.message : "Не удалось начать поиск из файла.");
+  } finally {
+    fileImportRequest = null;
+    fileImportTabId = null;
+    if (activeRequest === controller) {
+      activeRequest = null;
+      submitButton.disabled = false;
+      oemSidebar?.refresh();
+    }
+    updateFileImportControls();
+    if (!fileImportModal.hidden) (fileImportStart.disabled ? fileImportInput : fileImportStart).focus();
+  }
+});
 
 const addSavedOemArticle = async (article, signal) => {
   const tab = getActiveTab();
@@ -963,7 +1171,7 @@ const addTab = () => {
 const closeTab = (tabId) => {
   const index = tabs.findIndex((tab) => tab.id === tabId);
   if (index < 0) return;
-  if (activeTabId === tabId) activeRequest?.abort();
+  if (fileImportTabId === tabId || (!fileImportRequest && activeTabId === tabId)) activeRequest?.abort();
   tabs.splice(index, 1);
   if (!tabs.length) tabs.push(createTab());
   if (!tabs.some((tab) => tab.id === activeTabId)) activeTabId = tabs[Math.min(index, tabs.length - 1)].id;
@@ -1261,6 +1469,26 @@ document.addEventListener("click", (event) => {
   if (!resultContextMenu.hidden && !resultContextMenu.contains(event.target)) hideResultContextMenu();
 });
 document.addEventListener("keydown", (event) => {
+  if (!fileImportModal.hidden) {
+    if (event.key === "Escape") {
+      closeFileImportModal();
+      return;
+    }
+    if (event.key === "Tab") {
+      const focusable = [...fileImportModal.querySelectorAll("button:not([disabled]), input:not([disabled])")]
+        .filter((element) => element.offsetParent !== null);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === fileImportModal)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+      return;
+    }
+  }
   if (!multiListModal.hidden && event.key === "Tab") {
     const focusable = [...multiListModal.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex='0']")]
       .filter((element) => element.offsetParent !== null);
@@ -1352,7 +1580,7 @@ form.addEventListener("submit", async (event) => {
   }
   if (!skus.length) return;
   if (skus.length === 1 && !selectedMakes().length) await applyCachedBrand(skus[0], { force: true });
-  if (tab !== getActiveTab() || inputSku !== skuInput.value.trim()) return;
+  if (activeRequest || tab !== getActiveTab() || inputSku !== skuInput.value.trim()) return;
   const makes = selectedMakes();
   if (!makes.length) {
     setFeedback("Выберите хотя бы один бренд из списка.");
@@ -1375,6 +1603,7 @@ form.addEventListener("submit", async (event) => {
   const entries = requestedPairs.map((pair) => createSearchEntry({ sku: pair.sku, makeName: pair.brand, status: "Ищем применимость…" }));
   const controller = new AbortController();
   activeRequest = controller;
+  fileImportButton.disabled = true;
   submitButton.disabled = true;
   submitButton.querySelector("span").textContent = "Ищем…";
   try {
@@ -1412,12 +1641,7 @@ form.addEventListener("submit", async (event) => {
     const completed = outcomes.filter((outcome) => outcome.result);
     const normalizedOutcome = completed.find(({ result }) => result.usedNormalizedSku);
     const sku = normalizedOutcome?.entry.sku;
-    completed.forEach(({ entry, result }) => {
-      if (result.usedNormalizedSku) entry.sku = result.normalizedSku;
-      entry.results = result.results;
-      entry.hasSearched = true;
-      entry.status = result.results.length ? `Найдено автомобилей: ${result.results.length}` : "Не найдено";
-    });
+    completed.forEach(({ entry, result }) => applySearchResult(entry, result));
     if (failed.length) {
       tab.searches = tab.searches.filter((item) => !failed.some((outcome) => outcome.entry === item));
       const failure = (failed.find(({ error }) => error?.status === 401) ?? failed[0]).error;
@@ -1455,6 +1679,7 @@ form.addEventListener("submit", async (event) => {
   } finally {
     if (activeRequest === controller) {
       activeRequest = null;
+      fileImportButton.disabled = false;
       submitButton.disabled = false;
       submitButton.querySelector("span").textContent = "Поиск";
       oemSidebar?.refresh();
@@ -1467,8 +1692,8 @@ if (!tabs.length) tabs.push(createTab());
 if (!tabs.some((tab) => tab.id === activeTabId)) activeTabId = tabs[0].id;
 oemSidebar = bootstrapApplicabilityOemSidebar({ addArticle: addSavedOemArticle, notify: showApplicabilityToast });
 renderActiveTab();
-loadMakes();
-loadApiKeyState();
+const makesReady = loadMakes();
+const apiKeyReady = loadApiKeyState();
 try {
   if (localStorage.getItem(activeFunctionStorageKey) === "applicability") setActiveFunction("applicability");
 } catch {

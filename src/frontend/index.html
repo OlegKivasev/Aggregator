@@ -279,6 +279,9 @@
                 </div>
                 <div class="applicability-make-menu card border-0 shadow" id="applicability-makes" role="listbox" aria-multiselectable="true" hidden></div>
               </div>
+              <button type="button" class="settings-button applicability-file-button" id="applicability-file-toggle" aria-label="Поиск применимости из текстового файла" title="Поиск из файла" aria-haspopup="dialog" aria-controls="applicability-file-modal">
+                <img src="/applicability-file-import.png" alt="" />
+              </button>
               <button type="button" class="settings-button" id="applicability-settings-toggle" aria-label="Открыть настройки применимости" title="Настройки применимости">
                 <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" /><path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.46-2.47 1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58 1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 1.55 2 3.46 2.47-1a8.05 8.05 0 0 0 2.58 1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" /></svg>
               </button>
@@ -730,6 +733,34 @@
             </footer>
           </div>
         </div>
+      </section>
+    </div>
+
+    <div class="analogs-modal applicability-file-modal" id="applicability-file-modal" role="dialog" aria-modal="true" aria-labelledby="applicability-file-title" aria-describedby="applicability-file-help" tabindex="-1" hidden>
+      <div class="analogs-modal__backdrop" data-close-applicability-file></div>
+      <section class="analogs-modal__card card border-0 shadow-lg">
+        <header class="analogs-modal__header">
+          <div><h2 id="applicability-file-title">Поиск из текстового файла</h2></div>
+          <button type="button" class="analogs-modal__close btn btn-light" data-close-applicability-file aria-label="Закрыть окно">×</button>
+        </header>
+        <form class="applicability-file-modal__form" id="applicability-file-form">
+          <div class="applicability-file-modal__content">
+            <p id="applicability-file-help">Одна пара в строке: <strong>артикул | бренд</strong>. До 500 строк, размер до 1 МБ.</p>
+            <p id="applicability-file-target"></p>
+            <label class="field" for="applicability-file-input"><span>Текстовый файл</span><input id="applicability-file-input" type="file" accept=".txt,text/plain" /></label>
+            <p class="applicability-feedback" id="applicability-file-feedback" role="status" aria-live="polite" hidden></p>
+            <div class="applicability-file-preview" id="applicability-file-preview" hidden>
+              <table><thead><tr><th scope="col">№</th><th scope="col">OEM-артикул</th><th scope="col">Бренд</th><th scope="col">Статус</th></tr></thead><tbody id="applicability-file-rows"></tbody></table>
+            </div>
+            <progress id="applicability-file-progress" value="0" max="1" aria-label="Обработка файла" hidden></progress>
+            <p id="applicability-file-summary" role="status" aria-live="polite"></p>
+          </div>
+          <footer class="analogs-modal__footer applicability-file-modal__footer">
+            <button type="button" class="btn btn-light" data-close-applicability-file>Закрыть</button>
+            <button type="button" class="btn btn-light" id="applicability-file-stop" hidden>Остановить</button>
+            <button type="submit" class="btn btn-primary" id="applicability-file-start" disabled>Начать поиск</button>
+          </footer>
+        </form>
       </section>
     </div>
 
