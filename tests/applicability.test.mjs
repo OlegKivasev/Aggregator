@@ -75,6 +75,47 @@ test("PartsAPI applicability client rejects malformed data and rejected API keys
   );
 });
 
+test("PartsAPI limit errors identify only the key suffix and keep other access failures ambiguous", async () => {
+  const apiKey = "private-test-key-ABCDE";
+  const cases = [
+    { status: 429, body: "", message: "Закончились лимиты у ключа PartsAPI …ABCDE." },
+    { status: 403, body: JSON.stringify({ message: "Request limit exceeded" }), message: "Закончились лимиты у ключа PartsAPI …ABCDE." },
+    { status: 401, body: "Лимиты запросов исчерпаны", message: "Закончились лимиты у ключа PartsAPI …ABCDE." },
+    { status: 403, body: "Forbidden", message: "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт." },
+    { status: 401, body: JSON.stringify({ message: `Invalid key ${apiKey}` }), message: "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт." },
+    { status: 403, body: "x".repeat(16 * 1024 + 1), message: "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт." },
+  ];
+  for (const { status, body, message } of cases) {
+    const client = new PartsApiApplicabilityClient(async () => new Response(body, { status }));
+    await assert.rejects(client.search({ sku: "OEM1", brand: "FORD", apiKey }, new AbortController().signal), (error) => {
+      assert.ok(error instanceof SupplierAuthError);
+      assert.equal(error.publicMessage, message);
+      assert.doesNotMatch(JSON.stringify(error), /private-test-key/);
+      assert.doesNotMatch(error.stack, /private-test-key/);
+      return true;
+    });
+  }
+});
+
+test("PartsAPI rejection handling hides short keys, ignores key text and preserves cancellation", async () => {
+  for (const apiKey of ["x", "ABCDE", "test-limit-exceeded-ABCDE"]) {
+    const client = new PartsApiApplicabilityClient(async () => new Response(`Invalid key ${apiKey}`, { status: 403 }));
+    await assert.rejects(client.search({ sku: "OEM1", brand: "FORD", apiKey }, new AbortController().signal), (error) => {
+      assert.ok(error instanceof SupplierAuthError);
+      assert.match(error.publicMessage, /доступ/);
+      assert.ok(!error.publicMessage.includes(apiKey));
+      return true;
+    });
+  }
+  const controller = new AbortController();
+  const reason = new Error("Test cancellation");
+  const client = new PartsApiApplicabilityClient(async () => {
+    controller.abort(reason);
+    return new Response(null, { status: 403 });
+  });
+  await assert.rejects(client.search({ sku: "OEM1", brand: "FORD", apiKey: "test-key" }, controller.signal), (error) => error === reason);
+});
+
 test("PartsAPI key is stored encrypted and can only be removed explicitly", () => {
   const directory = mkdtempSync(join(tmpdir(), "partsapi-key-"));
   const filePath = join(directory, "partsapi-key.enc.json");

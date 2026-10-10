@@ -16,6 +16,7 @@ import type {
   SupplierSearchQuery,
 } from "../types.ts";
 import type { ApplicabilityApiKeyState, ApplicabilitySavedArticlesPage, ApplicabilitySavedArticlesQuery, ApplicabilitySearchRequest, ApplicabilitySearchResult, ApplicabilityVehicle } from "../applicability/types.ts";
+import { PartsApiKeyError } from "../applicability/partsapi-key-error.ts";
 import {
   articleLengthLimit,
   parseApplicabilityApiKeyPayload,
@@ -119,13 +120,15 @@ function serveApplicabilityError(
   const category = classifyOperationalError(error);
   reportError({ operation: "search-applicability", category });
   const statusCode = category === "authorization" ? 401 : category === "timeout" ? 504 : category === "integration" ? 502 : 500;
-  const message = category === "authorization"
-    ? "PartsAPI rejected the API key"
-    : category === "timeout"
-      ? "PartsAPI did not respond in time"
-      : error instanceof SupplierIntegrationError && error.publicMessage
-        ? error.publicMessage
-      : "Applicability search failed";
+  const message = error instanceof PartsApiKeyError
+    ? error.publicMessage
+    : category === "authorization"
+      ? "PartsAPI rejected the API key"
+      : category === "timeout"
+        ? "PartsAPI did not respond in time"
+        : error instanceof SupplierIntegrationError && error.publicMessage
+          ? error.publicMessage
+          : "Applicability search failed";
   serveJson(response, statusCode, { message });
 }
 

@@ -547,7 +547,11 @@ const searchApplicability = async (sku, brand, signal) => {
     signal,
   });
   const payload = await response.json();
-  if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось выполнить поиск применимости.");
+  if (!response.ok) {
+    const error = new Error(typeof payload?.message === "string" ? payload.message : "Не удалось выполнить поиск применимости.");
+    error.status = response.status;
+    throw error;
+  }
   if (!Array.isArray(payload?.results) || typeof payload.cacheHit !== "boolean") throw new Error("Сервис вернул некорректный ответ.");
   return { results: payload.results, cacheHit: payload.cacheHit };
 };
@@ -1533,18 +1537,27 @@ form.addEventListener("submit", async (event) => {
     });
     if (failed.length) {
       tab.searches = tab.searches.filter((item) => !failed.some((outcome) => outcome.entry === item));
-      const failure = failed[0].error;
-      if (activeTabId === tab.id) setFeedback(failure instanceof Error ? failure.message : "Не удалось выполнить поиск применимости.");
+      const failure = (failed.find(({ error }) => error?.status === 401) ?? failed[0]).error;
+      if (activeTabId === tab.id) {
+        const message = failure instanceof Error ? failure.message : "Не удалось выполнить поиск применимости.";
+        if (failure?.status === 401) {
+          setFeedback("");
+          showApplicabilityToast(message, "error");
+        } else {
+          setFeedback(message);
+        }
+      }
     }
     const cachedOutcome = completed.find(({ result }) => result.cacheHit);
-    if (normalizedOutcome) {
+    const keyAccessFailed = failed.some(({ error }) => error?.status === 401);
+    if (!keyAccessFailed && normalizedOutcome) {
       showApplicabilityToast(
         normalizedOutcome.result.cacheHit
           ? `Артикул «${sku}» изменён на «${normalizedOutcome.result.normalizedSku}». Использован сохранённый результат из базы.`
           : `Артикул «${sku}» изменён на «${normalizedOutcome.result.normalizedSku}» и успешно найден.`,
         normalizedOutcome.result.cacheHit ? "success" : "notice",
       );
-    } else if (cachedOutcome) {
+    } else if (!keyAccessFailed && cachedOutcome) {
       showApplicabilityToast("Использован сохранённый результат из базы.", "success");
     }
     if (activeTabId === tab.id) renderResults(tab);

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../src/backend/errors.ts";
 import { createAggregatorServer } from "../src/backend/http/create-server.ts";
+import { PartsApiApplicabilityClient } from "../src/backend/applicability/partsapi-client.ts";
 
 const publicDir = join(process.cwd(), "src", "frontend");
 const openServers = new Set();
@@ -206,6 +207,38 @@ test("HTTP server returns cached applicability brands for an article", async () 
   const response = await fetch(`${baseUrl}/api/applicability/cached-brands?sku=2170-2915004`);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { brands: ["LADA"] });
+});
+
+test("HTTP applicability failures expose a safe masked-key notice without raw rejection details", async () => {
+  const events = [];
+  const apiKey = "private-test-key-ABCDE";
+  let upstreamStatus = 403;
+  let upstreamBody = `Request limit exceeded for ${apiKey}; internal diagnostic`;
+  const client = new PartsApiApplicabilityClient(async () => new Response(upstreamBody, { status: upstreamStatus }));
+  const { baseUrl } = await listen(createApplication({
+    searchApplicability: (query, signal) => client.search({ ...query, apiKey }, signal),
+  }), (event) => events.push(event));
+  for (const status of [403, 429, 401]) {
+    const limitExceeded = status !== 401;
+    upstreamStatus = status;
+    upstreamBody = limitExceeded
+      ? `Request limit exceeded for ${apiKey}; internal diagnostic`
+      : `Invalid key ${apiKey}; internal diagnostic`;
+    const response = await fetch(`${baseUrl}/api/applicability/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sku: "OEM1", brand: "FORD" }),
+    });
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { message: limitExceeded
+      ? "Закончились лимиты у ключа PartsAPI …ABCDE."
+      : "Лимиты исчерпаны или доступ к ключу PartsAPI …ABCDE закрыт." });
+  }
+  assert.deepEqual(events, [
+    { operation: "search-applicability", category: "authorization" },
+    { operation: "search-applicability", category: "authorization" },
+    { operation: "search-applicability", category: "authorization" },
+  ]);
 });
 
 test("HTTP server lists, opens and deletes saved OEM pairs without external searches", async () => {
