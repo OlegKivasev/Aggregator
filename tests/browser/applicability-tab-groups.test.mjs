@@ -200,3 +200,81 @@ test("group lists handle unnamed and empty tabs immediately and render untrusted
     }
   });
 });
+
+test("dragging tabs out of a group preserves searches, removes empty folders and persists membership", async () => {
+  await withGroupsPage({ activeTabId: "a", groups: [{ id: "g", name: "Детали" }], tabs: [
+    { ...tab("a", "Деталь A"), groupId: "g" }, { ...tab("b", "Деталь B", []), groupId: "g" }, tab("c", "Деталь C"),
+  ] }, async (page) => {
+    const dropZone = page.locator("#applicability-tab-ungroup-drop");
+    const multiList = page.locator("#applicability-multi-list-button");
+    const feedback = page.locator("#applicability-tab-drop-feedback");
+    const beginDragOut = async (id) => {
+      const source = tabButton(page, id);
+      await source.evaluate((element) => element.scrollIntoView({ block: "nearest", inline: "center" }));
+      const from = await source.boundingBox();
+      await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(from.x + from.width / 2 + 12, from.y + from.height / 2, { steps: 4 });
+      await dropZone.waitFor({ state: "visible" });
+      const to = await dropZone.boundingBox();
+      await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 16 });
+      await page.mouse.move(to.x + to.width / 2 + 1, to.y + to.height / 2);
+      await feedback.waitFor({ state: "visible" });
+      assert.match(await feedback.textContent(), /вынести вкладку из группы/i);
+      assert.equal(await dropZone.evaluate((element) => element.classList.contains("is-group-drop-target")), true);
+      assert.equal((await storedState(page)).tabs.find((item) => item.id === id).groupId, "g", "Preview does not change membership");
+    };
+    assert.equal(await dropZone.isVisible(), false);
+    await tabButton(page, "c").click();
+    await tabButton(page, "a").click();
+    const originalSearches = (await storedState(page)).tabs.map((item) => [item.id, item.searches]);
+    await beginDragOut("a");
+    await page.mouse.move(30, 650, { steps: 12 });
+    await page.mouse.up();
+    assert.equal(await feedback.isVisible(), false);
+    assert.equal(await dropZone.isVisible(), false);
+    assert.equal((await storedState(page)).tabs.find((item) => item.id === "a").groupId, "g", "Dropping outside the tab strip cancels the operation");
+
+    await beginDragOut("a");
+    await page.mouse.up();
+    assert.equal(await feedback.isVisible(), false);
+    assert.equal(await dropZone.isVisible(), false);
+    let state = await storedState(page);
+    assert.deepEqual(state.tabs.map((item) => item.id), ["b", "c", "a"]);
+    assert.equal(state.tabs.find((item) => item.id === "a").groupId, null);
+    assert.equal(state.activeTabId, "a");
+    assert.equal(state.groups.length, 1, "The remaining one-tab group stays intact");
+    assert.equal(await multiList.isVisible(), false);
+    assert.deepEqual(await page.locator("#applicability-results-summary dd").allTextContents(), ["1", "1", "0"]);
+    await page.locator("#applicability-list-button").click();
+    assert.match(await page.locator("#applicability-document-text").inputValue(), /OEM-артикул: OEM-a/);
+    await page.keyboard.press("Escape");
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    assert.equal(await multiList.isVisible(), false);
+    assert.equal(await groupHeader(page, "Детали").count(), 1);
+
+    await tabButton(page, "b").click();
+    assert.equal(await multiList.isVisible(), true);
+    await page.setViewportSize({ width: 320, height: 760 });
+    await beginDragOut("b");
+    assert.ok(await dropZone.evaluate((element) => element.getBoundingClientRect().right <= window.innerWidth));
+    await page.mouse.up();
+    state = await storedState(page);
+    assert.deepEqual(state.groups, []);
+    assert.equal(await page.locator(".applicability-tab-group").count(), 0);
+    assert.equal(await multiList.isVisible(), false);
+    assert.match(await page.locator("#applicability-results-body").textContent(), /OEM-bFORDНе найдено/);
+    for (const [id, searches] of originalSearches) assert.deepEqual(state.tabs.find((item) => item.id === id).searches, searches);
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    assert.deepEqual((await storedState(page)).groups, []);
+    assert.equal(await dropZone.isVisible(), false);
+    await page.setViewportSize({ width: 1800, height: 900 });
+    await tabButton(page, "a").dragTo(tabButton(page, "c"));
+    assert.equal(await groupHeader(page, "Группа 1").count(), 1, "Ungrouped tabs can be grouped again");
+    const snapshot = await storedState(page);
+    await dropZone.dispatchEvent("drop", { dataTransfer: await page.evaluateHandle(() => new DataTransfer()) });
+    assert.deepEqual(await storedState(page), snapshot, "External drops cannot remove tabs from groups");
+  });
+});

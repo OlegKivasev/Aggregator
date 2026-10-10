@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { moveApplicabilityTabIntoGroup, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "../src/frontend/applicability-tab-groups.js";
+import { moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "../src/frontend/applicability-tab-groups.js";
 
 test("restoring tab groups migrates old tabs and discards invalid and empty group references", () => {
   const tabs = [{ id: "old" }, { id: "valid", groupId: "group" }, { id: "dangling", groupId: "missing" }];
@@ -58,5 +58,30 @@ test("self drops, repeated same-group drops and missing tabs do not mutate group
   for (const [source, target] of [["a", "a"], ["a", "b"], ["missing", "b"], ["a", "missing"]]) {
     assert.equal(moveApplicabilityTabIntoGroup(tabs, groups, source, target, () => { throw new Error("must not create group"); }), null);
   }
+  assert.deepEqual({ tabs, groups }, snapshot);
+});
+
+test("dragging out moves only the selected tab to the end and retains search objects", () => {
+  const searches = [{ sku: "FIXTURE", results: [] }];
+  const source = { id: "a", groupId: "g1", searches };
+  const tabs = [source, { id: "b", groupId: "g1" }, { id: "c", groupId: "g2" }];
+  const groups = [{ id: "g1", name: "Группа 1" }, { id: "g2", name: "Группа 2" }];
+  assert.equal(moveApplicabilityTabOutOfGroup(tabs, groups, "a"), true);
+  assert.equal(source.groupId, null);
+  assert.equal(source.searches, searches);
+  assert.deepEqual(tabs.map((tab) => tab.id), ["b", "c", "a"]);
+  assert.equal(tabs[0].groupId, "g1");
+  assert.equal(groups.length, 2);
+  assert.equal(moveApplicabilityTabOutOfGroup(tabs, groups, "b"), true);
+  assert.deepEqual(groups, [{ id: "g2", name: "Группа 2" }]);
+  assert.deepEqual(tabs.map((tab) => tab.id), ["c", "a", "b"]);
+});
+
+test("dragging out an unknown or ungrouped tab leaves tabs and folders unchanged", () => {
+  const tabs = [{ id: "a", groupId: null }, { id: "b", groupId: "g1" }];
+  const groups = [{ id: "g1", name: "Группа 1" }];
+  const snapshot = structuredClone({ tabs, groups });
+  assert.equal(moveApplicabilityTabOutOfGroup(tabs, groups, "a"), false);
+  assert.equal(moveApplicabilityTabOutOfGroup(tabs, groups, "missing"), false);
   assert.deepEqual({ tabs, groups }, snapshot);
 });

@@ -319,6 +319,9 @@ input {
 .applicability-tab-group .search-tab { min-width: 130px; max-width: 190px; }
 #applicability-tabs-list .is-dragging { opacity: .45; }
 #applicability-tabs-list .is-group-drop-target { outline: 2px dashed var(--accent); outline-offset: -3px; color: var(--accent-dark); background: #ffe4d7; }
+.applicability-tab-ungroup-drop { display: flex; flex: 1 0 128px; align-items: center; justify-content: center; padding: 0 10px; border-left: 1px dashed #ffb59d; color: var(--accent-dark); background: #fffaf6; font-size: 12px; font-weight: 700; }
+.applicability-tab-ungroup-drop[hidden] { display: none; }
+.applicability-tab-ungroup-drop.is-group-drop-target { outline: 2px dashed var(--accent); outline-offset: -3px; background: #ffe4d7; }
 .applicability-tab-drop-feedback { margin: -4px 0; padding: 7px 12px; border: 1px dashed var(--accent); border-radius: 7px; color: var(--accent-dark); background: #fff1eb; font-size: 12px; font-weight: 700; }
 .applicability-tab-drop-feedback[hidden], .applicability-multi-list-button[hidden] { display: none; }
 .applicability-search-row { flex: 0 0 auto; }

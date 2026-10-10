@@ -40,3 +40,15 @@ export function moveApplicabilityTabIntoGroup(tabs, groups, sourceId, targetId, 
   }
   return group;
 }
+
+export function moveApplicabilityTabOutOfGroup(tabs, groups, sourceId) {
+  const source = tabs.find((tab) => tab.id === sourceId);
+  if (!source?.groupId) return false;
+  source.groupId = null;
+  tabs.splice(tabs.indexOf(source), 1);
+  tabs.push(source);
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    if (!tabs.some((tab) => tab.groupId === groups[index].id)) groups.splice(index, 1);
+  }
+  return true;
+}
