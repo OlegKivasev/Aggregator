@@ -2,6 +2,7 @@ import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicleGroups 
 import { normalizeApplicabilitySku, parseApplicabilitySkus, runApplicabilityBatch } from "./applicability-search-input.js";
 import { bootstrapApplicabilityOemSidebar } from "./applicability-oem-sidebar.js";
 import { applicabilityFileMaxBytes, decodeApplicabilityFile, parseApplicabilityFile } from "./applicability-file-import.js";
+import { moveApplicabilityTabIntoGroup, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "./applicability-tab-groups.js";
 
 const markupFunction = document.querySelector("#markup-function");
 const applicabilityFunction = document.querySelector("#applicability-function");
@@ -23,6 +24,9 @@ const apiKeyStatus = document.querySelector("#applicability-api-key-status");
 const deleteApiKeyButton = document.querySelector("#applicability-api-key-delete");
 const tabContextMenu = document.querySelector("#applicability-tab-context-menu");
 const renameTabButton = document.querySelector("#applicability-rename-tab-button");
+const removeFromGroupButton = document.querySelector("#applicability-remove-from-group");
+const dissolveGroupButton = document.querySelector("#applicability-dissolve-group");
+const tabDropFeedback = document.querySelector("#applicability-tab-drop-feedback");
 const resultContextMenu = document.querySelector("#applicability-result-context-menu");
 const deleteResultButton = document.querySelector("#applicability-result-delete-button");
 const submitButton = document.querySelector("#applicability-submit");
@@ -34,14 +38,9 @@ const applicabilityToast = document.querySelector("#applicability-toast");
 const articleNameModal = document.querySelector("#applicability-article-name-modal");
 const articleNameForm = document.querySelector("#applicability-article-name-form");
 const articleNameInput = document.querySelector("#applicability-article-name-input");
-const articleNameTabContext = document.querySelector("#applicability-article-name-tab-context");
+const articleNameTitle = document.querySelector("#applicability-article-name-title");
+const articleNameLabel = document.querySelector('label[for="applicability-article-name-input"] > span');
 const closeArticleNameButtons = [...document.querySelectorAll("[data-close-applicability-article-name]")];
-const multiListModal = document.querySelector("#applicability-multi-list-modal");
-const multiListForm = document.querySelector("#applicability-multi-list-form");
-const multiListTabs = document.querySelector("#applicability-multi-list-tabs");
-const multiListSubmit = document.querySelector("#applicability-multi-list-submit");
-const multiListOemPopover = document.querySelector("#applicability-multi-list-oem-popover");
-const closeMultiListButtons = [...document.querySelectorAll("[data-close-applicability-multi-list]")];
 const documentModal = document.querySelector("#applicability-document-modal");
 const documentText = document.querySelector("#applicability-document-text");
 const documentCount = document.querySelector("#applicability-document-count");
@@ -68,18 +67,23 @@ const closeFileImportButtons = [...document.querySelectorAll("[data-close-applic
 
 let makesByName = new Map();
 let tabs = [];
+let tabGroups = [];
+let groupSequence = 1;
+let draggedTabId = null;
+let tabDropTarget = null;
 let activeTabId = null;
 let tabSequence = 1;
 let activeRequest = null;
 let hasStoredApiKey = false;
 let activeMakeIndex = -1;
 let contextMenuTabId = null;
+let contextMenuGroupId = null;
 let contextMenuTabAnchor = null;
 let contextMenuEntryAnchor = null;
 let articleNameModalReturnFocus = null;
 let articleNameModalTabId = null;
+let articleNameModalGroupId = null;
 let openDocumentAfterArticleNaming = false;
-let multiDocumentTabIds = null;
 let documentModalReturnFocus = null;
 let documentFormat = "structured";
 let documentSections = [];
@@ -127,6 +131,7 @@ const createTab = (data = {}) => {
   return {
     id: data.id ?? `applicability-tab-${Date.now()}-${tabSequence++}`,
     name: typeof data.name === "string" ? data.name.replace(/\s+/g, " ").trim().slice(0, 100) : "",
+    groupId: typeof data.groupId === "string" ? data.groupId : null,
     sku: typeof data.sku === "string" ? data.sku : "",
     makeNames,
     makeName: makeNames[0] ?? "",
@@ -191,9 +196,12 @@ const saveApplicabilityState = () => {
     syncActiveTab();
     localStorage.setItem(applicabilityStateStorageKey, JSON.stringify({
       activeTabId,
+      groups: tabGroups.map(({ id, name }) => ({ id, name })),
+      nextGroupNumber: groupSequence,
       tabs: tabs.map((tab) => ({
         id: tab.id,
         name: tab.name,
+        groupId: tab.groupId,
         sku: tab.sku,
         makeNames: tab.makeNames,
         makeName: tab.makeName,
@@ -221,6 +229,8 @@ const restoreApplicabilityState = () => {
     const state = JSON.parse(rawState);
     if (!Array.isArray(state?.tabs) || !state.tabs.length) return;
     tabs = state.tabs.map((tab) => createTab(tab));
+    tabGroups = restoreApplicabilityGroups(state.groups, tabs);
+    groupSequence = nextApplicabilityGroupNumber(state.nextGroupNumber, tabGroups);
     activeTabId = tabs.some((tab) => tab.id === state.activeTabId) ? state.activeTabId : tabs[0].id;
   } catch {
     localStorage.removeItem(applicabilityStateStorageKey);
@@ -813,9 +823,11 @@ const updateListButton = (tab) => {
   const hasResults = completedSearches(tab).length > 0;
   listButton.disabled = !hasResults;
   listButton.title = hasResults ? "Сформировать список применимости" : "Нет результатов поиска для списка";
-  const hasResultsInAnyTab = tabs.some((item) => completedSearches(item).length > 0);
-  multiListButton.disabled = !hasResultsInAnyTab;
-  multiListButton.title = hasResultsInAnyTab ? "Выбрать вкладки для мультисписка" : "Нет результатов поиска для мультисписка";
+  const group = tabGroups.find((item) => item.id === tab.groupId);
+  const hasGroupResults = Boolean(group && tabs.some((item) => item.groupId === group.id && completedSearches(item).length));
+  multiListButton.hidden = !group;
+  multiListButton.disabled = !hasGroupResults;
+  multiListButton.title = hasGroupResults ? `Сформировать мультисписок группы «${group.name}»` : "В группе нет завершённых поисков";
 };
 
 const clearSelectedEntries = () => {
@@ -941,20 +953,21 @@ const closeArticleNameModal = (restoreFocus = true) => {
   if (restoreFocus && articleNameModalReturnFocus?.isConnected) articleNameModalReturnFocus.focus();
   articleNameModalReturnFocus = null;
   articleNameModalTabId = null;
+  articleNameModalGroupId = null;
   openDocumentAfterArticleNaming = false;
-  multiDocumentTabIds = null;
 };
 
-const openArticleNameModal = (tabId, { openDocument = false, showTabContext = false, returnFocus = document.activeElement } = {}) => {
+const openArticleNameModal = (tabId, { openDocument = false, returnFocus = document.activeElement } = {}) => {
   const tab = tabs.find((item) => item.id === tabId);
   if (!tab) return;
-  const index = tabs.indexOf(tab);
   articleNameModalReturnFocus = returnFocus;
   articleNameModalTabId = tabId;
+  articleNameModalGroupId = null;
   openDocumentAfterArticleNaming = openDocument;
-  articleNameTabContext.textContent = `Вкладка: ${tab.name || `Новая применимость ${index + 1}`}`;
-  articleNameTabContext.hidden = !showTabContext;
-  articleNameInput.value = tab.name || tab.sku || `Новая применимость ${index + 1}`;
+  articleNameTitle.textContent = "Наименование исходного артикула";
+  articleNameLabel.textContent = "Наименование";
+  articleNameInput.setCustomValidity("");
+  articleNameInput.value = tab.name || tab.sku || `Новая применимость ${tabs.indexOf(tab) + 1}`;
   articleNameModal.hidden = false;
   articleNameInput.focus();
   articleNameInput.select();
@@ -962,7 +975,7 @@ const openArticleNameModal = (tabId, { openDocument = false, showTabContext = fa
 
 const openDocumentModalForTabs = (selectedTabs, returnFocus = document.activeElement) => {
   const sections = selectedTabs
-    .map((tab) => ({ articleName: tab.name, entries: completedSearches(tab) }))
+    .map((tab) => ({ articleName: tab.name || tab.sku || `Новая применимость ${tabs.indexOf(tab) + 1}`, entries: completedSearches(tab) }))
     .filter((section) => section.entries.length);
   if (!sections.length) return;
   documentSections = sections;
@@ -984,129 +997,68 @@ const openDocumentModal = (tab = getActiveTab(), returnFocus = document.activeEl
   openDocumentModalForTabs([tab], returnFocus);
 };
 
-const closeMultiListModal = (restoreFocus = true) => {
-  hideMultiListOemPopover();
-  multiListModal.hidden = true;
-  if (restoreFocus && multiListModalReturnFocus?.isConnected) multiListModalReturnFocus.focus();
-  multiListModalReturnFocus = null;
+const openGroupNameModal = (groupId, returnFocus = document.activeElement) => {
+  const group = tabGroups.find((item) => item.id === groupId);
+  if (!group) return;
+  articleNameModalReturnFocus = returnFocus;
+  articleNameModalTabId = null;
+  articleNameModalGroupId = group.id;
+  openDocumentAfterArticleNaming = false;
+  articleNameTitle.textContent = "Название группы";
+  articleNameLabel.textContent = "Название";
+  articleNameInput.value = group.name;
+  articleNameInput.setCustomValidity("");
+  articleNameModal.hidden = false;
+  articleNameInput.focus();
+  articleNameInput.select();
 };
 
-let multiListModalReturnFocus = null;
-
-const hideMultiListOemPopover = () => {
-  multiListOemPopover.hidden = true;
-  multiListOemPopover.replaceChildren();
-  multiListOemPopover.style.removeProperty("left");
-  multiListOemPopover.style.removeProperty("top");
-};
-
-const showMultiListOemPopover = (anchor, oemEntries) => {
-  multiListOemPopover.replaceChildren();
-  const title = document.createElement("span");
-  title.className = "applicability-multi-list-modal__oem-popover-title";
-  title.textContent = "OEM-артикулы";
-  const values = document.createElement("span");
-  values.className = "applicability-multi-list-modal__oem-popover-values";
-  oemEntries.forEach(({ sku, brands }) => {
-    const value = document.createElement("span");
-    const skuValue = document.createElement("span");
-    skuValue.className = "applicability-multi-list-modal__oem-popover-sku";
-    skuValue.textContent = sku;
-    value.append(skuValue);
-    if (brands.length) {
-      const brandValue = document.createElement("span");
-      brandValue.className = "applicability-multi-list-modal__oem-popover-brand";
-      brandValue.textContent = brands.join(", ");
-      value.append(brandValue);
-    }
-    values.append(value);
-  });
-  multiListOemPopover.append(title, values);
-  multiListOemPopover.hidden = false;
-  const anchorBounds = anchor.getBoundingClientRect();
-  const popoverBounds = multiListOemPopover.getBoundingClientRect();
-  const margin = 12;
-  const left = Math.max(margin, Math.min(anchorBounds.right - popoverBounds.width + 8, window.innerWidth - popoverBounds.width - margin));
-  const below = anchorBounds.bottom + 9;
-  const top = below + popoverBounds.height <= window.innerHeight - margin
-    ? below
-    : Math.max(margin, anchorBounds.top - popoverBounds.height - 9);
-  multiListOemPopover.style.left = `${left}px`;
-  multiListOemPopover.style.top = `${top}px`;
-};
-
-const selectedMultiListTabs = () => [...multiListTabs.querySelectorAll("input:checked")]
-  .map((input) => tabs.find((tab) => tab.id === input.value))
-  .filter((tab) => tab && completedSearches(tab).length);
-
-const updateMultiListSubmit = () => {
-  multiListSubmit.disabled = selectedMultiListTabs().length === 0;
-};
-
-const renderMultiListTabs = () => {
-  multiListTabs.replaceChildren();
-  const tabsWithResults = tabs.filter((tab) => completedSearches(tab).length);
-  tabsWithResults.forEach((tab) => {
-    const entries = completedSearches(tab);
-    const index = tabs.indexOf(tab);
-    const oemEntries = groupSearchesBySku(entries).map(([sku, entriesForSku]) => ({
-      sku,
-      brands: [...new Set(entriesForSku.map((entry) => entry.makeName).filter(Boolean))],
-    }));
-    const label = document.createElement("label");
-    label.className = "applicability-multi-list-modal__tab";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.value = tab.id;
-    input.setAttribute("aria-label", tab.name || `Новая применимость ${index + 1}`);
-    input.addEventListener("change", updateMultiListSubmit);
-    const name = document.createElement("span");
-    name.className = "applicability-multi-list-modal__tab-name";
-    name.textContent = tab.name || `Новая применимость ${index + 1}`;
-    const oem = document.createElement("span");
-    oem.className = "applicability-multi-list-modal__oem";
-    oem.tabIndex = 0;
-    oem.setAttribute("aria-label", `OEM-артикулы: ${oemEntries.map(({ sku, brands }) => `${sku}${brands.length ? ` — ${brands.join(", ")}` : ""}`).join("; ")}`);
-    const status = document.createElement("span");
-    status.className = "applicability-multi-list-modal__tab-status";
-    status.textContent = `OEM: ${oemEntries.length}`;
-    oem.addEventListener("pointerenter", () => showMultiListOemPopover(oem, oemEntries));
-    oem.addEventListener("pointerleave", hideMultiListOemPopover);
-    oem.addEventListener("focus", () => showMultiListOemPopover(oem, oemEntries));
-    oem.addEventListener("blur", hideMultiListOemPopover);
-    oem.append(status);
-    label.append(input, name, oem);
-    multiListTabs.append(label);
-  });
-  updateMultiListSubmit();
-};
-
-const openMultiListModal = (returnFocus = document.activeElement) => {
+const openGroupDocument = () => {
   syncActiveTab();
-  renderMultiListTabs();
-  multiListModalReturnFocus = returnFocus;
-  multiListModal.hidden = false;
-  multiListModal.focus();
-};
-
-const openMultiDocument = (selectedTabs, returnFocus) => {
-  multiDocumentTabIds = selectedTabs.map((tab) => tab.id);
-  const unnamedTab = selectedTabs.find((tab) => !tab.name);
-  if (unnamedTab) {
-    openArticleNameModal(unnamedTab.id, { showTabContext: true, returnFocus });
-    return;
-  }
-  multiDocumentTabIds = null;
-  openDocumentModalForTabs(selectedTabs, returnFocus);
+  const group = tabGroups.find((item) => item.id === getActiveTab()?.groupId);
+  if (!group) return;
+  openDocumentModalForTabs(tabs.filter((tab) => tab.groupId === group.id));
 };
 
 const renderTabs = () => {
   applicabilityTabsList.replaceChildren();
+  const groupContainers = new Map();
   tabs.forEach((tab, index) => {
+    let container = applicabilityTabsList;
+    const group = tabGroups.find((item) => item.id === tab.groupId);
+    if (group) {
+      if (!groupContainers.has(group.id)) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "applicability-tab-group";
+        wrapper.classList.toggle("is-active", getActiveTab()?.groupId === group.id);
+        wrapper.dataset.groupId = group.id;
+        wrapper.setAttribute("role", "group");
+        wrapper.setAttribute("aria-label", group.name);
+        const header = document.createElement("button");
+        header.type = "button";
+        header.className = "applicability-tab-group__header";
+        header.dataset.groupHeaderId = group.id;
+        header.title = `${group.name}. Двойной щелчок — переименовать группу.`;
+        header.setAttribute("aria-label", group.name);
+        const icon = document.createElement("img");
+        icon.src = "/applicability-group.png";
+        icon.alt = "";
+        icon.draggable = false;
+        const name = document.createElement("span");
+        name.textContent = group.name;
+        header.append(icon, name);
+        wrapper.append(header);
+        applicabilityTabsList.append(wrapper);
+        groupContainers.set(group.id, wrapper);
+      }
+      container = groupContainers.get(group.id);
+    }
     const button = document.createElement("button");
     button.type = "button";
     button.className = `search-tab${tab.id === activeTabId ? " active" : ""}`;
     button.dataset.tabId = tab.id;
+    button.draggable = true;
+    button.classList.toggle("is-dragging", draggedTabId === tab.id);
     button.setAttribute("role", "tab");
     button.setAttribute("aria-selected", String(tab.id === activeTabId));
     const status = document.createElement("span");
@@ -1125,9 +1077,94 @@ const renderTabs = () => {
     close.setAttribute("aria-label", "Закрыть вкладку");
     close.textContent = "×";
     button.append(status, title, close);
-    applicabilityTabsList.append(button);
+    container.append(button);
   });
 };
+
+const clearTabDropTarget = () => {
+  tabDropTarget?.classList.remove("is-group-drop-target");
+  tabDropTarget = null;
+  tabDropFeedback.hidden = true;
+  tabDropFeedback.textContent = "";
+};
+
+const tabAtDropTarget = (element) => {
+  const tabButton = element.closest("[data-tab-id]");
+  if (tabButton && applicabilityTabsList.contains(tabButton)) return tabs.find((tab) => tab.id === tabButton.dataset.tabId);
+  const header = element.closest("[data-group-header-id]");
+  if (header && applicabilityTabsList.contains(header)) return tabs.find((tab) => tab.groupId === header.dataset.groupHeaderId);
+  return null;
+};
+
+const validTabDropTarget = (element) => {
+  const source = tabs.find((tab) => tab.id === draggedTabId);
+  const target = tabAtDropTarget(element);
+  return source && target && source !== target && (!target.groupId || target.groupId !== source.groupId) ? target : null;
+};
+
+applicabilityTabsList.addEventListener("dragstart", (event) => {
+  const button = event.target.closest("[data-tab-id]");
+  if (!button || !event.dataTransfer || event.target.closest("[data-close-tab-id]")) {
+    event.preventDefault();
+    return;
+  }
+  draggedTabId = button.dataset.tabId;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", draggedTabId);
+  button.classList.add("is-dragging");
+  hideTabContextMenu();
+});
+applicabilityTabsList.addEventListener("dragover", (event) => {
+  if (!draggedTabId) return;
+  const target = validTabDropTarget(event.target);
+  if (!target) {
+    clearTabDropTarget();
+    return;
+  }
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  const anchor = event.target.closest("[data-tab-id], [data-group-header-id]");
+  if (tabDropTarget !== anchor) {
+    clearTabDropTarget();
+    tabDropTarget = anchor;
+    anchor.classList.add("is-group-drop-target");
+  }
+  const group = tabGroups.find((item) => item.id === target.groupId);
+  tabDropFeedback.textContent = group ? `Добавить вкладку в группу «${group.name}»` : "Отпустите вкладку, чтобы создать группу";
+  tabDropFeedback.hidden = false;
+  const bounds = applicabilityTabsList.getBoundingClientRect();
+  if (event.clientX > bounds.right - 28) applicabilityTabsList.scrollLeft += 12;
+  else if (event.clientX < bounds.left + 28) applicabilityTabsList.scrollLeft -= 12;
+});
+applicabilityTabsList.addEventListener("dragleave", (event) => {
+  if (!event.relatedTarget || !applicabilityTabsList.contains(event.relatedTarget)) clearTabDropTarget();
+});
+applicabilityTabsList.addEventListener("drop", (event) => {
+  const target = validTabDropTarget(event.target);
+  if (!target) return;
+  event.preventDefault();
+  syncActiveTab();
+  const group = moveApplicabilityTabIntoGroup(tabs, tabGroups, draggedTabId, target.id, () => ({
+    id: `applicability-group-${Date.now()}-${tabSequence++}`,
+    name: `Группа ${groupSequence++}`,
+  }));
+  clearTabDropTarget();
+  draggedTabId = null;
+  if (!group) return;
+  renderTabs();
+  updateListButton(getActiveTab());
+  saveApplicabilityState();
+  showApplicabilityToast(`Вкладка добавлена в группу «${group.name}».`, "success");
+});
+applicabilityTabsList.addEventListener("dragend", () => {
+  clearTabDropTarget();
+  draggedTabId = null;
+  applicabilityTabsList.querySelectorAll(".is-dragging").forEach((button) => button.classList.remove("is-dragging"));
+});
+applicabilityTabsList.addEventListener("dblclick", (event) => {
+  const header = event.target.closest("[data-group-header-id]");
+  if (header) openGroupNameModal(header.dataset.groupHeaderId, header);
+});
 
 const syncActiveTab = () => {
   const tab = getActiveTab();
@@ -1173,6 +1210,7 @@ const closeTab = (tabId) => {
   if (index < 0) return;
   if (fileImportTabId === tabId || (!fileImportRequest && activeTabId === tabId)) activeRequest?.abort();
   tabs.splice(index, 1);
+  tabGroups = restoreApplicabilityGroups(tabGroups, tabs);
   if (!tabs.length) tabs.push(createTab());
   if (!tabs.some((tab) => tab.id === activeTabId)) activeTabId = tabs[Math.min(index, tabs.length - 1)].id;
   renderActiveTab();
@@ -1202,47 +1240,36 @@ markupTab.addEventListener("click", () => setActiveFunction("markup"));
 applicabilityTab.addEventListener("click", () => setActiveFunction("applicability"));
 newApplicabilityTabButton.addEventListener("click", addTab);
 listButton.addEventListener("click", () => openDocumentModal());
-multiListButton.addEventListener("click", () => openMultiListModal());
+multiListButton.addEventListener("click", openGroupDocument);
 closeArticleNameButtons.forEach((button) => button.addEventListener("click", () => closeArticleNameModal()));
 articleNameForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const tab = tabs.find((item) => item.id === articleNameModalTabId);
-  const articleName = normalizeTabName(articleNameInput.value);
-  if (!tab || !articleName) {
-    articleNameInput.setCustomValidity("Введите наименование исходного артикула.");
+  const group = tabGroups.find((item) => item.id === articleNameModalGroupId);
+  const articleName = group ? normalizeApplicabilityGroupName(articleNameInput.value) : normalizeTabName(articleNameInput.value);
+  if ((!tab && !group) || !articleName) {
+    articleNameInput.setCustomValidity(group ? "Введите название группы." : "Введите наименование исходного артикула.");
     articleNameInput.reportValidity();
     return;
   }
   articleNameInput.setCustomValidity("");
   const returnFocus = articleNameModalReturnFocus;
   const shouldOpenDocument = openDocumentAfterArticleNaming;
-  const selectedMultiTabIds = multiDocumentTabIds;
-  tab.name = articleName;
+  if (group) group.name = articleName;
+  else tab.name = articleName;
   renderTabs();
+  updateListButton(getActiveTab());
   saveApplicabilityState();
   closeArticleNameModal(false);
-  if (selectedMultiTabIds) {
-    const selectedTabs = selectedMultiTabIds.map((id) => tabs.find((item) => item.id === id)).filter(Boolean);
-    const nextUnnamedTab = selectedTabs.find((item) => !item.name);
-    if (nextUnnamedTab) {
-      multiDocumentTabIds = selectedMultiTabIds;
-      openArticleNameModal(nextUnnamedTab.id, { showTabContext: true, returnFocus });
-    }
-    else openDocumentModalForTabs(selectedTabs, returnFocus);
-  } else if (shouldOpenDocument) openDocumentModal(tab, returnFocus);
+  if (shouldOpenDocument) openDocumentModal(tab, returnFocus);
   else if (returnFocus?.isConnected) returnFocus.focus();
+  else {
+    const anchor = [...applicabilityTabsList.querySelectorAll("[data-group-header-id], [data-tab-id]")]
+      .find((element) => group ? element.dataset.groupHeaderId === group.id : element.dataset.tabId === tab.id);
+    anchor?.focus();
+  }
 });
 articleNameInput.addEventListener("input", () => articleNameInput.setCustomValidity(""));
-closeMultiListButtons.forEach((button) => button.addEventListener("click", () => closeMultiListModal()));
-multiListTabs.addEventListener("scroll", hideMultiListOemPopover);
-multiListForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const selectedTabs = selectedMultiListTabs();
-  if (!selectedTabs.length) return;
-  const returnFocus = multiListModalReturnFocus;
-  closeMultiListModal(false);
-  openMultiDocument(selectedTabs, returnFocus);
-});
 closeDocumentButtons.forEach((button) => button.addEventListener("click", () => closeDocumentModal()));
 documentSaveButton.addEventListener("click", async () => {
   try {
@@ -1303,17 +1330,27 @@ applicabilityTabsList.addEventListener("click", (event) => {
   }
   const tab = event.target.closest("[data-tab-id]");
   if (tab) activateTab(tab.dataset.tabId);
+  const header = event.target.closest("[data-group-header-id]");
+  if (header && getActiveTab()?.groupId !== header.dataset.groupHeaderId) {
+    const firstTab = tabs.find((item) => item.groupId === header.dataset.groupHeaderId);
+    if (firstTab) activateTab(firstTab.id);
+  }
 });
 
 const hideTabContextMenu = (restoreFocus = false) => {
   tabContextMenu.hidden = true;
   contextMenuTabId = null;
+  contextMenuGroupId = null;
   if (restoreFocus && contextMenuTabAnchor?.isConnected) contextMenuTabAnchor.focus();
   contextMenuTabAnchor = null;
 };
 
-const showTabContextMenu = (tabId, clientX, clientY, anchor) => {
-  contextMenuTabId = tabId;
+const showTabContextMenu = (anchor, clientX, clientY) => {
+  contextMenuTabId = anchor.dataset.tabId ?? null;
+  contextMenuGroupId = anchor.dataset.groupHeaderId ?? null;
+  renameTabButton.textContent = contextMenuGroupId ? "Переименовать группу" : "Переименовать вкладку";
+  removeFromGroupButton.hidden = !tabs.find((tab) => tab.id === contextMenuTabId)?.groupId;
+  dissolveGroupButton.hidden = !contextMenuGroupId;
   contextMenuTabAnchor = anchor;
   tabContextMenu.hidden = false;
   const bounds = tabContextMenu.getBoundingClientRect();
@@ -1329,26 +1366,49 @@ const renameTab = (tabId, returnFocus) => {
 };
 
 applicabilityTabsList.addEventListener("contextmenu", (event) => {
-  const tab = event.target.closest("[data-tab-id]");
-  if (!tab) return;
+  const anchor = event.target.closest("[data-tab-id], [data-group-header-id]");
+  if (!anchor) return;
   event.preventDefault();
-  showTabContextMenu(tab.dataset.tabId, event.clientX, event.clientY, tab);
+  showTabContextMenu(anchor, event.clientX, event.clientY);
 });
 
 applicabilityTabsList.addEventListener("keydown", (event) => {
   if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
-  const tab = event.target.closest("[data-tab-id]");
-  if (!tab) return;
+  const anchor = event.target.closest("[data-tab-id], [data-group-header-id]");
+  if (!anchor) return;
   event.preventDefault();
-  const bounds = tab.getBoundingClientRect();
-  showTabContextMenu(tab.dataset.tabId, bounds.left + 16, bounds.top + 16, tab);
+  const bounds = anchor.getBoundingClientRect();
+  showTabContextMenu(anchor, bounds.left + 16, bounds.top + 16);
 });
 
 renameTabButton.addEventListener("click", () => {
   const tabId = contextMenuTabId;
+  const groupId = contextMenuGroupId;
   const returnFocus = contextMenuTabAnchor;
   hideTabContextMenu();
-  if (tabId) renameTab(tabId, returnFocus);
+  if (groupId) openGroupNameModal(groupId, returnFocus);
+  else if (tabId) renameTab(tabId, returnFocus);
+});
+
+removeFromGroupButton.addEventListener("click", () => {
+  const tab = tabs.find((item) => item.id === contextMenuTabId);
+  hideTabContextMenu();
+  if (!tab?.groupId) return;
+  tab.groupId = null;
+  tabGroups = restoreApplicabilityGroups(tabGroups, tabs);
+  renderTabs();
+  updateListButton(getActiveTab());
+  saveApplicabilityState();
+});
+dissolveGroupButton.addEventListener("click", () => {
+  const groupId = contextMenuGroupId;
+  hideTabContextMenu();
+  if (!groupId) return;
+  tabs.forEach((tab) => { if (tab.groupId === groupId) tab.groupId = null; });
+  tabGroups = restoreApplicabilityGroups(tabGroups, tabs);
+  renderTabs();
+  updateListButton(getActiveTab());
+  saveApplicabilityState();
 });
 
 const hideResultContextMenu = (restoreFocus = false) => {
@@ -1489,25 +1549,6 @@ document.addEventListener("keydown", (event) => {
       return;
     }
   }
-  if (!multiListModal.hidden && event.key === "Tab") {
-    const focusable = [...multiListModal.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex='0']")]
-      .filter((element) => element.offsetParent !== null);
-    if (!focusable.length) {
-      event.preventDefault();
-      multiListModal.focus();
-      return;
-    }
-    const first = focusable[0];
-    const last = focusable.at(-1);
-    if (event.shiftKey && (document.activeElement === first || document.activeElement === multiListModal)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-    return;
-  }
   if (!articleNameModal.hidden && event.key === "Tab") {
     const focusable = [...articleNameModal.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex='0']")]
       .filter((element) => element.offsetParent !== null);
@@ -1547,10 +1588,6 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key !== "Escape") return;
-  if (!multiListModal.hidden) {
-    closeMultiListModal();
-    return;
-  }
   if (!articleNameModal.hidden) {
     closeArticleNameModal();
     return;

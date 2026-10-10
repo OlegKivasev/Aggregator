@@ -39,8 +39,9 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
     });
     const state = {
       activeTabId: "empty",
+      groups: [{ id: "parts", name: "Детали" }],
       tabs: [
-        { id: "mixed", name: "Деталь A", searches: [
+        { id: "mixed", name: "Деталь A", groupId: "parts", searches: [
           entry("MISS-A1"),
           entry("FULL-A1", [vehicle, { ...vehicle, carId: 2 }]),
           entry("MISS-A2"),
@@ -48,8 +49,8 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
           entry("FULL-A1", [], "VW"),
           entry("PENDING-A", [], "FORD", false),
         ] },
-        { id: "empty", name: "Деталь B", searches: [entry("ONLY-A"), entry("ONLY-B")] },
-        { id: "other", name: "Деталь C", searches: [
+        { id: "empty", name: "Деталь B", groupId: "parts", searches: [entry("ONLY-A"), entry("ONLY-B")] },
+        { id: "other", name: "Деталь C", groupId: "parts", searches: [
           entry("MISS-C"), entry("FULL-C", [vehicle]),
         ] },
         { id: "failed", name: "Ошибка", searches: [entry("FAILED", [], "FORD", false)] },
@@ -124,12 +125,9 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
     assert.deepEqual(oemSkus(await documentText.inputValue()), oemSkus(mixedText));
     await closeDocument();
 
-    // Empty-only tabs can be selected, with empty blocks at the end of their own section.
+    // The active group includes empty-only tabs without a checkbox selection step.
     await page.locator("#applicability-multi-list-button").click();
-    const choices = page.locator('#applicability-multi-list-tabs input[type="checkbox"]');
-    assert.deepEqual(await choices.evaluateAll((inputs) => inputs.map((input) => input.value)), ["mixed", "empty", "other"]);
-    for (const id of ["mixed", "empty", "other"]) await page.locator(`#applicability-multi-list-tabs input[value="${id}"]`).check();
-    await page.locator("#applicability-multi-list-submit").click();
+    assert.equal(await page.locator("#applicability-multi-list-modal").count(), 0);
     const multiText = await documentText.inputValue();
     assert.deepEqual(oemSkus(multiText), ["FULL-A1", "FULL-A2", "MISS-A1", "MISS-A2", "ONLY-A", "ONLY-B", "FULL-C", "MISS-C"]);
     assert.match(multiText, /OEM-артикул: MISS-A2 \| FORD\s*Артикул: Деталь B/);

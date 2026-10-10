@@ -265,6 +265,7 @@
           <div class="search-tabs__list" id="applicability-tabs-list" role="tablist"></div>
           <button type="button" class="new-tab-button btn btn-light" id="applicability-new-tab" aria-label="Открыть новую вкладку применимости">+</button>
         </nav>
+        <p class="applicability-tab-drop-feedback" id="applicability-tab-drop-feedback" role="status" aria-live="polite" hidden></p>
         <div class="applicability-workspace" id="applicability-workspace">
         <div class="applicability-shell card border-0 shadow-sm">
           <div class="search-row applicability-search-row">
@@ -305,7 +306,7 @@
                   <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3.75h7l3.25 3.25v13.25H7z" /><path d="M14 3.75V7h3.25M9.75 11h4.5M9.75 14.25h4.5M9.75 17.5h3" /></svg>
                   <span>Сформировать список</span>
                 </button>
-                <button type="button" class="btn btn-primary applicability-list-button applicability-multi-list-button" id="applicability-multi-list-button" disabled>
+                <button type="button" class="btn btn-primary applicability-list-button applicability-multi-list-button" id="applicability-multi-list-button" hidden disabled>
                   <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3.75h7l3.25 3.25v13.25H7z" /><path d="M14 3.75V7h3.25M9.75 11h4.5M9.75 14.25h4.5M9.75 17.5h3" /></svg>
                   <span>Сформировать мультисписок</span>
                 </button>
@@ -619,6 +620,8 @@
     </div>
     <div class="tab-context-menu card border-0 shadow" id="applicability-tab-context-menu" role="menu" hidden>
       <button type="button" id="applicability-rename-tab-button" role="menuitem">Переименовать вкладку</button>
+      <button type="button" id="applicability-remove-from-group" role="menuitem" hidden>Убрать из группы</button>
+      <button type="button" id="applicability-dissolve-group" role="menuitem" hidden>Разгруппировать</button>
     </div>
     <div class="result-context-menu applicability-context-menu card border-0 shadow" id="applicability-result-context-menu" role="menu" hidden>
       <button type="button" class="applicability-context-menu__delete" id="applicability-result-delete-button" role="menuitem">Удалить строку</button>
@@ -773,7 +776,6 @@
         </header>
         <form class="applicability-article-name-modal__form" id="applicability-article-name-form">
           <div class="applicability-article-name-modal__content">
-            <p class="applicability-article-name-modal__tab-context" id="applicability-article-name-tab-context" hidden></p>
             <label class="field" for="applicability-article-name-input"><span>Наименование</span><input id="applicability-article-name-input" type="text" maxlength="100" autocomplete="off" required /></label>
           </div>
           <footer class="analogs-modal__footer applicability-article-name-modal__footer">
@@ -782,24 +784,6 @@
           </footer>
         </form>
       </section>
-    </div>
-
-    <div class="analogs-modal applicability-multi-list-modal" id="applicability-multi-list-modal" role="dialog" aria-modal="true" aria-labelledby="applicability-multi-list-title" tabindex="-1" hidden>
-      <div class="analogs-modal__backdrop" data-close-applicability-multi-list></div>
-      <section class="analogs-modal__card card border-0 shadow-lg">
-        <header class="analogs-modal__header">
-          <div><h2 id="applicability-multi-list-title">Сформировать мультисписок</h2></div>
-          <button type="button" class="analogs-modal__close btn btn-light" data-close-applicability-multi-list aria-label="Закрыть окно">×</button>
-        </header>
-        <form class="applicability-multi-list-modal__form" id="applicability-multi-list-form">
-          <div class="applicability-multi-list-modal__content" id="applicability-multi-list-tabs"></div>
-          <footer class="analogs-modal__footer applicability-multi-list-modal__footer">
-            <button type="button" class="btn btn-light" data-close-applicability-multi-list>Отмена</button>
-            <button type="submit" class="btn btn-primary" id="applicability-multi-list-submit" disabled>Сформировать</button>
-          </footer>
-        </form>
-      </section>
-      <div class="applicability-multi-list-modal__oem-popover" id="applicability-multi-list-oem-popover" role="tooltip" hidden></div>
     </div>
 
     <div class="analogs-modal applicability-document-modal" id="applicability-document-modal" role="dialog" aria-modal="true" aria-labelledby="applicability-document-title" tabindex="-1" hidden>
