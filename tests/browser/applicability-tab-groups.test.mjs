@@ -65,14 +65,42 @@ const storedState = (page) => page.evaluate(() => JSON.parse(localStorage.getIte
 const tabButton = (page, id) => page.locator(`#applicability-tabs-list [data-tab-id="${id}"]`);
 const groupHeader = (page, name) => page.locator(".applicability-tab-group__header").filter({ hasText: name });
 
-async function dragWithPreview(page, source, target, message) {
+const folderForTab = (locator) => locator.locator("xpath=ancestor::div[@data-group-id]").locator(".applicability-tab-group__header");
+
+async function revealTab(locator) {
+  if (!await locator.isVisible()) await folderForTab(locator).hover();
+}
+
+async function clickTab(page, id, options) {
+  const button = tabButton(page, id);
+  await revealTab(button);
+  await button.click(options);
+}
+
+async function beginDragTo(page, source, target, fraction = 0.5) {
+  await revealTab(source);
   const from = await source.boundingBox();
-  const to = await target.boundingBox();
+  let to = await target.boundingBox();
+  const targetHidden = !to;
+  if (targetHidden) to = await folderForTab(target).boundingBox();
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
   await page.mouse.move(from.x + from.width / 2 + 12, from.y + from.height / 2, { steps: 4 });
-  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 16 });
-  await page.mouse.move(to.x + to.width / 2 + 1, to.y + to.height / 2);
+  if (targetHidden) {
+    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
+    await page.mouse.move(to.x + to.width / 2 + 1, to.y + to.height / 2);
+    await target.waitFor({ state: "visible" });
+    to = await target.boundingBox();
+  }
+  const vertical = await target.evaluate((element) => element.matches("[data-tab-id]") && Boolean(element.closest(".applicability-tab-group__tabs")));
+  const x = to.x + to.width * (vertical ? 0.5 : fraction);
+  const y = to.y + to.height * (vertical ? fraction : 0.5);
+  await page.mouse.move(x, y, { steps: 16 });
+  await page.mouse.move(x + 1, y);
+}
+
+async function dragWithPreview(page, source, target, message) {
+  await beginDragTo(page, source, target);
   await page.waitForFunction(() => !document.querySelector("#applicability-tab-drop-feedback").hidden);
   assert.match(await page.locator("#applicability-tab-drop-feedback").textContent(), message);
   assert.ok(await target.evaluate((element) => element.classList.contains("is-group-drop-target") && !element.classList.contains("is-reorder-target")));
@@ -82,25 +110,25 @@ async function dragWithPreview(page, source, target, message) {
 }
 
 async function dragToPart(page, source, target, fraction = 0.2) {
-  const from = await source.boundingBox();
-  const to = await target.boundingBox();
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(from.x + from.width / 2 + 12, from.y + from.height / 2, { steps: 4 });
-  await page.mouse.move(to.x + to.width * fraction, to.y + to.height / 2, { steps: 16 });
-  await page.mouse.move(to.x + to.width * fraction + 1, to.y + to.height / 2);
+  await beginDragTo(page, source, target, fraction);
   const position = fraction < 0.5 ? "before" : "after";
   assert.ok(await target.evaluate((element, side) => element.closest(".is-reorder-target")?.classList.contains(`is-reorder-${side}`), position));
   const marker = await target.evaluate((element) => {
     const anchor = element.closest(".is-reorder-target");
     const style = getComputedStyle(anchor, "::before");
-    return { outline: getComputedStyle(anchor).outlineStyle, width: style.width, content: style.content, left: style.left, right: style.right };
+    return { outline: getComputedStyle(anchor).outlineStyle, width: style.width, height: style.height, content: style.content, left: style.left, right: style.right, top: style.top, bottom: style.bottom, vertical: Boolean(anchor.closest(".applicability-tab-group__tabs")) };
   });
   assert.equal(marker.outline, "none");
-  assert.equal(marker.width, "3px");
+  assert.equal(marker[marker.vertical ? "height" : "width"], "3px");
   assert.equal(marker.content, '""');
-  assert.equal(marker[position === "before" ? "left" : "right"], "0px");
+  assert.equal(marker[marker.vertical ? (position === "before" ? "top" : "bottom") : (position === "before" ? "left" : "right")], "0px");
   if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, `applicability-reorder-${position}-preview.png`) });
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelector("#applicability-tab-drop-feedback").hidden);
+}
+
+async function dragToTab(page, source, target) {
+  await beginDragTo(page, source, target);
   await page.mouse.up();
   await page.waitForFunction(() => document.querySelector("#applicability-tab-drop-feedback").hidden);
 }
@@ -131,21 +159,21 @@ test("dragging tabs creates and moves groups, renames folders and forms only the
     assert.doesNotMatch(await documentText.inputValue(), /Деталь C|OEM-c/);
     assert.equal(await page.locator("#applicability-multi-list-modal").count(), 0);
     await page.locator("#applicability-document-modal button[data-close-applicability-document]").click();
-    await tabButton(page, "c").click();
+    await clickTab(page, "c");
     assert.equal(await multiList.isVisible(), false);
     await dragWithPreview(page, tabButton(page, "c"), groupHeader(page, "Детали двигателя"), /Добавить вкладку в группу/);
     assert.equal(await multiList.isVisible(), true);
     if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-tab-groups.png") });
-    await tabButton(page, "d").dragTo(tabButton(page, "e"));
+    await dragToTab(page, tabButton(page, "d"), tabButton(page, "e"));
     assert.equal(await groupHeader(page, "Группа 2").count(), 1);
     await dragToPart(page, groupHeader(page, "Группа 2"), groupHeader(page, "Детали двигателя"), 0.15);
     assert.deepEqual((await storedState(page)).groups.map((group) => group.name), ["Группа 2", "Детали двигателя"]);
-    await tabButton(page, "c").dragTo(tabButton(page, "e"));
+    await dragToTab(page, tabButton(page, "c"), tabButton(page, "e"));
     const state = await storedState(page);
     const group2Id = state.groups.find((group) => group.name === "Группа 2").id;
     assert.deepEqual(state.tabs.filter((item) => item.groupId === group2Id).map((item) => item.id), ["e", "d", "c"]);
     assert.equal(state.tabs.find((item) => item.id === "a").searches.length, 1);
-    await tabButton(page, "c").dragTo(tabButton(page, "e"));
+    await dragToPart(page, tabButton(page, "c"), tabButton(page, "e"), 0.15);
     assert.equal((await storedState(page)).groups.length, 2);
     assert.deepEqual((await storedState(page)).tabs.filter((item) => item.groupId === group2Id).map((item) => item.id), ["c", "e", "d"]);
     await page.reload();
@@ -156,20 +184,23 @@ test("dragging tabs creates and moves groups, renames folders and forms only the
     assert.deepEqual([...(await documentText.inputValue()).matchAll(/^Артикул: (.+)$/gm)].map((match) => match[1]), ["Деталь C", "Деталь E", "Деталь D"]);
     await page.keyboard.press("Escape");
 
-    await tabButton(page, "b").click({ button: "right" });
+    await clickTab(page, "b", { button: "right" });
     await page.locator("#applicability-remove-from-group").click();
-    await tabButton(page, "b").click();
+    await clickTab(page, "b");
     assert.equal(await multiList.isVisible(), false);
     assert.equal(await page.locator("#applicability-results-body tr").count(), 1);
     await groupHeader(page, "Детали двигателя").click({ button: "right" });
     await page.locator("#applicability-dissolve-group").click();
     assert.equal(await groupHeader(page, "Детали двигателя").count(), 0);
     assert.equal(await tabButton(page, "a").count(), 1);
-    for (const id of ["e", "d", "c"]) await page.locator(`[data-close-tab-id="${id}"]`).click();
+    for (const id of ["e", "d", "c"]) {
+      await revealTab(tabButton(page, id));
+      await page.locator(`[data-close-tab-id="${id}"]`).click();
+    }
     assert.equal(await page.locator(".applicability-tab-group").count(), 0);
     await page.locator("#applicability-new-tab").click();
     const unnamed = page.locator("#applicability-tabs-list [data-tab-id]").last();
-    await unnamed.dragTo(tabButton(page, "a"));
+    await dragToTab(page, unnamed, tabButton(page, "a"));
     assert.equal(await groupHeader(page, "Группа 1").count(), 1);
   });
 });
@@ -184,8 +215,68 @@ test("dragging tab edges reorders tabs without grouping them", async () => {
 
     await dragToPart(page, tabButton(page, "a"), tabButton(page, "b"), 0.85);
     assert.deepEqual((await storedState(page)).tabs.map((item) => item.id), ["c", "b", "a"]);
-    await tabButton(page, "a").click();
+    await clickTab(page, "a");
     assert.match(await page.locator("#applicability-results-body").textContent(), /OEM-a/);
+  });
+});
+
+test("a folder moves as one block before and after standalone tabs", async () => {
+  await withGroupsPage({ activeTabId: "a", groups: [{ id: "g", name: "Группа 1" }], tabs: [
+    tab("left", "Слева"), { ...tab("a", "Деталь A"), groupId: "g" }, { ...tab("b", "Деталь B"), groupId: "g" }, tab("right", "Справа"),
+  ] }, async (page) => {
+    await dragToPart(page, groupHeader(page, "Группа 1").locator("img"), tabButton(page, "left"), 0.15);
+    assert.deepEqual((await storedState(page)).tabs.map((item) => item.id), ["a", "b", "left", "right"]);
+    await dragToPart(page, groupHeader(page, "Группа 1"), tabButton(page, "right"), 0.85);
+    assert.deepEqual((await storedState(page)).tabs.map((item) => item.id), ["left", "right", "a", "b"]);
+    assert.deepEqual((await storedState(page)).tabs.filter((item) => item.groupId === "g").map((item) => item.id), ["a", "b"]);
+    await dragToPart(page, groupHeader(page, "Группа 1"), tabButton(page, "left"), 0.15);
+    await dragToTab(page, groupHeader(page, "Группа 1"), page.locator("#applicability-new-tab"));
+    assert.deepEqual((await storedState(page)).tabs.map((item) => item.id), ["left", "right", "a", "b"]);
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    assert.deepEqual(await page.locator("#applicability-tabs-list > *").evaluateAll((items) => items.map((item) => item.dataset.tabId ?? item.dataset.groupId)), ["left", "right", "g"]);
+  });
+});
+
+test("folders reveal clickable tabs on hover and keyboard focus without shifting the strip", async () => {
+  await withGroupsPage({ activeTabId: "a", groups: [{ id: "g", name: "Группа 1" }], tabs: [
+    { ...tab("a", "Деталь A"), groupId: "g" }, { ...tab("b", "Деталь B"), groupId: "g" }, tab("c", "Отдельно"),
+  ] }, async (page) => {
+    const header = groupHeader(page, "Группа 1");
+    const panel = page.locator(".applicability-tab-group__tabs");
+    assert.equal(await panel.isVisible(), false);
+    assert.equal(await tabButton(page, "a").isVisible(), false);
+    const standaloneBefore = await tabButton(page, "c").boundingBox();
+    await header.hover();
+    assert.equal(await header.getAttribute("aria-expanded"), "true");
+    assert.equal(await panel.isVisible(), true);
+    assert.deepEqual(await tabButton(page, "c").boundingBox(), standaloneBefore);
+    await tabButton(page, "a").hover();
+    assert.equal(await panel.isVisible(), true);
+    assert.ok(await tabButton(page, "b").evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+    }), "The menu is not clipped by the tab strip");
+    if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-folder-hover.png") });
+    await page.locator("#applicability-sku").hover();
+    assert.equal(await panel.isVisible(), false);
+    assert.equal(await header.getAttribute("aria-expanded"), "false");
+    await header.focus();
+    assert.equal(await panel.isVisible(), true);
+    await page.keyboard.press("Tab");
+    assert.equal(await tabButton(page, "a").evaluate((element) => element === document.activeElement), true);
+    await page.keyboard.press("Escape");
+    assert.equal(await panel.isVisible(), false);
+    assert.equal(await header.evaluate((element) => element === document.activeElement), true);
+    await clickTab(page, "b");
+    assert.equal((await storedState(page)).activeTabId, "b");
+    assert.match(await page.locator("#applicability-results-body").textContent(), /OEM-b/);
+    await page.locator("#applicability-sku").click();
+    await page.setViewportSize({ width: 320, height: 760 });
+    await header.hover();
+    const bounds = await panel.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320);
+    assert.equal(await tabButton(page, "b").isVisible(), true);
   });
 });
 
@@ -235,12 +326,12 @@ test("group lists handle unnamed and empty tabs immediately and render untrusted
     assert.match(text, /Артикул: Исходный B/);
     assert.doesNotMatch(text, /Новая применимость 3|Отдельно/);
     await page.keyboard.press("Escape");
-    await tabButton(page, "c").click();
+    await clickTab(page, "c");
     assert.equal(await multiList.isEnabled(), true);
-    await tabButton(page, "d").click();
+    await clickTab(page, "d");
     assert.equal(await multiList.isVisible(), true);
     assert.equal(await multiList.isDisabled(), true);
-    await tabButton(page, "e").click();
+    await clickTab(page, "e");
     assert.equal(await multiList.isVisible(), false);
     await header.dblclick();
     assert.equal(await page.locator("#applicability-article-name-modal").isVisible(), true);
@@ -277,6 +368,7 @@ test("dragging tabs out of a group preserves searches, removes empty folders and
     const feedback = page.locator("#applicability-tab-drop-feedback");
     const beginDragOut = async (id) => {
       const source = tabButton(page, id);
+      await revealTab(source);
       await source.evaluate((element) => element.scrollIntoView({ block: "nearest", inline: "center" }));
       const from = await source.boundingBox();
       await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
@@ -292,8 +384,8 @@ test("dragging tabs out of a group preserves searches, removes empty folders and
       assert.equal((await storedState(page)).tabs.find((item) => item.id === id).groupId, "g", "Preview does not change membership");
     };
     assert.equal(await dropZone.isVisible(), false);
-    await tabButton(page, "c").click();
-    await tabButton(page, "a").click();
+    await clickTab(page, "c");
+    await clickTab(page, "a");
     const originalSearches = (await storedState(page)).tabs.map((item) => [item.id, item.searches]);
     await beginDragOut("a");
     await page.mouse.move(30, 650, { steps: 12 });
@@ -321,7 +413,7 @@ test("dragging tabs out of a group preserves searches, removes empty folders and
     assert.equal(await multiList.isVisible(), false);
     assert.equal(await groupHeader(page, "Детали").count(), 1);
 
-    await tabButton(page, "b").click();
+    await clickTab(page, "b");
     assert.equal(await multiList.isVisible(), true);
     await page.setViewportSize({ width: 320, height: 760 });
     await beginDragOut("b");
@@ -338,7 +430,7 @@ test("dragging tabs out of a group preserves searches, removes empty folders and
     assert.deepEqual((await storedState(page)).groups, []);
     assert.equal(await dropZone.isVisible(), false);
     await page.setViewportSize({ width: 1800, height: 900 });
-    await tabButton(page, "a").dragTo(tabButton(page, "c"));
+    await dragToTab(page, tabButton(page, "a"), tabButton(page, "c"));
     assert.equal(await groupHeader(page, "Группа 1").count(), 1, "Ungrouped tabs can be grouped again");
     const snapshot = await storedState(page);
     await dropZone.dispatchEvent("drop", { dataTransfer: await page.evaluateHandle(() => new DataTransfer()) });

@@ -111,6 +111,7 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
     await closeDocument();
 
     // Deduplication, brand grouping and stable ordering of nonempty blocks are preserved.
+    await page.locator('[data-group-header-id="parts"]').hover();
     await page.locator('[data-tab-id="mixed"]').click();
     assert.deepEqual(await summary(), ["6", "2", "3"]);
     await assertTableFits();

@@ -67,19 +67,17 @@ export function moveApplicabilityTabRelative(tabs, groups, sourceId, targetId, p
   return true;
 }
 
-export function moveApplicabilityGroupRelative(tabs, groups, sourceGroupId, targetGroupId, position = "before") {
+export function moveApplicabilityGroupRelative(tabs, groups, sourceGroupId, targetTabId, position = "before") {
   const source = groups.find((group) => group.id === sourceGroupId);
-  const target = groups.find((group) => group.id === targetGroupId);
-  if (!source || !target || source === target) return false;
+  const target = tabs.find((tab) => tab.id === targetTabId);
+  if (!source || !target || target.groupId === source.id) return false;
   const members = tabs.filter((tab) => tab.groupId === source.id);
   const remaining = tabs.filter((tab) => tab.groupId !== source.id);
-  const targetMembers = remaining.filter((tab) => tab.groupId === target.id);
+  const targetMembers = target.groupId ? remaining.filter((tab) => tab.groupId === target.groupId) : [target];
   if (!members.length || !targetMembers.length) return false;
   const targetIndex = remaining.indexOf(position === "after" ? targetMembers.at(-1) : targetMembers[0]);
   remaining.splice(position === "after" ? targetIndex + 1 : targetIndex, 0, ...members);
   tabs.splice(0, tabs.length, ...remaining);
-  groups.splice(groups.indexOf(source), 1);
-  const adjustedTargetIndex = groups.indexOf(target);
-  groups.splice(position === "after" ? adjustedTargetIndex + 1 : adjustedTargetIndex, 0, source);
+  groups.sort((left, right) => tabs.findIndex((tab) => tab.groupId === left.id) - tabs.findIndex((tab) => tab.groupId === right.id));
   return true;
 }

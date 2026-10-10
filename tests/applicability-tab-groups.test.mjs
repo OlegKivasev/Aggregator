@@ -100,9 +100,25 @@ test("moving tabs relative to each other reorders them and adopts the target gro
 test("moving groups reorders their tab blocks and group persistence order", () => {
   const tabs = [{ id: "a", groupId: "g1" }, { id: "b", groupId: "g2" }, { id: "c", groupId: "g1" }, { id: "d", groupId: "g2" }];
   const groups = [{ id: "g1", name: "Группа 1" }, { id: "g2", name: "Группа 2" }];
-  assert.equal(moveApplicabilityGroupRelative(tabs, groups, "g2", "g1", "before"), true);
+  assert.equal(moveApplicabilityGroupRelative(tabs, groups, "g2", "a", "before"), true);
   assert.deepEqual(tabs.map((tab) => tab.id), ["b", "d", "a", "c"]);
   assert.deepEqual(groups.map((group) => group.id), ["g2", "g1"]);
-  assert.equal(moveApplicabilityGroupRelative(tabs, groups, "g1", "g2", "after"), true);
+  assert.equal(moveApplicabilityGroupRelative(tabs, groups, "g1", "b", "after"), true);
   assert.deepEqual(tabs.map((tab) => tab.id), ["b", "d", "a", "c"]);
+});
+
+test("moving a group past standalone tabs preserves member order and objects", () => {
+  const searches = [{ sku: "TEST" }];
+  const tabs = [{ id: "left", groupId: null }, { id: "a", groupId: "g", searches }, { id: "b", groupId: "g" }, { id: "right", groupId: null }];
+  const groups = [{ id: "g", name: "Группа 1" }];
+  assert.equal(moveApplicabilityGroupRelative(tabs, groups, "g", "left", "before"), true);
+  assert.deepEqual(tabs.map((tab) => tab.id), ["a", "b", "left", "right"]);
+  assert.equal(moveApplicabilityGroupRelative(tabs, groups, "g", "right", "after"), true);
+  assert.deepEqual(tabs.map((tab) => tab.id), ["left", "right", "a", "b"]);
+  assert.equal(tabs.find((tab) => tab.id === "a").searches, searches);
+  const snapshot = structuredClone({ tabs, groups });
+  for (const [source, target] of [["g", "a"], ["g", "missing"], ["missing", "right"]]) {
+    assert.equal(moveApplicabilityGroupRelative(tabs, groups, source, target), false);
+  }
+  assert.deepEqual({ tabs, groups }, snapshot);
 });

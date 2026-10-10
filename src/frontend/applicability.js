@@ -77,6 +77,7 @@ let groupSequence = 1;
 let draggedTabId = null;
 let draggedGroupId = null;
 let tabDropTarget = null;
+let expandedGroupId = null;
 let activeTabId = null;
 let tabSequence = 1;
 let activeRequest = null;
@@ -1036,6 +1037,33 @@ const openGroupDocument = () => {
   openDocumentModalForTabs(tabs.filter((tab) => tab.groupId === group.id));
 };
 
+const closeGroupTabs = (keepGroupId = null) => {
+  // Keep the source tab visible until the native drag finishes.
+  const sourceGroupId = tabs.find((tab) => tab.id === draggedTabId)?.groupId;
+  applicabilityTabsList.querySelectorAll(".applicability-tab-group").forEach((wrapper) => {
+    const expanded = wrapper.dataset.groupId === keepGroupId || wrapper.dataset.groupId === sourceGroupId;
+    wrapper.classList.toggle("is-expanded", wrapper.dataset.groupId === keepGroupId);
+    wrapper.querySelector(".applicability-tab-group__tabs").hidden = !expanded;
+    wrapper.querySelector(".applicability-tab-group__header").setAttribute("aria-expanded", String(expanded));
+  });
+  expandedGroupId = keepGroupId;
+};
+
+const openGroupTabs = (groupId) => {
+  if (draggedGroupId) return;
+  const wrapper = [...applicabilityTabsList.querySelectorAll(".applicability-tab-group")].find((item) => item.dataset.groupId === groupId);
+  if (!wrapper) {
+    closeGroupTabs();
+    return;
+  }
+  closeGroupTabs(groupId);
+  const panel = wrapper.querySelector(".applicability-tab-group__tabs");
+  const bounds = wrapper.getBoundingClientRect();
+  const panelBounds = panel.getBoundingClientRect();
+  panel.style.left = `${Math.max(8, Math.min(bounds.left, window.innerWidth - panelBounds.width - 8))}px`;
+  panel.style.top = `${Math.max(8, Math.min(bounds.bottom, window.innerHeight - panelBounds.height - 8))}px`;
+};
+
 const renderTabs = () => {
   applicabilityTabsList.replaceChildren();
   const groupContainers = new Map();
@@ -1058,6 +1086,12 @@ const renderTabs = () => {
         header.classList.toggle("is-dragging", draggedGroupId === group.id);
         header.title = `${group.name}. Двойной щелчок — переименовать группу.`;
         header.setAttribute("aria-label", group.name);
+        header.setAttribute("aria-expanded", "false");
+        const panel = document.createElement("div");
+        panel.className = "applicability-tab-group__tabs";
+        panel.id = `applicability-group-tabs-${groupContainers.size}`;
+        panel.hidden = true;
+        header.setAttribute("aria-controls", panel.id);
         const icon = document.createElement("img");
         icon.src = "/applicability-group.png";
         icon.alt = "";
@@ -1065,9 +1099,9 @@ const renderTabs = () => {
         const name = document.createElement("span");
         name.textContent = group.name;
         header.append(icon, name);
-        wrapper.append(header);
+        wrapper.append(header, panel);
         applicabilityTabsList.append(wrapper);
-        groupContainers.set(group.id, wrapper);
+        groupContainers.set(group.id, panel);
       }
       container = groupContainers.get(group.id);
     }
@@ -1097,7 +1131,37 @@ const renderTabs = () => {
     button.append(status, title, close);
     container.append(button);
   });
+  if (expandedGroupId) openGroupTabs(expandedGroupId);
 };
+
+applicabilityTabsList.addEventListener("pointerover", (event) => {
+  const wrapper = event.target.closest(".applicability-tab-group");
+  if (wrapper) openGroupTabs(wrapper.dataset.groupId);
+  else if (!draggedTabId && !draggedGroupId) closeGroupTabs();
+});
+applicabilityTabsList.addEventListener("pointerout", (event) => {
+  const wrapper = event.target.closest(".applicability-tab-group");
+  const keyboardFocus = wrapper?.contains(document.activeElement) && document.activeElement.matches(":focus-visible");
+  if (!draggedTabId && !draggedGroupId && wrapper && !wrapper.contains(event.relatedTarget) && !keyboardFocus) closeGroupTabs();
+});
+applicabilityTabsList.addEventListener("focusin", (event) => {
+  const wrapper = event.target.closest(".applicability-tab-group");
+  if (wrapper) openGroupTabs(wrapper.dataset.groupId);
+  else closeGroupTabs();
+});
+applicabilityTabsList.addEventListener("focusout", (event) => {
+  const wrapper = event.target.closest(".applicability-tab-group");
+  if (wrapper && !wrapper.contains(event.relatedTarget) && !wrapper.matches(":hover")) closeGroupTabs();
+});
+applicabilityTabsList.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && expandedGroupId) {
+    event.preventDefault();
+    event.target.closest(".applicability-tab-group")?.querySelector(".applicability-tab-group__header").focus();
+    closeGroupTabs();
+  }
+});
+applicabilityTabsList.addEventListener("scroll", () => { if (expandedGroupId) openGroupTabs(expandedGroupId); });
+window.addEventListener("resize", () => { if (expandedGroupId) openGroupTabs(expandedGroupId); });
 
 const clearTabDropTarget = () => {
   tabDropTarget?.classList.remove("is-group-drop-target", "is-reorder-target", "is-reorder-before", "is-reorder-after");
@@ -1109,8 +1173,8 @@ const clearTabDropTarget = () => {
 const tabAtDropTarget = (element) => {
   const tabButton = element.closest("[data-tab-id]");
   if (tabButton && applicabilityTabsList.contains(tabButton)) return tabs.find((tab) => tab.id === tabButton.dataset.tabId);
-  const header = element.closest("[data-group-header-id]");
-  if (header && applicabilityTabsList.contains(header)) return tabs.find((tab) => tab.groupId === header.dataset.groupHeaderId);
+  const wrapper = element.closest(".applicability-tab-group");
+  if (wrapper && applicabilityTabsList.contains(wrapper)) return tabs.find((tab) => tab.groupId === wrapper.dataset.groupId);
   return null;
 };
 
@@ -1120,10 +1184,13 @@ const tabDropAction = (element, event) => {
   const target = tabAtDropTarget(element);
   if (target) {
     if (source === target) return null;
-    const anchor = element.closest("[data-tab-id], [data-group-header-id]");
+    const anchor = element.closest("[data-tab-id], [data-group-header-id]") ?? element.closest(".applicability-tab-group").querySelector("[data-group-header-id]");
     const targetBounds = anchor.getBoundingClientRect();
     const isTab = anchor.matches("[data-tab-id]");
-    const position = isTab && event.clientX < targetBounds.left + targetBounds.width / 2 ? "before" : "after";
+    const before = isTab && (target.groupId
+      ? event.clientY < targetBounds.top + targetBounds.height / 2
+      : event.clientX < targetBounds.left + targetBounds.width / 2);
+    const position = before ? "before" : "after";
     const sameGroup = source.groupId === (target.groupId ?? null);
     if (isTab && sameGroup && (source.groupId || event.clientX < targetBounds.left + targetBounds.width * 0.3 || event.clientX > targetBounds.right - targetBounds.width * 0.3)) {
       return { type: "reorder-tab", target, position, anchor };
@@ -1138,14 +1205,24 @@ const tabDropAction = (element, event) => {
 
 const groupDropAction = (element, event) => {
   const source = tabGroups.find((group) => group.id === draggedGroupId);
-  const header = element.closest("[data-group-header-id]");
-  if (!source || !header || !applicabilityTabsList.contains(header) || header.dataset.groupHeaderId === source.id) return null;
-  const bounds = header.getBoundingClientRect();
+  if (!source || !applicabilityTabs.contains(element)) return null;
+  let anchor = element.closest(".applicability-tab-group, [data-tab-id]");
+  if (anchor?.closest(".applicability-tab-group")) anchor = anchor.closest(".applicability-tab-group");
+  if (!anchor) {
+    const items = [...applicabilityTabsList.children].filter((item) => item.dataset.groupId !== source.id);
+    anchor = items.find((item) => {
+      const bounds = item.getBoundingClientRect();
+      return event.clientX < bounds.left + bounds.width / 2;
+    }) ?? items.at(-1);
+  }
+  const target = anchor && tabAtDropTarget(anchor);
+  if (!target || target.groupId === source.id) return null;
+  const bounds = anchor.getBoundingClientRect();
   return {
     type: "reorder-group",
-    targetGroupId: header.dataset.groupHeaderId,
+    targetTabId: target.id,
     position: event.clientX < bounds.left + bounds.width / 2 ? "before" : "after",
-    anchor: header.closest(".applicability-tab-group"),
+    anchor,
   };
 };
 
@@ -1157,6 +1234,7 @@ applicabilityTabsList.addEventListener("dragstart", (event) => {
       return;
     }
     draggedGroupId = header.dataset.groupHeaderId;
+    closeGroupTabs();
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", draggedGroupId);
     header.classList.add("is-dragging");
@@ -1177,6 +1255,8 @@ applicabilityTabsList.addEventListener("dragstart", (event) => {
 });
 applicabilityTabs.addEventListener("dragover", (event) => {
   if (!draggedTabId && !draggedGroupId) return;
+  const hoveredGroup = event.target.closest(".applicability-tab-group");
+  if (draggedTabId && hoveredGroup) openGroupTabs(hoveredGroup.dataset.groupId);
   const action = draggedGroupId ? groupDropAction(event.target, event) : tabDropAction(event.target, event);
   if (!action) {
     clearTabDropTarget();
@@ -1218,7 +1298,7 @@ applicabilityTabs.addEventListener("drop", (event) => {
     name: `Группа ${groupSequence++}`,
   })) : null;
   const reorderedTab = action.type === "reorder-tab" && moveApplicabilityTabRelative(tabs, tabGroups, draggedTabId, action.target.id, action.position);
-  const reorderedGroup = action.type === "reorder-group" && moveApplicabilityGroupRelative(tabs, tabGroups, draggedGroupId, action.targetGroupId, action.position);
+  const reorderedGroup = action.type === "reorder-group" && moveApplicabilityGroupRelative(tabs, tabGroups, draggedGroupId, action.targetTabId, action.position);
   const removedFromGroup = action.type === "ungroup" && moveApplicabilityTabOutOfGroup(tabs, tabGroups, draggedTabId);
   clearTabDropTarget();
   draggedTabId = null;
@@ -1240,6 +1320,7 @@ applicabilityTabs.addEventListener("dragend", () => {
   draggedGroupId = null;
   tabUngroupDrop.hidden = true;
   applicabilityTabsList.querySelectorAll(".is-dragging").forEach((button) => button.classList.remove("is-dragging"));
+  closeGroupTabs();
 });
 applicabilityTabsList.addEventListener("dblclick", (event) => {
   const header = event.target.closest("[data-group-header-id]");
