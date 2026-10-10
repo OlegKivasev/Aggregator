@@ -75,7 +75,7 @@ async function dragWithPreview(page, source, target, message) {
   await page.mouse.move(to.x + to.width / 2 + 1, to.y + to.height / 2);
   await page.waitForFunction(() => !document.querySelector("#applicability-tab-drop-feedback").hidden);
   assert.match(await page.locator("#applicability-tab-drop-feedback").textContent(), message);
-  assert.ok(await target.evaluate((element) => element.classList.contains("is-group-drop-target") || element.classList.contains("is-reorder-target")));
+  assert.ok(await target.evaluate((element) => element.classList.contains("is-group-drop-target") && !element.classList.contains("is-reorder-target")));
   if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-group-drop-preview.png") });
   await page.mouse.up();
   await page.waitForFunction(() => document.querySelector("#applicability-tab-drop-feedback").hidden);
@@ -88,6 +88,19 @@ async function dragToPart(page, source, target, fraction = 0.2) {
   await page.mouse.down();
   await page.mouse.move(from.x + from.width / 2 + 12, from.y + from.height / 2, { steps: 4 });
   await page.mouse.move(to.x + to.width * fraction, to.y + to.height / 2, { steps: 16 });
+  await page.mouse.move(to.x + to.width * fraction + 1, to.y + to.height / 2);
+  const position = fraction < 0.5 ? "before" : "after";
+  assert.ok(await target.evaluate((element, side) => element.closest(".is-reorder-target")?.classList.contains(`is-reorder-${side}`), position));
+  const marker = await target.evaluate((element) => {
+    const anchor = element.closest(".is-reorder-target");
+    const style = getComputedStyle(anchor, "::before");
+    return { outline: getComputedStyle(anchor).outlineStyle, width: style.width, content: style.content, left: style.left, right: style.right };
+  });
+  assert.equal(marker.outline, "none");
+  assert.equal(marker.width, "3px");
+  assert.equal(marker.content, '""');
+  assert.equal(marker[position === "before" ? "left" : "right"], "0px");
+  if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, `applicability-reorder-${position}-preview.png`) });
   await page.mouse.up();
   await page.waitForFunction(() => document.querySelector("#applicability-tab-drop-feedback").hidden);
 }
@@ -173,6 +186,31 @@ test("dragging tab edges reorders tabs without grouping them", async () => {
     assert.deepEqual((await storedState(page)).tabs.map((item) => item.id), ["c", "b", "a"]);
     await tabButton(page, "a").click();
     assert.match(await page.locator("#applicability-results-body").textContent(), /OEM-a/);
+  });
+});
+
+test("drag preview switches between either edge and grouping on the same target", async () => {
+  await withGroupsPage({ activeTabId: "a", tabs: [tab("a", "Деталь A"), tab("b", "Деталь B")] }, async (page) => {
+    const source = tabButton(page, "a");
+    const target = tabButton(page, "b");
+    const from = await source.boundingBox();
+    const to = await target.boundingBox();
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from.x + from.width / 2 + 12, from.y + from.height / 2, { steps: 4 });
+    for (const [fraction, expectedClass] of [[0.15, "is-reorder-before"], [0.5, "is-group-drop-target"], [0.85, "is-reorder-after"]]) {
+      await page.mouse.move(to.x + to.width * fraction, to.y + to.height / 2, { steps: 8 });
+      await page.mouse.move(to.x + to.width * fraction + 1, to.y + to.height / 2);
+      assert.ok(await target.evaluate((element, className) => element.classList.contains(className), expectedClass));
+      for (const className of ["is-reorder-before", "is-group-drop-target", "is-reorder-after"]) {
+        assert.equal(await target.evaluate((element, name) => element.classList.contains(name), className), className === expectedClass);
+      }
+    }
+    await page.mouse.up();
+    await page.waitForFunction(() => document.querySelector("#applicability-tab-drop-feedback").hidden);
+    assert.equal(await page.locator(".is-reorder-target, .is-group-drop-target").count(), 0);
+    assert.equal(await page.locator(".applicability-tab-group").count(), 0);
+    assert.deepEqual((await storedState(page)).tabs.map((item) => item.id), ["b", "a"]);
   });
 });
 

@@ -1100,7 +1100,7 @@ const renderTabs = () => {
 };
 
 const clearTabDropTarget = () => {
-  tabDropTarget?.classList.remove("is-group-drop-target", "is-reorder-target");
+  tabDropTarget?.classList.remove("is-group-drop-target", "is-reorder-target", "is-reorder-before", "is-reorder-after");
   tabDropTarget = null;
   tabDropFeedback.hidden = true;
   tabDropFeedback.textContent = "";
@@ -1145,7 +1145,7 @@ const groupDropAction = (element, event) => {
     type: "reorder-group",
     targetGroupId: header.dataset.groupHeaderId,
     position: event.clientX < bounds.left + bounds.width / 2 ? "before" : "after",
-    anchor: header,
+    anchor: header.closest(".applicability-tab-group"),
   };
 };
 
@@ -1188,8 +1188,12 @@ applicabilityTabs.addEventListener("dragover", (event) => {
   if (tabDropTarget !== anchor) {
     clearTabDropTarget();
     tabDropTarget = anchor;
-    anchor.classList.add(action.type === "reorder-tab" || action.type === "reorder-group" ? "is-reorder-target" : "is-group-drop-target");
   }
+  const isReorder = action.type === "reorder-tab" || action.type === "reorder-group";
+  anchor.classList.toggle("is-group-drop-target", !isReorder);
+  anchor.classList.toggle("is-reorder-target", isReorder);
+  anchor.classList.toggle("is-reorder-before", isReorder && action.position === "before");
+  anchor.classList.toggle("is-reorder-after", isReorder && action.position === "after");
   const group = action.type === "group" ? tabGroups.find((item) => item.id === action.target.groupId) : null;
   tabDropFeedback.textContent = action.type === "ungroup"
     ? "Отпустите, чтобы вынести вкладку из группы"
