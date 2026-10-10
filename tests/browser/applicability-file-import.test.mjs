@@ -34,7 +34,7 @@ async function withImportPage(search, check, { configured = true } = {}) {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.addInitScript((entry) => {
-      localStorage.setItem("autoservice.applicabilityState", JSON.stringify({ activeTabId: "original", tabs: [
+      if (!localStorage.getItem("autoservice.applicabilityState")) localStorage.setItem("autoservice.applicabilityState", JSON.stringify({ activeTabId: "original", tabs: [
         { id: "original", name: "Импорт", sku: "", makeNames: ["FORD"], searches: [entry] },
         { id: "other", name: "Другая вкладка", sku: "", searches: [] },
       ] }));
@@ -138,6 +138,184 @@ test("file import previews safe pairs, searches sequentially and appends increme
     assert.deepEqual(await page.locator("#applicability-results-summary dd").allTextContents(), ["6", "5", "1"]);
     if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-file-results.png") });
   });
+});
+
+const storedState = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.applicabilityState")));
+const openImportedTab = async (page, name) => {
+  await page.locator(".applicability-tab-group__header").hover();
+  await page.locator("[data-tab-id]").filter({ hasText: name }).click();
+};
+
+test("structured file creates one persisted group, searches OEMs in their own source tabs and resolves aliases", async () => {
+  const calls = [];
+  await withImportPage(async (route) => {
+    calls.push(route.request().postDataJSON());
+    await route.fulfill({ json: { results: [vehicle], cacheHit: true } });
+  }, async (page) => {
+    await page.locator("#applicability-file-toggle").click();
+    await upload(page, [
+      "\uFEFFАртикул: PART-1", "OEM-артикул: OEM-1 | Volkswagen", "OEM-артикул: OEM1 | VW",
+      "OEM-артикул: OEM1 | Audi", "Артикул: PART-2", "OEM-артикул: OEM1 | Volkswagen",
+      "OEM-артикул: OEM2 | Citroen", "OEM-артикул: OEM3 | ГАЗ", "OEM-артикул: OEM4 | FoMoCo", "OEM-артикул: GM1 | GM",
+    ].join("\r\n"));
+    assert.match(await page.locator("#applicability-file-target").textContent(), /Будет создана группа.*\(2\)/);
+    assert.equal(await page.locator("#applicability-file-article-heading").isVisible(), true);
+    assert.equal((await storedState(page)).tabs.length, 2, "preview must not create tabs");
+    await page.setViewportSize({ width: 375, height: 760 });
+    const card = await page.locator("#applicability-file-modal .analogs-modal__card").boundingBox();
+    assert.ok(card.x >= 0 && card.x + card.width <= 375);
+    const preview = await page.locator("#applicability-file-preview").boundingBox();
+    assert.ok(preview.x >= 0 && preview.x + preview.width <= 375);
+    assert.equal(await page.locator("#applicability-file-article-heading").evaluate((heading) => getComputedStyle(heading).whiteSpace), "normal");
+    if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-structured-file-mobile.png") });
+    await page.setViewportSize({ width: 1366, height: 768 });
+    if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-structured-file-preview.png") });
+    await page.locator("#applicability-file-start").click();
+    await waitFinished(page);
+    assert.deepEqual(calls, [
+      { sku: "OEM-1", brand: "VW" }, { sku: "OEM1", brand: "AUDI" },
+      { sku: "OEM1", brand: "VW" }, { sku: "OEM2", brand: "CITROËN" },
+      { sku: "OEM3", brand: "GAZ" }, { sku: "OEM4", brand: "FORD" },
+    ]);
+    assert.match(await page.locator("#applicability-file-target").textContent(), /группу «Группа 1»/);
+    assert.match(await page.locator("#applicability-file-summary").textContent(), /Добавлено: 6\. Ошибок: 0\. Пропущено: 2/);
+    await page.keyboard.press("Escape");
+    const state = await storedState(page);
+    assert.deepEqual(state.groups.map((group) => group.name), ["Группа 1"]);
+    const imported = state.tabs.filter((tab) => tab.groupId === state.groups[0].id);
+    assert.deepEqual(imported.map((tab) => tab.name), ["PART-1", "PART-2"]);
+    assert.deepEqual(imported.map((tab) => tab.searches.length), [2, 4]);
+    assert.deepEqual(state.tabs[0].searches.map((entry) => entry.sku), ["EXIST1"]);
+    assert.equal(state.tabs[1].searches.length, 0);
+    await openImportedTab(page, "PART-2");
+    assert.deepEqual(await page.locator("#applicability-results-summary dd").allTextContents(), ["4", "4", "0"]);
+    await page.locator("#applicability-multi-list-button").click();
+    const document = await page.locator("#applicability-document-text").inputValue();
+    assert.match(document, /Артикул: PART-1/);
+    assert.match(document, /Артикул: PART-2/);
+    assert.match(document, /OEM-артикул: OEM2/);
+    assert.doesNotMatch(document, /GM1/);
+    await page.keyboard.press("Escape");
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    const restored = await storedState(page);
+    assert.deepEqual(restored.groups, state.groups);
+    assert.deepEqual(restored.tabs.filter((tab) => tab.groupId).map((tab) => [tab.name, tab.searches.length]), [["PART-1", 2], ["PART-2", 4]]);
+    assert.equal(calls.length, 6);
+    if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-structured-file-group.png") });
+  });
+});
+
+test("one source article appends its OEMs to the current tab and manual make selection accepts aliases", async () => {
+  const calls = [];
+  await withImportPage(async (route) => {
+    calls.push(route.request().postDataJSON());
+    await route.fulfill({ json: { results: [vehicle], cacheHit: false } });
+  }, async (page) => {
+    await page.locator("#applicability-file-toggle").click();
+    await upload(page, "Артикул: SINGLE-1\nOEM-артикул: SINGLE-OE | Mercedes Benz");
+    assert.match(await page.locator("#applicability-file-target").textContent(), /Один исходный артикул/);
+    await page.locator("#applicability-file-start").click();
+    await waitFinished(page);
+    await page.keyboard.press("Escape");
+    const state = await storedState(page);
+    assert.deepEqual(state.groups, []);
+    assert.equal(state.tabs.length, 2);
+    assert.equal(state.tabs[0].id, "original");
+    assert.equal(state.tabs[0].name, "SINGLE-1");
+    assert.deepEqual(state.tabs[0].searches.map((entry) => [entry.sku, entry.makeName]), [["EXIST1", "FORD"], ["SINGLE-OE", "MERCEDES-BENZ"]]);
+    await page.locator('#applicability-selected-makes [data-remove-make-name="FORD"]').click();
+    await page.locator("#applicability-make").fill("Фольксваген");
+    const option = page.locator('#applicability-makes [data-make-name="VW"]');
+    assert.equal(await option.isVisible(), true);
+    await option.click();
+    await page.locator("#applicability-sku").fill("MANUAL1");
+    await page.locator("#applicability-submit").click();
+    await page.waitForFunction(() => !document.querySelector("#applicability-submit").disabled);
+    assert.deepEqual(calls, [{ sku: "SINGLE-OE", brand: "MERCEDES-BENZ" }, { sku: "MANUAL1", brand: "VW" }]);
+  });
+});
+
+test("stopped structured imports resume in the same group even after switching tabs", async () => {
+  const calls = [];
+  let releasePending;
+  const pendingGate = new Promise((resolve) => { releasePending = resolve; });
+  let reportPending;
+  const pendingStarted = new Promise((resolve) => { reportPending = resolve; });
+  await withImportPage(async (route) => {
+    calls.push(route.request().postDataJSON().sku);
+    if (calls.length === 2) {
+      reportPending();
+      await pendingGate;
+      await route.abort();
+    } else await route.fulfill({ json: { results: [vehicle], cacheHit: false } });
+  }, async (page) => {
+    await page.locator("#applicability-file-toggle").click();
+    await upload(page, "Артикул: PART-1\nOEM-артикул: OE1 | FORD\nАртикул: PART-2\nOEM-артикул: OE2 | FORD\nOEM-артикул: OE3 | FORD");
+    await page.locator("#applicability-file-start").click();
+    await pendingStarted;
+    await page.locator("#applicability-file-stop").click();
+    await waitFinished(page);
+    await page.keyboard.press("Escape");
+    await page.locator('[data-tab-id="other"]').click();
+    await page.locator("#applicability-file-toggle").click();
+    assert.match(await page.locator("#applicability-file-target").textContent(), /группу «Группа 1»/);
+    releasePending();
+    await page.locator("#applicability-file-start").click();
+    await waitFinished(page);
+    const state = await storedState(page);
+    assert.equal(state.groups.length, 1);
+    assert.deepEqual(state.tabs.filter((tab) => tab.groupId).map((tab) => [tab.name, tab.searches.map((entry) => entry.sku)]), [["PART-1", ["OE1"]], ["PART-2", ["OE2", "OE3"]]]);
+    assert.equal(state.tabs[1].searches.length, 0);
+    assert.deepEqual(calls, ["OE1", "OE2", "OE2", "OE3"]);
+  });
+});
+
+test("closing an imported tab aborts its group queue and late results cannot restore it", async () => {
+  const calls = [];
+  let releasePending;
+  const pendingGate = new Promise((resolve) => { releasePending = resolve; });
+  let reportPending;
+  const pendingStarted = new Promise((resolve) => { reportPending = resolve; });
+  await withImportPage(async (route) => {
+    calls.push(route.request().postDataJSON().sku);
+    reportPending();
+    await pendingGate;
+    await route.fulfill({ json: { results: [vehicle], cacheHit: false } });
+  }, async (page) => {
+    await page.locator("#applicability-file-toggle").click();
+    await upload(page, "Артикул: PART-1\nOEM-артикул: OE1 | FORD\nАртикул: PART-2\nOEM-артикул: OE2 | FORD");
+    await page.locator("#applicability-file-start").click();
+    await pendingStarted;
+    await page.keyboard.press("Escape");
+    const state = await storedState(page);
+    const target = state.tabs.find((tab) => tab.name === "PART-1");
+    await page.locator(".applicability-tab-group__header").hover();
+    await page.locator(`[data-close-tab-id="${target.id}"]`).click();
+    await waitFinished(page);
+    releasePending();
+    await page.locator("#applicability-file-toggle").click();
+    await page.locator("#applicability-file-start").click();
+    await waitFinished(page);
+    assert.match(await page.locator("#applicability-file-feedback").textContent(), /Вкладка импорта закрыта/);
+    const after = await storedState(page);
+    assert.equal(after.tabs.some((tab) => tab.id === target.id), false);
+    assert.equal(after.tabs.find((tab) => tab.name === "PART-2").searches.length, 0);
+    assert.deepEqual(calls, ["OE1"]);
+  });
+});
+
+test("structured file creates no group when the API key is missing", async () => {
+  await withImportPage(async () => assert.fail("No search is allowed without a key"), async (page) => {
+    await page.locator("#applicability-file-toggle").click();
+    await upload(page, "Артикул: PART-1\nOEM-артикул: OE1 | FORD\nАртикул: PART-2\nOEM-артикул: OE2 | FORD");
+    await page.locator("#applicability-file-start").click();
+    await waitFinished(page);
+    assert.match(await page.locator("#applicability-file-feedback").textContent(), /Укажите API-ключ/);
+    const state = await storedState(page);
+    assert.equal(state.tabs.length, 2);
+    assert.ok(!state.groups?.length);
+  }, { configured: false });
 });
 
 test("stopping import preserves completed rows, cancels queued searches and allows continuation", async () => {

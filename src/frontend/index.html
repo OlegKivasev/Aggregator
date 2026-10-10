@@ -754,12 +754,12 @@
         </header>
         <form class="applicability-file-modal__form" id="applicability-file-form">
           <div class="applicability-file-modal__content">
-            <p id="applicability-file-help">Одна пара в строке: <strong>артикул | бренд</strong>. До 500 строк, размер до 1 МБ.</p>
+            <p id="applicability-file-help">Пары <strong>артикул | бренд</strong> или блоки <strong>Артикул: …</strong> с его строками <strong>OEM-артикул: … | бренд</strong>. Несколько исходных артикулов создают группу вкладок. До 5000 строк и 100 исходных артикулов, размер до 1 МБ.</p>
             <p id="applicability-file-target"></p>
             <label class="field" for="applicability-file-input"><span>Текстовый файл</span><input id="applicability-file-input" type="file" accept=".txt,text/plain" /></label>
             <p class="applicability-feedback" id="applicability-file-feedback" role="status" aria-live="polite" hidden></p>
             <div class="applicability-file-preview" id="applicability-file-preview" hidden>
-              <table><thead><tr><th scope="col">№</th><th scope="col">OEM-артикул</th><th scope="col">Бренд</th><th scope="col">Статус</th></tr></thead><tbody id="applicability-file-rows"></tbody></table>
+              <table><thead><tr><th scope="col">№</th><th scope="col" id="applicability-file-article-heading" hidden>Исходный артикул</th><th scope="col">OEM-артикул</th><th scope="col">Бренд</th><th scope="col">Статус</th></tr></thead><tbody id="applicability-file-rows"></tbody></table>
             </div>
             <progress id="applicability-file-progress" value="0" max="1" aria-label="Обработка файла" hidden></progress>
             <p id="applicability-file-summary" role="status" aria-live="polite"></p>

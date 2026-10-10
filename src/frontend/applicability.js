@@ -2,6 +2,7 @@ import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicleGroups 
 import { normalizeApplicabilitySku, parseApplicabilitySkus, runApplicabilityBatch } from "./applicability-search-input.js";
 import { bootstrapApplicabilityOemSidebar } from "./applicability-oem-sidebar.js";
 import { applicabilityFileMaxBytes, decodeApplicabilityFile, parseApplicabilityFile } from "./applicability-file-import.js";
+import { createApplicabilityMakeMatcher } from "./applicability-make-aliases.js";
 import { moveApplicabilityGroupRelative, moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, moveApplicabilityTabRelative, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "./applicability-tab-groups.js";
 
 const markupFunction = document.querySelector("#markup-function");
@@ -71,6 +72,7 @@ const fileImportStop = document.querySelector("#applicability-file-stop");
 const closeFileImportButtons = [...document.querySelectorAll("[data-close-applicability-file]")];
 
 let makesByName = new Map();
+let makeMatcher = createApplicabilityMakeMatcher([]);
 let tabs = [];
 let tabGroups = [];
 let groupSequence = 1;
@@ -103,6 +105,9 @@ let oemSidebar = null;
 let fileImportRows = [];
 let fileImportRequest = null;
 let fileImportTabId = null;
+let fileImportArticles = [];
+let fileImportTargets = new Map();
+let fileImportGroupId = null;
 let fileImportReturnFocus = null;
 let fileReadSequence = 0;
 let fileReading = false;
@@ -312,9 +317,9 @@ const isMakeSelected = (make, tab = getActiveTab()) => selectedMakeNames(tab)
   .some((name) => name.toLocaleUpperCase() === make.name.toLocaleUpperCase());
 
 const matchingMakes = () => {
-  const query = makeInput.value.trim().toLocaleUpperCase();
+  const query = makeInput.value.trim();
   return [...makesByName.values()]
-    .filter((make) => !query || make.name.toLocaleUpperCase().includes(query))
+    .filter((make) => makeMatcher.matches(make.name, query))
     .slice(0, 80);
 };
 
@@ -413,6 +418,7 @@ const appendCell = (row, text) => {
   const cell = document.createElement("td");
   cell.textContent = text;
   row.append(cell);
+  return cell;
 };
 
 const completedSearches = (tab) => tab.searches.filter((entry) => entry.hasSearched);
@@ -514,6 +520,50 @@ const setFileImportFeedback = (message) => {
   fileImportFeedback.hidden = !message;
 };
 
+const updateFileImportTarget = () => {
+  if (fileImportArticles.length > 1) {
+    const group = tabGroups.find((item) => item.id === fileImportGroupId);
+    fileImportTarget.textContent = group
+      ? `Результаты добавляются в группу «${group.name}». Вкладок: ${fileImportArticles.length}; у каждого исходного артикула свои OEM-номера.`
+      : fileImportTargets.size
+        ? `Результаты добавляются в исходные вкладки (${fileImportArticles.length}). У каждого артикула свои OEM-номера.`
+        : `Будет создана группа с вкладками по исходным артикулам (${fileImportArticles.length}). У каждого артикула свои OEM-номера.`;
+    return;
+  }
+  const tabId = fileImportTargets.values().next().value ?? fileImportTabId;
+  const tab = tabs.find((item) => item.id === tabId) ?? getActiveTab();
+  const name = tab?.name || `Новая применимость ${tabs.indexOf(tab) + 1}`;
+  fileImportTarget.textContent = fileImportArticles.length
+    ? `Один исходный артикул: «${fileImportArticles[0]}». Его OEM-номера будут добавлены в текущую вкладку «${name}»; вкладка получит название артикула.`
+    : `Результаты добавляются во вкладку «${name}».`;
+};
+
+const prepareFileImportTargets = (tab) => {
+  if (fileImportTargets.size) {
+    if ([...fileImportTargets.values()].some((id) => !tabs.some((item) => item.id === id))) {
+      throw new Error("Вкладка импорта закрыта. Выберите файл заново для продолжения.");
+    }
+    return;
+  }
+  if (fileImportArticles.length > 1) {
+    const group = { id: `applicability-group-${Date.now()}-${tabSequence++}`, name: `Группа ${groupSequence++}` };
+    tabGroups.push(group);
+    fileImportGroupId = group.id;
+    for (const article of fileImportArticles) {
+      const target = createTab({ name: article, groupId: group.id });
+      tabs.push(target);
+      fileImportTargets.set(article, target.id);
+    }
+    if (getActiveTab() === tab) activeTabId = fileImportTargets.values().next().value;
+  } else {
+    if (fileImportArticles.length) tab.name = normalizeTabName(fileImportArticles[0]);
+    fileImportTargets.set(fileImportArticles[0] ?? "", tab.id);
+  }
+  renderActiveTab();
+  saveApplicabilityState();
+  updateFileImportTarget();
+};
+
 const updateFileImportControls = () => {
   fileImportInput.disabled = Boolean(fileImportRequest);
   fileImportStart.disabled = Boolean(activeRequest) || fileReading || !fileImportRows.some((row) => row.state === "pending" || row.state === "error");
@@ -532,6 +582,8 @@ const renderFileImportRows = () => {
   fileImportRows.forEach((row) => {
     row.element = document.createElement("tr");
     appendCell(row.element, String(row.lineNumber));
+    const articleCell = appendCell(row.element, row.article ?? "");
+    articleCell.hidden = !fileImportArticles.length;
     appendCell(row.element, row.sku);
     appendCell(row.element, row.brand);
     row.statusCell = document.createElement("td");
@@ -540,6 +592,7 @@ const renderFileImportRows = () => {
     fileImportRowsBody.append(row.element);
   });
   fileImportPreview.hidden = !fileImportRows.length;
+  document.querySelector("#applicability-file-article-heading").hidden = !fileImportArticles.length;
   const ready = fileImportRows.filter((row) => row.state === "pending").length;
   fileImportSummary.textContent = `Готово к поиску: ${ready}. Пропущено: ${fileImportRows.length - ready}.`;
   updateFileImportControls();
@@ -554,8 +607,7 @@ const closeFileImportModal = () => {
 fileImportButton.addEventListener("click", () => {
   closeMakeMenu();
   fileImportReturnFocus = document.activeElement;
-  const tab = fileImportRequest ? tabs.find((item) => item.id === fileImportTabId) : getActiveTab();
-  fileImportTarget.textContent = `Результаты добавляются во вкладку «${tab?.name || `Новая применимость ${tabs.indexOf(tab) + 1}`}».`;
+  updateFileImportTarget();
   fileImportModal.hidden = false;
   updateFileImportControls();
   (fileImportRequest ? fileImportStop : fileImportInput).focus();
@@ -570,11 +622,15 @@ fileImportInput.addEventListener("change", async () => {
   const sequence = ++fileReadSequence;
   const file = fileImportInput.files[0];
   fileImportRows = [];
+  fileImportArticles = [];
+  fileImportTargets = new Map();
+  fileImportGroupId = null;
   fileImportRowsBody.replaceChildren();
   fileImportPreview.hidden = true;
   fileImportProgress.hidden = true;
   fileImportSummary.textContent = "";
   setFileImportFeedback("");
+  updateFileImportTarget();
   fileReading = Boolean(file);
   updateFileImportControls();
   if (!file) return;
@@ -585,7 +641,10 @@ fileImportInput.addEventListener("change", async () => {
     await makesReady;
     if (sequence !== fileReadSequence) return;
     if (!makesByName.size) throw new Error("Не удалось загрузить список брендов. Обновите страницу.");
-    fileImportRows = parseApplicabilityFile(text, [...makesByName.values()].map((make) => make.name));
+    const parsed = parseApplicabilityFile(text, [...makesByName.values()].map((make) => make.name));
+    fileImportRows = parsed.rows;
+    fileImportArticles = parsed.articles;
+    updateFileImportTarget();
     renderFileImportRows();
   } catch (error) {
     if (sequence === fileReadSequence) setFileImportFeedback(error instanceof Error ? error.message : "Не удалось прочитать файл.");
@@ -627,12 +686,16 @@ fileImportForm.addEventListener("submit", async (event) => {
     controller.signal.throwIfAborted();
     if (apiKeyInput.value.trim()) await saveApiKey(AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]));
     if (!hasStoredApiKey) throw new Error("Укажите API-ключ PartsAPI в настройках рядом с кнопкой импорта.");
+    controller.signal.throwIfAborted();
+    if (!tabs.includes(tab)) return;
+    prepareFileImportTargets(tab);
     fileImportProgress.max = queue.length;
     fileImportProgress.hidden = false;
     updateProgress();
     for (const row of queue) {
-      if (controller.signal.aborted || !tabs.includes(tab)) break;
-      if (duplicateSearch(tab, row.sku, row.brand)) {
+      const target = tabs.find((item) => item.id === fileImportTargets.get(row.article ?? ""));
+      if (controller.signal.aborted || !target) break;
+      if (duplicateSearch(target, row.sku, row.brand)) {
         setFileImportRowStatus(row, "skipped", "Уже есть во вкладке");
         skipped += 1;
         completed += 1;
@@ -640,19 +703,19 @@ fileImportForm.addEventListener("submit", async (event) => {
         continue;
       }
       const entry = createSearchEntry({ sku: row.sku, makeName: row.brand, status: "Ищем применимость…" });
-      tab.searches.push(entry);
+      target.searches.push(entry);
       setFileImportRowStatus(row, "searching", "Ищем применимость…");
-      if (getActiveTab() === tab) renderResults(tab);
+      if (getActiveTab() === target) renderResults(target);
       try {
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(35_000)]);
         const result = await executeApplicabilitySearch(entry.sku, entry.makeName, signal);
         signal.throwIfAborted();
-        if (!tabs.includes(tab)) break;
+        if (!tabs.includes(target)) break;
         applySearchResult(entry, result);
         setFileImportRowStatus(row, "done", `${entry.status}${result.cacheHit ? " · Из базы" : ""}`);
         added += 1;
       } catch (error) {
-        tab.searches = tab.searches.filter((item) => item !== entry);
+        target.searches = target.searches.filter((item) => item !== entry);
         if (controller.signal.aborted) {
           setFileImportRowStatus(row, "pending", "Остановлено");
           break;
@@ -666,7 +729,7 @@ fileImportForm.addEventListener("submit", async (event) => {
           controller.abort();
         }
       } finally {
-        if (getActiveTab() === tab) renderResults(tab);
+        if (getActiveTab() === target) renderResults(target);
         renderTabs();
         saveApplicabilityState();
       }
@@ -1369,7 +1432,8 @@ const addTab = () => {
 const closeTab = (tabId) => {
   const index = tabs.findIndex((tab) => tab.id === tabId);
   if (index < 0) return;
-  if (fileImportTabId === tabId || (!fileImportRequest && activeTabId === tabId)) activeRequest?.abort();
+  if ((fileImportRequest && (fileImportTargets.size ? [...fileImportTargets.values()].includes(tabId) : fileImportTabId === tabId))
+    || (!fileImportRequest && activeTabId === tabId)) activeRequest?.abort();
   tabs.splice(index, 1);
   pruneApplicabilityGroups();
   if (!tabs.length) tabs.push(createTab());
@@ -1392,6 +1456,7 @@ const loadMakes = async () => {
     });
     if (!makes.size) throw new Error("Make list is empty");
     makesByName = makes;
+    makeMatcher = createApplicabilityMakeMatcher([...makes.values()].map((make) => make.name));
   } catch {
     setFeedback("Не удалось загрузить список брендов. Обновите страницу и повторите попытку.");
   }
