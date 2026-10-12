@@ -65,6 +65,10 @@ test("applicability key failures use a red toast and retain successful batch res
         await route.fulfill({ status: 404, json: { message: "Not found" } });
       } else if (path === "/api/applicability/cached-brands") {
         await route.fulfill({ json: { brands: [] } });
+      } else if (path === "/api/applicability/proxies") {
+        await route.fulfill({ json: { persistent: true, activeRouteId: null, directLimited: false, lastSwitchReason: null,
+          usage: { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0, windowStartedAt: null, resetAt: null, secondsUntilReset: null },
+          directUsage: { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0 }, proxies: [] } });
       } else if (path === "/api/suppliers/sessions") {
         await route.fulfill({ json: { sessions: [] } });
       } else if (path === "/api/garage/vehicles") {
@@ -109,7 +113,8 @@ test("applicability key failures use a red toast and retain successful batch res
     await page.locator("#applicability-settings-toggle").click();
     await page.waitForLoadState("networkidle");
     const drawer = page.locator("#applicability-settings-drawer");
-    assert.equal(await drawer.locator('input[type="password"]').count(), 1);
+    assert.equal(await drawer.locator('#applicability-api-key[type="password"]').count(), 1);
+    assert.equal(await drawer.locator('#applicability-proxy-password[type="password"]').count(), 1);
     assert.equal(await page.locator("#applicability-fallback-key-add").count(), 0);
     assert.equal(await page.locator("#applicability-primary-key-controls").count(), 0);
     assert.doesNotMatch(await drawer.textContent(), /Запасные|Сделать основным|Запросов за 24 часа|Сброс:|лимит исчерпан/);

@@ -293,6 +293,7 @@
               </button>
             </form>
           </div>
+          <button type="button" class="applicability-route-indicator" id="applicability-route-indicator" aria-controls="applicability-settings-drawer" aria-live="polite" title="Выбрать соединение PartsAPI">PartsAPI: проверка соединения…</button>
           <p class="applicability-feedback" id="applicability-feedback" role="status" aria-live="polite" hidden></p>
           <div class="results-panel applicability-results-panel card border-0 shadow-sm overflow-hidden" id="applicability-result" aria-busy="false">
             <div class="results-table applicability-results-table">
@@ -889,10 +890,31 @@
             <p class="settings-drawer__status" id="applicability-api-key-status" role="status" aria-live="polite" hidden>Ключ введён</p>
           </div>
         </details>
+        <details class="applicability-key-method applicability-proxy-settings" id="applicability-proxy-settings" open>
+          <summary>Соединение PartsAPI</summary>
+          <div class="applicability-key-method__content">
+            <p class="settings-drawer__hint">При лимите по IP запрос повторится через следующий доступный прокси. Соединение можно выбрать вручную.</p>
+            <p class="settings-drawer__hint applicability-proxy-usage" id="applicability-proxy-usage" aria-live="polite"></p>
+            <div class="applicability-proxy-routes" id="applicability-proxy-routes" aria-label="Соединения PartsAPI"></div>
+            <form class="auth-form applicability-proxy-form" id="applicability-proxy-form">
+              <label class="field" for="applicability-proxy-protocol"><span>Тип прокси</span><select id="applicability-proxy-protocol" name="protocol"><option value="http">HTTP</option><option value="https">HTTPS</option></select></label>
+              <div class="applicability-proxy-address">
+                <label class="field" for="applicability-proxy-host"><span>IPv4-адрес</span><input id="applicability-proxy-host" name="host" type="text" maxlength="15" autocomplete="off" placeholder="IP из кабинета прокси" required /></label>
+                <label class="field" for="applicability-proxy-port"><span>Порт</span><input id="applicability-proxy-port" name="port" type="number" min="1" max="65535" autocomplete="off" required /></label>
+              </div>
+              <label class="field" for="applicability-proxy-login"><span>Логин</span><input id="applicability-proxy-login" name="login" type="text" maxlength="256" autocomplete="off" /></label>
+              <label class="field" for="applicability-proxy-password"><span>Пароль</span><span class="password-field"><input id="applicability-proxy-password" name="password" type="password" maxlength="4096" autocomplete="new-password" /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="applicability-proxy-password"><span aria-hidden="true">&#128065;</span></button></span></label>
+              <button class="btn btn-primary" type="submit" id="applicability-proxy-add">Добавить прокси</button>
+            </form>
+            <p class="settings-drawer__hint" id="applicability-proxy-persistence"></p>
+            <p class="settings-drawer__status applicability-proxy-feedback" id="applicability-proxy-feedback" role="status" aria-live="polite" hidden></p>
+          </div>
+        </details>
       </div>
     </aside>
 
     <script type="module" src="/app.js"></script>
     <script type="module" src="/applicability.js"></script>
+    <script type="module" src="/applicability-proxy-settings.js"></script>
   </body>
 </html>

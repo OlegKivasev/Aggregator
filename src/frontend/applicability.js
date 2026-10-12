@@ -479,20 +479,24 @@ const applyCachedBrand = async (sku, { force = false } = {}) => {
 };
 
 const searchApplicability = async (sku, brand, signal) => {
-  const response = await fetch("/api/applicability/search", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ sku, brand }),
-    signal,
-  });
-  const payload = await response.json();
-  if (!response.ok) {
-    const error = new Error(typeof payload?.message === "string" ? payload.message : "Не удалось выполнить поиск применимости.");
-    error.status = response.status;
-    throw error;
+  try {
+    const response = await fetch("/api/applicability/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ sku, brand }),
+      signal,
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      const error = new Error(typeof payload?.message === "string" ? payload.message : "Не удалось выполнить поиск применимости.");
+      error.status = response.status;
+      throw error;
+    }
+    if (!Array.isArray(payload?.results) || typeof payload.cacheHit !== "boolean") throw new Error("Сервис вернул некорректный ответ.");
+    return { results: payload.results, cacheHit: payload.cacheHit };
+  } finally {
+    document.dispatchEvent(new Event("partsapi-request-finished"));
   }
-  if (!Array.isArray(payload?.results) || typeof payload.cacheHit !== "boolean") throw new Error("Сервис вернул некорректный ответ.");
-  return { results: payload.results, cacheHit: payload.cacheHit };
 };
 
 const executeApplicabilitySearch = async (sku, brand, signal) => {

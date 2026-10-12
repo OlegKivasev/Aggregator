@@ -3,6 +3,9 @@ import { decodeRosskoApiCredentials, SupplierSessionService } from "./applicatio
 import { ApplicabilityApplicationService } from "./applicability/applicability-application-service.ts";
 import { EncryptedApplicabilityApiKeyStore } from "./applicability/encrypted-api-key-store.ts";
 import { PartsApiApplicabilityClient } from "./applicability/partsapi-client.ts";
+import { EncryptedPartsApiProxyStore } from "./applicability/encrypted-proxy-store.ts";
+import { PartsApiRoutingClient } from "./applicability/partsapi-routing-client.ts";
+import type { PartsApiProxyConfig } from "./applicability/partsapi-proxy-config.ts";
 import { SqliteApplicabilityCacheRepository } from "./applicability/sqlite-applicability-cache-repository.ts";
 import type { ApplicabilitySavedArticlesQuery, ApplicabilitySearchRequest } from "./applicability/types.ts";
 import { getArmtekApiConfig, getGarageDatabasePath, getStateFilePath, getStpartsApiConfig, supplierCredentialsEncryptionKey } from "./config.ts";
@@ -79,7 +82,10 @@ const searchService = new SearchApplicationService(
   sessionManager,
   (supplier) => sessionService.disconnectSupplier(supplier),
 );
-const applicabilityService = new ApplicabilityApplicationService(new PartsApiApplicabilityClient(), applicabilityApiKeyStore, applicabilityCacheRepository);
+const applicabilityProxyStore = new EncryptedPartsApiProxyStore(getStateFilePath("partsapi-proxies.enc.json"), supplierCredentialsEncryptionKey);
+const applicabilityService = new ApplicabilityApplicationService(
+  new PartsApiRoutingClient(new PartsApiApplicabilityClient(), applicabilityProxyStore), applicabilityApiKeyStore, applicabilityCacheRepository,
+);
 
 function bootstrapPersistedSessions(): void {
   const rosskoCredentials = credentialStore.get("rossko");
@@ -175,6 +181,10 @@ export const deleteApplicabilitySavedArticle = (query: ApplicabilitySearchReques
 export const getApplicabilityApiKeyState = () => applicabilityService.getApiKeyState();
 export const saveApplicabilityApiKey = (apiKey: string) => applicabilityService.saveApiKey(apiKey);
 export const deleteApplicabilityApiKey = () => applicabilityService.deleteApiKey();
+export const getApplicabilityProxyState = () => applicabilityProxyStore.getState();
+export const addApplicabilityProxy = (config: PartsApiProxyConfig) => applicabilityProxyStore.add(config);
+export const selectApplicabilityProxy = (routeId: string | null) => applicabilityProxyStore.select(routeId);
+export const deleteApplicabilityProxy = (id: string) => applicabilityProxyStore.delete(id);
 
 export async function shutdownSearchService(): Promise<void> {
   closeSiteHttpAgent();

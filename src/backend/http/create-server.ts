@@ -17,6 +17,7 @@ import type {
 } from "../types.ts";
 import type { ApplicabilityApiKeyState, ApplicabilitySavedArticlesPage, ApplicabilitySavedArticlesQuery, ApplicabilitySearchRequest, ApplicabilitySearchResult, ApplicabilityVehicle } from "../applicability/types.ts";
 import { PartsApiKeyError } from "../applicability/partsapi-key-error.ts";
+import { parsePartsApiProxyConfig, PartsApiProxyValidationError, type PartsApiProxyConfig, type PartsApiProxyState } from "../applicability/partsapi-proxy-config.ts";
 import {
   articleLengthLimit,
   parseApplicabilityApiKeyPayload,
@@ -65,6 +66,10 @@ export interface AggregatorApplication {
   getApplicabilityApiKeyState(): ApplicabilityApiKeyState;
   saveApplicabilityApiKey(apiKey: string): ApplicabilityApiKeyState;
   deleteApplicabilityApiKey(): ApplicabilityApiKeyState;
+  getApplicabilityProxyState(): PartsApiProxyState;
+  addApplicabilityProxy(config: PartsApiProxyConfig): PartsApiProxyState;
+  selectApplicabilityProxy(routeId: string | null): PartsApiProxyState;
+  deleteApplicabilityProxy(id: string): PartsApiProxyState;
 }
 
 interface CreateAggregatorServerOptions {
@@ -111,6 +116,10 @@ function serveApplicabilityError(
   error: unknown,
   reportError: (event: OperationalErrorEvent) => void,
 ): void {
+  if (error instanceof PartsApiProxyValidationError) {
+    serveJson(response, 400, { message: error.message });
+    return;
+  }
   if (error instanceof RequestBodyError) {
     serveJson(response, error.statusCode, { message: "Applicability request is invalid" });
     return;
@@ -291,6 +300,38 @@ export function createAggregatorServer({
         serveApplicabilityError(response, error, reportError);
         return;
       }
+    }
+
+    if (url.pathname === "/api/applicability/proxies") {
+      try {
+        if (request.method === "GET") {
+          serveJson(response, 200, application.getApplicabilityProxyState());
+          return;
+        }
+        if (request.method === "POST") {
+          serveJson(response, 200, application.addApplicabilityProxy(parsePartsApiProxyConfig(await readJsonBody(request))));
+          return;
+        }
+      } catch (error) { serveApplicabilityError(response, error, reportError); return; }
+    }
+
+    if (url.pathname === "/api/applicability/proxy-route" && request.method === "PUT") {
+      try {
+        const payload = await readJsonBody(request);
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new PartsApiProxyValidationError();
+        const { routeId } = payload as Record<string, unknown>;
+        if (routeId !== null && typeof routeId !== "string") throw new PartsApiProxyValidationError();
+        serveJson(response, 200, application.selectApplicabilityProxy(routeId));
+      } catch (error) { serveApplicabilityError(response, error, reportError); }
+      return;
+    }
+
+    const proxyMatch = /^\/api\/applicability\/proxies\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (proxyMatch && request.method === "DELETE") {
+      try {
+        serveJson(response, 200, application.deleteApplicabilityProxy(proxyMatch[1]));
+      } catch (error) { serveApplicabilityError(response, error, reportError); }
+      return;
     }
 
     if (url.pathname === "/api/ui-preferences/table-column-widths") {

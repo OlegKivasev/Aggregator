@@ -8,6 +8,7 @@ import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 import { PartsApiApplicabilityClient } from "../src/backend/applicability/partsapi-client.ts";
 import { ApplicabilityApplicationService } from "../src/backend/applicability/applicability-application-service.ts";
 import { EncryptedApplicabilityApiKeyStore } from "../src/backend/applicability/encrypted-api-key-store.ts";
+import { EncryptedPartsApiProxyStore } from "../src/backend/applicability/encrypted-proxy-store.ts";
 import { SqliteApplicabilityCacheRepository } from "../src/backend/applicability/sqlite-applicability-cache-repository.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,6 +52,9 @@ function createApplication(overrides = {}) {
     getApplicabilityApiKeyState: () => ({ configured: false, persistent: true, maskedKey: null }),
     saveApplicabilityApiKey: () => ({ configured: true, persistent: true, maskedKey: "…t-key" }),
     deleteApplicabilityApiKey: () => ({ configured: false, persistent: true, maskedKey: null }),
+    getApplicabilityProxyState: () => ({ persistent: true, activeRouteId: null, directLimited: false, lastSwitchReason: null,
+      usage: { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0, windowStartedAt: null, resetAt: null, secondsUntilReset: null },
+      directUsage: { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0 }, proxies: [] }),
     ...overrides,
   };
 }
@@ -108,6 +112,37 @@ test("HTTP server delegates authorization to the injected application", async ()
   assert.equal(response.status, 200);
   assert.deepEqual(receivedCredentials, { login: "api-user", password: " secret " });
   assert.deepEqual(await response.json(), { session: session("armtek", true) });
+});
+
+test("PartsAPI proxy routes validate input, hide credentials and protect the active connection", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "http-proxies-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const proxies = new EncryptedPartsApiProxyStore(join(directory, "proxies.enc.json"), Buffer.alloc(32, 6));
+  const { baseUrl } = await listen(createApplication({
+    getApplicabilityProxyState: () => proxies.getState(),
+    addApplicabilityProxy: (config) => proxies.add(config),
+    selectApplicabilityProxy: (id) => proxies.select(id),
+    deleteApplicabilityProxy: (id) => proxies.delete(id),
+  }), () => {});
+  const request = (path, method, body) => fetch(`${baseUrl}/api/applicability/${path}`, { method, headers: { "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const config = { protocol: "http", host: "8.8.8.8", port: 8000, login: "fictional-private-user", password: "fictional-private-password" };
+  const added = await request("proxies", "POST", config);
+  assert.equal(added.status, 200);
+  const state = await added.json();
+  assert.ok(!JSON.stringify(state).includes(config.login));
+  assert.ok(!JSON.stringify(state).includes(config.password));
+  const id = state.proxies[0].id;
+  const selected = await request("proxy-route", "PUT", { routeId: id });
+  assert.equal((await selected.json()).activeRouteId, id);
+  assert.equal((await request(`proxies/${id}`, "DELETE")).status, 502);
+  assert.equal((await request("proxy-route", "PUT", { routeId: null })).status, 200);
+  assert.equal((await request(`proxies/${id}`, "DELETE")).status, 200);
+  for (const body of [null, [], {}, { ...config, host: "127.0.0.1" }, { ...config, protocol: "socks5" }, { ...config, port: "8000" }]) assert.equal((await request("proxies", "POST", body)).status, 400);
+  for (const body of [null, [], {}, { routeId: 1 }, { routeId: "unknown" }]) assert.equal((await request("proxy-route", "PUT", body)).status, 400);
+  const malformed = await fetch(`${baseUrl}/api/applicability/proxies`, { method: "POST", body: "{" });
+  assert.equal(malformed.status, 400);
+  const stateResponse = await request("proxies", "GET");
+  assert.deepEqual((await stateResponse.json()).proxies, []);
 });
 
 test("HTTP server stores the applicability API key without exposing it to searches", async () => {

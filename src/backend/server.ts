@@ -10,6 +10,10 @@ import {
   authorizePartKom,
   authorizeRossko,
   authorizeStparts,
+  addApplicabilityProxy,
+  deleteApplicabilityProxy,
+  getApplicabilityProxyState,
+  selectApplicabilityProxy,
   deleteApplicabilityApiKey,
   getApplicabilityApiKeyState,
   getApplicabilityCachedBrands,
@@ -38,6 +42,10 @@ const host = "127.0.0.1";
 const port = readPort();
 
 const application: AggregatorApplication = {
+  addApplicabilityProxy,
+  deleteApplicabilityProxy,
+  getApplicabilityProxyState,
+  selectApplicabilityProxy,
   authorizeArmtek,
   authorizeForumAuto,
   authorizeMotorDetal,
