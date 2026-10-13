@@ -72,7 +72,7 @@ const upload = async (page, contents, name = "articles.txt") => {
 };
 const waitFinished = (page) => page.waitForFunction(() => document.querySelector("#applicability-file-stop").hidden);
 
-test("file import previews safe pairs, searches sequentially and appends incremental results", async () => {
+test("file import previews safe pairs, searches in parallel and appends incremental results", async () => {
   const calls = [];
   let releaseFirst;
   const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
@@ -83,8 +83,8 @@ test("file import previews safe pairs, searches sequentially and appends increme
   await withImportPage(async (route) => {
     const pair = route.request().postDataJSON();
     calls.push(pair);
-    if (calls.length === 1) {
-      reportFirst();
+    if (calls.length <= 4) {
+      if (calls.length === 4) reportFirst();
       await firstGate;
     }
     if (pair.sku === "FAIL1") await route.fulfill({ status: 502, json: { message: "Applicability search failed" } });
@@ -106,20 +106,21 @@ test("file import previews safe pairs, searches sequentially and appends increme
     if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-file-preview.png") });
     await page.locator("#applicability-file-start").click();
     await firstStarted;
-    assert.equal(calls.length, 1);
-    assert.equal(await rows.locator('[data-state="searching"]').count(), 1);
-    assert.equal(await page.locator("#applicability-results-body tr").count(), 2);
-    assert.deepEqual(await page.locator("#applicability-results-summary dd").allTextContents(), ["2", "1", "0"]);
+    assert.equal(calls.length, 4);
+    assert.equal(await rows.locator('[data-state="searching"]').count(), 4);
+    assert.equal(await page.locator("#applicability-results-body tr").count(), 5);
+    assert.deepEqual(await page.locator("#applicability-results-summary dd").allTextContents(), ["5", "1", "0"]);
     assert.equal(await page.locator("#applicability-submit").isDisabled(), true);
     assert.equal(await page.locator("#applicability-file-input").isDisabled(), true);
     releaseFirst();
     await waitFinished(page);
-    assert.deepEqual(calls, [
+    assert.deepEqual(calls.toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))), [
       { sku: "12345", brand: "HYUNDAI" }, { sku: "12345", brand: "LAND ROVER" },
       { sku: "FAIL1", brand: "FORD" }, { sku: "NORM1", brand: "FORD" },
       { sku: "EMPTY1", brand: "FORD" }, { sku: cleanedUntrustedSku, brand: "FORD" },
       { sku: untrustedSku, brand: "FORD" },
-    ]);
+    ].toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+    assert.ok(calls.findIndex((pair) => pair.sku === cleanedUntrustedSku) < calls.findIndex((pair) => pair.sku === untrustedSku));
     assert.match(await page.locator("#applicability-file-summary").textContent(), /Добавлено: 5\. Ошибок: 1\. Пропущено: 4/);
     assert.equal(await rows.locator('[data-state="error"]').textContent(), "6FAIL1FORDApplicability search failed");
     assert.match(await rows.textContent(), /Из базы/);
@@ -147,6 +148,56 @@ const openImportedTab = async (page, name) => {
   await page.locator("[data-tab-id]").filter({ hasText: name }).click();
 };
 
+test("file import keeps four requests active, refills each free slot and preserves file order", async () => {
+  const calls = [];
+  const gates = new Map();
+  const started = new Map();
+  const skus = Array.from({ length: 7 }, (_, index) => `PARALLEL${index + 1}`);
+  for (const sku of skus) {
+    let release;
+    let report;
+    const pending = new Promise((resolve) => { release = resolve; });
+    const received = new Promise((resolve) => { report = resolve; });
+    gates.set(sku, { pending, release });
+    started.set(sku, { received, report });
+  }
+  let active = 0;
+  let maximumActive = 0;
+  try {
+    await withImportPage(async (route) => {
+      const { sku } = route.request().postDataJSON();
+      calls.push(sku);
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      started.get(sku).report();
+      await gates.get(sku).pending;
+      active -= 1;
+      await route.fulfill({ json: { results: [vehicle], cacheHit: false } });
+    }, async (page) => {
+      await page.locator("#applicability-file-toggle").click();
+      await upload(page, skus.map((sku) => `${sku} | FORD`).join("\n"));
+      await page.locator("#applicability-file-start").click();
+      await Promise.all(skus.slice(0, 4).map((sku) => started.get(sku).received));
+      assert.deepEqual(calls.toSorted(), skus.slice(0, 4));
+      assert.equal(await page.locator('#applicability-file-rows [data-state="searching"]').count(), 4);
+      for (let index = 3; index < 6; index += 1) {
+        gates.get(skus[index]).release();
+        await started.get(skus[index + 1]).received;
+        assert.equal(active, 4);
+        assert.equal(await page.locator('#applicability-file-rows [data-state="done"]').count(), index - 2);
+      }
+      for (const sku of skus.toReversed()) gates.get(sku).release();
+      await waitFinished(page);
+      assert.equal(maximumActive, 4);
+      assert.equal(calls.length, skus.length);
+      assert.equal(await page.locator('#applicability-file-rows [data-state="done"]').count(), skus.length);
+      assert.deepEqual((await storedState(page)).tabs[0].searches.map((entry) => entry.sku), ["EXIST1", ...skus]);
+    });
+  } finally {
+    for (const gate of gates.values()) gate.release();
+  }
+});
+
 test("structured file creates one persisted group, searches OEMs in their own source tabs and resolves aliases", async () => {
   const calls = [];
   await withImportPage(async (route) => {
@@ -173,11 +224,11 @@ test("structured file creates one persisted group, searches OEMs in their own so
     if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-structured-file-preview.png") });
     await page.locator("#applicability-file-start").click();
     await waitFinished(page);
-    assert.deepEqual(calls, [
+    assert.deepEqual(calls.toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))), [
       { sku: "OEM1", brand: "VW" }, { sku: "OEM1", brand: "AUDI" },
       { sku: "OEM1", brand: "VW" }, { sku: "OEM2", brand: "CITROËN" },
       { sku: "OEM3", brand: "GAZ" }, { sku: "OEM4", brand: "FORD" },
-    ]);
+    ].toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
     assert.match(await page.locator("#applicability-file-target").textContent(), /группу «Группа 1»/);
     assert.match(await page.locator("#applicability-file-summary").textContent(), /Добавлено: 6\. Ошибок: 0\. Пропущено: 2/);
     await page.keyboard.press("Escape");
@@ -244,9 +295,10 @@ test("stopped structured imports resume in the same group even after switching t
   let reportPending;
   const pendingStarted = new Promise((resolve) => { reportPending = resolve; });
   await withImportPage(async (route) => {
-    calls.push(route.request().postDataJSON().sku);
-    if (calls.length === 2) {
-      reportPending();
+    const { sku } = route.request().postDataJSON();
+    calls.push(sku);
+    if (calls.length === 3) reportPending();
+    if (sku === "OE2" && calls.filter((value) => value === sku).length === 1) {
       await pendingGate;
       await route.abort();
     } else await route.fulfill({ json: { results: [vehicle], cacheHit: false } });
@@ -255,6 +307,7 @@ test("stopped structured imports resume in the same group even after switching t
     await upload(page, "Артикул: PART-1\nOEM-артикул: OE1 | FORD\nАртикул: PART-2\nOEM-артикул: OE2 | FORD\nOEM-артикул: OE3 | FORD");
     await page.locator("#applicability-file-start").click();
     await pendingStarted;
+    await page.waitForFunction(() => document.querySelectorAll('#applicability-file-rows [data-state="done"]').length === 2);
     await page.locator("#applicability-file-stop").click();
     await waitFinished(page);
     await page.keyboard.press("Escape");
@@ -268,7 +321,7 @@ test("stopped structured imports resume in the same group even after switching t
     assert.equal(state.groups.length, 1);
     assert.deepEqual(state.tabs.filter((tab) => tab.groupId).map((tab) => [tab.name, tab.searches.map((entry) => entry.sku)]), [["PART-1", ["OE1"]], ["PART-2", ["OE2", "OE3"]]]);
     assert.equal(state.tabs[1].searches.length, 0);
-    assert.deepEqual(calls, ["OE1", "OE2", "OE2", "OE3"]);
+    assert.deepEqual(calls.toSorted(), ["OE1", "OE2", "OE2", "OE3"]);
   });
 });
 
@@ -280,7 +333,7 @@ test("closing an imported tab aborts its group queue and late results cannot res
   const pendingStarted = new Promise((resolve) => { reportPending = resolve; });
   await withImportPage(async (route) => {
     calls.push(route.request().postDataJSON().sku);
-    reportPending();
+    if (calls.length === 2) reportPending();
     await pendingGate;
     await route.fulfill({ json: { results: [vehicle], cacheHit: false } });
   }, async (page) => {
@@ -302,7 +355,7 @@ test("closing an imported tab aborts its group queue and late results cannot res
     const after = await storedState(page);
     assert.equal(after.tabs.some((tab) => tab.id === target.id), false);
     assert.equal(after.tabs.find((tab) => tab.name === "PART-2").searches.length, 0);
-    assert.deepEqual(calls, ["OE1"]);
+    assert.deepEqual(calls.toSorted(), ["OE1", "OE2"]);
   });
 });
 
@@ -321,6 +374,8 @@ test("structured file creates no group when the API key is missing", async () =>
 
 test("stopping import preserves completed rows, cancels queued searches and allows continuation", async () => {
   const calls = [];
+  const skus = Array.from({ length: 7 }, (_, index) => `STOP${index + 1}`);
+  let resuming = false;
   let releasePending;
   const pendingGate = new Promise((resolve) => { releasePending = resolve; });
   let reportPending;
@@ -328,48 +383,68 @@ test("stopping import preserves completed rows, cancels queued searches and allo
   await withImportPage(async (route) => {
     const pair = route.request().postDataJSON();
     calls.push(pair.sku);
-    if (calls.length === 2) {
-      reportPending();
+    if (calls.length === 5) reportPending();
+    if (!resuming && pair.sku !== "STOP1") {
       await pendingGate;
       await route.abort();
     } else await route.fulfill({ json: { results: [vehicle], cacheHit: false } });
   }, async (page) => {
     await page.locator("#applicability-file-toggle").click();
-    await upload(page, "STOP1 | FORD\nSTOP2 | FORD\nSTOP3 | FORD");
+    await upload(page, skus.map((sku) => `${sku} | FORD`).join("\n"));
     await page.locator("#applicability-file-start").click();
     await pendingStarted;
     await page.locator("#applicability-file-stop").click();
     await waitFinished(page);
-    assert.deepEqual(calls, ["STOP1", "STOP2"]);
+    assert.deepEqual(calls.toSorted(), skus.slice(0, 5));
     assert.match(await page.locator("#applicability-file-summary").textContent(), /Очередь остановлена/);
     assert.equal(await page.locator("#applicability-results-body tr").count(), 2);
     assert.match(await page.locator("#applicability-results-body").textContent(), /STOP1/);
     assert.doesNotMatch(await page.locator("#applicability-results-body").textContent(), /STOP2/);
+    assert.equal(await page.locator('#applicability-file-rows [data-state="pending"]').count(), 6);
     assert.equal(await page.locator("#applicability-file-start").isEnabled(), true);
+    resuming = true;
     releasePending();
     await page.locator("#applicability-file-start").click();
     await waitFinished(page);
-    assert.deepEqual(calls, ["STOP1", "STOP2", "STOP2", "STOP3"]);
-    assert.equal(await page.locator("#applicability-results-body tr").count(), 4);
-    assert.equal(await page.locator('#applicability-file-rows [data-state="done"]').count(), 3);
+    assert.deepEqual(calls.toSorted(), [...skus.slice(0, 5), ...skus.slice(1)].toSorted());
+    assert.equal(await page.locator("#applicability-results-body tr").count(), 8);
+    assert.equal(await page.locator('#applicability-file-rows [data-state="done"]').count(), 7);
+    assert.deepEqual((await storedState(page)).tabs[0].searches.map((entry) => entry.sku), ["EXIST1", ...skus]);
   });
 });
 
 test("file import stops on key failure and never invents empty results", async () => {
   const calls = [];
+  let releaseFailure;
+  const failureGate = new Promise((resolve) => { releaseFailure = resolve; });
+  let releasePending;
+  const pendingGate = new Promise((resolve) => { releasePending = resolve; });
+  let reportPending;
+  const pendingStarted = new Promise((resolve) => { reportPending = resolve; });
   await withImportPage(async (route) => {
     const { sku } = route.request().postDataJSON();
     calls.push(sku);
-    await route.fulfill({ status: 401, json: { message: "PartsAPI отклонил запрос для ключа …TEST1. Проверьте ключ и подписку." } });
+    if (calls.length === 4) reportPending();
+    if (sku === "KEY1") {
+      await failureGate;
+      await route.fulfill({ status: 401, json: { message: "PartsAPI отклонил запрос для ключа …TEST1. Проверьте ключ и подписку." } });
+    } else {
+      await pendingGate;
+      await route.abort();
+    }
   }, async (page) => {
     await page.locator("#applicability-file-toggle").click();
-    await upload(page, "KEY1 | FORD\nKEY2 | FORD");
+    await upload(page, Array.from({ length: 6 }, (_, index) => `KEY${index + 1} | FORD`).join("\n"));
     await page.locator("#applicability-file-start").click();
+    await pendingStarted;
+    releaseFailure();
     await waitFinished(page);
-    assert.deepEqual(calls, ["KEY1"]);
+    assert.deepEqual(calls.toSorted(), ["KEY1", "KEY2", "KEY3", "KEY4"]);
     assert.match(await page.locator("#applicability-file-feedback").textContent(), /PartsAPI отклонил/);
     assert.equal(await page.locator("#applicability-results-body tr").count(), 1);
-    assert.equal(await page.locator('#applicability-file-rows [data-state="pending"]').count(), 1);
+    assert.equal(await page.locator('#applicability-file-rows [data-state="pending"]').count(), 5);
+    assert.equal(await page.locator('#applicability-file-rows [data-state="error"]').count(), 1);
+    releasePending();
   });
 });
 
@@ -381,7 +456,7 @@ test("file import stays in its original tab and closing that tab aborts its queu
   const pendingStarted = new Promise((resolve) => { reportPending = resolve; });
   await withImportPage(async (route) => {
     calls.push(route.request().postDataJSON().sku);
-    reportPending();
+    if (calls.length === 2) reportPending();
     await pendingGate;
     await route.abort();
   }, async (page) => {
@@ -399,7 +474,7 @@ test("file import stays in its original tab and closing that tab aborts its queu
     await page.keyboard.press("Escape");
     await page.locator('[data-close-tab-id="original"]').click();
     await waitFinished(page);
-    assert.deepEqual(calls, ["TAB1"]);
+    assert.deepEqual(calls.toSorted(), ["TAB1", "TAB2"]);
     assert.equal(await page.locator("#applicability-results-body tr").count(), 0);
     assert.equal(await page.locator("#applicability-submit").isEnabled(), true);
     const state = await page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.applicabilityState")));
@@ -422,7 +497,7 @@ test("file import reports timeout and malformed responses and continues with lat
     await upload(page, "TIME1 | FORD\nBAD1 | FORD\nGOOD1 | FORD");
     await page.locator("#applicability-file-start").click();
     await waitFinished(page);
-    assert.deepEqual(calls, ["TIME1", "BAD1", "GOOD1"]);
+    assert.deepEqual(calls.toSorted(), ["BAD1", "GOOD1", "TIME1"]);
     const rows = page.locator("#applicability-file-rows");
     assert.equal(await rows.locator('[data-state="error"]').count(), 2);
     assert.match(await rows.textContent(), /timed out/);

@@ -672,6 +672,7 @@ fileImportForm.addEventListener("submit", async (event) => {
   let added = fileImportRows.filter((row) => row.state === "done").length;
   let failed = 0;
   let skipped = fileImportRows.filter((row) => row.state === "skipped").length;
+  const importLineNumbers = new Map(fileImportRows.filter((row) => row.searchEntry).map((row) => [row.searchEntry, row.lineNumber]));
   const updateProgress = () => {
     fileImportProgress.value = completed;
     fileImportSummary.textContent = `Обработано: ${completed} из ${queue.length}. Добавлено: ${added}. Ошибок: ${failed}. Пропущено: ${skipped}.`;
@@ -687,25 +688,34 @@ fileImportForm.addEventListener("submit", async (event) => {
     fileImportProgress.max = queue.length;
     fileImportProgress.hidden = false;
     updateProgress();
-    for (const row of queue) {
+    const outcomes = await runApplicabilityBatch(queue, async (row) => {
       const target = tabs.find((item) => item.id === fileImportTargets.get(row.article ?? ""));
-      if (controller.signal.aborted || !target) break;
+      if (!target) {
+        controller.abort();
+        return;
+      }
       if (duplicateSearch(target, row.sku, row.brand)) {
         setFileImportRowStatus(row, "skipped", "Уже есть во вкладке");
         skipped += 1;
         completed += 1;
         updateProgress();
-        continue;
+        return;
       }
       const entry = createSearchEntry({ sku: row.sku, makeName: row.brand, status: "Ищем применимость…" });
-      target.searches.push(entry);
+      const insertionIndex = target.searches.findIndex((item) => importLineNumbers.get(item) > row.lineNumber);
+      target.searches.splice(insertionIndex < 0 ? target.searches.length : insertionIndex, 0, entry);
+      row.searchEntry = entry;
+      importLineNumbers.set(entry, row.lineNumber);
       setFileImportRowStatus(row, "searching", "Ищем применимость…");
       if (getActiveTab() === target) renderResults(target);
       try {
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(35_000)]);
         const result = await executeApplicabilitySearch(entry.sku, entry.makeName, signal);
         signal.throwIfAborted();
-        if (!tabs.includes(target)) break;
+        if (!tabs.includes(target)) {
+          controller.abort();
+          return;
+        }
         applySearchResult(entry, result);
         setFileImportRowStatus(row, "done", `${entry.status}${result.cacheHit ? " · Из базы" : ""}`);
         added += 1;
@@ -713,7 +723,7 @@ fileImportForm.addEventListener("submit", async (event) => {
         target.searches = target.searches.filter((item) => item !== entry);
         if (controller.signal.aborted) {
           setFileImportRowStatus(row, "pending", "Остановлено");
-          break;
+          return;
         }
         const message = error?.name === "TimeoutError" ? "Время ожидания поиска истекло." : error instanceof Error ? error.message : "Не удалось выполнить поиск применимости.";
         setFileImportRowStatus(row, "error", message);
@@ -730,7 +740,9 @@ fileImportForm.addEventListener("submit", async (event) => {
       }
       completed += 1;
       updateProgress();
-    }
+    }, controller.signal);
+    const unexpectedFailure = outcomes.find((outcome) => outcome.error);
+    if (unexpectedFailure) throw unexpectedFailure.error;
     if (controller.signal.aborted) fileImportSummary.textContent += " Очередь остановлена; готовые результаты сохранены.";
   } catch (error) {
     if (!controller.signal.aborted) setFileImportFeedback(error instanceof Error ? error.message : "Не удалось начать поиск из файла.");
