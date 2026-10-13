@@ -152,12 +152,17 @@ test("PartsAPI proxy routes validate input, hide credentials and protect the act
   assert.equal(importState.proxies.length, 100);
   assert.ok(!JSON.stringify(importState).includes("fictional-user"));
   assert.equal((await (await request("proxies/import", "POST", { protocol: "http", text: file })).json()).duplicateCount, 100);
+  const extra = Array.from({ length: 125 }, (_, index) => `edge-${index}.proxy.example.org:8080:user:pass`).join("\n");
+  const more = await request("proxies/import", "POST", { protocol: "http", text: extra });
+  assert.equal(more.status, 200);
+  assert.equal((await more.json()).importedCount, 125);
+  assert.equal((await request("proxies", "POST", config)).status, 200);
   for (const body of [null, {}, { protocol: "socks5", text: file }, { protocol: "http", text: "" }, { protocol: "http", text: "8.8.8.8:8080:user:fictional-secret\n127.0.0.1:8080:user:fictional-secret" }]) {
     const rejected = await request("proxies/import", "POST", body);
     assert.equal(rejected.status, 400);
     assert.ok(!(await rejected.text()).includes("fictional-secret"));
   }
-  assert.equal(proxies.getState().proxies.length, 100);
+  assert.equal(proxies.getState().proxies.length, 226);
   const oversized = await request("proxies/import", "POST", { protocol: "http", text: "x".repeat(1024 * 1024) });
   assert.equal(oversized.status, 413);
 });

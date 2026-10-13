@@ -900,7 +900,7 @@
             <form class="auth-form applicability-proxy-form" id="applicability-proxy-import-form">
               <label class="field" for="applicability-proxy-import-protocol"><span>Тип прокси в файле</span><select id="applicability-proxy-import-protocol" name="protocol"><option value="http">HTTP</option><option value="https">HTTPS</option></select></label>
               <label class="field" for="applicability-proxy-import-file"><span>Текстовый файл с прокси</span><input id="applicability-proxy-import-file" type="file" accept=".txt,text/plain" required /></label>
-              <p class="settings-drawer__hint">Файл UTF-8, до 100 прокси, по одному в строке: адрес:порт:логин:пароль. Дубликаты будут пропущены. При лимите IP соединение переключается автоматически.</p>
+              <p class="settings-drawer__hint">Файл UTF-8, по одному прокси в строке: адрес:порт:логин:пароль. Количество прокси не ограничено. Дубликаты будут пропущены. При лимите IP соединение переключается автоматически.</p>
               <button class="btn btn-primary" type="submit" id="applicability-proxy-import">Импортировать прокси</button>
             </form>
             <form class="auth-form applicability-proxy-form" id="applicability-proxy-form">

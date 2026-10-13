@@ -44,9 +44,9 @@ const readState = async (response) => {
     || ![null, "manual", "ip-limit"].includes(payload.lastSwitchReason)
     || !validCounters(payload.usage) || !validWindow(payload.usage)
     || !validCounters(payload.directUsage)
-    || (payload.importedCount !== undefined && (!Number.isInteger(payload.importedCount) || payload.importedCount < 0 || payload.importedCount > 100
-      || !Number.isInteger(payload.duplicateCount) || payload.duplicateCount < 0 || payload.duplicateCount > 100))
-    || !Array.isArray(payload.proxies) || payload.proxies.length > 100
+    || (payload.importedCount !== undefined && (!Number.isSafeInteger(payload.importedCount) || payload.importedCount < 0
+      || !Number.isSafeInteger(payload.duplicateCount) || payload.duplicateCount < 0))
+    || !Array.isArray(payload.proxies)
     || payload.proxies.some((proxy) => !proxy || !validId(proxy.id) || !["http", "https"].includes(proxy.protocol)
       || !validHost(proxy.host)
       || !Number.isInteger(proxy.port) || proxy.port < 1 || proxy.port > 65535 || typeof proxy.limited !== "boolean" || !validCounters(proxy.usage))
@@ -103,8 +103,8 @@ const render = (next) => {
   indicator.dataset.route = active ? "proxy" : "direct";
   indicator.dataset.limited = String(limited);
   persistence.textContent = state.persistent ? "Данные прокси сохраняются зашифрованными на сервере." : "Для сохранения прокси нужно настроить защищённое хранение на сервере.";
-  addButton.disabled = mutating || importing || !state.persistent || state.proxies.length >= 100;
-  importButton.disabled = mutating || importing || !state.persistent || state.proxies.length >= 100;
+  addButton.disabled = mutating || importing || !state.persistent;
+  importButton.disabled = mutating || importing || !state.persistent;
   const previousScrollTop = routes.scrollTop;
   routes.replaceChildren();
   const choices = [{ id: null, label: "Прямое соединение", limited: state.directLimited }, ...state.proxies.map((proxy) => ({ ...proxy, label: `${proxy.host}:${proxy.port} · ${proxy.protocol.toUpperCase()}` }))];

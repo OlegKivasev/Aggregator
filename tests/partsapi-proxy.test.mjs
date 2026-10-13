@@ -64,7 +64,7 @@ test("proxy text import preserves password punctuation and reports safe line err
   const configs = parsePartsApiProxyImport({ protocol: "https", text: "\uFEFFproxy.example.org:8443:fictional-user: password:with:@symbols \r\n\r\n8.8.8.8:8080:user:pass" });
   assert.deepEqual(configs[0], { protocol: "https", host: "proxy.example.org", port: 8443, login: "fictional-user", password: " password:with:@symbols " });
   assert.equal(configs.length, 2);
-  for (const text of ["", "\n ", "8.8.8.8:8080:user", "8.8.8.8:0:user:secret", "8.8.8.8:8080:user:secret\n127.0.0.1:8080:user:secret", "x".repeat(512 * 1024 + 1), Array(101).fill("8.8.8.8:8080:user:secret").join("\n")]) {
+  for (const text of ["", "\n ", "8.8.8.8:8080:user", "8.8.8.8:0:user:secret", "8.8.8.8:8080:user:secret\n127.0.0.1:8080:user:secret", "x".repeat(512 * 1024 + 1)]) {
     assert.throws(() => parsePartsApiProxyImport({ protocol: "http", text }), (error) => {
       assert.ok(error instanceof PartsApiProxyValidationError);
       assert.ok(!error.message.includes("secret"));
@@ -72,28 +72,29 @@ test("proxy text import preserves password punctuation and reports safe line err
     });
   }
   assert.throws(() => parsePartsApiProxyImport({ protocol: "http", text: "8.8.8.8:8080:user:pass\nwrong" }), /Строка 2/);
+  assert.equal(parsePartsApiProxyImport({ protocol: "http", text: Array.from({ length: 1500 }, (_, index) => `edge-${index}.proxy.example.org:8080:user:pass`).join("\n") }).length, 1500);
 });
 
-test("a hundred proxies import atomically, deduplicate and restore from encrypted storage", (t) => {
+test("proxy imports exceed a hundred and restore large encrypted lists without a count ceiling", (t) => {
   const { store, path, key } = fixture(t);
-  const configs = Array.from({ length: 100 }, (_, index) => ({ ...config, host: `edge-${index}.proxy.example.org`, password: "fictional-long-password-" + "a".repeat(1600) }));
+  const configs = Array.from({ length: 1000 }, (_, index) => ({ ...config, host: `edge-${index}.proxy.example.org`, password: "fictional-long-password-" + "a".repeat(1600) }));
   const imported = store.import(configs);
-  assert.equal(imported.importedCount, 100);
+  assert.equal(imported.importedCount, 1000);
   assert.equal(imported.duplicateCount, 0);
-  const id = imported.proxies[99].id;
+  const id = imported.proxies[999].id;
   store.select(id);
   const encrypted = readFileSync(path, "utf8");
-  assert.ok(encrypted.length > 128 * 1024);
+  assert.ok(encrypted.length > 2 * 1024 * 1024);
   assert.ok(!encrypted.includes(configs[0].password));
   const restored = new EncryptedPartsApiProxyStore(path, key);
-  assert.equal(restored.getState().proxies.length, 100);
+  assert.equal(restored.getState().proxies.length, 1000);
   assert.equal(restored.getState().activeRouteId, id);
-  assert.equal(restored.import(configs).duplicateCount, 100);
+  assert.equal(restored.import(configs).duplicateCount, 1000);
   assert.equal(restored.getState().activeRouteId, id);
-  assert.throws(() => restored.add(config), /full/);
-  const before = readFileSync(path, "utf8");
-  assert.throws(() => restored.import([config]), /100/);
-  assert.equal(readFileSync(path, "utf8"), before);
+  assert.equal(restored.add(config).proxies.length, 1001);
+  assert.equal(restored.import([secondConfig]).importedCount, 1);
+  assert.equal(new EncryptedPartsApiProxyStore(path, key).getState().proxies.length, 1002);
+  assert.equal(restored.getState().activeRouteId, id);
   const empty = fixture(t).store;
   assert.throws(() => empty.import([config, { ...config, host: "127.0.0.1" }]), PartsApiProxyValidationError);
   assert.equal(empty.getState().proxies.length, 0);

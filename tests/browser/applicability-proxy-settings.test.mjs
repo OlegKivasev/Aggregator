@@ -126,7 +126,7 @@ test("PartsAPI proxy settings save secrets securely, switch automatically and al
   }
 });
 
-test("a text file imports 100 proxies, switches automatically, searches clean articles first and resets daily", { timeout: 60000 }, async () => {
+test("repeated file imports grow beyond 100 proxies and preserve automatic switching and daily reset", { timeout: 60000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), "browser-partsapi-import-"));
   const path = join(directory, "proxies.enc.json");
   let now = Date.now();
@@ -174,7 +174,21 @@ test("a text file imports 100 proxies, switches automatically, searches clean ar
     await page.locator("#applicability-proxy-import").click();
     await page.waitForFunction(() => document.querySelector("#applicability-proxy-feedback").textContent.includes("Импортировано: 100"));
     assert.equal(await page.locator(".applicability-proxy-route").count(), 101);
-    assert.equal(await page.locator("#applicability-proxy-add").isDisabled(), true);
+    assert.equal(await page.locator("#applicability-proxy-add").isEnabled(), true);
+    assert.equal(await page.locator("#applicability-proxy-import").isEnabled(), true);
+    const largerFile = Array.from({ length: 125 }, (_, index) => `edge-${index}.proxy.example.org:8080:fictional-import-user:fictional-import-password`).join("\n");
+    await page.locator("#applicability-proxy-import-file").setInputFiles(file(largerFile));
+    await page.locator("#applicability-proxy-import").click();
+    await page.waitForFunction(() => document.querySelector("#applicability-proxy-feedback").textContent.includes("Импортировано: 25. Дубликатов пропущено: 100"));
+    assert.equal(await page.locator(".applicability-proxy-route").count(), 126);
+    await page.locator("#applicability-proxy-import-file").setInputFiles(file(largerFile));
+    await page.locator("#applicability-proxy-import").click();
+    await page.waitForFunction(() => document.querySelector("#applicability-proxy-feedback").textContent.includes("Импортировано: 0. Дубликатов пропущено: 125"));
+    await page.locator("#applicability-proxy-host").fill("8.8.8.8");
+    await page.locator("#applicability-proxy-port").fill("8080");
+    await page.locator("#applicability-proxy-add").click();
+    await page.waitForFunction(() => document.querySelectorAll(".applicability-proxy-route").length === 127);
+    assert.equal(proxies.getState().proxies.length, 126);
     assert.ok(!readFileSync(path, "utf8").includes("fictional-import-password"));
     await page.locator("#applicability-settings-close").click();
     await page.locator("#applicability-make").fill("FORD");
@@ -201,6 +215,7 @@ test("a text file imports 100 proxies, switches automatically, searches clean ar
     assert.ok(!localState.includes("fictional-import-user"));
     await page.reload();
     await page.waitForFunction(() => document.querySelector("#applicability-route-indicator").textContent.includes("edge-1.proxy.example.org"));
+    assert.equal(await page.locator(".applicability-proxy-route").count(), 127);
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

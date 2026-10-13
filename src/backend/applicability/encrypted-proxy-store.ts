@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { SupplierIntegrationError } from "../errors.ts";
 import { writeJsonStateFileAtomic } from "../session/state-file.ts";
-import { maximumPartsApiProxies as maximumProxies, parsePartsApiProxyConfig, PartsApiProxyValidationError, type PartsApiProxy, type PartsApiProxyConfig, type PartsApiProxyImportResult, type PartsApiProxyState, type PartsApiUsageCounters } from "./partsapi-proxy-config.ts";
+import { parsePartsApiProxyConfig, PartsApiProxyValidationError, type PartsApiProxy, type PartsApiProxyConfig, type PartsApiProxyImportResult, type PartsApiProxyState, type PartsApiUsageCounters } from "./partsapi-proxy-config.ts";
 
 const authenticatedContext = Buffer.from("autoservice-aggregator:partsapi-proxies:v1");
 const usageWindowMs = 24 * 60 * 60 * 1000;
@@ -141,7 +141,6 @@ export class EncryptedPartsApiProxyStore {
 
   add(config: PartsApiProxyConfig): PartsApiProxyState {
     const parsed = parsePartsApiProxyConfig(config);
-    if (this.proxies.length >= maximumProxies) throw new SupplierIntegrationError("PartsAPI proxy list is full", { publicMessage: "Можно сохранить не более 100 прокси." });
     if (this.proxies.some(({ host, port }) => host === parsed.host && port === parsed.port)) {
       throw new SupplierIntegrationError("PartsAPI proxy already exists", { publicMessage: "Прокси с таким адресом и портом уже добавлен." });
     }
@@ -150,7 +149,7 @@ export class EncryptedPartsApiProxyStore {
   }
 
   import(configs: PartsApiProxyConfig[]): PartsApiProxyImportResult {
-    if (!configs.length || configs.length > maximumProxies) throw new PartsApiProxyValidationError("В файле должно быть от 1 до 100 прокси.");
+    if (!configs.length) throw new PartsApiProxyValidationError("Файл не содержит прокси.");
     const parsed = configs.map(parsePartsApiProxyConfig);
     const addresses = new Set(this.proxies.map(({ host, port }) => `${host}:${port}`));
     const additions: PartsApiProxy[] = [];
@@ -160,7 +159,6 @@ export class EncryptedPartsApiProxyStore {
       addresses.add(address);
       additions.push({ ...config, id: randomUUID() });
     }
-    if (this.proxies.length + additions.length > maximumProxies) throw new PartsApiProxyValidationError("В списке можно сохранить не более 100 прокси. Удалите лишние и повторите импорт.");
     if (additions.length) this.commit([...this.proxies, ...additions], this.activeRouteId);
     return { ...this.getState(), importedCount: additions.length, duplicateCount: parsed.length - additions.length };
   }
@@ -311,7 +309,6 @@ export class EncryptedPartsApiProxyStore {
     if (!existsSync(this.filePath)) return;
     if (!this.encryptionKey) throw new Error("SUPPLIER_CREDENTIALS_ENCRYPTION_KEY is required to read PartsAPI proxies");
     try {
-      if (statSync(this.filePath).size > 2 * 1024 * 1024) throw new Error("Proxy store is too large");
       const envelope: unknown = JSON.parse(readFileSync(this.filePath, "utf8"));
       if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) throw new Error("Invalid proxy envelope");
       const { version, algorithm, iv, ciphertext, authTag } = envelope as Record<string, unknown>;
@@ -328,7 +325,7 @@ export class EncryptedPartsApiProxyStore {
       const payload: unknown = JSON.parse(Buffer.concat([decipher.update(decode(ciphertext)), decipher.final()]).toString("utf8"));
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Invalid proxy payload");
       const data = payload as Record<string, unknown>;
-      if ((data.version !== 1 && data.version !== 2) || !Array.isArray(data.proxies) || data.proxies.length > maximumProxies) throw new Error("Invalid proxy list");
+      if ((data.version !== 1 && data.version !== 2) || !Array.isArray(data.proxies)) throw new Error("Invalid proxy list");
       const proxies = data.proxies.map((value: unknown) => {
         const config = parsePartsApiProxyConfig(value);
         const id = (value as Record<string, unknown>).id;
@@ -350,7 +347,7 @@ export class EncryptedPartsApiProxyStore {
           if (!proxies.some((proxy) => proxy.id === id)) throw new Error("Invalid proxy usage ID");
           this.proxyUsage.set(id, parseUsageCounters(value));
         }
-        if (!Array.isArray(data.limitedRoutes) || data.limitedRoutes.length > maximumProxies + 1
+        if (!Array.isArray(data.limitedRoutes) || data.limitedRoutes.length > proxies.length + 1
           || data.limitedRoutes.some((id: unknown) => id !== null && !proxies.some((proxy) => proxy.id === id))
           || ![null, "manual", "ip-limit"].includes(data.lastSwitchReason as PartsApiProxyState["lastSwitchReason"])) throw new Error("Invalid proxy limit state");
         for (const id of data.limitedRoutes) this.limitedRoutes.add(id as string | null);

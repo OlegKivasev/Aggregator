@@ -12,7 +12,6 @@ export interface PartsApiProxy extends PartsApiProxyConfig {
   id: string;
 }
 
-export const maximumPartsApiProxies = 100;
 export const maximumPartsApiProxyImportBytes = 512 * 1024;
 
 export interface PartsApiUsageCounters {
@@ -66,7 +65,6 @@ export function parsePartsApiProxyImport(value: unknown): PartsApiProxyConfig[] 
     } catch {
       throw new PartsApiProxyValidationError(`Строка ${index + 1}: ожидается адрес:порт:логин:пароль с публичным адресом и корректным портом.`);
     }
-    if (configs.length > maximumPartsApiProxies) throw new PartsApiProxyValidationError("В файле должно быть не более 100 прокси.");
   }
   if (!configs.length) throw new PartsApiProxyValidationError("Файл не содержит прокси.");
   return configs;
