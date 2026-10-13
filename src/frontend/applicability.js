@@ -1,5 +1,5 @@
 import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicleGroups } from "./applicability-formatting.js";
-import { normalizeApplicabilitySku, parseApplicabilitySkus, runApplicabilityBatch } from "./applicability-search-input.js";
+import { normalizeApplicabilitySku, parseApplicabilitySkus, runApplicabilityBatch, searchApplicabilityVariants } from "./applicability-search-input.js";
 import { bootstrapApplicabilityOemSidebar } from "./applicability-oem-sidebar.js";
 import { applicabilityFileMaxBytes, decodeApplicabilityFile, parseApplicabilityFile } from "./applicability-file-import.js";
 import { createApplicabilityMakeMatcher } from "./applicability-make-aliases.js";
@@ -499,16 +499,7 @@ const searchApplicability = async (sku, brand, signal) => {
   }
 };
 
-const executeApplicabilitySearch = async (sku, brand, signal) => {
-  let { results, cacheHit } = await searchApplicability(sku, brand, signal);
-  const normalizedSku = normalizeApplicabilitySku(sku);
-  let usedNormalizedSku = false;
-  if (!results.length && normalizedSku && normalizedSku !== sku) {
-    ({ results, cacheHit } = await searchApplicability(normalizedSku, brand, signal));
-    usedNormalizedSku = results.length > 0;
-  }
-  return { results, cacheHit, usedNormalizedSku, normalizedSku };
-};
+const executeApplicabilitySearch = (sku, brand, signal) => searchApplicabilityVariants(sku, brand, signal, searchApplicability);
 
 const duplicateSearch = (tab, sku, brand) => tab.searches.find((entry) => searchIdentity(entry.sku, entry.makeName) === searchIdentity(sku, brand));
 

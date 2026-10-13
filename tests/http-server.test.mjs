@@ -121,11 +121,12 @@ test("PartsAPI proxy routes validate input, hide credentials and protect the act
   const { baseUrl } = await listen(createApplication({
     getApplicabilityProxyState: () => proxies.getState(),
     addApplicabilityProxy: (config) => proxies.add(config),
+    importApplicabilityProxies: (configs) => proxies.import(configs),
     selectApplicabilityProxy: (id) => proxies.select(id),
     deleteApplicabilityProxy: (id) => proxies.delete(id),
   }), () => {});
   const request = (path, method, body) => fetch(`${baseUrl}/api/applicability/${path}`, { method, headers: { "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  const config = { protocol: "http", host: "8.8.8.8", port: 8000, login: "fictional-private-user", password: "fictional-private-password" };
+  const config = { protocol: "https", host: "edge-8-8-8-8.proxy.example.org", port: 8443, login: "fictional-private-user", password: "fictional-private-password" };
   const added = await request("proxies", "POST", config);
   assert.equal(added.status, 200);
   const state = await added.json();
@@ -143,6 +144,22 @@ test("PartsAPI proxy routes validate input, hide credentials and protect the act
   assert.equal(malformed.status, 400);
   const stateResponse = await request("proxies", "GET");
   assert.deepEqual((await stateResponse.json()).proxies, []);
+  const file = Array.from({ length: 100 }, (_, index) => `8.8.4.${index + 1}:8080:fictional-user:${"p".repeat(200)}`).join("\r\n");
+  const imported = await request("proxies/import", "POST", { protocol: "http", text: file });
+  assert.equal(imported.status, 200);
+  const importState = await imported.json();
+  assert.equal(importState.importedCount, 100);
+  assert.equal(importState.proxies.length, 100);
+  assert.ok(!JSON.stringify(importState).includes("fictional-user"));
+  assert.equal((await (await request("proxies/import", "POST", { protocol: "http", text: file })).json()).duplicateCount, 100);
+  for (const body of [null, {}, { protocol: "socks5", text: file }, { protocol: "http", text: "" }, { protocol: "http", text: "8.8.8.8:8080:user:fictional-secret\n127.0.0.1:8080:user:fictional-secret" }]) {
+    const rejected = await request("proxies/import", "POST", body);
+    assert.equal(rejected.status, 400);
+    assert.ok(!(await rejected.text()).includes("fictional-secret"));
+  }
+  assert.equal(proxies.getState().proxies.length, 100);
+  const oversized = await request("proxies/import", "POST", { protocol: "http", text: "x".repeat(1024 * 1024) });
+  assert.equal(oversized.status, 413);
 });
 
 test("HTTP server stores the applicability API key without exposing it to searches", async () => {

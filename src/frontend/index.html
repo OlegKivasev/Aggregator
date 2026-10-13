@@ -261,6 +261,7 @@
       <section class="applicability-function" id="applicability-function" hidden aria-labelledby="applicability-title">
         <h1 class="visually-hidden" id="applicability-title">Применимость</h1>
         <div class="garage-toast" id="applicability-toast" role="status" aria-live="polite" hidden></div>
+        <div class="garage-toast" id="applicability-route-notice" data-tone="notice" role="status" aria-live="polite" hidden></div>
         <nav class="search-tabs applicability-tabs card border-0 shadow-sm mb-4" aria-label="Вкладки применимости">
           <div class="search-tabs__list" id="applicability-tabs-list" role="tablist"></div>
           <button type="button" class="new-tab-button btn btn-light" id="applicability-new-tab" aria-label="Открыть новую вкладку применимости">+</button>
@@ -896,10 +897,16 @@
             <p class="settings-drawer__hint">При лимите по IP запрос повторится через следующий доступный прокси. Соединение можно выбрать вручную.</p>
             <p class="settings-drawer__hint applicability-proxy-usage" id="applicability-proxy-usage" aria-live="polite"></p>
             <div class="applicability-proxy-routes" id="applicability-proxy-routes" aria-label="Соединения PartsAPI"></div>
+            <form class="auth-form applicability-proxy-form" id="applicability-proxy-import-form">
+              <label class="field" for="applicability-proxy-import-protocol"><span>Тип прокси в файле</span><select id="applicability-proxy-import-protocol" name="protocol"><option value="http">HTTP</option><option value="https">HTTPS</option></select></label>
+              <label class="field" for="applicability-proxy-import-file"><span>Текстовый файл с прокси</span><input id="applicability-proxy-import-file" type="file" accept=".txt,text/plain" required /></label>
+              <p class="settings-drawer__hint">Файл UTF-8, до 100 прокси, по одному в строке: адрес:порт:логин:пароль. Дубликаты будут пропущены. При лимите IP соединение переключается автоматически.</p>
+              <button class="btn btn-primary" type="submit" id="applicability-proxy-import">Импортировать прокси</button>
+            </form>
             <form class="auth-form applicability-proxy-form" id="applicability-proxy-form">
               <label class="field" for="applicability-proxy-protocol"><span>Тип прокси</span><select id="applicability-proxy-protocol" name="protocol"><option value="http">HTTP</option><option value="https">HTTPS</option></select></label>
               <div class="applicability-proxy-address">
-                <label class="field" for="applicability-proxy-host"><span>IPv4-адрес</span><input id="applicability-proxy-host" name="host" type="text" maxlength="15" autocomplete="off" placeholder="IP из кабинета прокси" required /></label>
+                <label class="field" for="applicability-proxy-host"><span>Адрес прокси</span><input id="applicability-proxy-host" name="host" type="text" maxlength="253" autocomplete="off" spellcheck="false" placeholder="IPv4 или доменное имя" required /></label>
                 <label class="field" for="applicability-proxy-port"><span>Порт</span><input id="applicability-proxy-port" name="port" type="number" min="1" max="65535" autocomplete="off" required /></label>
               </div>
               <label class="field" for="applicability-proxy-login"><span>Логин</span><input id="applicability-proxy-login" name="login" type="text" maxlength="256" autocomplete="off" /></label>

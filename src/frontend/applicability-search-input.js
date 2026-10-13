@@ -1,5 +1,17 @@
 export const normalizeApplicabilitySku = (sku) => sku.replace(/[^\p{L}\p{N}]/gu, "");
 
+export async function searchApplicabilityVariants(sku, brand, signal, request) {
+  const normalizedSku = normalizeApplicabilitySku(sku);
+  let { results, cacheHit } = await request(normalizedSku, brand, signal);
+  let usedNormalizedSku = normalizedSku !== sku && results.length > 0;
+  if (!results.length && normalizedSku !== sku) {
+    signal.throwIfAborted();
+    ({ results, cacheHit } = await request(sku, brand, signal));
+    usedNormalizedSku = false;
+  }
+  return { results, cacheHit, usedNormalizedSku, normalizedSku };
+}
+
 export function parseApplicabilitySkus(value) {
   if (typeof value !== "string" || value.length > 8192) {
     throw new Error("Список артикулов слишком длинный.");

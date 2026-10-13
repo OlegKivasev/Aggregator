@@ -17,7 +17,7 @@ import type {
 } from "../types.ts";
 import type { ApplicabilityApiKeyState, ApplicabilitySavedArticlesPage, ApplicabilitySavedArticlesQuery, ApplicabilitySearchRequest, ApplicabilitySearchResult, ApplicabilityVehicle } from "../applicability/types.ts";
 import { PartsApiKeyError } from "../applicability/partsapi-key-error.ts";
-import { parsePartsApiProxyConfig, PartsApiProxyValidationError, type PartsApiProxyConfig, type PartsApiProxyState } from "../applicability/partsapi-proxy-config.ts";
+import { parsePartsApiProxyConfig, parsePartsApiProxyImport, PartsApiProxyValidationError, type PartsApiProxyConfig, type PartsApiProxyImportResult, type PartsApiProxyState } from "../applicability/partsapi-proxy-config.ts";
 import {
   articleLengthLimit,
   parseApplicabilityApiKeyPayload,
@@ -68,6 +68,7 @@ export interface AggregatorApplication {
   deleteApplicabilityApiKey(): ApplicabilityApiKeyState;
   getApplicabilityProxyState(): PartsApiProxyState;
   addApplicabilityProxy(config: PartsApiProxyConfig): PartsApiProxyState;
+  importApplicabilityProxies(configs: PartsApiProxyConfig[]): PartsApiProxyImportResult;
   selectApplicabilityProxy(routeId: string | null): PartsApiProxyState;
   deleteApplicabilityProxy(id: string): PartsApiProxyState;
 }
@@ -300,6 +301,13 @@ export function createAggregatorServer({
         serveApplicabilityError(response, error, reportError);
         return;
       }
+    }
+
+    if (url.pathname === "/api/applicability/proxies/import" && request.method === "POST") {
+      try {
+        serveJson(response, 200, application.importApplicabilityProxies(parsePartsApiProxyImport(await readJsonBody(request, 1024 * 1024))));
+      } catch (error) { serveApplicabilityError(response, error, reportError); }
+      return;
     }
 
     if (url.pathname === "/api/applicability/proxies") {

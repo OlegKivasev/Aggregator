@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { createServer as createHttpsServer, request as httpsRequest } from "node:https";
 import { connect } from "node:net";
-import { getCACertificates, setDefaultCACertificates } from "node:tls";
 import { test } from "node:test";
-import { requestPartsApiViaProxy } from "../src/backend/applicability/partsapi-proxy-request.ts";
+import { requestPartsApiViaProxy, lookupPartsApiProxyAddress } from "../src/backend/applicability/partsapi-proxy-request.ts";
 import { PartsApiApplicabilityClient } from "../src/backend/applicability/partsapi-client.ts";
 import { SupplierIntegrationError } from "../src/backend/errors.ts";
 
@@ -14,8 +13,15 @@ import { SupplierIntegrationError } from "../src/backend/errors.ts";
 const key = readFileSync(new URL("./fixtures/partsapi-proxy-test-key.pem", import.meta.url));
 const cert = readFileSync(new URL("./fixtures/partsapi-proxy-test-cert.pem", import.meta.url));
 const targetUrl = new URL("https://api.partsapi.ru/?method=getApplicability&key=fictional-key&sku=TEST1&brand=FORD");
-const proxyConfig = (port, protocol = "http") => ({ protocol, host: "127.0.0.1", port, login: "fictional+proxy", password: " fictional:p@ss%word " });
+const proxyConfig = (port, protocol = "http") => ({ protocol, host: "api.partsapi.ru", port, login: "fictional+proxy", password: " fictional:p@ss%word " });
 const trustedRequest = (url, options, callback) => httpsRequest(url, { ...options, ca: cert }, callback);
+const loopbackLookup = (_hostname, options, callback) => callback(null,
+  options.all ? [{ address: "127.0.0.1", family: 4 }] : "127.0.0.1", 4);
+// Only this test transport redirects the validated hostname to the loopback fixture.
+const loopbackProxyRequest = (url, options) => (url.protocol === "https:" ? httpsRequest : httpRequest)(url, {
+  ...options, ca: cert, lookup: loopbackLookup,
+});
+const fixtureRequest = (url, proxy, signal) => requestPartsApiViaProxy(url, proxy, signal, trustedRequest, loopbackProxyRequest);
 
 async function listen(t, server) {
   const sockets = new Set();
@@ -29,11 +35,6 @@ async function listen(t, server) {
 }
 
 for (const protocol of ["http", "https"]) test(`PartsAPI uses authenticated ${protocol.toUpperCase()} CONNECT and never sends proxy credentials to the target`, { timeout: 5000 }, async (t) => {
-  if (protocol === "https") {
-    const original = getCACertificates("default");
-    setDefaultCACertificates([...original, cert.toString()]);
-    t.after(() => setDefaultCACertificates(original));
-  }
   let received;
   const target = createHttpsServer({ key, cert }, (request, response) => {
     received = { url: request.url, headers: request.headers };
@@ -44,7 +45,7 @@ for (const protocol of ["http", "https"]) test(`PartsAPI uses authenticated ${pr
   let connected;
   const proxy = protocol === "https" ? createHttpsServer({ key, cert }) : createServer();
   proxy.on("connect", (request, client, head) => {
-    connected = { url: request.url, authorization: request.headers["proxy-authorization"] };
+    connected = { url: request.url, authorization: request.headers["proxy-authorization"], servername: client.servername };
     const upstream = connect(targetPort, "127.0.0.1", () => {
       client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       if (head.length) upstream.write(head);
@@ -55,11 +56,12 @@ for (const protocol of ["http", "https"]) test(`PartsAPI uses authenticated ${pr
     client.once("close", () => upstream.destroy());
   });
   const port = await listen(t, proxy);
-  const response = await requestPartsApiViaProxy(targetUrl, proxyConfig(port, protocol), new AbortController().signal, trustedRequest);
+  const response = await fixtureRequest(targetUrl, proxyConfig(port, protocol), new AbortController().signal);
   assert.equal(response.status, 200);
   assert.equal((await response.json())[0].carId, 1);
   assert.equal(connected.url, "api.partsapi.ru:443");
   assert.equal(connected.authorization, `Basic ${Buffer.from("fictional+proxy: fictional:p@ss%word ").toString("base64")}`);
+  if (protocol === "https") assert.equal(connected.servername, "api.partsapi.ru");
   assert.equal(received.url, targetUrl.pathname + targetUrl.search);
   assert.equal(received.headers["proxy-authorization"], undefined);
   assert.equal(received.headers.authorization, undefined);
@@ -70,7 +72,7 @@ test("an authenticated proxy rejection is a safe error and cannot fall back to d
   proxy.on("connect", (_request, socket) => socket.end("HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n"));
   const port = await listen(t, proxy);
   let directCalls = 0;
-  const client = new PartsApiApplicabilityClient(async () => { directCalls += 1; throw new Error("Direct request must never happen"); });
+  const client = new PartsApiApplicabilityClient(async () => { directCalls += 1; throw new Error("Direct request must never happen"); }, fixtureRequest);
   await assert.rejects(client.search({ sku: "TEST1", brand: "FORD", apiKey: "fictional-key" }, new AbortController().signal, proxyConfig(port)), (error) => {
     assert.ok(error instanceof SupplierIntegrationError);
     assert.match(error.publicMessage, /прокси PartsAPI/);
@@ -85,7 +87,7 @@ test("cancelling a pending proxy CONNECT closes its socket", { timeout: 5000 }, 
   const port = await listen(t, proxy);
   const connecting = once(proxy, "connect");
   const controller = new AbortController();
-  const pending = requestPartsApiViaProxy(targetUrl, proxyConfig(port), controller.signal);
+  const pending = fixtureRequest(targetUrl, proxyConfig(port), controller.signal);
   const [, socket] = await connecting;
   // CONNECT hands ownership to the proxy; observe the client's EOF before closing our half.
   const ended = once(socket, "end");
@@ -98,4 +100,72 @@ test("cancelling a pending proxy CONNECT closes its socket", { timeout: 5000 }, 
 
 test("unapproved target origins are rejected before a proxy can see credentials", () => {
   assert.throws(() => requestPartsApiViaProxy(new URL("https://unapproved.invalid/"), proxyConfig(8000), new AbortController().signal), SupplierIntegrationError);
+});
+
+test("HTTPS proxy certificates must be trusted and match the proxy hostname", { timeout: 5000 }, async (t) => {
+  const proxy = createHttpsServer({ key, cert });
+  const port = await listen(t, proxy);
+  let connected = 0;
+  proxy.on("connect", () => { connected += 1; });
+  const untrustedRequest = (url, options) => httpsRequest(url, { ...options, lookup: loopbackLookup });
+  await assert.rejects(requestPartsApiViaProxy(targetUrl, proxyConfig(port, "https"), new AbortController().signal, trustedRequest, untrustedRequest), SupplierIntegrationError);
+  await assert.rejects(fixtureRequest(targetUrl, { ...proxyConfig(port, "https"), host: "proxy.example.org" }, new AbortController().signal), SupplierIntegrationError);
+  assert.equal(connected, 0);
+});
+
+test("cancellation closes a tunnel during the target TLS handshake", { timeout: 5000 }, async (t) => {
+  const proxy = createServer();
+  let handshakeStarted;
+  const started = new Promise((resolve) => { handshakeStarted = resolve; });
+  proxy.on("connect", (_request, socket) => {
+    socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+    socket.once("data", () => handshakeStarted(socket));
+    socket.resume();
+  });
+  const port = await listen(t, proxy);
+  const controller = new AbortController();
+  const pending = fixtureRequest(targetUrl, proxyConfig(port), controller.signal);
+  const socket = await started;
+  const ended = once(socket, "end");
+  controller.abort();
+  await assert.rejects(pending, { name: "AbortError" });
+  await ended;
+  socket.end();
+});
+
+test("target TLS certificate validation stays enabled inside the proxy tunnel", { timeout: 5000 }, async (t) => {
+  const target = createHttpsServer({ key, cert }, (_request, response) => response.end("[]"));
+  const targetPort = await listen(t, target);
+  const proxy = createServer();
+  proxy.on("connect", (_request, client) => {
+    const upstream = connect(targetPort, "127.0.0.1", () => {
+      client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      client.pipe(upstream).pipe(client);
+    });
+    upstream.on("error", () => client.destroy());
+    client.on("error", () => upstream.destroy());
+    client.once("close", () => upstream.destroy());
+  });
+  const port = await listen(t, proxy);
+  await assert.rejects(requestPartsApiViaProxy(targetUrl, proxyConfig(port), new AbortController().signal, httpsRequest, loopbackProxyRequest), SupplierIntegrationError);
+});
+
+test("proxy DNS pins a checked public IPv4 and rejects mixed or private answers", async () => {
+  const resolve = (addresses, options = {}) => new Promise((done, reject) => {
+    lookupPartsApiProxyAddress("proxy.example.org", options, (error, result) => error ? reject(error) : done(result),
+      (host, lookupOptions, callback) => {
+        assert.equal(host, "proxy.example.org");
+        assert.deepEqual(lookupOptions, { family: 4, all: true });
+        callback(null, addresses);
+      });
+  });
+  assert.equal(await resolve([{ address: "8.8.8.8", family: 4 }]), "8.8.8.8");
+  assert.deepEqual(await resolve([{ address: "8.8.8.8", family: 4 }], { all: true }), [{ address: "8.8.8.8", family: 4 }]);
+  for (const address of ["127.0.0.1", "10.0.0.1", "169.254.169.254", "100.64.0.1", "192.168.1.1", "::1"]) {
+    await assert.rejects(resolve([{ address: "8.8.8.8", family: 4 }, { address, family: address === "::1" ? 6 : 4 }]), SupplierIntegrationError);
+  }
+  await assert.rejects(resolve([]), SupplierIntegrationError);
+  const failure = new Error("Fictional DNS failure");
+  await assert.rejects(new Promise((resolve, reject) => lookupPartsApiProxyAddress("proxy.example.org", {},
+    (error, address) => error ? reject(error) : resolve(address), (_host, _options, callback) => callback(failure))), (error) => error === failure);
 });

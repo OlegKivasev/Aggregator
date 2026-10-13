@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseApplicabilitySkus, runApplicabilityBatch } from "../src/frontend/applicability-search-input.js";
+import { parseApplicabilitySkus, runApplicabilityBatch, searchApplicabilityVariants } from "../src/frontend/applicability-search-input.js";
 
 test("applicability input uses commas and preserves article punctuation and internal spaces", () => {
   assert.deepEqual(parseApplicabilitySkus(" 30676484,30780376, 30780377 ,8687389 "),
@@ -12,6 +12,41 @@ test("applicability input uses commas and preserves article punctuation and inte
 
 test("applicability input removes normalized duplicates without changing the first spelling", () => {
   assert.deepEqual(parseApplicabilitySkus("1fa-079, 1FA079, AP 108/6, ap1086, 1fa-079,"), ["1fa-079", "AP 108/6"]);
+});
+
+test("applicability searches the cleaned SKU first and uses original punctuation only after an empty answer", async () => {
+  const signal = new AbortController().signal;
+  const calls = [];
+  let mode = "found";
+  const request = async (sku, brand, receivedSignal) => {
+    assert.equal(brand, "FORD");
+    assert.equal(receivedSignal, signal);
+    calls.push(sku);
+    return { results: mode === "found" || sku === "AP 108/6" ? [{ carId: 1 }] : [], cacheHit: false };
+  };
+  assert.equal((await searchApplicabilityVariants("AP 108/6", "FORD", signal, request)).usedNormalizedSku, true);
+  assert.deepEqual(calls, ["AP1086"]);
+  calls.length = 0;
+  mode = "fallback";
+  assert.equal((await searchApplicabilityVariants("AP 108/6", "FORD", signal, request)).usedNormalizedSku, false);
+  assert.deepEqual(calls, ["AP1086", "AP 108/6"]);
+  calls.length = 0;
+  await searchApplicabilityVariants("AP1086", "FORD", signal, request);
+  assert.deepEqual(calls, ["AP1086"]);
+  calls.length = 0;
+  await assert.rejects(searchApplicabilityVariants("AP 108/6", "FORD", signal, async (sku) => { calls.push(sku); throw new Error("Timed out"); }), /Timed out/);
+  assert.deepEqual(calls, ["AP1086"]);
+});
+
+test("cancellation prevents the original-SKU fallback", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  await assert.rejects(searchApplicabilityVariants("AA-1", "FORD", controller.signal, async () => {
+    calls += 1;
+    controller.abort();
+    return { results: [], cacheHit: false };
+  }), { name: "AbortError" });
+  assert.equal(calls, 1);
 });
 
 test("applicability input rejects invalid and oversized batches before requests", () => {

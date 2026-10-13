@@ -183,6 +183,7 @@ export const saveApplicabilityApiKey = (apiKey: string) => applicabilityService.
 export const deleteApplicabilityApiKey = () => applicabilityService.deleteApiKey();
 export const getApplicabilityProxyState = () => applicabilityProxyStore.getState();
 export const addApplicabilityProxy = (config: PartsApiProxyConfig) => applicabilityProxyStore.add(config);
+export const importApplicabilityProxies = (configs: PartsApiProxyConfig[]) => applicabilityProxyStore.import(configs);
 export const selectApplicabilityProxy = (routeId: string | null) => applicabilityProxyStore.select(routeId);
 export const deleteApplicabilityProxy = (id: string) => applicabilityProxyStore.delete(id);
 

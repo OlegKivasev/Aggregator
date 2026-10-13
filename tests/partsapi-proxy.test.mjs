@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, rmdirSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { EncryptedPartsApiProxyStore } from "../src/backend/applicability/encrypted-proxy-store.ts";
-import { parsePartsApiProxyConfig, PartsApiProxyValidationError } from "../src/backend/applicability/partsapi-proxy-config.ts";
+import { parsePartsApiProxyConfig, parsePartsApiProxyImport, PartsApiProxyValidationError } from "../src/backend/applicability/partsapi-proxy-config.ts";
 import { PartsApiApplicabilityClient } from "../src/backend/applicability/partsapi-client.ts";
 import { PartsApiRoutingClient } from "../src/backend/applicability/partsapi-routing-client.ts";
 import { PartsApiIpLimitError, PartsApiKeyError } from "../src/backend/applicability/partsapi-key-error.ts";
@@ -28,10 +28,12 @@ function fixture(t) {
   return { store, path, key };
 }
 
-test("proxy settings validate IPv4, protocols, ports and credentials before connecting", () => {
+test("proxy settings validate public IPv4, domain names, protocols, ports and credentials before connecting", () => {
   assert.deepEqual(parsePartsApiProxyConfig(config), config);
+  const domain = { ...config, protocol: "https", host: "edge-8-8-8-8.proxy.example.org", port: 8443 };
+  assert.deepEqual(parsePartsApiProxyConfig({ ...domain, host: domain.host.toUpperCase() }), domain);
   assert.deepEqual(parsePartsApiProxyConfig({ ...config, login: "", password: "" }), { ...config, login: "", password: "" });
-  for (const host of ["localhost", "127.0.0.1", "0.0.0.0", "10.0.0.1", "172.16.1.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "198.18.0.1", "224.0.0.1", "255.255.255.255", "[::1]", "2130706433", "8.8.8.8@127.0.0.1", "8.8.8.8/path"]) {
+  for (const host of ["localhost", "proxy.localhost", "proxy.internal", "https://proxy.example.org", "proxy.example.org:8443", "proxy..example.org", "-proxy.example.org", "proxy-.example.org", "proxy.example.org.", `${"a".repeat(64)}.example.org`, `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(63)}.org`, "127.0.0.1", "0.0.0.0", "10.0.0.1", "172.16.1.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "198.18.0.1", "224.0.0.1", "255.255.255.255", "[::1]", "2130706433", "8.8.8.8@127.0.0.1", "8.8.8.8/path"]) {
     assert.throws(() => parsePartsApiProxyConfig({ ...config, host }), PartsApiProxyValidationError);
   }
   for (const extra of [{ protocol: "socks5" }, { port: 0 }, { port: 65536 }, { port: 8000.5 }, { port: "8000" }, { login: "bad:user" }, { login: "" }, { password: "" }, { password: "bad\r\nvalue" }]) {
@@ -56,6 +58,110 @@ test("proxies and active selection are encrypted, restored and removed without e
   restored.delete(id);
   assert.equal(existsSync(path), false);
   assert.throws(() => store.add(config), /already exists/);
+});
+
+test("proxy text import preserves password punctuation and reports safe line errors", () => {
+  const configs = parsePartsApiProxyImport({ protocol: "https", text: "\uFEFFproxy.example.org:8443:fictional-user: password:with:@symbols \r\n\r\n8.8.8.8:8080:user:pass" });
+  assert.deepEqual(configs[0], { protocol: "https", host: "proxy.example.org", port: 8443, login: "fictional-user", password: " password:with:@symbols " });
+  assert.equal(configs.length, 2);
+  for (const text of ["", "\n ", "8.8.8.8:8080:user", "8.8.8.8:0:user:secret", "8.8.8.8:8080:user:secret\n127.0.0.1:8080:user:secret", "x".repeat(512 * 1024 + 1), Array(101).fill("8.8.8.8:8080:user:secret").join("\n")]) {
+    assert.throws(() => parsePartsApiProxyImport({ protocol: "http", text }), (error) => {
+      assert.ok(error instanceof PartsApiProxyValidationError);
+      assert.ok(!error.message.includes("secret"));
+      return true;
+    });
+  }
+  assert.throws(() => parsePartsApiProxyImport({ protocol: "http", text: "8.8.8.8:8080:user:pass\nwrong" }), /Строка 2/);
+});
+
+test("a hundred proxies import atomically, deduplicate and restore from encrypted storage", (t) => {
+  const { store, path, key } = fixture(t);
+  const configs = Array.from({ length: 100 }, (_, index) => ({ ...config, host: `edge-${index}.proxy.example.org`, password: "fictional-long-password-" + "a".repeat(1600) }));
+  const imported = store.import(configs);
+  assert.equal(imported.importedCount, 100);
+  assert.equal(imported.duplicateCount, 0);
+  const id = imported.proxies[99].id;
+  store.select(id);
+  const encrypted = readFileSync(path, "utf8");
+  assert.ok(encrypted.length > 128 * 1024);
+  assert.ok(!encrypted.includes(configs[0].password));
+  const restored = new EncryptedPartsApiProxyStore(path, key);
+  assert.equal(restored.getState().proxies.length, 100);
+  assert.equal(restored.getState().activeRouteId, id);
+  assert.equal(restored.import(configs).duplicateCount, 100);
+  assert.equal(restored.getState().activeRouteId, id);
+  assert.throws(() => restored.add(config), /full/);
+  const before = readFileSync(path, "utf8");
+  assert.throws(() => restored.import([config]), /100/);
+  assert.equal(readFileSync(path, "utf8"), before);
+  const empty = fixture(t).store;
+  assert.throws(() => empty.import([config, { ...config, host: "127.0.0.1" }]), PartsApiProxyValidationError);
+  assert.equal(empty.getState().proxies.length, 0);
+  assert.equal(empty.import([config, config]).duplicateCount, 1);
+});
+
+test("IP-limit rotation traverses all hundred imported proxies without manual selection", async (t) => {
+  const { store } = fixture(t);
+  store.import(Array.from({ length: 100 }, (_, index) => ({ ...config, host: `edge-${index}.proxy.example.org` })));
+  const calls = [];
+  const routing = new PartsApiRoutingClient(new PartsApiApplicabilityClient(async () => limited(), async (_url, proxy) => {
+    calls.push(proxy.host);
+    return proxy.host === "edge-99.proxy.example.org" ? success() : limited();
+  }), store);
+  assert.equal((await routing.search(query, signal())).length, 1);
+  assert.equal(calls.length, 100);
+  assert.equal(store.getSelection().proxy.host, "edge-99.proxy.example.org");
+  assert.equal(store.getState().usage.requestCount, 101);
+  await routing.search(query, signal());
+  assert.equal(calls.at(-1), "edge-99.proxy.example.org");
+});
+
+test("daily reset keeps its boundary over idle days, restart and late IP-limit replies", (t) => {
+  const { path, key } = fixture(t);
+  const start = 1_800_000_000_000;
+  let now = start;
+  const store = new EncryptedPartsApiProxyStore(path, key, () => now);
+  store.add(config);
+  const oldSelection = store.getSelection();
+  const attemptWindow = store.recordAttempt(null);
+  now += 3 * 86_400_000 + 1234;
+  store.recordOutcome(null, "failed", attemptWindow);
+  store.advanceAfterIpLimit(oldSelection, new Set([null]));
+  let state = store.getState();
+  assert.equal(state.usage.requestCount, 0);
+  assert.equal(state.directLimited, false);
+  assert.equal(state.usage.windowStartedAt, start + 3 * 86_400_000);
+  assert.equal(state.usage.secondsUntilReset, 86_399);
+  const restored = new EncryptedPartsApiProxyStore(path, key, () => now);
+  assert.equal(restored.getState().usage.resetAt, start + 4 * 86_400_000);
+  restored.recordAttempt(null);
+  now = start + 4 * 86_400_000;
+  state = restored.getState();
+  assert.equal(state.usage.requestCount, 0);
+  assert.equal(state.usage.secondsUntilReset, 86_400);
+});
+
+test("failed imports and daily reset writes preserve previous state for a retry", (t) => {
+  const { path, key } = fixture(t);
+  let now = 1_800_000_000_000;
+  const store = new EncryptedPartsApiProxyStore(path, key, () => now);
+  store.add(config);
+  store.recordAttempt(null);
+  store.advanceAfterIpLimit(store.getSelection(), new Set([null]));
+  const saved = readFileSync(path);
+  const before = store.getState();
+  rmSync(path);
+  mkdirSync(path);
+  assert.throws(() => store.import([secondConfig]));
+  assert.deepEqual(store.getState(), before);
+  now += 86_400_000;
+  assert.throws(() => store.getState());
+  assert.throws(() => store.getState());
+  rmdirSync(path);
+  writeFileSync(path, saved);
+  assert.equal(store.getState().usage.requestCount, 0);
+  assert.equal(store.getState().directLimited, false);
+  assert.equal(new EncryptedPartsApiProxyStore(path, key, () => now).getState().proxies.length, 1);
 });
 
 test("usage counters classify data, empty and failed responses and reset after 24 hours", (t) => {
@@ -90,7 +196,8 @@ test("usage counters classify data, empty and failed responses and reset after 2
   now += 1_000;
   state = store.getState();
   assert.equal(state.usage.requestCount, 0);
-  assert.equal(state.usage.resetAt, null);
+  assert.equal(state.usage.resetAt, now + 86_400_000);
+  assert.equal(state.usage.secondsUntilReset, 86_400);
   assert.equal(state.directLimited, false);
   assert.equal(state.proxies[0].usage.requestCount, 0);
   const restored = new EncryptedPartsApiProxyStore(path, key, () => now);
@@ -331,7 +438,6 @@ test("adding a proxy during an IP rejection permits switching without overriding
 test("proxy rotation is bounded by a single thirty-second deadline", async (t) => {
   const { store } = fixture(t);
   for (let port = 8000; port < 8008; port += 1) store.add({ ...config, port });
-  assert.throws(() => store.add({ ...config, port: 8008 }), /full/);
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let calls = 0;
   const respond = (signal) => new Promise((resolve, reject) => {

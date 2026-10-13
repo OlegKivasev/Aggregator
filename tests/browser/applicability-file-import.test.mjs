@@ -79,6 +79,7 @@ test("file import previews safe pairs, searches sequentially and appends increme
   let reportFirst;
   const firstStarted = new Promise((resolve) => { reportFirst = resolve; });
   const untrustedSku = "S<script>window.importXss=1</script>";
+  const cleanedUntrustedSku = "SscriptwindowimportXss1script";
   await withImportPage(async (route) => {
     const pair = route.request().postDataJSON();
     calls.push(pair);
@@ -87,7 +88,7 @@ test("file import previews safe pairs, searches sequentially and appends increme
       await firstGate;
     }
     if (pair.sku === "FAIL1") await route.fulfill({ status: 502, json: { message: "Applicability search failed" } });
-    else await route.fulfill({ json: { results: ["NORM-1", "EMPTY1"].includes(pair.sku) ? [] : [vehicle], cacheHit: pair.brand === "HYUNDAI" } });
+    else await route.fulfill({ json: { results: ["EMPTY1", cleanedUntrustedSku].includes(pair.sku) ? [] : [vehicle], cacheHit: pair.brand === "HYUNDAI" } });
   }, async (page) => {
     const icon = page.locator("#applicability-file-toggle");
     const bounds = await icon.boundingBox();
@@ -115,8 +116,8 @@ test("file import previews safe pairs, searches sequentially and appends increme
     await waitFinished(page);
     assert.deepEqual(calls, [
       { sku: "12345", brand: "HYUNDAI" }, { sku: "12345", brand: "LAND ROVER" },
-      { sku: "FAIL1", brand: "FORD" }, { sku: "NORM-1", brand: "FORD" },
-      { sku: "NORM1", brand: "FORD" }, { sku: "EMPTY1", brand: "FORD" },
+      { sku: "FAIL1", brand: "FORD" }, { sku: "NORM1", brand: "FORD" },
+      { sku: "EMPTY1", brand: "FORD" }, { sku: cleanedUntrustedSku, brand: "FORD" },
       { sku: untrustedSku, brand: "FORD" },
     ]);
     assert.match(await page.locator("#applicability-file-summary").textContent(), /Добавлено: 5\. Ошибок: 1\. Пропущено: 4/);
@@ -173,7 +174,7 @@ test("structured file creates one persisted group, searches OEMs in their own so
     await page.locator("#applicability-file-start").click();
     await waitFinished(page);
     assert.deepEqual(calls, [
-      { sku: "OEM-1", brand: "VW" }, { sku: "OEM1", brand: "AUDI" },
+      { sku: "OEM1", brand: "VW" }, { sku: "OEM1", brand: "AUDI" },
       { sku: "OEM1", brand: "VW" }, { sku: "OEM2", brand: "CITROËN" },
       { sku: "OEM3", brand: "GAZ" }, { sku: "OEM4", brand: "FORD" },
     ]);
@@ -223,7 +224,7 @@ test("one source article appends its OEMs to the current tab and manual make sel
     assert.equal(state.tabs.length, 2);
     assert.equal(state.tabs[0].id, "original");
     assert.equal(state.tabs[0].name, "SINGLE-1");
-    assert.deepEqual(state.tabs[0].searches.map((entry) => [entry.sku, entry.makeName]), [["EXIST1", "FORD"], ["SINGLE-OE", "MERCEDES-BENZ"]]);
+    assert.deepEqual(state.tabs[0].searches.map((entry) => [entry.sku, entry.makeName]), [["EXIST1", "FORD"], ["SINGLEOE", "MERCEDES-BENZ"]]);
     await page.locator('#applicability-selected-makes [data-remove-make-name="FORD"]').click();
     await page.locator("#applicability-make").fill("Фольксваген");
     const option = page.locator('#applicability-makes [data-make-name="VW"]');
@@ -232,7 +233,7 @@ test("one source article appends its OEMs to the current tab and manual make sel
     await page.locator("#applicability-sku").fill("MANUAL1");
     await page.locator("#applicability-submit").click();
     await page.waitForFunction(() => !document.querySelector("#applicability-submit").disabled);
-    assert.deepEqual(calls, [{ sku: "SINGLE-OE", brand: "MERCEDES-BENZ" }, { sku: "MANUAL1", brand: "VW" }]);
+    assert.deepEqual(calls, [{ sku: "SINGLEOE", brand: "MERCEDES-BENZ" }, { sku: "MANUAL1", brand: "VW" }]);
   });
 });
 

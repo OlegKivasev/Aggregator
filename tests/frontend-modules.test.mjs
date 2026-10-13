@@ -643,7 +643,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.doesNotMatch(html, /id="applicability-cached/);
   assert.match(applicability, /setSelectedMakeNames\(\[\.\.\.selectedMakeNames\(\), \.\.\.cachedMakes\.map/);
   assert.match(applicability, /Некоторые пары «артикул \+ бренд» уже добавлены\./);
-  assert.match(applicability, /import \{ normalizeApplicabilitySku, parseApplicabilitySkus, runApplicabilityBatch \} from "\.\/applicability-search-input\.js"/);
+  assert.match(applicability, /import \{[^}]*searchApplicabilityVariants[^}]*\} from "\.\/applicability-search-input\.js"/);
   assert.match(applicability, /Артикул «\$\{sku\}» изменён на «\$\{normalizedOutcome\.result\.normalizedSku\}» и успешно найден\./);
   assert.match(applicability, /fetch\("\/api\/applicability\/api-key"/);
   assert.match(applicability, /JSON\.stringify\(\{ sku, brand \}\)/);

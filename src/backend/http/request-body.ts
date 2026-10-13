@@ -147,14 +147,14 @@ export function parseApplicabilityApiKeyPayload(payload: unknown): { apiKey: str
   return { apiKey: normalizedApiKey };
 }
 
-export async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+export async function readJsonBody(request: IncomingMessage, limitBytes = requestBodyLimitBytes): Promise<unknown> {
   const chunks: Uint8Array[] = [];
   let bodySize = 0;
 
   for await (const chunk of request) {
     const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
     bodySize += buffer.byteLength;
-    if (bodySize > requestBodyLimitBytes) {
+    if (bodySize > limitBytes) {
       throw new RequestBodyError(413, "Request body is too large");
     }
     chunks.push(buffer);

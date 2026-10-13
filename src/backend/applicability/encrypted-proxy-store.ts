@@ -2,10 +2,9 @@ import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:
 import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { SupplierIntegrationError } from "../errors.ts";
 import { writeJsonStateFileAtomic } from "../session/state-file.ts";
-import { parsePartsApiProxyConfig, PartsApiProxyValidationError, type PartsApiProxy, type PartsApiProxyConfig, type PartsApiProxyState, type PartsApiUsageCounters } from "./partsapi-proxy-config.ts";
+import { maximumPartsApiProxies as maximumProxies, parsePartsApiProxyConfig, PartsApiProxyValidationError, type PartsApiProxy, type PartsApiProxyConfig, type PartsApiProxyImportResult, type PartsApiProxyState, type PartsApiUsageCounters } from "./partsapi-proxy-config.ts";
 
 const authenticatedContext = Buffer.from("autoservice-aggregator:partsapi-proxies:v1");
-const maximumProxies = 8;
 const usageWindowMs = 24 * 60 * 60 * 1000;
 const maximumUsageCount = 1_000_000_000;
 const proxyIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -131,6 +130,7 @@ export class EncryptedPartsApiProxyStore {
   }
 
   recordOutcome(routeId: string | null, outcome: "data" | "empty" | "failed", attemptWindowStartedAt: number): void {
+    this.ensureUsageWindow();
     if (this.usageWindowStartedAt !== attemptWindowStartedAt) return;
     const field = outcome === "data" ? "dataResponseCount" : outcome === "empty" ? "emptyResponseCount" : "failedRequestCount";
     incrementUsageCounter(this.apiKeyUsage, field);
@@ -141,12 +141,28 @@ export class EncryptedPartsApiProxyStore {
 
   add(config: PartsApiProxyConfig): PartsApiProxyState {
     const parsed = parsePartsApiProxyConfig(config);
-    if (this.proxies.length >= maximumProxies) throw new SupplierIntegrationError("PartsAPI proxy list is full", { publicMessage: "Можно сохранить не более восьми прокси." });
+    if (this.proxies.length >= maximumProxies) throw new SupplierIntegrationError("PartsAPI proxy list is full", { publicMessage: "Можно сохранить не более 100 прокси." });
     if (this.proxies.some(({ host, port }) => host === parsed.host && port === parsed.port)) {
       throw new SupplierIntegrationError("PartsAPI proxy already exists", { publicMessage: "Прокси с таким адресом и портом уже добавлен." });
     }
     this.commit([...this.proxies, { ...parsed, id: randomUUID() }], this.activeRouteId);
     return this.getState();
+  }
+
+  import(configs: PartsApiProxyConfig[]): PartsApiProxyImportResult {
+    if (!configs.length || configs.length > maximumProxies) throw new PartsApiProxyValidationError("В файле должно быть от 1 до 100 прокси.");
+    const parsed = configs.map(parsePartsApiProxyConfig);
+    const addresses = new Set(this.proxies.map(({ host, port }) => `${host}:${port}`));
+    const additions: PartsApiProxy[] = [];
+    for (const config of parsed) {
+      const address = `${config.host}:${config.port}`;
+      if (addresses.has(address)) continue;
+      addresses.add(address);
+      additions.push({ ...config, id: randomUUID() });
+    }
+    if (this.proxies.length + additions.length > maximumProxies) throw new PartsApiProxyValidationError("В списке можно сохранить не более 100 прокси. Удалите лишние и повторите импорт.");
+    if (additions.length) this.commit([...this.proxies, ...additions], this.activeRouteId);
+    return { ...this.getState(), importedCount: additions.length, duplicateCount: parsed.length - additions.length };
   }
 
   select(routeId: string | null): PartsApiProxyState {
@@ -177,6 +193,7 @@ export class EncryptedPartsApiProxyStore {
   }
 
   advanceAfterIpLimit(failed: PartsApiRouteSelection, attempted: Set<string | null>): PartsApiRouteSelection | null {
+    this.ensureUsageWindow();
     if (failed.revision !== this.revision) {
       // A concurrent search or manual choice already changed the route. Do not overwrite it.
       return attempted.has(this.activeRouteId) ? null : this.getSelection();
@@ -202,6 +219,7 @@ export class EncryptedPartsApiProxyStore {
   }
 
   recordSuccess(selection: PartsApiRouteSelection): void {
+    this.ensureUsageWindow();
     if (selection.revision === this.revision && this.limitedRoutes.delete(selection.id)) this.persistIfConfigured();
   }
 
@@ -222,14 +240,29 @@ export class EncryptedPartsApiProxyStore {
 
   private ensureUsageWindow(): void {
     if (this.usageWindowStartedAt === null || this.now() < this.usageWindowStartedAt + usageWindowMs) return;
-    this.usageWindowStartedAt = null;
+    const previous = {
+      startedAt: this.usageWindowStartedAt, apiKeyUsage: this.apiKeyUsage, directUsage: this.directUsage,
+      proxyUsage: new Map(this.proxyUsage), limitedRoutes: new Set(this.limitedRoutes), lastSwitchReason: this.lastSwitchReason,
+    };
+    // Keep the persisted daily boundary even after idle days or a process restart.
+    this.usageWindowStartedAt += Math.floor((this.now() - this.usageWindowStartedAt) / usageWindowMs) * usageWindowMs;
     this.apiKeyUsage = createUsageCounters();
     this.directUsage = createUsageCounters();
     this.proxyUsage.clear();
     this.limitedRoutes.clear();
     this.lastSwitchReason = null;
+    try {
+      this.persistIfConfigured();
+    } catch (error) {
+      this.usageWindowStartedAt = previous.startedAt;
+      this.apiKeyUsage = previous.apiKeyUsage;
+      this.directUsage = previous.directUsage;
+      for (const [id, counters] of previous.proxyUsage) this.proxyUsage.set(id, counters);
+      for (const id of previous.limitedRoutes) this.limitedRoutes.add(id);
+      this.lastSwitchReason = previous.lastSwitchReason;
+      throw error;
+    }
     this.revision += 1;
-    this.persistIfConfigured();
   }
 
   private getProxyUsage(id: string): PartsApiUsageCounters {
@@ -278,7 +311,7 @@ export class EncryptedPartsApiProxyStore {
     if (!existsSync(this.filePath)) return;
     if (!this.encryptionKey) throw new Error("SUPPLIER_CREDENTIALS_ENCRYPTION_KEY is required to read PartsAPI proxies");
     try {
-      if (statSync(this.filePath).size > 128 * 1024) throw new Error("Proxy store is too large");
+      if (statSync(this.filePath).size > 2 * 1024 * 1024) throw new Error("Proxy store is too large");
       const envelope: unknown = JSON.parse(readFileSync(this.filePath, "utf8"));
       if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) throw new Error("Invalid proxy envelope");
       const { version, algorithm, iv, ciphertext, authTag } = envelope as Record<string, unknown>;

@@ -7,10 +7,16 @@ const persistence = document.querySelector("#applicability-proxy-persistence");
 const usage = document.querySelector("#applicability-proxy-usage");
 const addButton = document.querySelector("#applicability-proxy-add");
 const password = document.querySelector("#applicability-proxy-password");
+const importForm = document.querySelector("#applicability-proxy-import-form");
+const importFile = document.querySelector("#applicability-proxy-import-file");
+const importButton = document.querySelector("#applicability-proxy-import");
+const routeNotice = document.querySelector("#applicability-route-notice");
+let noticeTimer = null;
 let state = null;
 let stateReceivedAt = 0;
 let loading = false;
 let mutating = false;
+let importing = false;
 let lastRefresh = 0;
 let stateRevision = 0;
 
@@ -24,6 +30,8 @@ const readState = async (response) => {
   const payload = await response.json();
   if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось изменить соединение PartsAPI.");
   const validId = (id) => typeof id === "string" && /^[0-9a-f-]{36}$/.test(id);
+  const validHost = (host) => typeof host === "string" && host.length <= 253 && host.split(".").length >= 2
+    && host.split(".").every((label) => label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label));
   const validCounters = (counters) => counters && typeof counters === "object" && !Array.isArray(counters)
     && ["requestCount", "dataResponseCount", "emptyResponseCount", "failedRequestCount"]
       .every((key) => Number.isSafeInteger(counters[key]) && counters[key] >= 0 && counters[key] <= 1_000_000_000)
@@ -36,9 +44,11 @@ const readState = async (response) => {
     || ![null, "manual", "ip-limit"].includes(payload.lastSwitchReason)
     || !validCounters(payload.usage) || !validWindow(payload.usage)
     || !validCounters(payload.directUsage)
-    || !Array.isArray(payload.proxies) || payload.proxies.length > 8
+    || (payload.importedCount !== undefined && (!Number.isInteger(payload.importedCount) || payload.importedCount < 0 || payload.importedCount > 100
+      || !Number.isInteger(payload.duplicateCount) || payload.duplicateCount < 0 || payload.duplicateCount > 100))
+    || !Array.isArray(payload.proxies) || payload.proxies.length > 100
     || payload.proxies.some((proxy) => !proxy || !validId(proxy.id) || !["http", "https"].includes(proxy.protocol)
-      || typeof proxy.host !== "string" || !/^\d{1,3}(\.\d{1,3}){3}$/.test(proxy.host) || proxy.host.split(".").some((octet) => Number(octet) > 255)
+      || !validHost(proxy.host)
       || !Number.isInteger(proxy.port) || proxy.port < 1 || proxy.port > 65535 || typeof proxy.limited !== "boolean" || !validCounters(proxy.usage))
     || new Set(payload.proxies.map(({ id }) => id)).size !== payload.proxies.length
     || (payload.activeRouteId !== null && !payload.proxies.some(({ id }) => id === payload.activeRouteId))) {
@@ -76,17 +86,26 @@ const renderUsage = () => {
 };
 
 const render = (next) => {
+  const switched = state && next.activeRouteId !== state.activeRouteId && next.lastSwitchReason === "ip-limit";
   if (next !== state) stateReceivedAt = Date.now();
   state = next;
   renderUsage();
   const active = state.proxies.find(({ id }) => id === state.activeRouteId);
   const limited = active ? active.limited : state.directLimited;
   const name = active ? `прокси ${active.host}:${active.port}` : "прямое соединение";
+  if (switched) {
+    if (noticeTimer !== null) clearTimeout(noticeTimer);
+    routeNotice.textContent = `Лимит IP: PartsAPI автоматически переключён на ${name}.`;
+    routeNotice.hidden = false;
+    noticeTimer = setTimeout(() => { routeNotice.hidden = true; noticeTimer = null; }, 6_000);
+  }
   indicator.textContent = `PartsAPI: ${name} · ${formatRequestCount(state.usage.requestCount)}${limited ? " · лимит IP" : state.lastSwitchReason === "ip-limit" ? " · автопереключение" : ""}`;
   indicator.dataset.route = active ? "proxy" : "direct";
   indicator.dataset.limited = String(limited);
   persistence.textContent = state.persistent ? "Данные прокси сохраняются зашифрованными на сервере." : "Для сохранения прокси нужно настроить защищённое хранение на сервере.";
-  addButton.disabled = mutating || !state.persistent || state.proxies.length >= 8;
+  addButton.disabled = mutating || importing || !state.persistent || state.proxies.length >= 100;
+  importButton.disabled = mutating || importing || !state.persistent || state.proxies.length >= 100;
+  const previousScrollTop = routes.scrollTop;
   routes.replaceChildren();
   const choices = [{ id: null, label: "Прямое соединение", limited: state.directLimited }, ...state.proxies.map((proxy) => ({ ...proxy, label: `${proxy.host}:${proxy.port} · ${proxy.protocol.toUpperCase()}` }))];
   for (const choice of choices) {
@@ -112,7 +131,7 @@ const render = (next) => {
     select.type = "button";
     select.className = "btn btn-light";
     select.textContent = choice.limited ? "Повторить" : choice.id === state.activeRouteId ? "Выбрано" : "Выбрать";
-    select.disabled = mutating || !state.persistent || (choice.id === state.activeRouteId && !choice.limited);
+    select.disabled = mutating || importing || !state.persistent || (choice.id === state.activeRouteId && !choice.limited);
     select.addEventListener("click", () => mutate("/api/applicability/proxy-route", "PUT", { routeId: choice.id }));
     actions.append(select);
     if (choice.id !== null) {
@@ -120,13 +139,14 @@ const render = (next) => {
       remove.type = "button";
       remove.className = "btn btn-light";
       remove.textContent = "Удалить";
-      remove.disabled = mutating || choice.id === state.activeRouteId;
+      remove.disabled = mutating || importing || choice.id === state.activeRouteId;
       remove.addEventListener("click", () => mutate(`/api/applicability/proxies/${choice.id}`, "DELETE"));
       actions.append(remove);
     }
     row.append(label, actions);
     routes.append(row);
   }
+  routes.scrollTop = previousScrollTop;
 };
 
 const refresh = async (force = false) => {
@@ -158,14 +178,18 @@ const mutate = async (url, method, payload) => {
       method, headers: { "Content-Type": "application/json", Accept: "application/json" },
       ...(payload ? { body: JSON.stringify(payload) } : {}), signal: AbortSignal.timeout(10_000),
     }));
-    stateReceivedAt = Date.now();
-    state = next;
-    if (method === "POST") {
+    render(next);
+    if (url === "/api/applicability/proxies/import") {
+      importForm.reset();
+      notify(`Импортировано: ${next.importedCount}. Дубликатов пропущено: ${next.duplicateCount}. Автопереключение включено.`);
+    } else if (method === "POST") {
       form.reset();
       password.type = "password";
       password.closest(".password-field").querySelector(".password-toggle").setAttribute("aria-label", "Показать пароль");
+      notify("Прокси добавлен. Автопереключение включено.");
+    } else {
+      notify(method === "DELETE" ? "Прокси удалён." : "Соединение выбрано для новых запросов.");
     }
-    notify(method === "POST" ? "Прокси добавлен. Автопереключение включено." : method === "DELETE" ? "Прокси удалён." : "Соединение выбрано для новых запросов.");
   } catch (error) {
     notify(error instanceof Error ? error.message : "Не удалось изменить соединение PartsAPI.", true);
   } finally {
@@ -176,11 +200,30 @@ const mutate = async (url, method, payload) => {
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (importing) return;
   const fields = new FormData(form);
   mutate("/api/applicability/proxies", "POST", {
     protocol: fields.get("protocol"), host: fields.get("host").trim(), port: Number(fields.get("port")),
     login: fields.get("login"), password: fields.get("password"),
   });
+});
+importForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (mutating || importing) return;
+  const file = importFile.files?.[0];
+  if (!file || file.size > 512 * 1024) { notify("Выберите текстовый файл размером до 512 КБ.", true); return; }
+  importing = true;
+  const protocol = new FormData(importForm).get("protocol");
+  if (state) render(state);
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+    await mutate("/api/applicability/proxies/import", "POST", { protocol, text });
+  } catch {
+    notify("Не удалось прочитать файл. Сохраните его в кодировке UTF-8 и повторите импорт.", true);
+  } finally {
+    importing = false;
+    if (state) render(state);
+  }
 });
 indicator.addEventListener("click", () => {
   drawer.hidden = false;
@@ -197,5 +240,5 @@ const timer = setInterval(() => {
     refresh();
   }
 }, 1000);
-window.addEventListener("pagehide", () => clearInterval(timer), { once: true });
+window.addEventListener("pagehide", () => { clearInterval(timer); if (noticeTimer !== null) clearTimeout(noticeTimer); }, { once: true });
 refresh(true);

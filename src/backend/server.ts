@@ -11,6 +11,7 @@ import {
   authorizeRossko,
   authorizeStparts,
   addApplicabilityProxy,
+  importApplicabilityProxies,
   deleteApplicabilityProxy,
   getApplicabilityProxyState,
   selectApplicabilityProxy,
@@ -43,6 +44,7 @@ const port = readPort();
 
 const application: AggregatorApplication = {
   addApplicabilityProxy,
+  importApplicabilityProxies,
   deleteApplicabilityProxy,
   getApplicabilityProxyState,
   selectApplicabilityProxy,
