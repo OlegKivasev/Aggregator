@@ -186,6 +186,7 @@ export const addApplicabilityProxy = (config: PartsApiProxyConfig) => applicabil
 export const importApplicabilityProxies = (configs: PartsApiProxyConfig[]) => applicabilityProxyStore.import(configs);
 export const selectApplicabilityProxy = (routeId: string | null) => applicabilityProxyStore.select(routeId);
 export const deleteApplicabilityProxy = (id: string) => applicabilityProxyStore.delete(id);
+export const resetApplicabilityProxyUsage = (routeId: string | null) => applicabilityProxyStore.resetUsage(routeId);
 
 export async function shutdownSearchService(): Promise<void> {
   closeSiteHttpAgent();

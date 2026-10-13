@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { SupplierIntegrationError } from "../errors.ts";
 import { writeJsonStateFileAtomic } from "../session/state-file.ts";
-import { parsePartsApiProxyConfig, PartsApiProxyValidationError, type PartsApiProxy, type PartsApiProxyConfig, type PartsApiProxyImportResult, type PartsApiProxyState, type PartsApiUsageCounters } from "./partsapi-proxy-config.ts";
+import { parsePartsApiProxyConfig, PartsApiProxyValidationError, type PartsApiProxy, type PartsApiProxyConfig, type PartsApiProxyImportResult, type PartsApiProxyState, type PartsApiUsageCounters, type PartsApiUsageState } from "./partsapi-proxy-config.ts";
 
 const authenticatedContext = Buffer.from("autoservice-aggregator:partsapi-proxies:v1");
 const usageWindowMs = 24 * 60 * 60 * 1000;
@@ -13,8 +13,12 @@ function createUsageCounters(): PartsApiUsageCounters {
   return { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0 };
 }
 
-function cloneUsageCounters(value: PartsApiUsageCounters): PartsApiUsageCounters {
-  return { ...value };
+interface RouteUsage extends PartsApiUsageCounters {
+  windowStartedAt: number | null;
+}
+
+function createRouteUsage(): RouteUsage {
+  return { ...createUsageCounters(), windowStartedAt: null };
 }
 
 function hasUsageCounters(value: PartsApiUsageCounters): boolean {
@@ -64,10 +68,9 @@ export class EncryptedPartsApiProxyStore {
   private readonly filePath: string;
   private readonly encryptionKey: Buffer | null;
   private readonly now: () => number;
-  private usageWindowStartedAt: number | null = null;
-  private apiKeyUsage: PartsApiUsageCounters = createUsageCounters();
-  private directUsage: PartsApiUsageCounters = createUsageCounters();
-  private readonly proxyUsage = new Map<string, PartsApiUsageCounters>();
+  private directUsage: RouteUsage = createRouteUsage();
+  private readonly proxyUsage = new Map<string, RouteUsage>();
+  private readonly usageGenerations = new Map<string | null, number>();
 
   constructor(filePath: string, encryptionKey: Buffer | null, now: () => number = Date.now) {
     this.filePath = filePath;
@@ -78,21 +81,19 @@ export class EncryptedPartsApiProxyStore {
 
   getState(): PartsApiProxyState {
     this.ensureUsageWindow();
-    const resetAt = this.usageWindowStartedAt === null ? null : this.usageWindowStartedAt + usageWindowMs;
+    const total = createUsageCounters();
+    for (const usage of [this.directUsage, ...this.proxyUsage.values()]) {
+      for (const field of Object.keys(total) as (keyof PartsApiUsageCounters)[]) total[field] += usage[field];
+    }
     return {
       persistent: this.encryptionKey !== null,
       activeRouteId: this.activeRouteId,
       directLimited: this.limitedRoutes.has(null),
       lastSwitchReason: this.lastSwitchReason,
-      usage: {
-        ...cloneUsageCounters(this.apiKeyUsage),
-        windowStartedAt: this.usageWindowStartedAt,
-        resetAt,
-        secondsUntilReset: resetAt === null ? null : Math.max(1, Math.ceil((resetAt - this.now()) / 1000)),
-      },
-      directUsage: cloneUsageCounters(this.directUsage),
+      usage: total,
+      directUsage: this.describeUsage(this.directUsage),
       proxies: this.proxies.map(({ id, protocol, host, port }) => ({
-        id, protocol, host, port, limited: this.limitedRoutes.has(id), usage: cloneUsageCounters(this.proxyUsage.get(id) ?? createUsageCounters()),
+        id, protocol, host, port, limited: this.limitedRoutes.has(id), usage: this.describeUsage(this.proxyUsage.get(id) ?? createRouteUsage()),
       })),
     };
   }
@@ -104,39 +105,43 @@ export class EncryptedPartsApiProxyStore {
 
   recordAttempt(routeId: string | null): number {
     this.ensureUsageWindow();
-    const previousWindowStartedAt = this.usageWindowStartedAt;
-    const previousApiKeyUsage = cloneUsageCounters(this.apiKeyUsage);
-    const previousDirectUsage = cloneUsageCounters(this.directUsage);
-    const previousProxyUsage = routeId === null ? undefined : this.proxyUsage.get(routeId);
-    const now = this.now();
-    if (this.usageWindowStartedAt === null) this.usageWindowStartedAt = now;
+    this.validateRoute(routeId);
+    const previousUsage = routeId === null ? this.directUsage : this.proxyUsage.get(routeId);
+    const routeUsage = { ...(previousUsage ?? createRouteUsage()) };
     try {
-      incrementUsageCounter(this.apiKeyUsage, "requestCount");
-      const routeUsage = routeId === null ? this.directUsage : cloneUsageCounters(previousProxyUsage ?? createUsageCounters());
       incrementUsageCounter(routeUsage, "requestCount");
-      if (routeId !== null) this.proxyUsage.set(routeId, routeUsage);
+      this.setRouteUsage(routeId, routeUsage);
       this.persistIfConfigured();
     } catch (error) {
-      this.usageWindowStartedAt = previousWindowStartedAt;
-      this.apiKeyUsage = previousApiKeyUsage;
-      this.directUsage = previousDirectUsage;
-      if (routeId !== null) {
-        if (previousProxyUsage) this.proxyUsage.set(routeId, previousProxyUsage);
-        else this.proxyUsage.delete(routeId);
-      }
+      this.setRouteUsage(routeId, previousUsage ?? createRouteUsage());
       throw error;
     }
-    return this.usageWindowStartedAt;
+    return this.usageGenerations.get(routeId) ?? 0;
   }
 
-  recordOutcome(routeId: string | null, outcome: "data" | "empty" | "failed", attemptWindowStartedAt: number): void {
+  recordOutcome(routeId: string | null, outcome: "data" | "empty" | "failed", attemptGeneration: number): void {
     this.ensureUsageWindow();
-    if (this.usageWindowStartedAt !== attemptWindowStartedAt) return;
+    if ((this.usageGenerations.get(routeId) ?? 0) !== attemptGeneration
+      || (routeId !== null && !this.proxies.some((proxy) => proxy.id === routeId))) return;
+    const previousUsage = routeId === null ? this.directUsage : this.proxyUsage.get(routeId);
+    if (!previousUsage) return;
+    const routeUsage = { ...previousUsage };
     const field = outcome === "data" ? "dataResponseCount" : outcome === "empty" ? "emptyResponseCount" : "failedRequestCount";
-    incrementUsageCounter(this.apiKeyUsage, field);
-    if (routeId === null) incrementUsageCounter(this.directUsage, field);
-    else if (this.proxies.some((proxy) => proxy.id === routeId)) incrementUsageCounter(this.getProxyUsage(routeId), field);
-    this.persistIfConfigured();
+    incrementUsageCounter(routeUsage, field);
+    if (outcome !== "failed" && routeUsage.windowStartedAt === null) routeUsage.windowStartedAt = this.now();
+    this.setRouteUsage(routeId, routeUsage);
+    try {
+      this.persistIfConfigured();
+    } catch (error) {
+      this.setRouteUsage(routeId, previousUsage);
+      throw error;
+    }
+  }
+
+  resetUsage(routeId: string | null): PartsApiProxyState {
+    this.validateRoute(routeId);
+    this.resetRoutes([routeId]);
+    return this.getState();
   }
 
   add(config: PartsApiProxyConfig): PartsApiProxyState {
@@ -237,38 +242,48 @@ export class EncryptedPartsApiProxyStore {
   }
 
   private ensureUsageWindow(): void {
-    if (this.usageWindowStartedAt === null || this.now() < this.usageWindowStartedAt + usageWindowMs) return;
-    const previous = {
-      startedAt: this.usageWindowStartedAt, apiKeyUsage: this.apiKeyUsage, directUsage: this.directUsage,
-      proxyUsage: new Map(this.proxyUsage), limitedRoutes: new Set(this.limitedRoutes), lastSwitchReason: this.lastSwitchReason,
-    };
-    // Keep the persisted daily boundary even after idle days or a process restart.
-    this.usageWindowStartedAt += Math.floor((this.now() - this.usageWindowStartedAt) / usageWindowMs) * usageWindowMs;
-    this.apiKeyUsage = createUsageCounters();
-    this.directUsage = createUsageCounters();
-    this.proxyUsage.clear();
-    this.limitedRoutes.clear();
-    this.lastSwitchReason = null;
+    const expired: (string | null)[] = [];
+    const now = this.now();
+    for (const [id, usage] of [[null, this.directUsage] as const, ...this.proxyUsage.entries()]) {
+      if (usage.windowStartedAt !== null && now >= usage.windowStartedAt + usageWindowMs) expired.push(id);
+    }
+    if (expired.length) this.resetRoutes(expired);
+  }
+
+  private resetRoutes(ids: (string | null)[]): void {
+    const previousDirectUsage = this.directUsage;
+    const previousProxyUsage = new Map(this.proxyUsage);
+    const previousLimits = new Set(this.limitedRoutes);
+    for (const id of ids) {
+      this.setRouteUsage(id, createRouteUsage());
+      this.limitedRoutes.delete(id);
+    }
     try {
       this.persistIfConfigured();
     } catch (error) {
-      this.usageWindowStartedAt = previous.startedAt;
-      this.apiKeyUsage = previous.apiKeyUsage;
-      this.directUsage = previous.directUsage;
-      for (const [id, counters] of previous.proxyUsage) this.proxyUsage.set(id, counters);
-      for (const id of previous.limitedRoutes) this.limitedRoutes.add(id);
-      this.lastSwitchReason = previous.lastSwitchReason;
+      this.directUsage = previousDirectUsage;
+      this.proxyUsage.clear();
+      for (const [id, counters] of previousProxyUsage) this.proxyUsage.set(id, counters);
+      this.limitedRoutes.clear();
+      for (const id of previousLimits) this.limitedRoutes.add(id);
       throw error;
     }
+    for (const id of ids) this.usageGenerations.set(id, (this.usageGenerations.get(id) ?? 0) + 1);
     this.revision += 1;
   }
 
-  private getProxyUsage(id: string): PartsApiUsageCounters {
-    const existing = this.proxyUsage.get(id);
-    if (existing) return existing;
-    const created = createUsageCounters();
-    this.proxyUsage.set(id, created);
-    return created;
+  private validateRoute(id: string | null): void {
+    if (id !== null && !this.proxies.some((proxy) => proxy.id === id)) throw new PartsApiProxyValidationError();
+  }
+
+  private setRouteUsage(id: string | null, usage: RouteUsage): void {
+    if (id === null) this.directUsage = usage;
+    else this.proxyUsage.set(id, usage);
+  }
+
+  private describeUsage(usage: RouteUsage): PartsApiUsageState {
+    const resetAt = usage.windowStartedAt === null ? null : usage.windowStartedAt + usageWindowMs;
+    return { ...usage, resetAt, secondsUntilReset: resetAt === null ? null : Math.max(0, Math.ceil((resetAt - this.now()) / 1000)) };
   }
 
   private persistIfConfigured(): void {
@@ -276,8 +291,7 @@ export class EncryptedPartsApiProxyStore {
     const persistedProxyUsage = Object.fromEntries([...this.proxyUsage.entries()]
       .filter(([id]) => this.proxies.some((proxy) => proxy.id === id))
       .map(([id, usage]) => [id, usage]));
-    const hasUsage = this.usageWindowStartedAt !== null
-      || hasUsageCounters(this.apiKeyUsage)
+    const hasUsage = this.directUsage.windowStartedAt !== null
       || hasUsageCounters(this.directUsage)
       || Object.keys(persistedProxyUsage).length > 0;
     if (!this.proxies.length && !hasUsage) {
@@ -288,13 +302,11 @@ export class EncryptedPartsApiProxyStore {
     const cipher = createCipheriv("aes-256-gcm", this.encryptionKey, iv);
     cipher.setAAD(authenticatedContext);
     const payload = JSON.stringify({
-      version: 2,
+      version: 3,
       proxies: this.proxies,
       activeRouteId: this.activeRouteId,
       limitedRoutes: [...this.limitedRoutes].filter((id) => id === null || this.proxies.some((proxy) => proxy.id === id)),
       lastSwitchReason: this.lastSwitchReason,
-      usageWindowStartedAt: this.usageWindowStartedAt,
-      apiKeyUsage: this.apiKeyUsage,
       directUsage: this.directUsage,
       proxyUsage: persistedProxyUsage,
     });
@@ -325,7 +337,7 @@ export class EncryptedPartsApiProxyStore {
       const payload: unknown = JSON.parse(Buffer.concat([decipher.update(decode(ciphertext)), decipher.final()]).toString("utf8"));
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Invalid proxy payload");
       const data = payload as Record<string, unknown>;
-      if ((data.version !== 1 && data.version !== 2) || !Array.isArray(data.proxies)) throw new Error("Invalid proxy list");
+      if (![1, 2, 3].includes(data.version as number) || !Array.isArray(data.proxies)) throw new Error("Invalid proxy list");
       const proxies = data.proxies.map((value: unknown) => {
         const config = parsePartsApiProxyConfig(value);
         const id = (value as Record<string, unknown>).id;
@@ -337,25 +349,30 @@ export class EncryptedPartsApiProxyStore {
         || (data.activeRouteId !== null && !proxies.some(({ id }) => id === data.activeRouteId))) throw new Error("Invalid proxy selection");
       this.proxies = proxies;
       this.activeRouteId = data.activeRouteId as string | null;
-      if (data.version === 2) {
-        if (data.usageWindowStartedAt !== null && (typeof data.usageWindowStartedAt !== "number" || !Number.isSafeInteger(data.usageWindowStartedAt) || data.usageWindowStartedAt < 0)) throw new Error("Invalid usage window");
-        this.usageWindowStartedAt = data.usageWindowStartedAt as number | null;
-        this.apiKeyUsage = parseUsageCounters(data.apiKeyUsage);
-        this.directUsage = parseUsageCounters(data.directUsage);
+      if (data.version === 2 || data.version === 3) {
+        const parseRouteUsage = (value: unknown): RouteUsage => {
+          const counters = parseUsageCounters(value);
+          // Version 2 persisted one shared boundary. Preserve it only for used routes.
+          const startedAt = data.version === 2 ? data.usageWindowStartedAt : (value as Record<string, unknown>).windowStartedAt;
+          if (startedAt !== null && (typeof startedAt !== "number" || !Number.isSafeInteger(startedAt) || startedAt < 0
+            || !Number.isSafeInteger(startedAt + usageWindowMs))) throw new Error("Invalid usage window");
+          return { ...counters, windowStartedAt: hasUsageCounters(counters) ? startedAt as number | null : null };
+        };
+        this.directUsage = parseRouteUsage(data.directUsage);
         if (!data.proxyUsage || typeof data.proxyUsage !== "object" || Array.isArray(data.proxyUsage)) throw new Error("Invalid proxy usage");
         for (const [id, value] of Object.entries(data.proxyUsage)) {
           if (!proxies.some((proxy) => proxy.id === id)) throw new Error("Invalid proxy usage ID");
-          this.proxyUsage.set(id, parseUsageCounters(value));
+          this.proxyUsage.set(id, parseRouteUsage(value));
         }
         if (!Array.isArray(data.limitedRoutes) || data.limitedRoutes.length > proxies.length + 1
           || data.limitedRoutes.some((id: unknown) => id !== null && !proxies.some((proxy) => proxy.id === id))
           || ![null, "manual", "ip-limit"].includes(data.lastSwitchReason as PartsApiProxyState["lastSwitchReason"])) throw new Error("Invalid proxy limit state");
         for (const id of data.limitedRoutes) this.limitedRoutes.add(id as string | null);
         this.lastSwitchReason = data.lastSwitchReason as PartsApiProxyState["lastSwitchReason"];
-        const interrupted = [this.apiKeyUsage, this.directUsage, ...this.proxyUsage.values()]
+        const interrupted = [this.directUsage, ...this.proxyUsage.values()]
           .map(finishInterruptedUsage).some(Boolean);
         this.ensureUsageWindow();
-        if (interrupted) this.persistIfConfigured();
+        if (interrupted || data.version === 2) this.persistIfConfigured();
       }
     } catch (error) {
       throw new Error("Stored PartsAPI proxies could not be decrypted or validated", { cause: error });

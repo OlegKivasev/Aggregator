@@ -4,7 +4,6 @@ const routes = document.querySelector("#applicability-proxy-routes");
 const indicator = document.querySelector("#applicability-route-indicator");
 const feedback = document.querySelector("#applicability-proxy-feedback");
 const persistence = document.querySelector("#applicability-proxy-persistence");
-const usage = document.querySelector("#applicability-proxy-usage");
 const addButton = document.querySelector("#applicability-proxy-add");
 const password = document.querySelector("#applicability-proxy-password");
 const importForm = document.querySelector("#applicability-proxy-import-form");
@@ -32,9 +31,9 @@ const readState = async (response) => {
   const validId = (id) => typeof id === "string" && /^[0-9a-f-]{36}$/.test(id);
   const validHost = (host) => typeof host === "string" && host.length <= 253 && host.split(".").length >= 2
     && host.split(".").every((label) => label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label));
-  const validCounters = (counters) => counters && typeof counters === "object" && !Array.isArray(counters)
+  const validCounters = (counters, maximum = 1_000_000_000) => counters && typeof counters === "object" && !Array.isArray(counters)
     && ["requestCount", "dataResponseCount", "emptyResponseCount", "failedRequestCount"]
-      .every((key) => Number.isSafeInteger(counters[key]) && counters[key] >= 0 && counters[key] <= 1_000_000_000)
+      .every((key) => Number.isSafeInteger(counters[key]) && counters[key] >= 0 && counters[key] <= maximum)
     && counters.dataResponseCount + counters.emptyResponseCount + counters.failedRequestCount <= counters.requestCount;
   const validWindow = (window) => window && ((window.windowStartedAt === null && window.resetAt === null && window.secondsUntilReset === null)
     || (Number.isSafeInteger(window.windowStartedAt) && window.windowStartedAt >= 0
@@ -42,14 +41,14 @@ const readState = async (response) => {
       && Number.isSafeInteger(window.secondsUntilReset) && window.secondsUntilReset >= 0 && window.secondsUntilReset <= 86_400));
   if (typeof payload?.persistent !== "boolean" || typeof payload.directLimited !== "boolean"
     || ![null, "manual", "ip-limit"].includes(payload.lastSwitchReason)
-    || !validCounters(payload.usage) || !validWindow(payload.usage)
-    || !validCounters(payload.directUsage)
+    || !validCounters(payload.usage, Number.MAX_SAFE_INTEGER)
+    || !validCounters(payload.directUsage) || !validWindow(payload.directUsage)
     || (payload.importedCount !== undefined && (!Number.isSafeInteger(payload.importedCount) || payload.importedCount < 0
       || !Number.isSafeInteger(payload.duplicateCount) || payload.duplicateCount < 0))
     || !Array.isArray(payload.proxies)
     || payload.proxies.some((proxy) => !proxy || !validId(proxy.id) || !["http", "https"].includes(proxy.protocol)
       || !validHost(proxy.host)
-      || !Number.isInteger(proxy.port) || proxy.port < 1 || proxy.port > 65535 || typeof proxy.limited !== "boolean" || !validCounters(proxy.usage))
+      || !Number.isInteger(proxy.port) || proxy.port < 1 || proxy.port > 65535 || typeof proxy.limited !== "boolean" || !validCounters(proxy.usage) || !validWindow(proxy.usage))
     || new Set(payload.proxies.map(({ id }) => id)).size !== payload.proxies.length
     || (payload.activeRouteId !== null && !payload.proxies.some(({ id }) => id === payload.activeRouteId))) {
     throw new Error("Не удалось проверить соединение PartsAPI.");
@@ -57,14 +56,11 @@ const readState = async (response) => {
   return payload;
 };
 
-const formatRemaining = () => {
-  const seconds = Math.max(0, state.usage.secondsUntilReset - Math.floor((Date.now() - stateReceivedAt) / 1000));
-  if (seconds <= 0) return "сейчас";
+const formatRemaining = (usage) => {
+  const seconds = usage.secondsUntilReset === null ? 0 : Math.max(0, usage.secondsUntilReset - Math.floor((Date.now() - stateReceivedAt) / 1000));
   const hours = Math.floor(seconds / 3_600);
   const minutes = Math.floor((seconds % 3_600) / 60);
-  if (hours > 0) return `${hours} ч ${minutes} мин`;
-  if (minutes > 0) return `${minutes} мин`;
-  return "меньше минуты";
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 };
 
 const describeCounters = (counters) => `Данные: ${counters.dataResponseCount}; пустые ответы: ${counters.emptyResponseCount}; ошибки и отмены: ${counters.failedRequestCount}`;
@@ -78,18 +74,17 @@ const formatRequestCount = (count) => {
 
 const renderUsage = () => {
   if (!state) return;
-  const reset = state.usage.resetAt === null ? "Окно 24 часа начнётся с первого запроса" : `Расчётный сброс лимитов: через ${formatRemaining()}`;
-  usage.textContent = `Основной ключ: ${formatRequestCount(state.usage.requestCount)} · ${reset}`;
-  usage.title = `${describeCounters(state.usage)}. ${reset}`;
-  usage.setAttribute("aria-label", `${usage.textContent}. ${describeCounters(state.usage)}`);
-  indicator.title = `Всего: ${formatRequestCount(state.usage.requestCount)}. ${describeCounters(state.usage)}. ${reset}. Нажмите, чтобы выбрать соединение.`;
+  indicator.title = `Всего: ${formatRequestCount(state.usage.requestCount)}. ${describeCounters(state.usage)}. Нажмите, чтобы выбрать соединение.`;
+  for (const element of routes.querySelectorAll(".applicability-proxy-timer")) {
+    const counters = element.dataset.routeId === "direct" ? state.directUsage : state.proxies.find(({ id }) => id === element.dataset.routeId)?.usage;
+    if (counters) element.textContent = formatRemaining(counters);
+  }
 };
 
 const render = (next) => {
   const switched = state && next.activeRouteId !== state.activeRouteId && next.lastSwitchReason === "ip-limit";
   if (next !== state) stateReceivedAt = Date.now();
   state = next;
-  renderUsage();
   const active = state.proxies.find(({ id }) => id === state.activeRouteId);
   const limited = active ? active.limited : state.directLimited;
   const name = active ? `прокси ${active.host}:${active.port}` : "прямое соединение";
@@ -123,7 +118,12 @@ const render = (next) => {
     counter.textContent = formatRequestCount(counters.requestCount);
     counter.title = describeCounters(counters);
     counter.setAttribute("aria-label", `${formatRequestCount(counters.requestCount)}. ${describeCounters(counters)}`);
-    status.append(counter, document.createTextNode(` · ${stateText}`));
+    const countdown = document.createElement("span");
+    countdown.className = "applicability-proxy-timer";
+    countdown.dataset.routeId = choice.id ?? "direct";
+    countdown.title = "До сброса счётчиков";
+    countdown.setAttribute("aria-label", "До сброса счётчиков");
+    status.append(counter, document.createTextNode(" · "), countdown, document.createTextNode(` · ${stateText}`));
     label.append(status);
     const actions = document.createElement("div");
     actions.className = "applicability-proxy-route-actions";
@@ -134,6 +134,15 @@ const render = (next) => {
     select.disabled = mutating || importing || !state.persistent || (choice.id === state.activeRouteId && !choice.limited);
     select.addEventListener("click", () => mutate("/api/applicability/proxy-route", "PUT", { routeId: choice.id }));
     actions.append(select);
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.className = "btn btn-light applicability-proxy-reset";
+    reset.textContent = "↻";
+    reset.title = "Сбросить счётчики и таймер";
+    reset.setAttribute("aria-label", `Сбросить счётчики и таймер: ${choice.label}`);
+    reset.disabled = mutating || importing;
+    reset.addEventListener("click", () => mutate("/api/applicability/proxy-usage/reset", "POST", { routeId: choice.id }));
+    actions.append(reset);
     if (choice.id !== null) {
       const remove = document.createElement("button");
       remove.type = "button";
@@ -147,6 +156,7 @@ const render = (next) => {
     routes.append(row);
   }
   routes.scrollTop = previousScrollTop;
+  renderUsage();
 };
 
 const refresh = async (force = false) => {
@@ -182,6 +192,8 @@ const mutate = async (url, method, payload) => {
     if (url === "/api/applicability/proxies/import") {
       importForm.reset();
       notify(`Импортировано: ${next.importedCount}. Дубликатов пропущено: ${next.duplicateCount}. Автопереключение включено.`);
+    } else if (url === "/api/applicability/proxy-usage/reset") {
+      notify("Счётчики и таймер сброшены.");
     } else if (method === "POST") {
       form.reset();
       password.type = "password";

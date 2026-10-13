@@ -53,8 +53,8 @@ function createApplication(overrides = {}) {
     saveApplicabilityApiKey: () => ({ configured: true, persistent: true, maskedKey: "…t-key" }),
     deleteApplicabilityApiKey: () => ({ configured: false, persistent: true, maskedKey: null }),
     getApplicabilityProxyState: () => ({ persistent: true, activeRouteId: null, directLimited: false, lastSwitchReason: null,
-      usage: { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0, windowStartedAt: null, resetAt: null, secondsUntilReset: null },
-      directUsage: { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0 }, proxies: [] }),
+      usage: { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0 },
+      directUsage: { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0, windowStartedAt: null, resetAt: null, secondsUntilReset: null }, proxies: [] }),
     ...overrides,
   };
 }
@@ -124,6 +124,7 @@ test("PartsAPI proxy routes validate input, hide credentials and protect the act
     importApplicabilityProxies: (configs) => proxies.import(configs),
     selectApplicabilityProxy: (id) => proxies.select(id),
     deleteApplicabilityProxy: (id) => proxies.delete(id),
+    resetApplicabilityProxyUsage: (id) => proxies.resetUsage(id),
   }), () => {});
   const request = (path, method, body) => fetch(`${baseUrl}/api/applicability/${path}`, { method, headers: { "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const config = { protocol: "https", host: "edge-8-8-8-8.proxy.example.org", port: 8443, login: "fictional-private-user", password: "fictional-private-password" };
@@ -135,6 +136,15 @@ test("PartsAPI proxy routes validate input, hide credentials and protect the act
   const id = state.proxies[0].id;
   const selected = await request("proxy-route", "PUT", { routeId: id });
   assert.equal((await selected.json()).activeRouteId, id);
+  proxies.recordOutcome(id, "data", proxies.recordAttempt(id));
+  const reset = await request("proxy-usage/reset", "POST", { routeId: id });
+  assert.equal(reset.status, 200);
+  const resetState = await reset.json();
+  assert.equal(resetState.activeRouteId, id);
+  assert.equal(resetState.proxies[0].usage.requestCount, 0);
+  assert.equal(resetState.proxies[0].usage.resetAt, null);
+  assert.equal((await request("proxy-usage/reset", "POST", { routeId: null })).status, 200);
+  for (const body of [null, [], {}, { routeId: 1 }, { routeId: "unknown" }]) assert.equal((await request("proxy-usage/reset", "POST", body)).status, 400);
   assert.equal((await request(`proxies/${id}`, "DELETE")).status, 502);
   assert.equal((await request("proxy-route", "PUT", { routeId: null })).status, 200);
   assert.equal((await request(`proxies/${id}`, "DELETE")).status, 200);

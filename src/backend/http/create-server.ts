@@ -71,6 +71,7 @@ export interface AggregatorApplication {
   importApplicabilityProxies(configs: PartsApiProxyConfig[]): PartsApiProxyImportResult;
   selectApplicabilityProxy(routeId: string | null): PartsApiProxyState;
   deleteApplicabilityProxy(id: string): PartsApiProxyState;
+  resetApplicabilityProxyUsage(routeId: string | null): PartsApiProxyState;
 }
 
 interface CreateAggregatorServerOptions {
@@ -323,13 +324,15 @@ export function createAggregatorServer({
       } catch (error) { serveApplicabilityError(response, error, reportError); return; }
     }
 
-    if (url.pathname === "/api/applicability/proxy-route" && request.method === "PUT") {
+    if ((url.pathname === "/api/applicability/proxy-route" && request.method === "PUT")
+      || (url.pathname === "/api/applicability/proxy-usage/reset" && request.method === "POST")) {
       try {
         const payload = await readJsonBody(request);
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new PartsApiProxyValidationError();
         const { routeId } = payload as Record<string, unknown>;
         if (routeId !== null && typeof routeId !== "string") throw new PartsApiProxyValidationError();
-        serveJson(response, 200, application.selectApplicabilityProxy(routeId));
+        serveJson(response, 200, url.pathname === "/api/applicability/proxy-route"
+          ? application.selectApplicabilityProxy(routeId) : application.resetApplicabilityProxyUsage(routeId));
       } catch (error) { serveApplicabilityError(response, error, reportError); }
       return;
     }

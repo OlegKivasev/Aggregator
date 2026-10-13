@@ -896,16 +896,15 @@
         <details class="applicability-key-method applicability-proxy-settings" id="applicability-proxy-settings" open>
           <summary>Соединение PartsAPI</summary>
           <div class="applicability-key-method__content">
-            <p class="settings-drawer__hint">При лимите по IP запрос повторится через следующий доступный прокси. Соединение можно выбрать вручную.</p>
-            <p class="settings-drawer__hint applicability-proxy-usage" id="applicability-proxy-usage" aria-live="polite"></p>
             <div class="applicability-proxy-routes" id="applicability-proxy-routes" aria-label="Соединения PartsAPI"></div>
             <form class="auth-form applicability-proxy-form" id="applicability-proxy-import-form">
               <label class="field" for="applicability-proxy-import-protocol"><span>Тип прокси в файле</span><select id="applicability-proxy-import-protocol" name="protocol"><option value="http">HTTP</option><option value="https">HTTPS</option></select></label>
               <label class="field" for="applicability-proxy-import-file"><span>Текстовый файл с прокси</span><input id="applicability-proxy-import-file" type="file" accept=".txt,text/plain" required /></label>
-              <p class="settings-drawer__hint">Файл UTF-8, по одному прокси в строке: адрес:порт:логин:пароль. Количество прокси не ограничено. Дубликаты будут пропущены. При лимите IP соединение переключается автоматически.</p>
               <button class="btn btn-primary" type="submit" id="applicability-proxy-import">Импортировать прокси</button>
             </form>
-            <form class="auth-form applicability-proxy-form" id="applicability-proxy-form">
+            <details class="applicability-key-method applicability-proxy-manual" id="applicability-proxy-manual">
+              <summary>Добавить прокси вручную</summary>
+              <form class="auth-form applicability-proxy-form applicability-key-method__content" id="applicability-proxy-form">
               <label class="field" for="applicability-proxy-protocol"><span>Тип прокси</span><select id="applicability-proxy-protocol" name="protocol"><option value="http">HTTP</option><option value="https">HTTPS</option></select></label>
               <div class="applicability-proxy-address">
                 <label class="field" for="applicability-proxy-host"><span>Адрес прокси</span><input id="applicability-proxy-host" name="host" type="text" maxlength="253" autocomplete="off" spellcheck="false" placeholder="IPv4 или доменное имя" required /></label>
@@ -915,6 +914,7 @@
               <label class="field" for="applicability-proxy-password"><span>Пароль</span><span class="password-field"><input id="applicability-proxy-password" name="password" type="password" maxlength="4096" autocomplete="new-password" /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="applicability-proxy-password"><span aria-hidden="true">&#128065;</span></button></span></label>
               <button class="btn btn-primary" type="submit" id="applicability-proxy-add">Добавить прокси</button>
             </form>
+            </details>
             <p class="settings-drawer__hint" id="applicability-proxy-persistence"></p>
             <p class="settings-drawer__status applicability-proxy-feedback" id="applicability-proxy-feedback" role="status" aria-live="polite" hidden></p>
           </div>

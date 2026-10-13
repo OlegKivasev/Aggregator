@@ -4,13 +4,10 @@ export const maximumApplicabilityConcurrency = 32;
 
 export async function searchApplicabilityVariants(sku, brand, signal, request) {
   const normalizedSku = normalizeApplicabilitySku(sku);
-  let { results, cacheHit } = await request(normalizedSku, brand, signal);
-  let usedNormalizedSku = normalizedSku !== sku && results.length > 0;
-  if (!results.length && normalizedSku !== sku) {
-    signal.throwIfAborted();
-    ({ results, cacheHit } = await request(sku, brand, signal));
-    usedNormalizedSku = false;
-  }
+  signal.throwIfAborted();
+  const { results, cacheHit } = await request(normalizedSku, brand, signal);
+  signal.throwIfAborted();
+  const usedNormalizedSku = normalizedSku !== sku;
   return { results, cacheHit, usedNormalizedSku, normalizedSku };
 }
 

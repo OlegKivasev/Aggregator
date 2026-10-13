@@ -122,9 +122,8 @@ test("file import previews safe pairs, searches in parallel and appends incremen
       { sku: "12345", brand: "HYUNDAI" }, { sku: "12345", brand: "LAND ROVER" },
       { sku: "FAIL1", brand: "FORD" }, { sku: "NORM1", brand: "FORD" },
       { sku: "EMPTY1", brand: "FORD" }, { sku: cleanedUntrustedSku, brand: "FORD" },
-      { sku: untrustedSku, brand: "FORD" },
     ].toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
-    assert.ok(calls.findIndex((pair) => pair.sku === cleanedUntrustedSku) < calls.findIndex((pair) => pair.sku === untrustedSku));
+    assert.ok(calls.every((pair) => pair.sku !== untrustedSku));
     assert.match(await page.locator("#applicability-file-summary").textContent(), /Добавлено: 5\. Ошибок: 1\. Пропущено: 4/);
     assert.equal(await rows.locator('[data-state="error"]').textContent(), "6FAIL1FORDApplicability search failed");
     assert.match(await rows.textContent(), /Из базы/);
@@ -141,7 +140,7 @@ test("file import previews safe pairs, searches in parallel and appends incremen
     const state = await page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.applicabilityState")));
     assert.equal(state.tabs[0].searches.length, 6);
     assert.equal(state.tabs[1].searches.length, 0);
-    assert.deepEqual(await page.locator("#applicability-results-summary dd").allTextContents(), ["6", "5", "1"]);
+    assert.deepEqual(await page.locator("#applicability-results-summary dd").allTextContents(), ["6", "4", "2"]);
     if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-file-results.png") });
   });
 });

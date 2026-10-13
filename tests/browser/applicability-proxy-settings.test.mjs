@@ -35,6 +35,7 @@ test("PartsAPI proxy settings save secrets securely, switch automatically and al
     importApplicabilityProxies: (configs) => proxies.import(configs),
     selectApplicabilityProxy: (id) => proxies.select(id),
     deleteApplicabilityProxy: (id) => proxies.delete(id),
+    resetApplicabilityProxyUsage: (id) => proxies.resetUsage(id),
     searchApplicability: async (query, signal) => ({ results: await routing.search({ ...query, apiKey: "fictional-key-ABCDE" }, signal), cacheHit: false }),
   };
   const server = createAggregatorServer({ application, publicDir: resolve("src/frontend"), reportError: () => {} });
@@ -52,6 +53,10 @@ test("PartsAPI proxy settings save secrets securely, switch automatically and al
     const indicator = page.locator("#applicability-route-indicator");
     await page.waitForFunction(() => document.querySelector("#applicability-route-indicator").textContent.includes("прямое соединение"));
     await indicator.click();
+    assert.equal(await page.locator("#applicability-proxy-form").isVisible(), false);
+    assert.equal(await page.locator("#applicability-proxy-usage").count(), 0);
+    assert.doesNotMatch(await page.locator("#applicability-proxy-settings").textContent(), /Файл UTF-8|При лимите по IP запрос повторится|Основной ключ:/);
+    await page.getByText("Добавить прокси вручную", { exact: true }).click();
     for (const host of ["8.8.8.8", "edge-9-9-9-9.proxy.example.org"]) {
       await page.locator("#applicability-proxy-host").fill(host);
       assert.equal(await page.locator("#applicability-proxy-host").inputValue(), host);
@@ -82,10 +87,13 @@ test("PartsAPI proxy settings save secrets securely, switch automatically and al
     assert.match(await page.locator("#applicability-route-notice").textContent(), /автоматически переключён.*8\.8\.8\.8/);
     assert.equal(await page.locator("#applicability-route-notice").isVisible(), true);
     await indicator.click();
-    await page.waitForFunction(() => document.querySelector("#applicability-proxy-usage").textContent.includes("Основной ключ: 2 запроса"));
+    await page.waitForFunction(() => document.querySelector("#applicability-route-indicator").textContent.includes("2 запроса"));
     assert.match(await indicator.textContent(), /2 запроса/);
     assert.match(await indicator.getAttribute("title"), /Данные: 1; пустые ответы: 0; ошибки и отмены: 1/);
-    assert.match(await page.locator("#applicability-proxy-usage").getAttribute("title"), /Данные: 1; пустые ответы: 0; ошибки и отмены: 1/);
+    assert.equal(await direct.locator(".applicability-proxy-timer").textContent(), "00:00:00");
+    assert.match(await first.locator(".applicability-proxy-timer").textContent(), /^(24:00:00|23:59:\d{2})$/);
+    const firstTime = await first.locator(".applicability-proxy-timer").textContent();
+    await page.waitForFunction(({ host, time }) => [...document.querySelectorAll(".applicability-proxy-route")].find((row) => row.textContent.includes(host)).querySelector(".applicability-proxy-timer").textContent !== time, { host: "8.8.8.8", time: firstTime });
     assert.match(await rows.filter({ hasText: "8.8.8.8" }).locator("small").textContent(), /1 запрос/);
     await page.locator("#applicability-settings-close").click();
     mode = "all-limited";
@@ -108,10 +116,21 @@ test("PartsAPI proxy settings save secrets securely, switch automatically and al
     assert.match(await indicator.getAttribute("title"), /Данные: 1; пустые ответы: 1; ошибки и отмены: 3/);
     await indicator.click();
     assert.match(await second.locator(".applicability-proxy-counter").getAttribute("title"), /Данные: 0; пустые ответы: 1; ошибки и отмены: 1/);
+    await second.getByRole("button", { name: /^Сбросить счётчики и таймер:/ }).click();
+    await page.waitForFunction(() => document.querySelector("#applicability-proxy-feedback").textContent === "Счётчики и таймер сброшены.");
+    assert.equal(await second.locator(".applicability-proxy-counter").textContent(), "0 запросов");
+    assert.equal(await second.locator(".applicability-proxy-timer").textContent(), "00:00:00");
+    assert.equal(await second.getAttribute("data-active"), "true");
+    assert.match(await first.locator(".applicability-proxy-counter").textContent(), /2 запроса/);
     const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }));
     assert.ok(!stored.includes("fictional-proxy-password"));
     assert.ok(!stored.includes("fictional-private-proxy-user"));
     if (process.env.TEST_PROXY_SCREENSHOT) await page.screenshot({ path: process.env.TEST_PROXY_SCREENSHOT, fullPage: true });
+    await page.setViewportSize({ width: 375, height: 760 });
+    const resetBounds = await second.getByRole("button", { name: /^Сбросить счётчики и таймер:/ }).boundingBox();
+    assert.ok(resetBounds.x >= 0 && resetBounds.x + resetBounds.width <= 375);
+    if (process.env.TEST_PROXY_MOBILE_SCREENSHOT) await page.screenshot({ path: process.env.TEST_PROXY_MOBILE_SCREENSHOT, fullPage: true });
+    await page.setViewportSize({ width: 1366, height: 900 });
     await first.getByRole("button", { name: "Удалить", exact: true }).click();
     await page.waitForFunction(() => ![...document.querySelectorAll(".applicability-proxy-route")].some((row) => row.textContent.includes("8.8.8.8")));
     await page.reload();
@@ -150,6 +169,7 @@ test("repeated file imports grow beyond 100 proxies and preserve automatic switc
     addApplicabilityProxy: (config) => proxies.add(config),
     importApplicabilityProxies: (configs) => proxies.import(configs),
     selectApplicabilityProxy: (id) => proxies.select(id), deleteApplicabilityProxy: (id) => proxies.delete(id),
+    resetApplicabilityProxyUsage: (id) => proxies.resetUsage(id),
     searchApplicability: async (query, signal) => ({ results: await routing.search({ ...query, apiKey: "fictional-key-ABCDE" }, signal), cacheHit: false }),
   };
   const server = createAggregatorServer({ application, publicDir: resolve("src/frontend"), reportError: () => {} });
@@ -184,6 +204,7 @@ test("repeated file imports grow beyond 100 proxies and preserve automatic switc
     await page.locator("#applicability-proxy-import-file").setInputFiles(file(largerFile));
     await page.locator("#applicability-proxy-import").click();
     await page.waitForFunction(() => document.querySelector("#applicability-proxy-feedback").textContent.includes("Импортировано: 0. Дубликатов пропущено: 125"));
+    await page.getByText("Добавить прокси вручную", { exact: true }).click();
     await page.locator("#applicability-proxy-host").fill("8.8.8.8");
     await page.locator("#applicability-proxy-port").fill("8080");
     await page.locator("#applicability-proxy-add").click();
@@ -202,14 +223,16 @@ test("repeated file imports grow beyond 100 proxies and preserve automatic switc
     await page.locator("#applicability-sku").fill("ORIGINAL-2");
     await page.locator("#applicability-submit").click();
     await page.waitForFunction(() => !document.querySelector("#applicability-submit").disabled);
-    assert.deepEqual(calls.slice(-2), [{ host: "edge-1.proxy.example.org", sku: "ORIGINAL2" }, { host: "edge-1.proxy.example.org", sku: "ORIGINAL-2" }]);
+    assert.equal(calls.length, 4);
+    assert.deepEqual(calls.at(-1), { host: "edge-1.proxy.example.org", sku: "ORIGINAL2" });
     now += 86_400_000;
     await page.locator("#applicability-route-indicator").click();
-    await page.waitForFunction(() => document.querySelector("#applicability-proxy-usage").textContent.includes("Основной ключ: 0 запросов"));
-    assert.match(await page.locator("#applicability-proxy-usage").textContent(), /24 ч/);
-    assert.equal(proxies.getState().directLimited, false);
-    assert.ok(proxies.getState().proxies.every((proxy) => !proxy.limited && proxy.usage.requestCount === 0));
-    assert.equal(new EncryptedPartsApiProxyStore(path, Buffer.alloc(32, 8), () => now).getState().usage.requestCount, 0);
+    await page.waitForFunction(() => [...document.querySelectorAll(".applicability-proxy-route")].find((row) => row.textContent.includes("edge-1.proxy.example.org")).querySelector(".applicability-proxy-counter").textContent === "0 запросов");
+    assert.equal(await page.locator(".applicability-proxy-route").filter({ hasText: "edge-1.proxy.example.org" }).locator(".applicability-proxy-timer").textContent(), "00:00:00");
+    assert.equal(proxies.getState().directLimited, true);
+    assert.equal(proxies.getState().proxies[0].limited, true);
+    assert.equal(proxies.getState().proxies[1].usage.requestCount, 0);
+    assert.equal(new EncryptedPartsApiProxyStore(path, Buffer.alloc(32, 8), () => now).getState().proxies[1].usage.resetAt, null);
     const localState = await page.evaluate(() => JSON.stringify({ ...localStorage }));
     assert.ok(!localState.includes("fictional-import-password"));
     assert.ok(!localState.includes("fictional-import-user"));

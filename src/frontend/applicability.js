@@ -1914,7 +1914,7 @@ form.addEventListener("submit", async (event) => {
     }
     const failed = outcomes.filter((outcome) => outcome.error);
     const completed = outcomes.filter((outcome) => outcome.result);
-    const normalizedOutcome = completed.find(({ result }) => result.usedNormalizedSku);
+    const normalizedOutcome = completed.find(({ result }) => result.usedNormalizedSku && result.results.length > 0);
     const sku = normalizedOutcome?.entry.sku;
     completed.forEach(({ entry, result }) => applySearchResult(entry, result));
     if (failed.length) {

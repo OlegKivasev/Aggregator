@@ -14,7 +14,7 @@ test("applicability input removes normalized duplicates without changing the fir
   assert.deepEqual(parseApplicabilitySkus("1fa-079, 1FA079, AP 108/6, ap1086, 1fa-079,"), ["1fa-079", "AP 108/6"]);
 });
 
-test("applicability searches the cleaned SKU first and uses original punctuation only after an empty answer", async () => {
+test("applicability searches only the cleaned SKU, including after an empty answer", async () => {
   const signal = new AbortController().signal;
   const calls = [];
   let mode = "found";
@@ -28,8 +28,10 @@ test("applicability searches the cleaned SKU first and uses original punctuation
   assert.deepEqual(calls, ["AP1086"]);
   calls.length = 0;
   mode = "fallback";
-  assert.equal((await searchApplicabilityVariants("AP 108/6", "FORD", signal, request)).usedNormalizedSku, false);
-  assert.deepEqual(calls, ["AP1086", "AP 108/6"]);
+  const empty = await searchApplicabilityVariants("AP 108/6", "FORD", signal, request);
+  assert.equal(empty.usedNormalizedSku, true);
+  assert.deepEqual(empty.results, []);
+  assert.deepEqual(calls, ["AP1086"]);
   calls.length = 0;
   await searchApplicabilityVariants("AP1086", "FORD", signal, request);
   assert.deepEqual(calls, ["AP1086"]);
@@ -38,7 +40,7 @@ test("applicability searches the cleaned SKU first and uses original punctuation
   assert.deepEqual(calls, ["AP1086"]);
 });
 
-test("cancellation prevents the original-SKU fallback", async () => {
+test("cancellation discards a late response without making another request", async () => {
   const controller = new AbortController();
   let calls = 0;
   await assert.rejects(searchApplicabilityVariants("AA-1", "FORD", controller.signal, async () => {

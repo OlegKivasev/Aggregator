@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createCipheriv, createDecipheriv } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, rmdirSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -117,7 +118,7 @@ test("IP-limit rotation traverses all hundred imported proxies without manual se
   assert.equal(calls.at(-1), "edge-99.proxy.example.org");
 });
 
-test("daily reset keeps its boundary over idle days, restart and late IP-limit replies", (t) => {
+test("expired routes remain at zero over idle days and restart and discard late replies", (t) => {
   const { path, key } = fixture(t);
   const start = 1_800_000_000_000;
   let now = start;
@@ -125,21 +126,24 @@ test("daily reset keeps its boundary over idle days, restart and late IP-limit r
   store.add(config);
   const oldSelection = store.getSelection();
   const attemptWindow = store.recordAttempt(null);
+  store.recordOutcome(null, "empty", attemptWindow);
+  const pendingAttempt = store.recordAttempt(null);
   now += 3 * 86_400_000 + 1234;
-  store.recordOutcome(null, "failed", attemptWindow);
+  store.recordOutcome(null, "failed", pendingAttempt);
   store.advanceAfterIpLimit(oldSelection, new Set([null]));
   let state = store.getState();
   assert.equal(state.usage.requestCount, 0);
   assert.equal(state.directLimited, false);
-  assert.equal(state.usage.windowStartedAt, start + 3 * 86_400_000);
-  assert.equal(state.usage.secondsUntilReset, 86_399);
+  assert.equal(state.directUsage.windowStartedAt, null);
+  assert.equal(state.directUsage.secondsUntilReset, null);
   const restored = new EncryptedPartsApiProxyStore(path, key, () => now);
-  assert.equal(restored.getState().usage.resetAt, start + 4 * 86_400_000);
-  restored.recordAttempt(null);
+  assert.equal(restored.getState().directUsage.resetAt, null);
+  const next = restored.recordAttempt(null);
+  restored.recordOutcome(null, "data", next);
   now = start + 4 * 86_400_000;
   state = restored.getState();
-  assert.equal(state.usage.requestCount, 0);
-  assert.equal(state.usage.secondsUntilReset, 86_400);
+  assert.equal(state.usage.requestCount, 1);
+  assert.equal(state.directUsage.resetAt, start + 4 * 86_400_000 + 1234);
 });
 
 test("failed imports and daily reset writes preserve previous state for a retry", (t) => {
@@ -147,7 +151,7 @@ test("failed imports and daily reset writes preserve previous state for a retry"
   let now = 1_800_000_000_000;
   const store = new EncryptedPartsApiProxyStore(path, key, () => now);
   store.add(config);
-  store.recordAttempt(null);
+  store.recordOutcome(null, "data", store.recordAttempt(null));
   store.advanceAfterIpLimit(store.getSelection(), new Set([null]));
   const saved = readFileSync(path);
   const before = store.getState();
@@ -185,7 +189,8 @@ test("usage counters classify data, empty and failed responses and reset after 2
   assert.equal(state.directUsage.emptyResponseCount, 1);
   assert.equal(state.proxies[0].usage.dataResponseCount, 1);
   assert.equal(state.proxies[0].usage.failedRequestCount, 1);
-  assert.equal(state.usage.secondsUntilReset, 86_400);
+  assert.equal(state.directUsage.secondsUntilReset, 86_400);
+  assert.equal(state.proxies[0].usage.secondsUntilReset, 86_400);
   store.advanceAfterIpLimit(store.getSelection(), new Set([null]));
   assert.equal(store.getState().directLimited, true);
   const restoredBeforeReset = new EncryptedPartsApiProxyStore(path, key, () => now);
@@ -193,12 +198,12 @@ test("usage counters classify data, empty and failed responses and reset after 2
   assert.equal(restoredBeforeReset.getState().directLimited, true);
   assert.equal(restoredBeforeReset.getState().lastSwitchReason, "ip-limit");
   now += 86_400_000 - 1_000;
-  assert.equal(store.getState().usage.secondsUntilReset, 1);
+  assert.equal(store.getState().directUsage.secondsUntilReset, 1);
   now += 1_000;
   state = store.getState();
   assert.equal(state.usage.requestCount, 0);
-  assert.equal(state.usage.resetAt, now + 86_400_000);
-  assert.equal(state.usage.secondsUntilReset, 86_400);
+  assert.equal(state.directUsage.resetAt, null);
+  assert.equal(state.directUsage.secondsUntilReset, null);
   assert.equal(state.directLimited, false);
   assert.equal(state.proxies[0].usage.requestCount, 0);
   const restored = new EncryptedPartsApiProxyStore(path, key, () => now);
@@ -223,6 +228,116 @@ test("direct-only usage persists without proxies and drops late outcomes from th
   assert.notEqual(nextWindow, window);
   store.recordOutcome(null, "data", nextWindow);
   assert.equal(store.getState().usage.requestCount, 1);
+});
+
+test("each route starts its own timer on its first successful reply and resets independently", (t) => {
+  const { path, key } = fixture(t);
+  let now = 1_800_000_000_000;
+  const store = new EncryptedPartsApiProxyStore(path, key, () => now);
+  store.add(config);
+  store.add(secondConfig);
+  const [first, second] = store.getState().proxies.map(({ id }) => id);
+  store.recordOutcome(first, "failed", store.recordAttempt(first));
+  assert.equal(store.getState().proxies[0].usage.resetAt, null);
+  const firstAttempt = store.recordAttempt(first);
+  const parallelAttempt = store.recordAttempt(first);
+  now += 5000;
+  store.recordOutcome(first, "data", firstAttempt);
+  const firstStartedAt = now;
+  now += 1000;
+  store.recordOutcome(first, "empty", parallelAttempt);
+  assert.equal(store.getState().proxies[0].usage.windowStartedAt, firstStartedAt);
+  now += 3_600_000;
+  store.recordOutcome(second, "empty", store.recordAttempt(second));
+  const secondStartedAt = now;
+  store.select(second);
+  store.advanceAfterIpLimit(store.getSelection(), new Set([second]));
+  now = firstStartedAt + 86_400_000;
+  const expired = store.getState();
+  assert.equal(expired.proxies[0].usage.requestCount, 0);
+  assert.equal(expired.proxies[0].usage.resetAt, null);
+  assert.equal(expired.proxies[1].usage.requestCount, 1);
+  assert.equal(expired.proxies[1].usage.windowStartedAt, secondStartedAt);
+  assert.equal(expired.proxies[1].limited, true);
+  const restored = new EncryptedPartsApiProxyStore(path, key, () => now);
+  assert.deepEqual(restored.getState(), expired);
+  now = secondStartedAt + 86_400_000;
+  assert.equal(restored.getState().proxies[1].usage.requestCount, 0);
+  assert.equal(restored.getState().proxies[1].limited, false);
+  store.recordOutcome(first, "data", store.recordAttempt(first));
+  assert.equal(store.getState().proxies[0].usage.windowStartedAt, now);
+});
+
+test("manual reset clears only the chosen route and ignores its in-flight outcomes even at the same time", (t) => {
+  const { path, key } = fixture(t);
+  const now = 1_800_000_000_000;
+  const store = new EncryptedPartsApiProxyStore(path, key, () => now);
+  store.add(config);
+  const id = store.getState().proxies[0].id;
+  store.recordOutcome(null, "data", store.recordAttempt(null));
+  store.select(id);
+  const selection = store.getSelection();
+  store.recordOutcome(id, "empty", store.recordAttempt(id));
+  const pending = store.recordAttempt(id);
+  const beforeDirect = store.getState().directUsage;
+  store.resetUsage(id);
+  assert.equal(store.getState().activeRouteId, id);
+  assert.deepEqual(store.getState().directUsage, beforeDirect);
+  assert.equal(store.getState().proxies[0].usage.requestCount, 0);
+  assert.equal(store.getState().proxies[0].usage.resetAt, null);
+  store.recordOutcome(id, "data", pending);
+  store.advanceAfterIpLimit(selection, new Set([id]));
+  assert.equal(store.getState().proxies[0].limited, false);
+  assert.equal(store.getState().proxies[0].usage.requestCount, 0);
+  store.recordOutcome(id, "empty", store.recordAttempt(id));
+  assert.equal(store.getState().proxies[0].usage.requestCount, 1);
+  assert.equal(store.getState().proxies[0].usage.windowStartedAt, now);
+  assert.throws(() => store.resetUsage("unknown"), PartsApiProxyValidationError);
+  const before = store.getState();
+  const saved = readFileSync(path);
+  rmSync(path);
+  mkdirSync(path);
+  assert.throws(() => store.resetUsage(id));
+  assert.deepEqual(store.getState(), before);
+  rmdirSync(path);
+  writeFileSync(path, saved);
+  store.resetUsage(id);
+  assert.equal(new EncryptedPartsApiProxyStore(path, key, () => now).getState().proxies[0].usage.resetAt, null);
+});
+
+test("version two encrypted usage migrates without losing used-route counters or credentials", (t) => {
+  const { store, path, key } = fixture(t);
+  store.add(config);
+  store.add(secondConfig);
+  const [first] = store.getState().proxies.map(({ id }) => id);
+  const startedAt = 1_800_000_000_000;
+  const counters = { requestCount: 2, dataResponseCount: 1, emptyResponseCount: 0, failedRequestCount: 1 };
+  const envelope = JSON.parse(readFileSync(path, "utf8"));
+  const context = Buffer.from("autoservice-aggregator:partsapi-proxies:v1");
+  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(envelope.iv, "base64"));
+  decipher.setAAD(context);
+  decipher.setAuthTag(Buffer.from(envelope.authTag, "base64"));
+  const payload = JSON.parse(Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, "base64")), decipher.final()]).toString("utf8"));
+  payload.version = 2;
+  payload.usageWindowStartedAt = startedAt;
+  payload.directUsage = { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0 };
+  payload.apiKeyUsage = counters;
+  payload.proxyUsage = { [first]: counters };
+  const iv = Buffer.alloc(12, 5);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(context);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(payload)), cipher.final()]);
+  writeFileSync(path, JSON.stringify({ version: 1, algorithm: "aes-256-gcm", iv: iv.toString("base64"), ciphertext: ciphertext.toString("base64"), authTag: cipher.getAuthTag().toString("base64") }));
+  const restored = new EncryptedPartsApiProxyStore(path, key, () => startedAt + 1000);
+  const state = restored.getState();
+  assert.equal(state.usage.requestCount, 2);
+  assert.equal(state.proxies[0].usage.windowStartedAt, startedAt);
+  assert.equal(state.proxies[0].usage.secondsUntilReset, 86_399);
+  assert.equal(state.proxies[1].usage.resetAt, null);
+  assert.equal(state.directUsage.resetAt, null);
+  restored.select(first);
+  assert.equal(restored.getSelection().proxy.password, config.password);
+  assert.deepEqual(new EncryptedPartsApiProxyStore(path, key, () => startedAt + 1000).getState(), restored.getState());
 });
 
 test("direct usage works in memory when encrypted persistence is not configured", (t) => {

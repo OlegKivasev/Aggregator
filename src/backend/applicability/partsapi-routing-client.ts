@@ -21,17 +21,17 @@ export class PartsApiRoutingClient {
       while (true) {
         deadline.signal.throwIfAborted();
         attempted.add(selection.id);
-        const attemptWindowStartedAt = this.proxies.recordAttempt(selection.id);
+        const attemptGeneration = this.proxies.recordAttempt(selection.id);
         let outcomeRecorded = false;
         try {
           const results = await this.client.search(query, deadline.signal, selection.proxy);
           outcomeRecorded = true;
-          this.proxies.recordOutcome(selection.id, results.length > 0 ? "data" : "empty", attemptWindowStartedAt);
+          this.proxies.recordOutcome(selection.id, results.length > 0 ? "data" : "empty", attemptGeneration);
           deadline.signal.throwIfAborted();
           this.proxies.recordSuccess(selection);
           return results;
         } catch (error) {
-          if (!outcomeRecorded) this.proxies.recordOutcome(selection.id, "failed", attemptWindowStartedAt);
+          if (!outcomeRecorded) this.proxies.recordOutcome(selection.id, "failed", attemptGeneration);
           deadline.signal.throwIfAborted();
           if (!(error instanceof PartsApiIpLimitError)) throw error;
           const next = this.proxies.advanceAfterIpLimit(selection, attempted);

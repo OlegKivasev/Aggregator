@@ -32,9 +32,9 @@ export interface PartsApiProxyState {
   activeRouteId: string | null;
   directLimited: boolean;
   lastSwitchReason: "manual" | "ip-limit" | null;
-  usage: PartsApiUsageState;
-  directUsage: PartsApiUsageCounters;
-  proxies: { id: string; protocol: "http" | "https"; host: string; port: number; limited: boolean; usage: PartsApiUsageCounters }[];
+  usage: PartsApiUsageCounters;
+  directUsage: PartsApiUsageState;
+  proxies: { id: string; protocol: "http" | "https"; host: string; port: number; limited: boolean; usage: PartsApiUsageState }[];
 }
 
 export class PartsApiProxyValidationError extends Error {

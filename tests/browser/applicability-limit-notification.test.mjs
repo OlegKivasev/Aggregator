@@ -67,8 +67,8 @@ test("applicability key failures use a red toast and retain successful batch res
         await route.fulfill({ json: { brands: [] } });
       } else if (path === "/api/applicability/proxies") {
         await route.fulfill({ json: { persistent: true, activeRouteId: null, directLimited: false, lastSwitchReason: null,
-          usage: { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0, windowStartedAt: null, resetAt: null, secondsUntilReset: null },
-          directUsage: { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0 }, proxies: [] } });
+          usage: { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0 },
+          directUsage: { requestCount: 0, dataResponseCount: 0, emptyResponseCount: 0, failedRequestCount: 0, windowStartedAt: null, resetAt: null, secondsUntilReset: null }, proxies: [] } });
       } else if (path === "/api/suppliers/sessions") {
         await route.fulfill({ json: { sessions: [] } });
       } else if (path === "/api/garage/vehicles") {
