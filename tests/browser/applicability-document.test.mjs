@@ -33,7 +33,7 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
     const page = await browser.newPage();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    const vehicle = { carId: 1, makeName: "FORD", modelName: "TEST седан (ABC)", carName: "2.0", carType: "PC", yearStart: "2001", yearEnd: "2003" };
+    const vehicle = { carId: 1, makeName: "FORD", modelName: "TEST седан (ABC)", carName: "2.0 EXCLUSIVE", carType: "PC", yearStart: "2001", yearEnd: "2003" };
     const entry = (sku, results = [], makeName = "FORD", hasSearched = true) => ({
       id: `${sku}-${makeName}`, sku, makeName, results, hasSearched,
     });
@@ -87,6 +87,7 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
     const listButton = page.locator("#applicability-list-button");
     const documentText = page.locator("#applicability-document-text");
     const documentCount = page.locator("#applicability-document-count");
+    const modification = page.locator('[data-applicability-document-column="carName"]');
     const oemSkus = (text) => [...text.matchAll(/^OEM-артикул: ([^ |\n]+)/gm)].map((match) => match[1]);
     const closeDocument = () => page.locator("#applicability-document-modal button[data-close-applicability-document]").click();
     const summary = () => page.locator("#applicability-results-summary dd").allTextContents();
@@ -121,6 +122,8 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
     await page.locator('[data-expand-entry-id="FULL-A1-FORD"]').click();
     await listButton.click();
     const mixedText = await documentText.inputValue();
+    assert.equal(await modification.isChecked(), false);
+    assert.doesNotMatch(mixedText, /EXCLUSIVE/);
     assert.deepEqual(oemSkus(mixedText), ["FULL-A1", "FULL-A2", "MISS-A1", "MISS-A2"]);
     assert.match(mixedText, /OEM-артикул: FULL-A1 \| FORD, VW/);
     assert.doesNotMatch(mixedText, /PENDING-A/);
@@ -129,7 +132,8 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
 
     // Changing columns and switching back from raw data keep the same empty-block order.
     await page.locator("#applicability-document-columns > summary").click();
-    await page.locator('[data-applicability-document-column="carName"]').uncheck();
+    await modification.check();
+    assert.match(await documentText.inputValue(), /EXCLUSIVE/);
     assert.deepEqual(oemSkus(await documentText.inputValue()), oemSkus(mixedText));
     await page.locator("#applicability-document-format > summary").click();
     await page.locator('[data-applicability-document-format="raw"]').click();
@@ -141,11 +145,19 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
     await page.locator('[data-applicability-document-format="structured"]').click();
     assert.deepEqual(oemSkus(await documentText.inputValue()), oemSkus(mixedText));
     await closeDocument();
+    await listButton.click();
+    assert.equal(await modification.isChecked(), false);
+    assert.doesNotMatch(await documentText.inputValue(), /EXCLUSIVE/);
+    await page.locator("#applicability-document-columns > summary").click();
+    await modification.check();
+    await closeDocument();
 
     // The active group includes empty-only tabs without a checkbox selection step.
     await page.locator("#applicability-multi-list-button").click();
     assert.equal(await page.locator("#applicability-multi-list-modal").count(), 0);
     const multiText = await documentText.inputValue();
+    assert.equal(await modification.isChecked(), false);
+    assert.doesNotMatch(multiText, /EXCLUSIVE/);
     assert.deepEqual(oemSkus(multiText), ["FULL-A1", "FULL-A2", "MISS-A1", "MISS-A2", "ONLY-A", "ONLY-B", "FULL-C", "MISS-C"]);
     assert.match(multiText, /OEM-артикул: MISS-A2 \| FORD\s*Артикул: Деталь B/);
     assert.match(multiText, /OEM-артикул: ONLY-B \| FORD\s*Артикул: Деталь C/);

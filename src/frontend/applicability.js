@@ -1073,6 +1073,7 @@ const openDocumentModalForTabs = (selectedTabs, returnFocus = document.activeEle
   if (!sections.length) return;
   documentSections = sections;
   documentModalReturnFocus = returnFocus;
+  documentColumnInputs.find((input) => input.dataset.applicabilityDocumentColumn === "carName").checked = false;
   renderApplicabilityDocument();
   documentModal.hidden = false;
   documentText.setSelectionRange(0, 0);
