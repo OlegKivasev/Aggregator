@@ -3,7 +3,6 @@ const form = document.querySelector("#applicability-proxy-form");
 const routes = document.querySelector("#applicability-proxy-routes");
 const indicator = document.querySelector("#applicability-route-indicator");
 const feedback = document.querySelector("#applicability-proxy-feedback");
-const persistence = document.querySelector("#applicability-proxy-persistence");
 const addButton = document.querySelector("#applicability-proxy-add");
 const password = document.querySelector("#applicability-proxy-password");
 const importForm = document.querySelector("#applicability-proxy-import-form");
@@ -97,7 +96,6 @@ const render = (next) => {
   indicator.textContent = `PartsAPI: ${name} · ${formatRequestCount(state.usage.requestCount)}${limited ? " · лимит IP" : state.lastSwitchReason === "ip-limit" ? " · автопереключение" : ""}`;
   indicator.dataset.route = active ? "proxy" : "direct";
   indicator.dataset.limited = String(limited);
-  persistence.textContent = state.persistent ? "Данные прокси сохраняются зашифрованными на сервере." : "Для сохранения прокси нужно настроить защищённое хранение на сервере.";
   addButton.disabled = mutating || importing || !state.persistent;
   importButton.disabled = mutating || importing || !state.persistent;
   const previousScrollTop = routes.scrollTop;
@@ -193,7 +191,7 @@ const mutate = async (url, method, payload) => {
       importForm.reset();
       notify(`Импортировано: ${next.importedCount}. Дубликатов пропущено: ${next.duplicateCount}. Автопереключение включено.`);
     } else if (url === "/api/applicability/proxy-usage/reset") {
-      notify("Счётчики и таймер сброшены.");
+      document.dispatchEvent(new Event("partsapi-usage-reset"));
     } else if (method === "POST") {
       form.reset();
       password.type = "password";

@@ -55,6 +55,8 @@ test("PartsAPI proxy settings save secrets securely, switch automatically and al
     await indicator.click();
     assert.equal(await page.locator("#applicability-proxy-form").isVisible(), false);
     assert.equal(await page.locator("#applicability-proxy-usage").count(), 0);
+    assert.equal(await page.locator("#applicability-proxy-persistence").count(), 0);
+    assert.equal(await page.locator("#applicability-concurrency-hint").count(), 0);
     assert.doesNotMatch(await page.locator("#applicability-proxy-settings").textContent(), /Файл UTF-8|При лимите по IP запрос повторится|Основной ключ:/);
     await page.getByText("Добавить прокси вручную", { exact: true }).click();
     for (const host of ["8.8.8.8", "edge-9-9-9-9.proxy.example.org"]) {
@@ -117,7 +119,11 @@ test("PartsAPI proxy settings save secrets securely, switch automatically and al
     await indicator.click();
     assert.match(await second.locator(".applicability-proxy-counter").getAttribute("title"), /Данные: 0; пустые ответы: 1; ошибки и отмены: 1/);
     await second.getByRole("button", { name: /^Сбросить счётчики и таймер:/ }).click();
-    await page.waitForFunction(() => document.querySelector("#applicability-proxy-feedback").textContent === "Счётчики и таймер сброшены.");
+    await page.waitForFunction(() => document.querySelector("#applicability-toast").textContent === "Счётчики и таймер сброшены.");
+    assert.equal(await page.locator("#applicability-toast").isVisible(), true);
+    assert.equal(await page.locator("#applicability-toast").getAttribute("data-tone"), "success");
+    assert.ok((await page.locator("#applicability-toast").boundingBox()).y < 40);
+    assert.equal(await page.locator("#applicability-proxy-feedback").isVisible(), false);
     assert.equal(await second.locator(".applicability-proxy-counter").textContent(), "0 запросов");
     assert.equal(await second.locator(".applicability-proxy-timer").textContent(), "00:00:00");
     assert.equal(await second.getAttribute("data-active"), "true");

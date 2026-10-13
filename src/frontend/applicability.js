@@ -204,6 +204,8 @@ const showApplicabilityToast = (message, tone = "notice") => {
   }, 4_000);
 };
 
+document.addEventListener("partsapi-usage-reset", () => showApplicabilityToast("Счётчики и таймер сброшены.", "success"));
+
 const normalizeTabName = (value) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 100) : "");
 
 const saveApplicabilityState = () => {

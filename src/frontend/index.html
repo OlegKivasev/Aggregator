@@ -889,8 +889,7 @@
           <div class="applicability-key-method__content">
             <label class="field" for="applicability-api-key"><span>API-ключ PartsAPI</span><span class="password-field applicability-key-field"><input id="applicability-api-key" type="password" autocomplete="off" maxlength="512" /><button class="password-toggle" type="button" aria-label="Показать API-ключ" aria-controls="applicability-api-key"><span aria-hidden="true">&#128065;</span></button><button class="applicability-key-delete" id="applicability-api-key-delete" type="button" aria-label="Удалить API-ключ" title="Удалить API-ключ"><img src="/applicability-key-delete.png" alt="" /></button></span></label>
             <p class="settings-drawer__status" id="applicability-api-key-status" role="status" aria-live="polite" hidden>Ключ введён</p>
-            <label class="field" for="applicability-concurrency"><span>Одновременных поисков</span><input id="applicability-concurrency" type="number" min="1" max="32" step="1" value="8" required aria-describedby="applicability-concurrency-hint" /></label>
-            <p class="settings-drawer__hint" id="applicability-concurrency-hint">От 1 до 32. Действует для поиска из файла и ручного поиска нескольких артикулов. Измените перед запуском поиска.</p>
+            <label class="field" for="applicability-concurrency"><span>Одновременных поисков</span><input id="applicability-concurrency" type="number" min="1" max="32" step="1" value="8" required /></label>
           </div>
         </details>
         <details class="applicability-key-method applicability-proxy-settings" id="applicability-proxy-settings" open>
@@ -915,7 +914,6 @@
               <button class="btn btn-primary" type="submit" id="applicability-proxy-add">Добавить прокси</button>
             </form>
             </details>
-            <p class="settings-drawer__hint" id="applicability-proxy-persistence"></p>
             <p class="settings-drawer__status applicability-proxy-feedback" id="applicability-proxy-feedback" role="status" aria-live="polite" hidden></p>
           </div>
         </details>
