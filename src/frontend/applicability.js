@@ -1,5 +1,5 @@
 import { buildApplicabilityVariantCodeContext, formatApplicabilityVehicleGroups } from "./applicability-formatting.js";
-import { normalizeApplicabilitySku, parseApplicabilitySkus, runApplicabilityBatch, searchApplicabilityVariants } from "./applicability-search-input.js";
+import { defaultApplicabilityConcurrency, maximumApplicabilityConcurrency, normalizeApplicabilitySku, parseApplicabilitySkus, runApplicabilityBatch, searchApplicabilityVariants } from "./applicability-search-input.js";
 import { bootstrapApplicabilityOemSidebar } from "./applicability-oem-sidebar.js";
 import { applicabilityFileMaxBytes, decodeApplicabilityFile, parseApplicabilityFile } from "./applicability-file-import.js";
 import { createApplicabilityMakeMatcher } from "./applicability-make-aliases.js";
@@ -69,6 +69,9 @@ const fileImportProgress = document.querySelector("#applicability-file-progress"
 const fileImportSummary = document.querySelector("#applicability-file-summary");
 const fileImportStart = document.querySelector("#applicability-file-start");
 const fileImportStop = document.querySelector("#applicability-file-stop");
+const concurrencyInput = document.querySelector("#applicability-concurrency");
+concurrencyInput.value = String(defaultApplicabilityConcurrency);
+concurrencyInput.max = String(maximumApplicabilityConcurrency);
 const closeFileImportButtons = [...document.querySelectorAll("[data-close-applicability-file]")];
 
 let makesByName = new Map();
@@ -560,6 +563,7 @@ const prepareFileImportTargets = (tab) => {
 };
 
 const updateFileImportControls = () => {
+  concurrencyInput.disabled = Boolean(activeRequest);
   fileImportInput.disabled = Boolean(fileImportRequest);
   fileImportStart.disabled = Boolean(activeRequest) || fileReading || !fileImportRows.some((row) => row.state === "pending" || row.state === "error");
   fileImportStop.hidden = !fileImportRequest;
@@ -740,7 +744,7 @@ fileImportForm.addEventListener("submit", async (event) => {
       }
       completed += 1;
       updateProgress();
-    }, controller.signal);
+    }, controller.signal, Number(concurrencyInput.value));
     const unexpectedFailure = outcomes.find((outcome) => outcome.error);
     if (unexpectedFailure) throw unexpectedFailure.error;
     if (controller.signal.aborted) fileImportSummary.textContent += " Очередь остановлена; готовые результаты сохранены.";
@@ -1873,6 +1877,7 @@ form.addEventListener("submit", async (event) => {
   const entries = requestedPairs.map((pair) => createSearchEntry({ sku: pair.sku, makeName: pair.brand, status: "Ищем применимость…" }));
   const controller = new AbortController();
   activeRequest = controller;
+  concurrencyInput.disabled = true;
   fileImportButton.disabled = true;
   submitButton.disabled = true;
   submitButton.querySelector("span").textContent = "Ищем…";
@@ -1899,7 +1904,7 @@ form.addEventListener("submit", async (event) => {
     renderTabs();
     saveApplicabilityState();
     const outcomes = await runApplicabilityBatch(entries,
-      (entry, signal) => executeApplicabilitySearch(entry.sku, entry.makeName, signal), controller.signal);
+      (entry, signal) => executeApplicabilitySearch(entry.sku, entry.makeName, signal), controller.signal, Number(concurrencyInput.value));
     if (controller.signal.aborted) {
       tab.searches = tab.searches.filter((item) => !entries.includes(item));
       if (activeTabId === tab.id) renderResults(tab);
@@ -1949,6 +1954,7 @@ form.addEventListener("submit", async (event) => {
   } finally {
     if (activeRequest === controller) {
       activeRequest = null;
+      concurrencyInput.disabled = false;
       fileImportButton.disabled = false;
       submitButton.disabled = false;
       submitButton.querySelector("span").textContent = "Поиск";

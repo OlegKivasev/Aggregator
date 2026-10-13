@@ -1,4 +1,6 @@
 export const normalizeApplicabilitySku = (sku) => sku.replace(/[^\p{L}\p{N}]/gu, "");
+export const defaultApplicabilityConcurrency = 8;
+export const maximumApplicabilityConcurrency = 32;
 
 export async function searchApplicabilityVariants(sku, brand, signal, request) {
   const normalizedSku = normalizeApplicabilitySku(sku);
@@ -28,10 +30,13 @@ export function parseApplicabilitySkus(value) {
   return [...skus.values()];
 }
 
-export async function runApplicabilityBatch(entries, request, signal) {
+export async function runApplicabilityBatch(entries, request, signal, concurrency = defaultApplicabilityConcurrency) {
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > maximumApplicabilityConcurrency) {
+    throw new Error(`Укажите число одновременных поисков от 1 до ${maximumApplicabilityConcurrency}.`);
+  }
   const outcomes = new Array(entries.length);
   let nextIndex = 0;
-  await Promise.all(Array.from({ length: Math.min(4, entries.length) }, async () => {
+  await Promise.all(Array.from({ length: Math.min(concurrency, entries.length) }, async () => {
     while (!signal.aborted && nextIndex < entries.length) {
       const index = nextIndex++;
       const entry = entries[index];

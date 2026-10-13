@@ -9,7 +9,7 @@ import { chromium } from "playwright";
 const vehicle = { carId: 1, makeName: "FORD", modelName: "TEST", carName: "2.0", carType: "PC", yearStart: null, yearEnd: null };
 const existingEntry = { id: "existing", sku: "EXIST1", makeName: "FORD", results: [vehicle], hasSearched: true };
 
-async function withImportPage(search, check, { configured = true } = {}) {
+async function withImportPage(search, check, { configured = true, concurrency = 4 } = {}) {
   const frontendDir = resolve("src/frontend");
   const server = createServer(async (request, response) => {
     const path = new URL(request.url, "http://127.0.0.1").pathname;
@@ -58,6 +58,10 @@ async function withImportPage(search, check, { configured = true } = {}) {
     });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.waitForLoadState("networkidle");
+    await page.locator("#applicability-settings-toggle").click();
+    assert.equal(await page.locator("#applicability-concurrency").inputValue(), "8");
+    await page.locator("#applicability-concurrency").fill(String(concurrency));
+    await page.locator("#applicability-settings-close").click();
     await check(page);
     assert.deepEqual(errors, []);
   } finally {
@@ -148,11 +152,12 @@ const openImportedTab = async (page, name) => {
   await page.locator("[data-tab-id]").filter({ hasText: name }).click();
 };
 
-test("file import keeps four requests active, refills each free slot and preserves file order", async () => {
+test("file import keeps twelve requests active, refills each free slot and preserves file order", async () => {
   const calls = [];
   const gates = new Map();
   const started = new Map();
-  const skus = Array.from({ length: 7 }, (_, index) => `PARALLEL${index + 1}`);
+  const concurrency = 12;
+  const skus = Array.from({ length: 16 }, (_, index) => `PARALLEL${index + 1}`);
   for (const sku of skus) {
     let release;
     let report;
@@ -177,25 +182,80 @@ test("file import keeps four requests active, refills each free slot and preserv
       await page.locator("#applicability-file-toggle").click();
       await upload(page, skus.map((sku) => `${sku} | FORD`).join("\n"));
       await page.locator("#applicability-file-start").click();
-      await Promise.all(skus.slice(0, 4).map((sku) => started.get(sku).received));
-      assert.deepEqual(calls.toSorted(), skus.slice(0, 4));
-      assert.equal(await page.locator('#applicability-file-rows [data-state="searching"]').count(), 4);
-      for (let index = 3; index < 6; index += 1) {
+      await Promise.all(skus.slice(0, concurrency).map((sku) => started.get(sku).received));
+      assert.deepEqual(calls.toSorted(), skus.slice(0, concurrency).toSorted());
+      assert.equal(await page.locator('#applicability-file-rows [data-state="searching"]').count(), concurrency);
+      assert.equal(await page.locator("#applicability-concurrency").isDisabled(), true);
+      for (let index = concurrency - 1; index < skus.length - 1; index += 1) {
         gates.get(skus[index]).release();
         await started.get(skus[index + 1]).received;
-        assert.equal(active, 4);
-        assert.equal(await page.locator('#applicability-file-rows [data-state="done"]').count(), index - 2);
+        assert.equal(active, concurrency);
+        assert.equal(await page.locator('#applicability-file-rows [data-state="done"]').count(), index - concurrency + 2);
       }
       for (const sku of skus.toReversed()) gates.get(sku).release();
       await waitFinished(page);
-      assert.equal(maximumActive, 4);
+      assert.equal(maximumActive, concurrency);
+      assert.equal(await page.locator("#applicability-concurrency").isEnabled(), true);
       assert.equal(calls.length, skus.length);
       assert.equal(await page.locator('#applicability-file-rows [data-state="done"]').count(), skus.length);
       assert.deepEqual((await storedState(page)).tabs[0].searches.map((entry) => entry.sku), ["EXIST1", ...skus]);
-    });
+    }, { concurrency });
   } finally {
     for (const gate of gates.values()) gate.release();
   }
+});
+
+test("manual search uses the chosen concurrency and validates invalid settings before requests", async () => {
+  const calls = [];
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let report;
+  const firstWave = new Promise((resolve) => { report = resolve; });
+  const skus = Array.from({ length: 10 }, (_, index) => `MANUAL${index + 1}`);
+  await withImportPage(async (route) => {
+    calls.push(route.request().postDataJSON().sku);
+    if (calls.length === 8) report();
+    await gate;
+    await route.fulfill({ json: { results: [vehicle], cacheHit: false } });
+  }, async (page) => {
+    await page.locator("#applicability-settings-toggle").click();
+    const concurrencyInput = page.getByLabel("Одновременных поисков", { exact: true });
+    assert.equal(await concurrencyInput.inputValue(), "8");
+    assert.equal(await concurrencyInput.getAttribute("min"), "1");
+    assert.equal(await concurrencyInput.getAttribute("max"), "32");
+    if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-concurrency-desktop.png") });
+    await page.setViewportSize({ width: 375, height: 760 });
+    const bounds = await concurrencyInput.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 375);
+    if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-concurrency-mobile.png") });
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.locator("#applicability-settings-close").click();
+    await page.locator("#applicability-sku").fill(skus.join(", "));
+    await page.locator("#applicability-submit").click();
+    await firstWave;
+    assert.deepEqual(calls.toSorted(), skus.slice(0, 8).toSorted());
+    assert.equal(await page.locator("#applicability-concurrency").isDisabled(), true);
+    release();
+    await page.waitForFunction(() => !document.querySelector("#applicability-submit").disabled);
+    assert.equal(await page.locator("#applicability-concurrency").isEnabled(), true);
+    assert.deepEqual(calls.toSorted(), skus.toSorted());
+    await page.locator("#applicability-settings-toggle").click();
+    await page.locator("#applicability-concurrency").fill("33");
+    await page.locator("#applicability-settings-close").click();
+    await page.locator("#applicability-sku").fill("INVALID1, INVALID2");
+    await page.locator("#applicability-submit").click();
+    await page.waitForFunction(() => !document.querySelector("#applicability-submit").disabled);
+    assert.match(await page.locator("#applicability-feedback").textContent(), /от 1 до 32/);
+    assert.equal(calls.length, 10);
+    assert.equal(await page.locator("#applicability-results-body tr").count(), 11);
+    await page.locator("#applicability-file-toggle").click();
+    await upload(page, "INVALID1 | FORD");
+    await page.locator("#applicability-file-start").click();
+    await waitFinished(page);
+    assert.match(await page.locator("#applicability-file-feedback").textContent(), /от 1 до 32/);
+    assert.equal(calls.length, 10);
+    assert.equal(await page.locator('#applicability-file-rows [data-state="pending"]').count(), 1);
+  }, { concurrency: 8 });
 });
 
 test("structured file creates one persisted group, searches OEMs in their own source tabs and resolves aliases", async () => {

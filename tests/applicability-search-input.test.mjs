@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseApplicabilitySkus, runApplicabilityBatch, searchApplicabilityVariants } from "../src/frontend/applicability-search-input.js";
+import { defaultApplicabilityConcurrency, maximumApplicabilityConcurrency, parseApplicabilitySkus, runApplicabilityBatch, searchApplicabilityVariants } from "../src/frontend/applicability-search-input.js";
 
 test("applicability input uses commas and preserves article punctuation and internal spaces", () => {
   assert.deepEqual(parseApplicabilitySkus(" 30676484,30780376, 30780377 ,8687389 "),
@@ -77,8 +77,8 @@ test("applicability batch bounds concurrency and retains successful results afte
     active -= 1;
     if (entry === entries[3]) throw failure;
     return entry.sku;
-  }, controller.signal);
-  assert.equal(maximumActive, 4);
+  }, controller.signal, 12);
+  assert.equal(maximumActive, 12);
   assert.equal(active, 0);
   assert.equal(called.length, entries.length);
   assert.deepEqual(outcomes.map(({ entry }) => entry), entries);
@@ -95,9 +95,34 @@ test("applicability batch cancels queued requests and awaits active requests", a
     await new Promise((resolve) => setImmediate(resolve));
     controller.abort();
     signal.throwIfAborted();
-  }, controller.signal);
-  assert.deepEqual(called, [0, 1, 2, 3]);
-  assert.equal(outcomes.length, 4);
+  }, controller.signal, 8);
+  assert.deepEqual(called, [0, 1, 2, 3, 4, 5, 6, 7]);
+  assert.equal(outcomes.length, 8);
   assert.ok(outcomes.every(({ error }) => error.name === "AbortError"));
   assert.deepEqual(await runApplicabilityBatch(entries, () => { throw new Error("must not start"); }, controller.signal), []);
+});
+
+test("applicability concurrency defaults to eight and accepts serial and maximum parallel searches", async () => {
+  assert.equal(defaultApplicabilityConcurrency, 8);
+  const entries = Array.from({ length: 40 }, (_, index) => index);
+  for (const concurrency of [undefined, 1, maximumApplicabilityConcurrency]) {
+    let active = 0;
+    let maximumActive = 0;
+    const outcomes = await runApplicabilityBatch(entries, async (entry) => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setImmediate(resolve));
+      active -= 1;
+      return entry;
+    }, new AbortController().signal, concurrency);
+    assert.equal(maximumActive, concurrency ?? defaultApplicabilityConcurrency);
+    assert.equal(active, 0);
+    assert.deepEqual(outcomes.map(({ result }) => result), entries);
+  }
+});
+
+test("invalid concurrency starts no requests", async () => {
+  for (const concurrency of [0, -1, 33, 1.5, NaN, Infinity, null, "8"]) {
+    await assert.rejects(runApplicabilityBatch(["SKU1"], () => assert.fail("No request is allowed"), new AbortController().signal, concurrency), /от 1 до 32/);
+  }
 });
