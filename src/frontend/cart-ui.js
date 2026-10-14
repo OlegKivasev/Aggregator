@@ -63,6 +63,12 @@ const validateCart = (value) => {
 export const bootstrapCart = ({ getMarkupPrice }) => {
   const renderPrices = (result, quantity = 1) => `<span class="cart-price main-result-price" title="Цена с наценкой">${escapeHtml(cartPriceFormat.format(getMarkupPrice(result) * quantity))}</span>
     <span class="cart-purchase-price main-result-purchase-price" title="Закупочная цена">${escapeHtml(cartPriceFormat.format(result.price * quantity))}</span>`;
+  const renderTotals = (items) => {
+    const price = items.reduce((sum, item) => sum + getMarkupPrice(item.result) * item.quantity, 0);
+    const purchasePrice = items.reduce((sum, item) => sum + item.result.price * item.quantity, 0);
+    return `<strong class="cart-total-price" title="Сумма с наценкой">${escapeHtml(formatPrice(price))}</strong>
+      <span class="cart-purchase-price main-result-purchase-price" title="Закупочная сумма">${escapeHtml(formatPrice(purchasePrice))}</span>`;
+  };
   const toggle = document.querySelector("#cart-toggle");
   const badge = document.querySelector("#cart-badge");
   const modal = document.createElement("dialog");
@@ -79,8 +85,8 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       </tr></thead><tbody id="cart-items"></tbody></table></div>
       <p id="cart-summary"></p>
       <p class="cart-status" id="cart-status" role="status" aria-live="polite"></p></div>
-    <footer class="cart-footer"><div class="cart-footer__summary"><span>Итого по закупке</span><span>Дата поставки с учётом всех товаров</span>
-      <strong id="cart-total"></strong><strong id="cart-delivery-date"></strong></div>
+    <footer class="cart-footer"><div class="cart-footer__summary"><span>Итого</span><span>Дата поставки с учётом всех товаров</span>
+      <div id="cart-total"></div><strong id="cart-delivery-date"></strong></div>
       <button type="button" class="btn btn-primary" id="cart-test-order" title="Тестовый режим">Оформить заказы</button></footer>`;
   document.body.append(modal);
   const clearDialog = document.createElement("dialog");
@@ -100,7 +106,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     <div class="cart-content"><p class="cart-order-intro">Внимательно проверьте товары, количество, склады, сроки доставки и суммы перед заказом.</p>
       <p class="cart-order-note" id="cart-order-note">Тестовый режим. Заказ не будет отправлен поставщикам, оплата не производится.</p>
       <div id="cart-order-groups"></div><p class="cart-order-status" id="cart-order-status" role="status" aria-live="polite"></p></div>
-    <footer class="cart-footer"><div><span>Итого по закупке</span><strong id="cart-order-total"></strong></div>
+    <footer class="cart-footer"><div><span>Итого</span><div id="cart-order-total"></div></div>
       <div class="cart-confirm-actions"><button type="button" class="btn btn-light" id="cart-order-cancel" autofocus>Вернуться в корзину</button>
         <button type="button" class="btn cart-order-submit" id="cart-order-accept">Заказать</button></div></footer>`;
   document.body.append(orderDialog);
@@ -149,7 +155,6 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     if (activeSupplier !== "all" && !suppliers.includes(activeSupplier)) activeSupplier = "all";
     const items = activeSupplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === activeSupplier);
     const count = items.reduce((sum, item) => sum + item.quantity, 0);
-    const total = items.reduce((sum, item) => sum + item.quantity * item.result.price, 0);
     tabs.innerHTML = ["all", ...suppliers].map((supplier) => {
       const name = supplier === "all" ? "Все" : supplierNames[supplier];
       const tabCount = supplier === "all" ? cart.count : cart.items.filter((item) => item.result.supplier === supplier).reduce((sum, item) => sum + item.quantity, 0);
@@ -165,7 +170,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     toggle.hidden = cart.count === 0;
     toggle.setAttribute("aria-label", `Открыть корзину: ${cart.count} шт.`);
     modal.querySelector("#cart-summary").textContent = `Количество: ${count} шт.`;
-    modal.querySelector("#cart-total").textContent = formatPrice(total);
+    modal.querySelector("#cart-total").innerHTML = renderTotals(items);
     modal.querySelector("#cart-delivery-date").textContent = formatCartLatestDeliveryDate(items);
     if (testedRevision !== cart.revision) testResults.clear();
     body.innerHTML = items.length ? items.map((item) => {
@@ -339,10 +344,9 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
         const group = items.filter((item) => item.result.supplier === supplier);
         if (!group.length) return "";
         const count = group.reduce((sum, item) => sum + item.quantity, 0);
-        const total = group.reduce((sum, item) => sum + item.result.price * item.quantity, 0);
         return `<section class="cart-order-group" data-cart-order-supplier="${supplier}" aria-labelledby="cart-order-group-${supplier}">
           <header class="cart-order-group-header"><div><h3 id="cart-order-group-${supplier}">${name}</h3><span>${group.length} поз. / ${count} шт.</span></div>
-            <strong class="cart-order-group-total">${escapeHtml(formatPrice(total))}</strong></header>
+            <div class="cart-order-group-total">${renderTotals(group)}</div></header>
           <div class="cart-table-scroll"><table class="cart-table cart-order-table"><thead><tr><th>Запчасть</th><th>Наименование / доставка</th>
             <th class="cart-quantity-column">Кол-во</th><th class="cart-price-column">Цена, ₽</th><th class="cart-price-column">Стоимость, ₽</th></tr></thead><tbody>
             ${group.map(({ result, quantity }) => `<tr><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span>
@@ -353,7 +357,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
               <td class="cart-item-sum" data-label="Стоимость, ₽">${renderPrices(result, quantity)}</td></tr>`).join("")}
           </tbody></table></div><p class="cart-order-delivery">Дата поставки с учётом всех товаров: ${escapeHtml(formatCartLatestDeliveryDate(group))}</p></section>`;
       }).join("");
-      orderDialog.querySelector("#cart-order-total").textContent = formatPrice(items.reduce((sum, item) => sum + item.result.price * item.quantity, 0));
+      orderDialog.querySelector("#cart-order-total").innerHTML = renderTotals(items);
       orderStatus.textContent = "";
       orderStatus.classList.remove("is-error", "is-success");
       orderAccept.hidden = false;

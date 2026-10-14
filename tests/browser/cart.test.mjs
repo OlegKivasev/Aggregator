@@ -108,7 +108,7 @@ test("cart adds bounded quantities after garage icon, animates, persists, edits 
     await page.locator("#cart-toggle").click();
     await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 1);
     assert.ok(await page.locator("#cart-modal").isVisible());
-    assert.match(await page.locator("#cart-total").textContent(), /200/);
+    assert.match(await page.locator("#cart-total .cart-purchase-price").textContent(), /200/);
     assert.equal(await page.evaluate(() => window.cartXss), undefined);
     assert.equal(await page.locator("#cart-items img").count(), 0);
     await page.locator("#cart-items .cart-quantity").fill("3");
@@ -133,7 +133,7 @@ test("cart adds bounded quantities after garage icon, animates, persists, edits 
     assert.match(await page.locator("#cart-status").textContent(), /Тестовый заказ успешно завершён/);
     assert.equal(await page.locator(".cart-item-check.is-simulated").count(), 2);
     await page.locator("#cart-order-cancel").click();
-    assert.match(await page.locator("#cart-total").textContent(), /420/);
+    assert.match(await page.locator("#cart-total .cart-purchase-price").textContent(), /420/);
     if (process.env.CART_SCREENSHOT_PATH) await page.screenshot({ path: process.env.CART_SCREENSHOT_PATH });
     await page.locator("#cart-items .cart-remove").first().click();
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
@@ -223,13 +223,13 @@ test("cart supplier tabs filter rows, hide suppliers and recalculate purchase to
     assert.equal(await page.locator("#cart-tab-all").getAttribute("aria-selected"), "true");
     assert.equal(await page.locator("#cart-items .cart-item-supplier").count(), 2);
     assert.equal(await page.locator("#cart-items .cart-item-delivery").count(), 2);
-    assert.match(await page.locator("#cart-total").textContent(), /320/);
+    assert.match(await page.locator("#cart-total .cart-purchase-price").textContent(), /320/);
     assert.equal(await page.locator("#cart-delivery-date").textContent(), formatDeliveryDate(deliveries.partkom.deliveryDateTo));
     await page.locator("#cart-tab-armtek").click();
     assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 1);
     assert.equal(await page.locator("#cart-supplier-column").isVisible(), false);
     assert.equal(await page.locator("#cart-items .cart-item-supplier").count(), 0);
-    assert.match(await page.locator("#cart-total").textContent(), /200/);
+    assert.match(await page.locator("#cart-total .cart-purchase-price").textContent(), /200/);
     assert.equal(await page.locator("#cart-delivery-date").textContent(), formatDeliveryDate(deliveries.armtek.deliveryDateTo));
     assert.match(await page.locator("#cart-items .cart-item-delivery").textContent(), /10\.03\.2028 - 12\.03\.2028/);
     assert.equal(await page.locator("#cart-badge").textContent(), "3");
@@ -237,15 +237,15 @@ test("cart supplier tabs filter rows, hide suppliers and recalculate purchase to
     await page.keyboard.press("End");
     assert.equal(await page.locator("#cart-tab-part-kom").getAttribute("aria-selected"), "true");
     assert.equal(await page.locator("#cart-tab-part-kom").evaluate((node) => node === document.activeElement), true);
-    assert.match(await page.locator("#cart-total").textContent(), /120/);
+    assert.match(await page.locator("#cart-total .cart-purchase-price").textContent(), /120/);
     assert.equal(await page.locator("#cart-delivery-date").textContent(), formatDeliveryDate(deliveries.partkom.deliveryDateTo));
     await page.locator("#cart-items .cart-quantity").fill("2");
     await page.locator("#cart-title").click();
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "4");
-    assert.match(await page.locator("#cart-total").textContent(), /240/);
+    assert.match(await page.locator("#cart-total .cart-purchase-price").textContent(), /240/);
     assert.equal(await page.locator("#cart-tab-part-kom").getAttribute("aria-selected"), "true");
     await page.locator("#cart-tab-all").click();
-    assert.match(await page.locator("#cart-total").textContent(), /440/);
+    assert.match(await page.locator("#cart-total .cart-purchase-price").textContent(), /440/);
     assert.equal(await page.locator("#cart-supplier-column").isVisible(), true);
     if (process.env.CART_TABS_SCREENSHOT_PATH) await page.screenshot({ path: process.env.CART_TABS_SCREENSHOT_PATH });
     await page.keyboard.press("ArrowRight");
@@ -257,7 +257,7 @@ test("cart supplier tabs filter rows, hide suppliers and recalculate purchase to
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
     assert.equal(await page.locator("#cart-tab-part-kom").count(), 0);
     assert.equal(await page.locator("#cart-tab-all").getAttribute("aria-selected"), "true");
-    assert.match(await page.locator("#cart-total").textContent(), /200/);
+    assert.match(await page.locator("#cart-total .cart-purchase-price").textContent(), /200/);
     assert.equal(await page.locator("#cart-delivery-date").textContent(), formatDeliveryDate(deliveries.armtek.deliveryDateTo));
     await page.locator("#cart-tab-armtek").click();
     await page.keyboard.press("Escape");
@@ -303,11 +303,16 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     assert.ok(priceStyle.purchaseTop >= priceStyle.retailBottom);
     assert.equal(await page.locator("#cart-items .cart-item-part > span").count(), 4);
     assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 3 шт.");
+    assert.equal(await page.locator("#cart-total .cart-total-price").textContent(), "432,00 ₽");
+    assert.equal(await page.locator("#cart-total .cart-purchase-price").textContent(), "320,00 ₽");
+    assert.deepEqual(await page.locator("#cart-total .cart-purchase-price").evaluate((node) => ({
+      color: getComputedStyle(node).color, size: parseFloat(getComputedStyle(node).fontSize), weight: getComputedStyle(node).fontWeight,
+    })), { ...mainPurchaseStyle, size: mainPurchaseStyle.size - 1 });
     const tableBox = await page.locator(".cart-table-scroll").boundingBox();
     const summaryBox = await page.locator("#cart-summary").boundingBox();
     assert.ok(summaryBox.y >= tableBox.y + tableBox.height);
     const totals = await page.locator(".cart-footer__summary").evaluate((node) => {
-      const amount = node.querySelector("#cart-total");
+      const amount = node.querySelector("#cart-total .cart-total-price");
       const date = node.querySelector("#cart-delivery-date");
       const style = (value) => {
         const css = getComputedStyle(value);
@@ -326,10 +331,10 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     assert.equal(await page.locator("#cart-clear img").evaluate((node) => node.complete && node.naturalWidth > 0), true);
     if (process.env.CART_REFERENCE_SCREENSHOT_PATH) await page.screenshot({ path: process.env.CART_REFERENCE_SCREENSHOT_PATH });
     await page.setViewportSize({ width: 390, height: 844 });
-    const mobileAmount = await page.locator("#cart-total").boundingBox();
+    const mobileAmount = await page.locator("#cart-total .cart-total-price").boundingBox();
     const mobileDate = await page.locator("#cart-delivery-date").boundingBox();
     assert.equal(mobileAmount.y, mobileDate.y);
-    assert.equal(await page.locator("#cart-total").evaluate((node) => getComputedStyle(node).fontSize),
+    assert.equal(await page.locator("#cart-total .cart-total-price").evaluate((node) => getComputedStyle(node).fontSize),
       await page.locator("#cart-delivery-date").evaluate((node) => getComputedStyle(node).fontSize));
     await page.locator("#cart-clear").click();
     assert.equal(await page.locator("#cart-clear-title").textContent(), "Очистить вкладку «Все»?");
@@ -349,7 +354,11 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     assert.deepEqual(await page.locator(".cart-order-table .cart-purchase-price").first().evaluate((node) => ({
       color: getComputedStyle(node).color, size: parseFloat(getComputedStyle(node).fontSize), weight: getComputedStyle(node).fontWeight,
     })), { ...mainPurchaseStyle, size: mainPurchaseStyle.size - 1 });
-    assert.match(await page.locator("#cart-order-total").textContent(), /200/);
+    assert.match(await page.locator("#cart-order-total .cart-purchase-price").textContent(), /200/);
+    assert.equal(await page.locator("#cart-order-total .cart-total-price").textContent(), "270,00 ₽");
+    assert.deepEqual(await page.locator("#cart-order-total .cart-purchase-price").evaluate((node) => ({
+      color: getComputedStyle(node).color, size: parseFloat(getComputedStyle(node).fontSize), weight: getComputedStyle(node).fontWeight,
+    })), { ...mainPurchaseStyle, size: mainPurchaseStyle.size - 1 });
     await page.locator("#cart-order-accept").click();
     await page.waitForFunction(() => document.querySelectorAll(".cart-item-check").length === 1);
     assert.equal(orderCalls.length, 1);
@@ -418,8 +427,11 @@ test("four supplier checkout requires confirmation, groups exact totals, cancels
     assert.equal(orderCalls.length, 0);
     assert.equal(posts.length, 0);
     assert.deepEqual(await page.locator(".cart-order-group h3").allTextContents(), ["Armtek", "PartKOM", "Forum Auto", "Rossko"]);
-    assert.deepEqual((await page.locator(".cart-order-group-total").allTextContents()).map((text) => text.replace(/\s/g, "")), ["200,00₽", "120,00₽", "120,00₽", "120,00₽"]);
-    assert.match(await page.locator("#cart-order-total").textContent(), /560/);
+    assert.deepEqual((await page.locator(".cart-order-group-total .cart-purchase-price").allTextContents()).map((text) => text.replace(/\s/g, "")), ["200,00₽", "120,00₽", "120,00₽", "120,00₽"]);
+    assert.deepEqual((await page.locator(".cart-order-group-total .cart-total-price").allTextContents()).map((text) => text.replace(/\s/g, "")), ["270,00₽", "162,00₽", "162,00₽", "162,00₽"]);
+    assert.match(await page.locator("#cart-order-total .cart-purchase-price").textContent(), /560/);
+    assert.equal(await page.locator("#cart-order-total .cart-total-price").textContent(), "756,00 ₽");
+    assert.deepEqual(await page.locator(".cart-order-group-total .cart-purchase-price").evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).fontSize)), ["11px", "11px", "11px", "11px"]);
     assert.equal(await page.locator("#cart-order-groups tbody tr").count(), 4);
     assert.equal(await page.locator("#cart-order-groups img").count(), 0);
     assert.equal(await page.evaluate(() => window.cartXss), undefined);
@@ -467,7 +479,7 @@ test("four supplier checkout requires confirmation, groups exact totals, cancels
       await openCheckout(page);
       assert.equal(await page.locator(".cart-order-group").count(), 1);
       assert.equal(await page.locator(".cart-order-group").getAttribute("data-cart-order-supplier"), supplier);
-      assert.match(await page.locator("#cart-order-total").textContent(), /120/);
+      assert.match(await page.locator("#cart-order-total .cart-purchase-price").textContent(), /120/);
       await page.locator("#cart-order-accept").click();
       await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
       assert.deepEqual(orderCalls[index + 1].map((line) => line.reference.supplier), [supplier]);
@@ -483,7 +495,7 @@ test("checkout rejects a changed reviewed cart and requires reviewing the new qu
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
     await page.locator("#cart-toggle").click();
     await openCheckout(page);
-    assert.match(await page.locator("#cart-order-total").textContent(), /100/);
+    assert.match(await page.locator("#cart-order-total .cart-purchase-price").textContent(), /100/);
     await page.evaluate(async () => {
       const cart = await (await fetch("/api/cart")).json();
       const response = await fetch(`/api/cart/items/${cart.items[0].id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -497,7 +509,7 @@ test("checkout rejects a changed reviewed cart and requires reviewing the new qu
     assert.equal(orderCalls.length, 0);
     await page.locator("#cart-order-cancel").click();
     await openCheckout(page);
-    assert.match(await page.locator("#cart-order-total").textContent(), /200/);
+    assert.match(await page.locator("#cart-order-total .cart-purchase-price").textContent(), /200/);
     assert.equal(await page.locator(".cart-order-table .cart-item-quantity").textContent(), "2");
     await page.locator("#cart-order-accept").click();
     await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
