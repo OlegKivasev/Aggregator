@@ -89,9 +89,9 @@ test("PartsAPI proxy settings save secrets securely, switch automatically and al
     assert.match(await page.locator("#applicability-route-notice").textContent(), /автоматически переключён.*8\.8\.8\.8/);
     assert.equal(await page.locator("#applicability-route-notice").isVisible(), true);
     await indicator.click();
-    await page.waitForFunction(() => document.querySelector("#applicability-route-indicator").textContent.includes("2 запроса"));
-    assert.match(await indicator.textContent(), /2 запроса/);
-    assert.match(await indicator.getAttribute("title"), /Данные: 1; пустые ответы: 0; ошибки и отмены: 1/);
+    await page.waitForFunction(() => document.querySelector("#applicability-route-indicator").textContent.includes("1 запрос"));
+    assert.match(await indicator.textContent(), /1 запрос/);
+    assert.match(await indicator.getAttribute("title"), /Выбранное соединение: 1 запрос\. Данные: 1; пустые ответы: 0; ошибки и отмены: 0/);
     assert.equal(await direct.locator(".applicability-proxy-timer").textContent(), "00:00:00");
     assert.match(await first.locator(".applicability-proxy-timer").textContent(), /^(24:00:00|23:59:\d{2})$/);
     const firstTime = await first.locator(".applicability-proxy-timer").textContent();
@@ -114,8 +114,8 @@ test("PartsAPI proxy settings save secrets securely, switch automatically and al
     await page.locator("#applicability-sku").fill("TEST3");
     await page.locator("#applicability-submit").click();
     await page.waitForFunction(() => document.querySelector("#applicability-route-indicator").title.includes("пустые ответы: 1"));
-    assert.match(await indicator.textContent(), /5 запросов/);
-    assert.match(await indicator.getAttribute("title"), /Данные: 1; пустые ответы: 1; ошибки и отмены: 3/);
+    assert.match(await indicator.textContent(), /2 запроса/);
+    assert.match(await indicator.getAttribute("title"), /Данные: 0; пустые ответы: 1; ошибки и отмены: 1/);
     await indicator.click();
     assert.match(await second.locator(".applicability-proxy-counter").getAttribute("title"), /Данные: 0; пустые ответы: 1; ошибки и отмены: 1/);
     await second.getByRole("button", { name: /^Сбросить счётчики и таймер:/ }).click();
@@ -125,6 +125,8 @@ test("PartsAPI proxy settings save secrets securely, switch automatically and al
     assert.ok((await page.locator("#applicability-toast").boundingBox()).y < 40);
     assert.equal(await page.locator("#applicability-proxy-feedback").isVisible(), false);
     assert.equal(await second.locator(".applicability-proxy-counter").textContent(), "0 запросов");
+    assert.match(await indicator.textContent(), /0 запросов/);
+    assert.match(await indicator.getAttribute("title"), /Данные: 0; пустые ответы: 0; ошибки и отмены: 0/);
     assert.equal(await second.locator(".applicability-proxy-timer").textContent(), "00:00:00");
     assert.equal(await second.getAttribute("data-active"), "true");
     assert.match(await first.locator(".applicability-proxy-counter").textContent(), /2 запроса/);

@@ -625,11 +625,30 @@
     </div>
     <div class="tab-context-menu card border-0 shadow" id="tab-context-menu" role="menu" hidden>
       <button type="button" id="rename-tab-button" role="menuitem">Переименовать вкладку</button>
+      <div class="tab-close-control">
+        <button type="button" data-tab-close-toggle role="menuitem" aria-haspopup="menu" aria-expanded="false" aria-controls="tab-close-submenu">Закрыть <span aria-hidden="true">›</span></button>
+        <div class="tab-close-submenu card border-0 shadow" id="tab-close-submenu" role="menu" aria-label="Закрыть вкладки" hidden>
+          <button type="button" data-tab-close-action="current" role="menuitem">Закрыть вкладку</button>
+          <button type="button" data-tab-close-action="others" role="menuitem">Закрыть все, кроме выделенной</button>
+          <button type="button" data-tab-close-action="right" role="menuitem">Закрыть все правее</button>
+          <button type="button" data-tab-close-action="left" role="menuitem">Закрыть все левее</button>
+        </div>
+      </div>
     </div>
     <div class="tab-context-menu card border-0 shadow" id="applicability-tab-context-menu" role="menu" hidden>
       <button type="button" id="applicability-rename-tab-button" role="menuitem">Переименовать вкладку</button>
       <button type="button" id="applicability-remove-from-group" role="menuitem" hidden>Убрать из группы</button>
       <button type="button" id="applicability-dissolve-group" role="menuitem" hidden>Разгруппировать</button>
+      <button type="button" id="applicability-close-group" role="menuitem" hidden>Закрыть группу</button>
+      <div class="tab-close-control">
+        <button type="button" data-tab-close-toggle role="menuitem" aria-haspopup="menu" aria-expanded="false" aria-controls="applicability-tab-close-submenu">Закрыть <span aria-hidden="true">›</span></button>
+        <div class="tab-close-submenu card border-0 shadow" id="applicability-tab-close-submenu" role="menu" aria-label="Закрыть вкладки" hidden>
+          <button type="button" data-tab-close-action="current" role="menuitem">Закрыть вкладку</button>
+          <button type="button" data-tab-close-action="others" role="menuitem">Закрыть все, кроме выделенной</button>
+          <button type="button" data-tab-close-action="right" role="menuitem">Закрыть все правее</button>
+          <button type="button" data-tab-close-action="left" role="menuitem">Закрыть все левее</button>
+        </div>
+      </div>
     </div>
     <div class="result-context-menu applicability-context-menu card border-0 shadow" id="applicability-result-context-menu" role="menu" hidden>
       <button type="button" class="applicability-context-menu__delete" id="applicability-result-delete-button" role="menuitem">Удалить строку</button>
@@ -756,8 +775,13 @@
         </header>
         <form class="applicability-file-modal__form" id="applicability-file-form">
           <div class="applicability-file-modal__content">
-            <p id="applicability-file-help">Пары <strong>артикул | бренд</strong> или блоки <strong>Артикул: …</strong> с его строками <strong>OEM-артикул: … | бренд</strong>. Несколько исходных артикулов создают группу вкладок. До 5000 строк и 100 исходных артикулов, размер до 1 МБ.</p>
-            <p id="applicability-file-target"></p>
+            <div id="applicability-file-help" class="applicability-file-example"><span>Пример:</span><pre>Артикул: AMD.FL722
+OEM-артикул: 1016053926 | Geely
+OEM-артикул: 1056004100 | Geely
+
+Артикул: 9.1.662
+OEM-артикул: 09117557 | Cadillac
+OEM-артикул: 09117557 | Chevrolet</pre></div>
             <label class="field" for="applicability-file-input"><span>Текстовый файл</span><input id="applicability-file-input" type="file" accept=".txt,text/plain" /></label>
             <p class="applicability-feedback" id="applicability-file-feedback" role="status" aria-live="polite" hidden></p>
             <div class="applicability-file-preview" id="applicability-file-preview" hidden>
@@ -772,6 +796,21 @@
             <button type="submit" class="btn btn-primary" id="applicability-file-start" disabled>Начать поиск</button>
           </footer>
         </form>
+      </section>
+    </div>
+
+    <div class="analogs-modal applicability-article-name-modal" id="applicability-close-group-modal" role="dialog" aria-modal="true" aria-labelledby="applicability-close-group-title" aria-describedby="applicability-close-group-warning" tabindex="-1" hidden>
+      <div class="analogs-modal__backdrop" data-cancel-close-group></div>
+      <section class="analogs-modal__card card border-0 shadow-lg">
+        <header class="analogs-modal__header">
+          <h2 id="applicability-close-group-title">Закрыть группу?</h2>
+          <button type="button" class="analogs-modal__close btn btn-light" data-cancel-close-group aria-label="Закрыть окно">×</button>
+        </header>
+        <div class="applicability-file-modal__content"><p id="applicability-close-group-warning"></p></div>
+        <footer class="analogs-modal__footer applicability-file-modal__footer">
+          <button type="button" class="btn btn-light" id="applicability-close-group-cancel" data-cancel-close-group>Отмена</button>
+          <button type="button" class="btn btn-primary" id="applicability-close-group-confirm">Закрыть группу</button>
+        </footer>
       </section>
     </div>
 

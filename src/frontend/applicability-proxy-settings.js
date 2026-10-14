@@ -73,7 +73,8 @@ const formatRequestCount = (count) => {
 
 const renderUsage = () => {
   if (!state) return;
-  indicator.title = `Всего: ${formatRequestCount(state.usage.requestCount)}. ${describeCounters(state.usage)}. Нажмите, чтобы выбрать соединение.`;
+  const usage = state.proxies.find(({ id }) => id === state.activeRouteId)?.usage ?? state.directUsage;
+  indicator.title = `Выбранное соединение: ${formatRequestCount(usage.requestCount)}. ${describeCounters(usage)}. Нажмите, чтобы выбрать соединение.`;
   for (const element of routes.querySelectorAll(".applicability-proxy-timer")) {
     const counters = element.dataset.routeId === "direct" ? state.directUsage : state.proxies.find(({ id }) => id === element.dataset.routeId)?.usage;
     if (counters) element.textContent = formatRemaining(counters);
@@ -93,7 +94,7 @@ const render = (next) => {
     routeNotice.hidden = false;
     noticeTimer = setTimeout(() => { routeNotice.hidden = true; noticeTimer = null; }, 6_000);
   }
-  indicator.textContent = `PartsAPI: ${name} · ${formatRequestCount(state.usage.requestCount)}${limited ? " · лимит IP" : state.lastSwitchReason === "ip-limit" ? " · автопереключение" : ""}`;
+  indicator.textContent = `PartsAPI: ${name} · ${formatRequestCount((active?.usage ?? state.directUsage).requestCount)}${limited ? " · лимит IP" : state.lastSwitchReason === "ip-limit" ? " · автопереключение" : ""}`;
   indicator.dataset.route = active ? "proxy" : "direct";
   indicator.dataset.limited = String(limited);
   addButton.disabled = mutating || importing || !state.persistent;

@@ -3,6 +3,7 @@ import { defaultApplicabilityConcurrency, maximumApplicabilityConcurrency, norma
 import { bootstrapApplicabilityOemSidebar } from "./applicability-oem-sidebar.js";
 import { applicabilityFileMaxBytes, decodeApplicabilityFile, parseApplicabilityFile } from "./applicability-file-import.js";
 import { createApplicabilityMakeMatcher } from "./applicability-make-aliases.js";
+import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { moveApplicabilityGroupRelative, moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, moveApplicabilityTabRelative, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "./applicability-tab-groups.js";
 
 const markupFunction = document.querySelector("#markup-function");
@@ -29,6 +30,11 @@ const tabContextMenu = document.querySelector("#applicability-tab-context-menu")
 const renameTabButton = document.querySelector("#applicability-rename-tab-button");
 const removeFromGroupButton = document.querySelector("#applicability-remove-from-group");
 const dissolveGroupButton = document.querySelector("#applicability-dissolve-group");
+const closeGroupButton = document.querySelector("#applicability-close-group");
+const closeGroupModal = document.querySelector("#applicability-close-group-modal");
+const closeGroupWarning = document.querySelector("#applicability-close-group-warning");
+const closeGroupCancel = document.querySelector("#applicability-close-group-cancel");
+const closeGroupConfirm = document.querySelector("#applicability-close-group-confirm");
 const tabDropFeedback = document.querySelector("#applicability-tab-drop-feedback");
 const resultContextMenu = document.querySelector("#applicability-result-context-menu");
 const deleteResultButton = document.querySelector("#applicability-result-delete-button");
@@ -61,7 +67,6 @@ const fileImportButton = document.querySelector("#applicability-file-toggle");
 const fileImportModal = document.querySelector("#applicability-file-modal");
 const fileImportForm = document.querySelector("#applicability-file-form");
 const fileImportInput = document.querySelector("#applicability-file-input");
-const fileImportTarget = document.querySelector("#applicability-file-target");
 const fileImportFeedback = document.querySelector("#applicability-file-feedback");
 const fileImportPreview = document.querySelector("#applicability-file-preview");
 const fileImportRowsBody = document.querySelector("#applicability-file-rows");
@@ -86,6 +91,9 @@ let expandedGroupId = null;
 let activeTabId = null;
 let tabSequence = 1;
 let activeRequest = null;
+let activeRequestTabId = null;
+let closingGroupId = null;
+let closeGroupReturnFocus = null;
 let hasStoredApiKey = false;
 let activeMakeIndex = -1;
 let contextMenuTabId = null;
@@ -110,7 +118,6 @@ let fileImportRequest = null;
 let fileImportTabId = null;
 let fileImportArticles = [];
 let fileImportTargets = new Map();
-let fileImportGroupId = null;
 let fileImportReturnFocus = null;
 let fileReadSequence = 0;
 let fileReading = false;
@@ -520,24 +527,6 @@ const setFileImportFeedback = (message) => {
   fileImportFeedback.hidden = !message;
 };
 
-const updateFileImportTarget = () => {
-  if (fileImportArticles.length > 1) {
-    const group = tabGroups.find((item) => item.id === fileImportGroupId);
-    fileImportTarget.textContent = group
-      ? `Результаты добавляются в группу «${group.name}». Вкладок: ${fileImportArticles.length}; у каждого исходного артикула свои OEM-номера.`
-      : fileImportTargets.size
-        ? `Результаты добавляются в исходные вкладки (${fileImportArticles.length}). У каждого артикула свои OEM-номера.`
-        : `Будет создана группа с вкладками по исходным артикулам (${fileImportArticles.length}). У каждого артикула свои OEM-номера.`;
-    return;
-  }
-  const tabId = fileImportTargets.values().next().value ?? fileImportTabId;
-  const tab = tabs.find((item) => item.id === tabId) ?? getActiveTab();
-  const name = tab?.name || `Новая применимость ${tabs.indexOf(tab) + 1}`;
-  fileImportTarget.textContent = fileImportArticles.length
-    ? `Один исходный артикул: «${fileImportArticles[0]}». Его OEM-номера будут добавлены в текущую вкладку «${name}»; вкладка получит название артикула.`
-    : `Результаты добавляются во вкладку «${name}».`;
-};
-
 const prepareFileImportTargets = (tab) => {
   if (fileImportTargets.size) {
     if ([...fileImportTargets.values()].some((id) => !tabs.some((item) => item.id === id))) {
@@ -548,7 +537,6 @@ const prepareFileImportTargets = (tab) => {
   if (fileImportArticles.length > 1) {
     const group = { id: `applicability-group-${Date.now()}-${tabSequence++}`, name: `Группа ${groupSequence++}` };
     tabGroups.push(group);
-    fileImportGroupId = group.id;
     for (const article of fileImportArticles) {
       const target = createTab({ name: article, groupId: group.id });
       tabs.push(target);
@@ -561,7 +549,6 @@ const prepareFileImportTargets = (tab) => {
   }
   renderActiveTab();
   saveApplicabilityState();
-  updateFileImportTarget();
 };
 
 const updateFileImportControls = () => {
@@ -608,7 +595,6 @@ const closeFileImportModal = () => {
 fileImportButton.addEventListener("click", () => {
   closeMakeMenu();
   fileImportReturnFocus = document.activeElement;
-  updateFileImportTarget();
   fileImportModal.hidden = false;
   updateFileImportControls();
   (fileImportRequest ? fileImportStop : fileImportInput).focus();
@@ -625,13 +611,11 @@ fileImportInput.addEventListener("change", async () => {
   fileImportRows = [];
   fileImportArticles = [];
   fileImportTargets = new Map();
-  fileImportGroupId = null;
   fileImportRowsBody.replaceChildren();
   fileImportPreview.hidden = true;
   fileImportProgress.hidden = true;
   fileImportSummary.textContent = "";
   setFileImportFeedback("");
-  updateFileImportTarget();
   fileReading = Boolean(file);
   updateFileImportControls();
   if (!file) return;
@@ -645,7 +629,6 @@ fileImportInput.addEventListener("change", async () => {
     const parsed = parseApplicabilityFile(text, [...makesByName.values()].map((make) => make.name));
     fileImportRows = parsed.rows;
     fileImportArticles = parsed.articles;
-    updateFileImportTarget();
     renderFileImportRows();
   } catch (error) {
     if (sequence === fileReadSequence) setFileImportFeedback(error instanceof Error ? error.message : "Не удалось прочитать файл.");
@@ -1176,7 +1159,14 @@ const renderTabs = () => {
         const name = document.createElement("span");
         name.textContent = group.name;
         header.append(icon, name);
-        wrapper.append(header, panel);
+        const close = document.createElement("button");
+        close.type = "button";
+        close.className = "applicability-tab-group__close";
+        close.dataset.closeGroupId = group.id;
+        close.setAttribute("aria-label", `Закрыть группу «${group.name}»`);
+        close.title = "Закрыть группу";
+        close.textContent = "×";
+        wrapper.append(header, close, panel);
         applicabilityTabsList.append(wrapper);
         groupContainers.set(group.id, panel);
       }
@@ -1443,18 +1433,47 @@ const addTab = () => {
   skuInput.focus();
 };
 
-const closeTab = (tabId) => {
-  const index = tabs.findIndex((tab) => tab.id === tabId);
+const closeTabs = (tabIds) => {
+  const ids = new Set(tabIds);
+  const index = tabs.findIndex((tab) => ids.has(tab.id));
   if (index < 0) return;
-  if ((fileImportRequest && (fileImportTargets.size ? [...fileImportTargets.values()].includes(tabId) : fileImportTabId === tabId))
-    || (!fileImportRequest && activeTabId === tabId)) activeRequest?.abort();
-  tabs.splice(index, 1);
+  syncActiveTab();
+  if ((fileImportRequest && (fileImportTargets.size ? [...fileImportTargets.values()].some((id) => ids.has(id)) : ids.has(fileImportTabId)))
+    || (!fileImportRequest && ids.has(activeRequestTabId))) activeRequest?.abort();
+  tabs = tabs.filter((tab) => !ids.has(tab.id));
   pruneApplicabilityGroups();
   if (!tabs.length) tabs.push(createTab());
   if (!tabs.some((tab) => tab.id === activeTabId)) activeTabId = tabs[Math.min(index, tabs.length - 1)].id;
   renderActiveTab();
   saveApplicabilityState();
 };
+
+const dismissCloseGroupModal = () => {
+  closeGroupModal.hidden = true;
+  closingGroupId = null;
+  if (closeGroupReturnFocus?.isConnected) closeGroupReturnFocus.focus();
+  else newApplicabilityTabButton.focus();
+  closeGroupReturnFocus = null;
+};
+
+const requestCloseGroup = (groupId, returnFocus) => {
+  const group = tabGroups.find((item) => item.id === groupId);
+  if (!group) return;
+  closingGroupId = groupId;
+  closeGroupReturnFocus = returnFocus;
+  const count = tabs.filter((tab) => tab.groupId === groupId).length;
+  closeGroupWarning.textContent = `Группа «${group.name}» и все её вкладки (${count}) будут закрыты. Результаты в этих вкладках будут удалены. Продолжающийся поиск будет остановлен.`;
+  closeGroupModal.hidden = false;
+  closeGroupCancel.focus();
+};
+
+document.querySelectorAll("[data-cancel-close-group]").forEach((button) => button.addEventListener("click", dismissCloseGroupModal));
+closeGroupConfirm.addEventListener("click", () => {
+  const ids = tabs.filter((tab) => tab.groupId === closingGroupId).map((tab) => tab.id);
+  dismissCloseGroupModal();
+  closeTabs(ids);
+  newApplicabilityTabButton.focus();
+});
 
 const loadMakes = async () => {
   try {
@@ -1562,10 +1581,16 @@ deleteApiKeyButton.addEventListener("click", async () => {
   }
 });
 applicabilityTabsList.addEventListener("click", (event) => {
+  const groupClose = event.target.closest("[data-close-group-id]");
+  if (groupClose) {
+    event.stopPropagation();
+    requestCloseGroup(groupClose.dataset.closeGroupId, groupClose);
+    return;
+  }
   const close = event.target.closest("[data-close-tab-id]");
   if (close) {
     event.stopPropagation();
-    closeTab(close.dataset.closeTabId);
+    closeTabs([close.dataset.closeTabId]);
     return;
   }
   const tab = event.target.closest("[data-tab-id]");
@@ -1578,6 +1603,7 @@ applicabilityTabsList.addEventListener("click", (event) => {
 });
 
 const hideTabContextMenu = (restoreFocus = false) => {
+  tabCloseMenu.hide();
   tabContextMenu.hidden = true;
   contextMenuTabId = null;
   contextMenuGroupId = null;
@@ -1591,6 +1617,8 @@ const showTabContextMenu = (anchor, clientX, clientY) => {
   renameTabButton.textContent = contextMenuGroupId ? "Переименовать группу" : "Переименовать вкладку";
   removeFromGroupButton.hidden = !tabs.find((tab) => tab.id === contextMenuTabId)?.groupId;
   dissolveGroupButton.hidden = !contextMenuGroupId;
+  closeGroupButton.hidden = !contextMenuGroupId;
+  tabCloseMenu.refresh();
   contextMenuTabAnchor = anchor;
   tabContextMenu.hidden = false;
   const bounds = tabContextMenu.getBoundingClientRect();
@@ -1598,6 +1626,19 @@ const showTabContextMenu = (anchor, clientX, clientY) => {
   tabContextMenu.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - bounds.height - 8))}px`;
   renameTabButton.focus();
 };
+
+const tabCloseMenu = setupTabCloseMenu(tabContextMenu, {
+  getTabs: () => [...applicabilityTabsList.querySelectorAll("[data-tab-id]")].map((button) => ({ id: button.dataset.tabId })),
+  getSelectedId: () => contextMenuTabId,
+  closeTabs: (ids) => { hideTabContextMenu(); closeTabs(ids); newApplicabilityTabButton.focus(); },
+});
+
+closeGroupButton.addEventListener("click", () => {
+  const id = contextMenuGroupId;
+  const anchor = contextMenuTabAnchor;
+  hideTabContextMenu();
+  requestCloseGroup(id, anchor);
+});
 
 const renameTab = (tabId, returnFocus) => {
   const tab = tabs.find((item) => item.id === tabId);
@@ -1769,6 +1810,19 @@ document.addEventListener("click", (event) => {
   if (!resultContextMenu.hidden && !resultContextMenu.contains(event.target)) hideResultContextMenu();
 });
 document.addEventListener("keydown", (event) => {
+  if (!closeGroupModal.hidden) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismissCloseGroupModal();
+    } else if (event.key === "Tab") {
+      const buttons = [...closeGroupModal.querySelectorAll("button")];
+      const first = buttons[0];
+      const last = buttons.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+    return;
+  }
   if (!fileImportModal.hidden) {
     if (event.key === "Escape") {
       closeFileImportModal();
@@ -1880,6 +1934,7 @@ form.addEventListener("submit", async (event) => {
   const entries = requestedPairs.map((pair) => createSearchEntry({ sku: pair.sku, makeName: pair.brand, status: "Ищем применимость…" }));
   const controller = new AbortController();
   activeRequest = controller;
+  activeRequestTabId = tab.id;
   concurrencyInput.disabled = true;
   fileImportButton.disabled = true;
   submitButton.disabled = true;
@@ -1958,6 +2013,7 @@ form.addEventListener("submit", async (event) => {
     if (activeRequest === controller) {
       activeRequest = null;
       concurrencyInput.disabled = false;
+      activeRequestTabId = null;
       fileImportButton.disabled = false;
       submitButton.disabled = false;
       submitButton.querySelector("span").textContent = "Поиск";

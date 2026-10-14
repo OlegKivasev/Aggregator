@@ -269,7 +269,7 @@ test("structured file creates one persisted group, searches OEMs in their own so
       "OEM-артикул: OEM1 | Audi", "Артикул: PART-2", "OEM-артикул: OEM1 | Volkswagen",
       "OEM-артикул: OEM2 | Citroen", "OEM-артикул: OEM3 | ГАЗ", "OEM-артикул: OEM4 | FoMoCo", "OEM-артикул: GM1 | GM",
     ].join("\r\n"));
-    assert.match(await page.locator("#applicability-file-target").textContent(), /Будет создана группа.*\(2\)/);
+    assert.equal(await page.locator("#applicability-file-target").count(), 0);
     assert.equal(await page.locator("#applicability-file-article-heading").isVisible(), true);
     assert.equal((await storedState(page)).tabs.length, 2, "preview must not create tabs");
     await page.setViewportSize({ width: 375, height: 760 });
@@ -288,7 +288,7 @@ test("structured file creates one persisted group, searches OEMs in their own so
       { sku: "OEM1", brand: "VW" }, { sku: "OEM2", brand: "CITROËN" },
       { sku: "OEM3", brand: "GAZ" }, { sku: "OEM4", brand: "FORD" },
     ].toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
-    assert.match(await page.locator("#applicability-file-target").textContent(), /группу «Группа 1»/);
+    assert.equal((await storedState(page)).groups[0].name, "Группа 1");
     assert.match(await page.locator("#applicability-file-summary").textContent(), /Добавлено: 6\. Ошибок: 0\. Пропущено: 2/);
     await page.keyboard.press("Escape");
     const state = await storedState(page);
@@ -325,7 +325,7 @@ test("one source article appends its OEMs to the current tab and manual make sel
   }, async (page) => {
     await page.locator("#applicability-file-toggle").click();
     await upload(page, "Артикул: SINGLE-1\nOEM-артикул: SINGLE-OE | Mercedes Benz");
-    assert.match(await page.locator("#applicability-file-target").textContent(), /Один исходный артикул/);
+    assert.equal(await page.locator("#applicability-file-article-heading").isVisible(), true);
     await page.locator("#applicability-file-start").click();
     await waitFinished(page);
     await page.keyboard.press("Escape");
@@ -372,7 +372,7 @@ test("stopped structured imports resume in the same group even after switching t
     await page.keyboard.press("Escape");
     await page.locator('[data-tab-id="other"]').click();
     await page.locator("#applicability-file-toggle").click();
-    assert.match(await page.locator("#applicability-file-target").textContent(), /группу «Группа 1»/);
+    assert.equal((await storedState(page)).groups[0].name, "Группа 1");
     releasePending();
     await page.locator("#applicability-file-start").click();
     await waitFinished(page);
@@ -382,6 +382,48 @@ test("stopped structured imports resume in the same group even after switching t
     assert.equal(state.tabs[1].searches.length, 0);
     assert.deepEqual(calls.toSorted(), ["OE1", "OE2", "OE2", "OE3"]);
   });
+});
+
+test("closing an imported group confirms first, aborts its queue and prevents late restoration", { timeout: 60_000 }, async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let started;
+  const requestStarted = new Promise((resolve) => { started = resolve; });
+  let calls = 0;
+  try {
+    await withImportPage(async (route) => {
+      calls += 1;
+      started();
+      await gate;
+      await route.fulfill({ json: { results: [vehicle], cacheHit: true } });
+    }, async (page) => {
+      await page.locator("#applicability-file-toggle").click();
+      await upload(page, "Артикул: SOURCE1\nOEM-артикул: OEM1 | FORD\nАртикул: SOURCE2\nOEM-артикул: OEM2 | FORD");
+      await page.locator("#applicability-file-start").click();
+      await requestStarted;
+      await page.keyboard.press("Escape");
+      const groupId = (await storedState(page)).groups[0].id;
+      await page.locator(`[data-close-group-id="${groupId}"]`).click();
+      await page.locator("#applicability-close-group-cancel").click();
+      assert.equal((await storedState(page)).groups.length, 1);
+      assert.equal(await page.locator("#applicability-submit").isDisabled(), true);
+      await page.locator(`[data-close-group-id="${groupId}"]`).click();
+      await page.locator("#applicability-close-group-confirm").click();
+      await waitFinished(page);
+      const requestsAtClose = calls;
+      release();
+      await page.waitForLoadState("networkidle");
+      assert.equal(calls, requestsAtClose);
+      const state = await storedState(page);
+      assert.deepEqual(state.groups, []);
+      assert.deepEqual(state.tabs.map((item) => item.id), ["original", "other"]);
+      assert.equal(await page.locator("#applicability-submit").isEnabled(), true);
+      await page.locator("#applicability-file-toggle").click();
+      await page.locator("#applicability-file-start").click();
+      await waitFinished(page);
+      assert.match(await page.locator("#applicability-file-feedback").textContent(), /Вкладка импорта закрыта/);
+    });
+  } finally { release(); }
 });
 
 test("closing an imported tab aborts its group queue and late results cannot restore it", async () => {
@@ -528,7 +570,7 @@ test("file import stays in its original tab and closing that tab aborts its queu
     assert.equal(await page.locator("#applicability-results-body tr").count(), 0);
     assert.equal(await page.locator("#applicability-submit").isDisabled(), true);
     await page.locator("#applicability-file-toggle").click();
-    assert.match(await page.locator("#applicability-file-target").textContent(), /«Импорт»/);
+    assert.equal((await storedState(page)).activeTabId, "other");
     assert.equal(await page.locator("#applicability-file-stop").isVisible(), true);
     await page.keyboard.press("Escape");
     await page.locator('[data-close-tab-id="original"]').click();

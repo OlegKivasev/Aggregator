@@ -9,7 +9,7 @@ import { chromium } from "playwright";
 const vehicle = { carId: 1, makeName: "FORD", modelName: "TEST", carName: "2.0", carType: "PC", yearStart: null, yearEnd: null };
 const tab = (id, name, results = [vehicle]) => ({ id, name, searches: [{ id: `entry-${id}`, sku: `OEM-${id}`, makeName: "FORD", results, hasSearched: true }] });
 
-async function withGroupsPage(state, check) {
+async function withGroupsPage(state, check, search = null) {
   const frontendDir = resolve("src/frontend");
   const server = createServer(async (request, response) => {
     const path = new URL(request.url, "http://127.0.0.1").pathname;
@@ -33,6 +33,7 @@ async function withGroupsPage(state, check) {
     page.on("pageerror", (error) => errors.push(error.message));
     await page.addInitScript((storedState) => {
       if (!localStorage.getItem("autoservice.applicabilityState")) localStorage.setItem("autoservice.applicabilityState", JSON.stringify(storedState));
+      if (storedState.searchTabs && !localStorage.getItem("autoservice.searchState")) localStorage.setItem("autoservice.searchState", JSON.stringify({ activeTabId: "b", tabs: storedState.searchTabs }));
       localStorage.setItem("autoservice.activeFunction", "applicability");
     }, state);
     const origin = `http://127.0.0.1:${server.address().port}`;
@@ -42,6 +43,7 @@ async function withGroupsPage(state, check) {
       if (!url.pathname.startsWith("/api/")) return route.continue();
       if (url.pathname === "/api/applicability/search") {
         searches.push(route.request().postDataJSON());
+        if (search) return search(route);
         return route.fulfill({ json: { results: [vehicle], cacheHit: true } });
       }
       if (url.pathname === "/api/applicability/api-key") return route.fulfill({ json: { configured: true, persistent: false, maskedKey: "…TEST1" } });
@@ -54,7 +56,7 @@ async function withGroupsPage(state, check) {
     await page.waitForLoadState("networkidle");
     await check(page);
     assert.deepEqual(errors, []);
-    assert.deepEqual(searches, [], "Grouping and generating documents must not repeat supplier searches");
+    if (!search) assert.deepEqual(searches, [], "Grouping and generating documents must not repeat supplier searches");
   } finally {
     await browser?.close();
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -62,6 +64,189 @@ async function withGroupsPage(state, check) {
 }
 
 const storedState = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.applicabilityState")));
+
+test("closing a group warns first, supports cancellation and persists only surviving tabs", async () => {
+  await withGroupsPage({ activeTabId: "a", groups: [{ id: "g", name: 'Детали <img src=x onerror="alert(1)">' }], tabs: [
+    { ...tab("a", "Деталь A"), groupId: "g" }, { ...tab("b", "Деталь B"), groupId: "g" }, tab("c", "Отдельно"),
+  ] }, async (page) => {
+    const close = page.locator('[data-close-group-id="g"]');
+    const modal = page.locator("#applicability-close-group-modal");
+    await close.click();
+    assert.equal(await modal.isVisible(), true);
+    assert.match(await page.locator("#applicability-close-group-warning").textContent(), /вкладки \(2\).*Результаты.*удалены/);
+    assert.equal(await modal.locator("img").count(), 0);
+    assert.deepEqual((await storedState(page)).tabs.map((item) => item.id), ["a", "b", "c"]);
+    assert.equal(await page.locator("#applicability-close-group-cancel").evaluate((element) => element === document.activeElement), true);
+    await page.keyboard.press("Escape");
+    assert.equal(await modal.isVisible(), false);
+    await close.click();
+    await page.locator("#applicability-close-group-cancel").click();
+    assert.deepEqual((await storedState(page)).tabs.map((item) => item.id), ["a", "b", "c"]);
+    await page.locator(".applicability-tab-group__header").click({ button: "right" });
+    await page.locator("#applicability-close-group").click();
+    if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-close-group-warning.png") });
+    await page.locator("#applicability-close-group-confirm").click();
+    const state = await storedState(page);
+    assert.deepEqual(state.tabs.map((item) => item.id), ["c"]);
+    assert.equal(state.activeTabId, "c");
+    assert.deepEqual(state.groups, []);
+    assert.equal(state.nextGroupNumber, 1);
+    assert.equal(state.tabs[0].searches[0].results.length, 1);
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    assert.equal(await page.locator(".applicability-tab-group").count(), 0);
+    assert.equal(await page.locator('#applicability-tabs-list [data-tab-id="c"]').count(), 1);
+  });
+});
+
+test("closing the last group leaves a new empty tab", async () => {
+  await withGroupsPage({ activeTabId: "a", groups: [{ id: "g", name: "Группа 1" }], tabs: [
+    { ...tab("a", "Деталь A"), groupId: "g" }, { ...tab("b", "Деталь B"), groupId: "g" },
+  ] }, async (page) => {
+    await page.locator('[data-close-group-id="g"]').click();
+    await page.locator("#applicability-close-group-confirm").click();
+    const state = await storedState(page);
+    assert.deepEqual(state.groups, []);
+    assert.equal(state.tabs.length, 1);
+    assert.ok(!["a", "b"].includes(state.tabs[0].id));
+    assert.deepEqual(state.tabs[0].searches, []);
+    assert.equal(state.activeTabId, state.tabs[0].id);
+  });
+});
+
+for (const closeSearchingGroup of [false, true]) {
+  test(`manual search ${closeSearchingGroup ? "aborts when its inactive group closes" : "survives closing an unrelated active tab"}`, { timeout: 60_000 }, async () => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    let started;
+    const requestStarted = new Promise((resolve) => { started = resolve; });
+    let calls = 0;
+    try {
+      await withGroupsPage({ activeTabId: "a", groups: [{ id: "g", name: "Группа 1" }], tabs: [
+        { ...tab("a", "A"), sku: "NEW-OEM", makeNames: ["FORD"], searches: [], groupId: "g" }, tab("b", "B"),
+      ] }, async (page) => {
+        await page.locator("#applicability-submit").click();
+        await requestStarted;
+        await page.locator('#applicability-tabs-list [data-tab-id="b"]').click();
+        if (closeSearchingGroup) {
+          await page.locator('[data-close-group-id="g"]').click();
+          await page.locator("#applicability-close-group-cancel").click();
+          assert.equal(await page.locator("#applicability-submit").isDisabled(), true);
+          await page.locator('[data-close-group-id="g"]').click();
+          await page.locator("#applicability-close-group-confirm").click();
+          await page.waitForFunction(() => !document.querySelector("#applicability-submit").disabled);
+          release();
+          await page.waitForLoadState("networkidle");
+          assert.deepEqual((await storedState(page)).tabs.map((item) => item.id), ["b"]);
+          assert.deepEqual((await storedState(page)).groups, []);
+        } else {
+          await page.locator('[data-close-tab-id="b"]').click();
+          assert.equal(await page.locator("#applicability-submit").isDisabled(), true);
+          release();
+          await page.waitForFunction(() => !document.querySelector("#applicability-submit").disabled);
+          const state = await storedState(page);
+          assert.deepEqual(state.tabs.map((item) => item.id), ["a"]);
+          assert.equal(state.tabs[0].searches[0].hasSearched, true);
+          assert.deepEqual(state.tabs[0].searches[0].results, [vehicle]);
+        }
+        assert.equal(calls, 1);
+      }, async (route) => {
+        calls += 1;
+        started();
+        await gate;
+        await route.fulfill({ json: { results: [vehicle], cacheHit: true } });
+      });
+    } finally { release(); }
+  });
+}
+
+for (const section of ["applicability", "markup"]) {
+  test(`${section} tab submenu closes relative to the context tab and stays within mobile viewport`, async () => {
+    const initial = [tab("a", "A"), tab("b", "B"), tab("c", "C"), tab("d", "D")];
+    await withGroupsPage({ activeTabId: "b", tabs: initial, searchTabs: initial.map(({ id, name }) => ({ id, name, article: name, hasSearched: true })) }, async (page) => {
+      if (section === "markup") await page.locator("#markup-function-tab").click();
+      const list = page.locator(section === "markup" ? "#search-tabs-list" : "#applicability-tabs-list");
+      const menu = page.locator(section === "markup" ? "#tab-context-menu" : "#applicability-tab-context-menu");
+      const readState = () => section === "markup" ? page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.searchState"))) : storedState(page);
+      await list.locator('[data-tab-id="c"]').click({ button: "right" });
+      await menu.locator("[data-tab-close-toggle]").hover();
+      const submenu = menu.locator(".tab-close-submenu");
+      assert.equal(await submenu.isVisible(), true);
+      if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, `${section}-tab-close-menu.png`) });
+      await submenu.locator('[data-tab-close-action="right"]').click();
+      assert.deepEqual((await readState()).tabs.map((item) => item.id), ["a", "b", "c"]);
+      assert.equal((await readState()).activeTabId, "b");
+      await list.locator('[data-tab-id="c"]').focus();
+      await page.keyboard.press("Shift+F10");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowRight");
+      assert.equal(await submenu.isVisible(), true);
+      assert.equal(await submenu.locator('[data-tab-close-action="right"]').isDisabled(), true);
+      await page.keyboard.press("Escape");
+      assert.equal(await submenu.isVisible(), false);
+      assert.equal(await menu.isVisible(), true);
+      await menu.locator("[data-tab-close-toggle]").click();
+      await submenu.locator('[data-tab-close-action="left"]').click();
+      assert.deepEqual((await readState()).tabs.map((item) => item.id), ["c"]);
+      await list.locator('[data-tab-id="c"]').click({ button: "right" });
+      await menu.locator("[data-tab-close-toggle]").hover();
+      assert.equal(await submenu.locator('[data-tab-close-action="others"]').isDisabled(), true);
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Escape");
+      await page.setViewportSize({ width: 375, height: 760 });
+      await list.locator('[data-tab-id="c"]').click({ button: "right" });
+      await menu.locator("[data-tab-close-toggle]").click();
+      const bounds = await submenu.boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 375);
+      assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= 760);
+      if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, `${section}-tab-close-menu-mobile.png`) });
+      await submenu.locator('[data-tab-close-action="current"]').click();
+      assert.equal((await readState()).tabs.length, 1);
+      assert.notEqual((await readState()).tabs[0].id, "c");
+    });
+  });
+}
+
+test("closing other applicability tabs includes grouped tabs and retains the context tab's results", async () => {
+  await withGroupsPage({ activeTabId: "a", groups: [{ id: "g", name: "Группа 1" }], tabs: [
+    tab("a", "A"), { ...tab("b", "B"), groupId: "g" }, { ...tab("c", "C"), groupId: "g" }, tab("d", "D"),
+  ] }, async (page) => {
+    const button = page.locator('#applicability-tabs-list [data-tab-id="c"]');
+    await page.locator(".applicability-tab-group__header").hover();
+    await button.click({ button: "right" });
+    const menu = page.locator("#applicability-tab-context-menu");
+    await menu.locator("[data-tab-close-toggle]").hover();
+    await menu.locator('[data-tab-close-action="others"]').click();
+    const state = await storedState(page);
+    assert.deepEqual(state.tabs.map((item) => item.id), ["c"]);
+    assert.equal(state.activeTabId, "c");
+    assert.equal(state.groups.length, 1);
+    assert.deepEqual(state.tabs[0].searches[0].results, [vehicle]);
+  });
+});
+
+test("file import shows only a short example and both file buttons share the application style", async () => {
+  await withGroupsPage({ activeTabId: "a", tabs: [tab("a", "A")] }, async (page) => {
+    await page.locator("#applicability-file-toggle").click();
+    const help = page.locator("#applicability-file-help");
+    assert.match(await help.textContent(), /Пример:.*Артикул: AMD.FL722/s);
+    assert.doesNotMatch(await help.textContent(), /5000|1 МБ|Результаты добавляются|Пары/);
+    assert.ok((await help.locator("pre").textContent()).split("\n").length <= 8);
+    assert.equal(await page.locator("#applicability-file-target").count(), 0);
+    const styles = await page.locator('input[type="file"]').evaluateAll((inputs) => inputs.map((input) => {
+      const style = getComputedStyle(input, "::file-selector-button");
+      return { background: style.backgroundColor, radius: style.borderRadius, fontWeight: style.fontWeight };
+    }));
+    assert.equal(styles.length, 2);
+    assert.deepEqual(styles[0], styles[1]);
+    assert.equal(styles[0].radius, "8px");
+    assert.equal(styles[0].fontWeight, "700");
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#applicability-file-input").click();
+    assert.equal((await chooser).isMultiple(), false);
+    if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, "applicability-file-example.png") });
+  });
+});
 const tabButton = (page, id) => page.locator(`#applicability-tabs-list [data-tab-id="${id}"]`);
 const groupHeader = (page, name) => page.locator(".applicability-tab-group__header").filter({ hasText: name });
 
@@ -264,6 +449,8 @@ test("folders reveal clickable tabs on hover and keyboard focus without shifting
     await header.focus();
     assert.equal(await panel.isVisible(), true);
     await page.keyboard.press("Tab");
+    assert.equal(await page.locator('[data-close-group-id="g"]').evaluate((element) => element === document.activeElement), true);
+    await page.keyboard.press("Tab");
     assert.equal(await tabButton(page, "a").evaluate((element) => element === document.activeElement), true);
     await page.keyboard.press("Escape");
     assert.equal(await panel.isVisible(), false);
@@ -370,6 +557,7 @@ test("dragging tabs out of a group preserves searches, removes empty folders and
       const source = tabButton(page, id);
       await revealTab(source);
       await source.evaluate((element) => element.scrollIntoView({ block: "nearest", inline: "center" }));
+      await revealTab(source);
       const from = await source.boundingBox();
       await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
       await page.mouse.down();

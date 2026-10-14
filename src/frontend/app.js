@@ -12,6 +12,7 @@ import {
   renderDeliveryWarehouse,
 } from "./result-formatting.js";
 import { openSearchStream } from "./search-stream.js";
+import { setupTabCloseMenu } from "./tab-close-menu.js";
 import {
   isStpartsWarehouseVisible,
   normalizeStpartsWarehouseColors,
@@ -1863,6 +1864,7 @@ searchTabsList.addEventListener("click", (event) => {
 });
 
 const hideTabContextMenu = (restoreFocus = false) => {
+  tabCloseMenu.hide();
   tabContextMenu.hidden = true;
   contextMenuTabId = null;
   if (restoreFocus && contextMenuTabAnchor?.isConnected) {
@@ -1874,12 +1876,24 @@ const hideTabContextMenu = (restoreFocus = false) => {
 const showTabContextMenu = (tabId, clientX, clientY, anchor) => {
   contextMenuTabId = tabId;
   contextMenuTabAnchor = anchor;
+  tabCloseMenu.refresh();
   tabContextMenu.hidden = false;
   const bounds = tabContextMenu.getBoundingClientRect();
   tabContextMenu.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - bounds.width - 8))}px`;
   tabContextMenu.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - bounds.height - 8))}px`;
   renameTabButton.focus();
 };
+
+const tabCloseMenu = setupTabCloseMenu(tabContextMenu, {
+  getTabs: () => searchTabs,
+  getSelectedId: () => contextMenuTabId,
+  closeTabs: (ids) => {
+    hideTabContextMenu();
+    ids.forEach(closeTab);
+    const active = [...searchTabsList.querySelectorAll("[data-tab-id]")].find((button) => button.dataset.tabId === activeTabId);
+    active?.focus();
+  },
+});
 
 const renameTab = (tabId) => {
   const tab = searchTabs.find((item) => item.id === tabId);
