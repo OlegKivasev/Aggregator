@@ -97,35 +97,37 @@
           </button>
         </div>
         <section class="search-shell">
-          <div class="search-row card shadow-sm border-0">
-            <form class="search-form" id="search-form">
-              <input
-                class="search-input"
-                id="article-input"
-                name="article"
-                type="text"
-                placeholder="Введите артикул"
-                autocomplete="off"
-                required
-              />
-              <button type="button" class="settings-button" id="settings-toggle" aria-label="Открыть настройки" title="Настройки">
-                <svg aria-hidden="true" viewBox="0 0 24 24">
-                  <path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" />
-                  <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.46-2.47 1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58 1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 1.55 2 3.46 2.47-1a8.05 8.05 0 0 0 2.58 1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" />
-                </svg>
-              </button>
-              <button type="submit" id="submit-button" class="btn btn-primary">
-                <svg aria-hidden="true" viewBox="0 0 24 24">
-                  <circle cx="10.75" cy="10.75" r="6.25" />
-                  <path d="m15.5 15.5 4 4" />
-                </svg>
-                <span>Поиск</span>
-              </button>
-              <button type="button" class="cart-toggle" id="cart-toggle" aria-label="Открыть корзину" title="Корзина">
-                <img src="/shopping-cart.png" alt="" aria-hidden="true">
-                <span class="cart-badge" id="cart-badge" hidden>0</span>
-              </button>
-            </form>
+          <div class="search-toolbar">
+            <div class="search-row card shadow-sm border-0">
+              <form class="search-form" id="search-form">
+                <input
+                  class="search-input"
+                  id="article-input"
+                  name="article"
+                  type="text"
+                  placeholder="Введите артикул"
+                  autocomplete="off"
+                  required
+                />
+                <button type="button" class="settings-button" id="settings-toggle" aria-label="Открыть настройки" title="Настройки">
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" />
+                    <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.46-2.47 1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58 1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 1.55 2 3.46 2.47-1a8.05 8.05 0 0 0 2.58 1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" />
+                  </svg>
+                </button>
+                <button type="submit" id="submit-button" class="btn btn-primary">
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <circle cx="10.75" cy="10.75" r="6.25" />
+                    <path d="m15.5 15.5 4 4" />
+                  </svg>
+                  <span>Поиск</span>
+                </button>
+              </form>
+            </div>
+            <button type="button" class="cart-toggle" id="cart-toggle" aria-label="Открыть корзину" title="Корзина" hidden>
+              <img src="/shopping-cart.png" alt="" aria-hidden="true">
+              <span class="cart-badge" id="cart-badge" hidden>0</span>
+            </button>
           </div>
 
           <div class="results-panel card border-0 shadow-sm overflow-hidden" id="results-panel" aria-busy="false">

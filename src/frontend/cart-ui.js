@@ -1,8 +1,24 @@
 import { escapeHtml, formatArticle, formatBrand, formatPrice } from "./result-formatting.js";
+import { formatDeliveryDate } from "./supplier-search-summary.js";
 
 const supplierNames = { armtek: "Armtek", "part-kom": "PartKOM" };
 const maximumQuantity = (result) => Number.isFinite(result.quantity) ? Math.min(1_000_000, Math.floor(result.quantity)) : 0;
 const cartIcon = '<img src="/shopping-cart.png" alt="" aria-hidden="true">';
+
+export const formatCartLatestDeliveryDate = (items) => {
+  if (!items.length) return "Не указана";
+  let latest = null;
+  let approximate = false;
+  for (const { result } of items) {
+    const from = typeof result.deliveryDate === "string" ? Date.parse(result.deliveryDate) : Number.NaN;
+    const end = result.deliveryDateTo ?? result.deliveryDate;
+    const to = typeof end === "string" ? Date.parse(end) : Number.NaN;
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return "Не указана";
+    if (latest === null || to > Date.parse(latest)) latest = end;
+    approximate ||= result.deliveryDateApproximate === true;
+  }
+  return formatDeliveryDate(latest, approximate);
+};
 
 export const renderCartOfferControls = (result) => {
   const maximum = maximumQuantity(result);
@@ -52,12 +68,14 @@ export const bootstrapCart = () => {
   modal.setAttribute("aria-labelledby", "cart-title");
   modal.innerHTML = `<header class="analogs-modal__header"><div><h2 id="cart-title">Корзина</h2><p id="cart-summary"></p></div>
     <button type="button" class="btn btn-light analogs-modal__close" id="cart-close" aria-label="Закрыть корзину">×</button></header>
-    <div class="cart-content"><p class="cart-test-note">Тестовая проверка PartKOM и Armtek. Товары не заказываются и не оплачиваются.</p>
+    <div class="cart-tabs" id="cart-tabs" role="tablist" aria-label="Поставщики в корзине"></div>
+    <div class="cart-content" id="cart-tab-panel" role="tabpanel" aria-labelledby="cart-tab-all"><p class="cart-test-note">Тестовая проверка PartKOM и Armtek. Товары не заказываются и не оплачиваются.</p>
       <div class="cart-table-scroll"><table class="table align-middle cart-table"><thead><tr>
-        <th>Товар</th><th>Поставщик / склад</th><th>Количество</th><th>Цена закупки</th><th>Сумма</th><th><span class="visually-hidden">Удалить</span></th>
+        <th>Товар</th><th id="cart-supplier-column">Поставщик / склад</th><th>Дата поставки</th><th>Количество</th><th>Цена закупки</th><th>Сумма</th><th><span class="visually-hidden">Удалить</span></th>
       </tr></thead><tbody id="cart-items"></tbody></table></div>
       <p class="cart-status" id="cart-status" role="status" aria-live="polite"></p></div>
-    <footer class="cart-footer"><div><span>Итого по закупке</span><strong id="cart-total"></strong></div>
+    <footer class="cart-footer"><div class="cart-footer__summary"><div><span>Итого по закупке</span><strong id="cart-total"></strong></div>
+      <div class="cart-footer__delivery"><span>Все товары к</span><strong id="cart-delivery-date"></strong></div></div>
       <button type="button" class="btn btn-primary" id="cart-test-order">Проверить заказ</button></footer>`;
   document.body.append(modal);
   const toast = document.createElement("div");
@@ -67,6 +85,7 @@ export const bootstrapCart = () => {
   toast.setAttribute("aria-live", "polite");
   document.body.append(toast);
   const body = modal.querySelector("#cart-items");
+  const tabs = modal.querySelector("#cart-tabs");
   const status = modal.querySelector("#cart-status");
   const testButton = modal.querySelector("#cart-test-order");
   let cart = null;
@@ -76,6 +95,7 @@ export const bootstrapCart = () => {
   let testedRevision = null;
   let toastTimeout;
   let returnFocus = toggle;
+  let activeSupplier = "all";
 
   const notify = (message, error = false) => {
     clearTimeout(toastTimeout);
@@ -87,34 +107,54 @@ export const bootstrapCart = () => {
   const render = () => {
     if (!cart) return;
     const focusedControl = document.activeElement.closest?.("#cart-items input, #cart-items button");
+    const focusedTab = document.activeElement.closest?.(".cart-tab")?.dataset.cartSupplier;
     const focusedId = focusedControl?.closest("tr")?.dataset.cartItemId;
     const focusedSelector = focusedControl?.matches("input") ? ".cart-quantity" : ".cart-remove";
     const locked = busy || checking || cart.testing;
+    const suppliers = Object.keys(supplierNames).filter((supplier) => cart.items.some((item) => item.result.supplier === supplier));
+    if (activeSupplier !== "all" && !suppliers.includes(activeSupplier)) activeSupplier = "all";
+    const items = activeSupplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === activeSupplier);
+    const count = items.reduce((sum, item) => sum + item.quantity, 0);
+    const total = items.reduce((sum, item) => sum + item.quantity * item.result.price, 0);
+    tabs.innerHTML = ["all", ...suppliers].map((supplier) => {
+      const name = supplier === "all" ? "Все" : supplierNames[supplier];
+      const tabCount = supplier === "all" ? cart.count : cart.items.filter((item) => item.result.supplier === supplier).reduce((sum, item) => sum + item.quantity, 0);
+      return `<button type="button" class="cart-tab" id="cart-tab-${supplier}" role="tab" data-cart-supplier="${supplier}"
+        aria-selected="${activeSupplier === supplier}" aria-controls="cart-tab-panel" tabindex="${activeSupplier === supplier ? "0" : "-1"}"
+        aria-label="${name}: ${tabCount} шт.">${name}<span class="cart-tab__count" aria-hidden="true">${tabCount}</span></button>`;
+    }).join("");
+    modal.querySelector("#cart-tab-panel").setAttribute("aria-labelledby", `cart-tab-${activeSupplier}`);
+    modal.querySelector("#cart-supplier-column").hidden = activeSupplier !== "all";
+    modal.querySelector(".cart-table").classList.toggle("is-supplier-view", activeSupplier !== "all");
     badge.textContent = String(cart.count);
     badge.hidden = cart.count === 0;
+    toggle.hidden = cart.count === 0;
     toggle.setAttribute("aria-label", `Открыть корзину: ${cart.count} шт.`);
-    modal.querySelector("#cart-summary").textContent = `Позиций: ${cart.items.length}, ${cart.count} шт.`;
-    modal.querySelector("#cart-total").textContent = formatPrice(cart.total);
+    modal.querySelector("#cart-summary").textContent = `Позиций: ${items.length}, ${count} шт.`;
+    modal.querySelector("#cart-total").textContent = formatPrice(total);
+    modal.querySelector("#cart-delivery-date").textContent = formatCartLatestDeliveryDate(items);
     if (testedRevision !== cart.revision) testResults.clear();
-    body.innerHTML = cart.items.length ? cart.items.map((item) => {
+    body.innerHTML = items.length ? items.map((item) => {
       const result = item.result;
       const checked = testResults.get(item.id);
       const checkClass = checked?.status === "accepted" ? "is-accepted" : "is-unconfirmed";
       return `<tr data-cart-item-id="${escapeHtml(item.id)}"><td><strong>${escapeHtml(formatBrand(result.brand))} ${escapeHtml(formatArticle(result.article))}</strong>
         <span class="cart-item-title">${escapeHtml(result.title)}</span>${checked ? `<span class="cart-item-check ${checkClass}">${escapeHtml(checked.message)}</span>` : ""}</td>
-        <td>${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>
+        ${activeSupplier === "all" ? `<td class="cart-item-supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
+        <td class="cart-item-delivery">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
         <td><input class="cart-quantity" type="number" min="1" max="${maximumQuantity(result)}" step="1" value="${item.quantity}" inputmode="numeric"
           aria-label="Количество для ${escapeHtml(result.article)}" ${locked ? "disabled" : ""}><span class="cart-item-stock">из ${maximumQuantity(result)}</span></td>
         <td>${escapeHtml(formatPrice(result.price))}</td><td>${escapeHtml(formatPrice(result.price * item.quantity))}</td>
         <td><button type="button" class="cart-remove btn btn-light" aria-label="Удалить ${escapeHtml(result.article)}" title="Удалить" ${locked ? "disabled" : ""}>×</button></td></tr>`;
-    }).join("") : '<tr><td colspan="6" class="cart-empty">Корзина пуста. Добавьте товары из таблицы предложений.</td></tr>';
+    }).join("") : `<tr><td colspan="${activeSupplier === "all" ? 7 : 6}" class="cart-empty">Корзина пуста. Добавьте товары из таблицы предложений.</td></tr>`;
     testButton.disabled = locked || !cart.items.length;
-    testButton.textContent = checking ? "Проверяем…" : "Проверить заказ";
+    testButton.textContent = checking ? "Проверяем…" : activeSupplier === "all" ? "Проверить заказ" : "Проверить всю корзину";
     if (modal.open && focusedId) {
       const replacement = body.querySelector(`[data-cart-item-id="${CSS.escape(focusedId)}"] ${focusedSelector}`);
       if (replacement && !replacement.disabled) replacement.focus();
       else modal.querySelector("#cart-close").focus();
     }
+    if (modal.open && focusedTab) (tabs.querySelector(`#cart-tab-${CSS.escape(focusedTab)}`) ?? tabs.querySelector('[aria-selected="true"]')).focus();
   };
   const refresh = async () => {
     cart = validateCart(await api("/api/cart"));
@@ -158,19 +198,42 @@ export const bootstrapCart = () => {
 
   toggle.addEventListener("click", async () => {
     returnFocus = document.activeElement;
+    activeSupplier = "all";
     if (!modal.open) modal.showModal();
+    render();
     status.textContent = "";
     try { await refresh(); } catch (error) { status.textContent = error.message; }
   });
   modal.querySelector("#cart-close").addEventListener("click", () => modal.close());
+  tabs.addEventListener("click", (event) => {
+    const tab = event.target.closest(".cart-tab");
+    if (!tab) return;
+    activeSupplier = tab.dataset.cartSupplier;
+    render();
+  });
+  tabs.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const buttons = [...tabs.querySelectorAll(".cart-tab")];
+    const current = buttons.findIndex((button) => button === event.target.closest(".cart-tab"));
+    if (current < 0) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+      : (current + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+    activeSupplier = buttons[next].dataset.cartSupplier;
+    render();
+    tabs.querySelector('[aria-selected="true"]').focus();
+  });
   modal.addEventListener("click", (event) => { if (event.target === modal) {
     const rect = modal.getBoundingClientRect();
     if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) modal.close();
   } });
-  modal.addEventListener("close", () => returnFocus?.focus());
+  modal.addEventListener("close", () => {
+    const target = returnFocus?.hidden ? document.querySelector("#submit-button") : returnFocus;
+    target?.focus();
+  });
   modal.addEventListener("keydown", (event) => {
     if (event.key !== "Tab") return;
-    const controls = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), [tabindex="0"]')]
+    const controls = [...modal.querySelectorAll('button:not(:disabled):not([tabindex="-1"]), input:not(:disabled), [tabindex="0"]')]
       .filter((node) => node.getClientRects().length > 0);
     const first = controls[0];
     const last = controls.at(-1);

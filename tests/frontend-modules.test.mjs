@@ -24,6 +24,21 @@ import { isForumAutoReturnableVisible } from "../src/frontend/forum-auto-return-
 import { isArmtekReturnableVisible } from "../src/frontend/armtek-return-settings.js";
 import { applySavedColumnWidths } from "../src/frontend/table-column-widths.js";
 import { formatDeliveryDate } from "../src/frontend/supplier-search-summary.js";
+import { formatCartLatestDeliveryDate } from "../src/frontend/cart-ui.js";
+
+test("cart completion date uses the latest upper bound and retains missing or approximate dates", () => {
+  const item = (from, to = null, approximate = false) => ({ result: { deliveryDate: from, deliveryDateTo: to, deliveryDateApproximate: approximate } });
+  const early = item("2028-03-10T12:00:00Z", "2028-03-15T12:00:00Z");
+  const laterStart = item("2028-03-12T12:00:00Z", "2028-03-14T12:00:00Z");
+  assert.equal(formatCartLatestDeliveryDate([early, laterStart]), formatDeliveryDate(early.result.deliveryDateTo));
+  assert.equal(formatCartLatestDeliveryDate([laterStart, early]), formatDeliveryDate(early.result.deliveryDateTo));
+  assert.equal(formatCartLatestDeliveryDate([item("2028-03-10T12:00:00Z", null, true), laterStart]), formatDeliveryDate(laterStart.result.deliveryDateTo, true));
+  assert.equal(formatCartLatestDeliveryDate([item("2028-03-10T12:00:00Z")]), formatDeliveryDate("2028-03-10T12:00:00Z"));
+  for (const missing of [item(null), item("invalid"), item("2028-03-10T12:00:00Z", "invalid"), item("2028-03-10T12:00:00Z", "2028-03-09T12:00:00Z")]) {
+    assert.equal(formatCartLatestDeliveryDate([early, missing]), "Не указана");
+  }
+  assert.equal(formatCartLatestDeliveryDate([]), "Не указана");
+});
 
 test("result formatting escapes untrusted text and limits result links", () => {
   assert.equal(escapeHtml('<script data-value="x">'), "&lt;script data-value=&quot;x&quot;&gt;");
