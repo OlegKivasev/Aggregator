@@ -18,6 +18,11 @@ function validateQuantity(value: unknown, maximum: number): number {
   return value;
 }
 
+function normalizeCartSupplier(value: unknown): "all" | "armtek" | "part-kom" {
+  if (value !== "all" && value !== "armtek" && value !== "part-kom") throw new CartError("Выберите вкладку корзины.");
+  return value;
+}
+
 function validLine(line: PurchaseLine): boolean {
   return Boolean(line && typeof line.id === "string" && /^[0-9a-f-]{36}$/.test(line.id)
     && line.result && typeof line.result.article === "string" && typeof line.result.brand === "string"
@@ -94,18 +99,31 @@ export class CartApplicationService {
     return this.view();
   }
 
-  async test(revision: unknown, signal: AbortSignal) {
+  clear(supplier: unknown, revision: unknown) {
+    if (this.testing) throw new CartError("Дождитесь завершения проверки заказа.", 409);
+    const scope = normalizeCartSupplier(supplier);
+    const cart = this.load();
+    if (revision !== cart.revision) throw new CartError("Корзина изменилась. Обновите её и повторите действие.", 409);
+    const lines = scope === "all" ? [] : cart.lines.filter((line) => line.reference.supplier !== scope);
+    if (lines.length === cart.lines.length) return this.view();
+    if (!this.repository.save({ lines, revision: cart.revision + 1 }, cart.revision)) throw new CartError("Корзина изменилась. Повторите действие.", 409);
+    return this.view();
+  }
+
+  async test(revision: unknown, signal: AbortSignal, supplier: unknown = "all") {
     if (this.testing) throw new CartError("Заказ уже проверяется.", 409);
+    const scope = normalizeCartSupplier(supplier);
     const cart = this.load();
     if (revision !== cart.revision) throw new CartError("Корзина изменилась. Обновите её перед проверкой.", 409);
-    if (!cart.lines.length) throw new CartError("Добавьте товары в корзину.");
+    const lines = scope === "all" ? cart.lines : cart.lines.filter((line) => line.reference.supplier === scope);
+    if (!lines.length) throw new CartError("Добавьте товары в выбранную вкладку корзины.");
     this.testing = true;
     try {
       const combinedSignal = AbortSignal.any([signal, this.controller.signal]);
       combinedSignal.throwIfAborted();
-      const results = await this.testOrder(structuredClone(cart.lines), combinedSignal);
+      const results = await this.testOrder(structuredClone(lines), combinedSignal);
       combinedSignal.throwIfAborted();
-      return { testOnly: true, revision: cart.revision, results };
+      return { testOnly: true, revision: cart.revision, supplier: scope, results };
     } finally { this.testing = false; }
   }
 

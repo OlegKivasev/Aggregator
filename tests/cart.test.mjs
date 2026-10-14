@@ -97,12 +97,61 @@ test("cart freezes mutations during testing, forwards cancellation and does not 
     const checking = cart.test(1, controller.signal);
     await gate;
     assert.throws(() => cart.mutate("remove", { id: cart.view().items[0].id, revision: 1 }), /Дождитесь/);
+    assert.throws(() => cart.clear("all", 1), /Дождитесь/);
     await assert.rejects(cart.test(1, controller.signal), /уже проверяется/);
     controller.abort(new Error("Cancelled fixture"));
     await assert.rejects(checking, /Cancelled fixture/);
     assert.equal(cart.view().count, 1);
     assert.equal(cart.view().testing, false);
   }, async (_lines, signal) => { started(); return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })); });
+});
+
+test("cart atomically clears only the requested supplier and rejects invalid or stale scopes", async () => {
+  await withCart((cart, reopen) => {
+    for (const supplier of ["armtek", "part-kom"]) {
+      const id = randomUUID();
+      cart.registerOffer(id, result(supplier));
+      cart.mutate("add", { offerId: id, quantity: 2, revision: cart.view().revision });
+    }
+    for (const scope of [undefined, null, "stparts", [], {}]) assert.throws(() => cart.clear(scope, 2), /Выберите вкладку/);
+    assert.throws(() => cart.clear("all", 1), /Корзина изменилась/);
+    assert.equal(cart.view().count, 4);
+    const cleared = cart.clear("part-kom", 2);
+    assert.equal(cleared.revision, 3);
+    assert.equal(cleared.count, 2);
+    assert.ok(cleared.items.every((item) => item.result.supplier === "armtek"));
+    assert.equal(cart.clear("part-kom", 3).revision, 3);
+    const restored = reopen();
+    assert.equal(restored.view().count, 2);
+    assert.equal(restored.clear("all", 3).count, 0);
+    assert.equal(restored.view().revision, 4);
+  });
+});
+
+test("cart tests only the selected supplier while keeping all-mode and real-order protection", async () => {
+  const calls = [];
+  await withCart(async (cart) => {
+    for (const supplier of ["armtek", "part-kom"]) {
+      const id = randomUUID();
+      cart.registerOffer(id, result(supplier));
+      cart.mutate("add", { offerId: id, quantity: 1, revision: cart.view().revision });
+    }
+    const controller = new AbortController();
+    const selected = await cart.test(2, controller.signal, "armtek");
+    assert.equal(selected.testOnly, true);
+    assert.equal(selected.supplier, "armtek");
+    assert.equal(selected.results.length, 1);
+    assert.deepEqual(calls[0], ["armtek"]);
+    assert.equal((await cart.test(2, controller.signal)).supplier, "all");
+    assert.deepEqual(calls[1], ["armtek", "part-kom"]);
+    await assert.rejects(cart.test(2, controller.signal, "stparts"), /Выберите вкладку/);
+    cart.clear("part-kom", 2);
+    await assert.rejects(cart.test(3, controller.signal, "part-kom"), /выбранную вкладку/);
+    assert.equal(cart.view().count, 1);
+  }, async (lines) => {
+    calls.push(lines.map((line) => line.reference.supplier));
+    return lines.map((line) => ({ id: line.id, status: "accepted", acceptedQuantity: line.quantity, message: "fixture" }));
+  });
 });
 
 test("PartKOM normalization retains actual ordering identifiers without altering search JSON", () => {

@@ -9,7 +9,7 @@ import { attachPurchaseReference } from "../../src/backend/purchasing/purchase-o
 import { formatDeliveryDate } from "../../src/frontend/supplier-search-summary.js";
 
 // The browser uses a real local cart server; supplier searches and checks are fictional fixtures.
-const offer = (supplier, quantity, reference, delivery = {}) => attachPurchaseReference({ supplier, brand: "TEST", article: "A1", title: "Тестовый фильтр <img src=x onerror=window.cartXss=1>",
+const offer = (supplier, quantity, reference, delivery = {}, title = "Тестовый фильтр <img src=x onerror=window.cartXss=1>") => attachPurchaseReference({ supplier, brand: "TEST", article: "A1", title,
   quantity, price: supplier === "armtek" ? 100 : 120, warehouse: "Тестовый склад", deliveryDate: null, deliveryDateApproximate: false,
   link: supplier === "armtek" ? "https://etp.armtek.ru/" : "https://www.part-kom.ru/", ...delivery }, reference);
 
@@ -33,8 +33,8 @@ async function withCartPage(check, options = {}) {
       listApplicabilitySavedArticles: () => ({ articles: [], brandCounts: [], hasMore: false }),
       streamSearch: async (query, emit) => {
         emit({ type: "search_started", article: query.article, suppliers: ["armtek", "part-kom"] });
-        emit({ type: "result", result: offer("armtek", options.stock ?? 4, { supplier: "armtek", keyzak: "TEST01" }, options.deliveries?.armtek) });
-        emit({ type: "result", result: offer("part-kom", 3, { supplier: "part-kom", makerId: "101", providerId: "202" }, options.deliveries?.partkom) });
+        emit({ type: "result", result: offer("armtek", options.stock ?? 4, { supplier: "armtek", keyzak: "TEST01" }, options.deliveries?.armtek, options.title) });
+        emit({ type: "result", result: offer("part-kom", 3, { supplier: "part-kom", makerId: "101", providerId: "202" }, options.deliveries?.partkom, options.title) });
         emit({ type: "supplier_status", supplier: "armtek", status: "completed" });
         emit({ type: "supplier_status", supplier: "part-kom", status: "completed" });
         emit({ type: "search_completed", article: query.article });
@@ -218,7 +218,7 @@ test("cart supplier tabs filter rows, hide suppliers and recalculate purchase to
     assert.equal(await page.locator("#cart-delivery-date").textContent(), formatDeliveryDate(deliveries.armtek.deliveryDateTo));
     assert.match(await page.locator("#cart-items .cart-item-delivery").textContent(), /10\.03\.2028 - 12\.03\.2028/);
     assert.equal(await page.locator("#cart-badge").textContent(), "3");
-    assert.equal(await page.locator("#cart-test-order").textContent(), "Проверить всю корзину");
+    assert.equal(await page.locator("#cart-test-order").textContent(), "Оформить заказ");
     await page.keyboard.press("End");
     assert.equal(await page.locator("#cart-tab-part-kom").getAttribute("aria-selected"), "true");
     assert.equal(await page.locator("#cart-tab-part-kom").evaluate((node) => node === document.activeElement), true);
@@ -249,4 +249,108 @@ test("cart supplier tabs filter rows, hide suppliers and recalculate purchase to
     await page.locator("#cart-toggle").click();
     await page.waitForFunction(() => document.querySelector("#cart-tab-all").getAttribute("aria-selected") === "true");
   }, { deliveries, reducedMotion: "reduce" });
+});
+
+test("cart reference fields, aligned totals and tab-specific clear confirmations work without notes or links", async () => {
+  await withCartPage(async (page, { orderCalls }) => {
+    await page.locator("#results-body tr").first().locator(".cart-quantity").fill("2");
+    await page.locator("#results-body .cart-offer-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
+    await page.locator("#results-body .cart-offer-button").nth(1).click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "3");
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 2);
+    assert.equal(await page.locator("#cart-modal header #cart-summary").count(), 0);
+    assert.equal(await page.locator(".cart-test-note").count(), 0);
+    assert.equal(await page.locator("#cart-items a").count(), 0);
+    assert.deepEqual(await page.locator("#cart-modal .cart-table th").allTextContents(), ["Запчасть", "Наименование", "Поставщик", "Доставка", "Цена, ₽", "Кол-во", "Стоимость, ₽", "Удалить"]);
+    assert.equal(await page.locator("#cart-items .cart-item-name").first().textContent(), "Сайлентблок балки моста");
+    assert.equal(await page.locator("#cart-items .cart-item-part > span").count(), 4);
+    assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 3 шт.");
+    const tableBox = await page.locator(".cart-table-scroll").boundingBox();
+    const summaryBox = await page.locator("#cart-summary").boundingBox();
+    assert.ok(summaryBox.y >= tableBox.y + tableBox.height);
+    const totals = await page.locator(".cart-footer__summary").evaluate((node) => {
+      const amount = node.querySelector("#cart-total");
+      const date = node.querySelector("#cart-delivery-date");
+      const style = (value) => {
+        const css = getComputedStyle(value);
+        return [css.fontSize, css.fontWeight, css.fontFamily, css.lineHeight];
+      };
+      return { amount: style(amount), date: style(date), amountTop: amount.getBoundingClientRect().top, dateTop: date.getBoundingClientRect().top };
+    });
+    assert.deepEqual(totals.amount, totals.date);
+    assert.equal(totals.amountTop, totals.dateTop);
+    assert.equal(await page.locator(".cart-footer__summary > span").nth(1).textContent(), "Дата поставки с учётом всех товаров");
+    assert.equal(await page.locator("#cart-test-order").textContent(), "Оформить заказы");
+    assert.equal(await page.locator("#cart-test-order").getAttribute("title"), "Тестовый режим");
+    const clearBox = await page.locator("#cart-clear").boundingBox();
+    const closeBox = await page.locator("#cart-close").boundingBox();
+    assert.ok(clearBox.x + clearBox.width < closeBox.x);
+    assert.equal(await page.locator("#cart-clear img").evaluate((node) => node.complete && node.naturalWidth > 0), true);
+    if (process.env.CART_REFERENCE_SCREENSHOT_PATH) await page.screenshot({ path: process.env.CART_REFERENCE_SCREENSHOT_PATH });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileAmount = await page.locator("#cart-total").boundingBox();
+    const mobileDate = await page.locator("#cart-delivery-date").boundingBox();
+    assert.equal(mobileAmount.y, mobileDate.y);
+    assert.equal(await page.locator("#cart-total").evaluate((node) => getComputedStyle(node).fontSize),
+      await page.locator("#cart-delivery-date").evaluate((node) => getComputedStyle(node).fontSize));
+    await page.locator("#cart-clear").click();
+    assert.equal(await page.locator("#cart-clear-title").textContent(), "Очистить вкладку «Все»?");
+    const confirmationBox = await page.locator("#cart-clear-confirm").boundingBox();
+    assert.ok(confirmationBox.x >= 0 && confirmationBox.x + confirmationBox.width <= 390);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#cart-clear-confirm").open);
+    assert.equal(await page.locator("#cart-badge").textContent(), "3");
+    await page.locator("#cart-tab-armtek").click();
+    assert.equal(await page.locator("#cart-test-order").textContent(), "Оформить заказ");
+    await page.locator("#cart-test-order").click();
+    await page.waitForFunction(() => document.querySelectorAll(".cart-item-check").length === 1);
+    assert.equal(orderCalls.length, 1);
+    assert.deepEqual(orderCalls[0].map((line) => line.reference.supplier), ["armtek"]);
+    await page.locator("#cart-tab-part-kom").click();
+    assert.equal(await page.locator(".cart-item-check").count(), 0);
+    await page.locator("#cart-clear").click();
+    assert.equal(await page.locator("#cart-clear-title").textContent(), "Очистить вкладку «PartKOM»?");
+    await page.locator("#cart-clear-cancel").click();
+    assert.equal(await page.locator("#cart-badge").textContent(), "3");
+    await page.locator("#cart-clear").click();
+    await page.locator("#cart-clear-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
+    assert.equal(await page.locator("#cart-tab-part-kom").count(), 0);
+    assert.equal(await page.locator("#cart-items .cart-item-supplier").textContent(), "ArmtekТестовый склад");
+    assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 2 шт.");
+    await page.locator("#cart-clear").click();
+    assert.equal(await page.locator("#cart-clear-title").textContent(), "Очистить вкладку «Все»?");
+    await page.locator("#cart-clear-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-toggle").hidden);
+    assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 0 шт.");
+    assert.equal(await page.locator("#cart-clear").isDisabled(), true);
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    assert.equal(await page.locator("#cart-toggle").isVisible(), false);
+  }, { title: "Сайлентблок балки моста", reducedMotion: "reduce", deliveries: {
+    armtek: { deliveryDate: "2028-03-10T12:00:00Z", deliveryDateTo: "2028-03-12T12:00:00Z" },
+    partkom: { deliveryDate: "2028-03-11T12:00:00Z", deliveryDateTo: "2028-03-14T12:00:00Z" },
+  } });
+});
+
+test("cart clear confirmation rejects a cart changed after the user reviewed it", async () => {
+  await withCartPage(async (page) => {
+    await page.locator("#results-body .cart-offer-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 1);
+    await page.locator("#cart-clear").click();
+    await page.evaluate(async () => {
+      const cart = await (await fetch("/api/cart")).json();
+      const response = await fetch(`/api/cart/items/${cart.items[0].id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: cart.revision, quantity: 2 }) });
+      if (!response.ok) throw new Error("Fixture update failed");
+    });
+    await page.locator("#cart-clear-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
+    assert.match(await page.locator("#cart-status").textContent(), /Корзина изменилась/);
+    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 1);
+  }, { reducedMotion: "reduce" });
 });

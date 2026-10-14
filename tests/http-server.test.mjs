@@ -55,11 +55,17 @@ test("cart HTTP validates server offers and quantities, hides routing and cannot
     const malformed = await fetch(`${baseUrl}/api/cart/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{" });
     assert.equal(malformed.status, 400);
     assert.equal((await send("/api/cart/test-order", { revision: 0 })).status, 409);
-    const tested = await (await send("/api/cart/test-order", { revision: added.revision, flagTest: 0, testOnly: false })).json();
+    const tested = await (await send("/api/cart/test-order", { revision: added.revision, supplier: "part-kom", flagTest: 0, testOnly: false })).json();
     assert.equal(tested.testOnly, true);
+    assert.equal(tested.supplier, "part-kom");
     assert.equal(called, 1);
+    assert.equal((await send("/api/cart/test-order", { revision: added.revision, supplier: "stparts" })).status, 400);
+    assert.equal((await send("/api/cart/items", { revision: added.revision }, "DELETE")).status, 400);
+    assert.equal((await send("/api/cart/items", { revision: 0, supplier: "all" }, "DELETE")).status, 409);
     assert.equal((await send("/api/cart/order", { revision: added.revision })).status, 405);
-    assert.equal((await send(`/api/cart/items/${added.items[0].id}`, { revision: added.revision }, "DELETE")).status, 200);
+    const unaffected = await (await send("/api/cart/items", { revision: added.revision, supplier: "armtek" }, "DELETE")).json();
+    assert.equal(unaffected.count, 2);
+    assert.equal((await send("/api/cart/items", { revision: added.revision, supplier: "part-kom" }, "DELETE")).status, 200);
     assert.equal((await (await fetch(`${baseUrl}/api/cart`)).json()).count, 0);
   } finally {
     if (server?.listening) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); openServers.delete(server); }

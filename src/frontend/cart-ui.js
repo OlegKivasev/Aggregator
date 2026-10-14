@@ -4,6 +4,7 @@ import { formatDeliveryDate } from "./supplier-search-summary.js";
 const supplierNames = { armtek: "Armtek", "part-kom": "PartKOM" };
 const maximumQuantity = (result) => Number.isFinite(result.quantity) ? Math.min(1_000_000, Math.floor(result.quantity)) : 0;
 const cartIcon = '<img src="/shopping-cart.png" alt="" aria-hidden="true">';
+const cartPriceFormat = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export const formatCartLatestDeliveryDate = (items) => {
   if (!items.length) return "Не указана";
@@ -66,18 +67,28 @@ export const bootstrapCart = () => {
   modal.id = "cart-modal";
   modal.className = "cart-modal";
   modal.setAttribute("aria-labelledby", "cart-title");
-  modal.innerHTML = `<header class="analogs-modal__header"><div><h2 id="cart-title">Корзина</h2><p id="cart-summary"></p></div>
-    <button type="button" class="btn btn-light analogs-modal__close" id="cart-close" aria-label="Закрыть корзину">×</button></header>
+  modal.innerHTML = `<header class="analogs-modal__header"><h2 id="cart-title">Корзина</h2>
+    <div class="cart-header-actions"><button type="button" class="btn btn-light cart-clear-button" id="cart-clear" aria-label="Очистить вкладку «Все»" title="Очистить вкладку «Все»"><img src="/recycle-bin.png" alt="" aria-hidden="true"></button>
+      <button type="button" class="btn btn-light analogs-modal__close" id="cart-close" aria-label="Закрыть корзину">×</button></div></header>
     <div class="cart-tabs" id="cart-tabs" role="tablist" aria-label="Поставщики в корзине"></div>
-    <div class="cart-content" id="cart-tab-panel" role="tabpanel" aria-labelledby="cart-tab-all"><p class="cart-test-note">Тестовая проверка PartKOM и Armtek. Товары не заказываются и не оплачиваются.</p>
+    <div class="cart-content" id="cart-tab-panel" role="tabpanel" aria-labelledby="cart-tab-all">
       <div class="cart-table-scroll"><table class="table align-middle cart-table"><thead><tr>
-        <th>Товар</th><th id="cart-supplier-column">Поставщик / склад</th><th>Дата поставки</th><th>Количество</th><th>Цена закупки</th><th>Сумма</th><th><span class="visually-hidden">Удалить</span></th>
+        <th>Запчасть</th><th>Наименование</th><th id="cart-supplier-column">Поставщик</th><th>Доставка</th><th class="cart-price-column">Цена, ₽</th><th class="cart-quantity-column">Кол-во</th><th class="cart-price-column">Стоимость, ₽</th><th><span class="visually-hidden">Удалить</span></th>
       </tr></thead><tbody id="cart-items"></tbody></table></div>
+      <p id="cart-summary"></p>
       <p class="cart-status" id="cart-status" role="status" aria-live="polite"></p></div>
-    <footer class="cart-footer"><div class="cart-footer__summary"><div><span>Итого по закупке</span><strong id="cart-total"></strong></div>
-      <div class="cart-footer__delivery"><span>Все товары к</span><strong id="cart-delivery-date"></strong></div></div>
-      <button type="button" class="btn btn-primary" id="cart-test-order">Проверить заказ</button></footer>`;
+    <footer class="cart-footer"><div class="cart-footer__summary"><span>Итого по закупке</span><span>Дата поставки с учётом всех товаров</span>
+      <strong id="cart-total"></strong><strong id="cart-delivery-date"></strong></div>
+      <button type="button" class="btn btn-primary" id="cart-test-order" title="Тестовый режим">Оформить заказы</button></footer>`;
   document.body.append(modal);
+  const clearDialog = document.createElement("dialog");
+  clearDialog.id = "cart-clear-confirm";
+  clearDialog.className = "cart-modal cart-clear-confirm";
+  clearDialog.setAttribute("aria-labelledby", "cart-clear-title");
+  clearDialog.innerHTML = `<h3 id="cart-clear-title"></h3><div class="cart-confirm-actions">
+    <button type="button" class="btn btn-light" id="cart-clear-cancel" autofocus>Отмена</button>
+    <button type="button" class="btn btn-primary" id="cart-clear-accept">Очистить</button></div>`;
+  document.body.append(clearDialog);
   const toast = document.createElement("div");
   toast.className = "cart-toast";
   toast.hidden = true;
@@ -88,6 +99,10 @@ export const bootstrapCart = () => {
   const tabs = modal.querySelector("#cart-tabs");
   const status = modal.querySelector("#cart-status");
   const testButton = modal.querySelector("#cart-test-order");
+  const clearButton = modal.querySelector("#cart-clear");
+  const clearCancel = clearDialog.querySelector("#cart-clear-cancel");
+  const clearAccept = clearDialog.querySelector("#cart-clear-accept");
+  let clearTarget = null;
   let cart = null;
   let busy = false;
   let checking = false;
@@ -130,7 +145,7 @@ export const bootstrapCart = () => {
     badge.hidden = cart.count === 0;
     toggle.hidden = cart.count === 0;
     toggle.setAttribute("aria-label", `Открыть корзину: ${cart.count} шт.`);
-    modal.querySelector("#cart-summary").textContent = `Позиций: ${items.length}, ${count} шт.`;
+    modal.querySelector("#cart-summary").textContent = `Количество: ${count} шт.`;
     modal.querySelector("#cart-total").textContent = formatPrice(total);
     modal.querySelector("#cart-delivery-date").textContent = formatCartLatestDeliveryDate(items);
     if (testedRevision !== cart.revision) testResults.clear();
@@ -138,17 +153,22 @@ export const bootstrapCart = () => {
       const result = item.result;
       const checked = testResults.get(item.id);
       const checkClass = checked?.status === "accepted" ? "is-accepted" : "is-unconfirmed";
-      return `<tr data-cart-item-id="${escapeHtml(item.id)}"><td><strong>${escapeHtml(formatBrand(result.brand))} ${escapeHtml(formatArticle(result.article))}</strong>
-        <span class="cart-item-title">${escapeHtml(result.title)}</span>${checked ? `<span class="cart-item-check ${checkClass}">${escapeHtml(checked.message)}</span>` : ""}</td>
+      return `<tr data-cart-item-id="${escapeHtml(item.id)}"><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
+        <td class="cart-item-name">${escapeHtml(result.title)}${checked ? `<span class="cart-item-check ${checkClass}">${escapeHtml(checked.message)}</span>` : ""}</td>
         ${activeSupplier === "all" ? `<td class="cart-item-supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
         <td class="cart-item-delivery">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
-        <td><input class="cart-quantity" type="number" min="1" max="${maximumQuantity(result)}" step="1" value="${item.quantity}" inputmode="numeric"
+        <td class="cart-item-price">${escapeHtml(cartPriceFormat.format(result.price))}</td>
+        <td class="cart-item-quantity"><input class="cart-quantity" type="number" min="1" max="${maximumQuantity(result)}" step="1" value="${item.quantity}" inputmode="numeric"
           aria-label="Количество для ${escapeHtml(result.article)}" ${locked ? "disabled" : ""}><span class="cart-item-stock">из ${maximumQuantity(result)}</span></td>
-        <td>${escapeHtml(formatPrice(result.price))}</td><td>${escapeHtml(formatPrice(result.price * item.quantity))}</td>
+        <td class="cart-item-sum">${escapeHtml(cartPriceFormat.format(result.price * item.quantity))}</td>
         <td><button type="button" class="cart-remove btn btn-light" aria-label="Удалить ${escapeHtml(result.article)}" title="Удалить" ${locked ? "disabled" : ""}>×</button></td></tr>`;
-    }).join("") : `<tr><td colspan="${activeSupplier === "all" ? 7 : 6}" class="cart-empty">Корзина пуста. Добавьте товары из таблицы предложений.</td></tr>`;
+    }).join("") : `<tr><td colspan="${activeSupplier === "all" ? 8 : 7}" class="cart-empty">Корзина пуста. Добавьте товары из таблицы предложений.</td></tr>`;
     testButton.disabled = locked || !cart.items.length;
-    testButton.textContent = checking ? "Проверяем…" : activeSupplier === "all" ? "Проверить заказ" : "Проверить всю корзину";
+    testButton.textContent = checking ? "Проверяем…" : activeSupplier === "all" ? "Оформить заказы" : "Оформить заказ";
+    clearButton.disabled = locked || !items.length;
+    const clearLabel = `Очистить вкладку «${activeSupplier === "all" ? "Все" : supplierNames[activeSupplier]}»`;
+    clearButton.title = clearLabel;
+    clearButton.setAttribute("aria-label", clearLabel);
     if (modal.open && focusedId) {
       const replacement = body.querySelector(`[data-cart-item-id="${CSS.escape(focusedId)}"] ${focusedSelector}`);
       if (replacement && !replacement.disabled) replacement.focus();
@@ -205,6 +225,27 @@ export const bootstrapCart = () => {
     try { await refresh(); } catch (error) { status.textContent = error.message; }
   });
   modal.querySelector("#cart-close").addEventListener("click", () => modal.close());
+  clearButton.addEventListener("click", () => {
+    if (busy || checking || cart?.testing || !cart?.items.length) return;
+    clearTarget = { supplier: activeSupplier, revision: cart.revision };
+    clearDialog.querySelector("#cart-clear-title").textContent = `Очистить вкладку «${activeSupplier === "all" ? "Все" : supplierNames[activeSupplier]}»?`;
+    clearDialog.showModal();
+  });
+  clearCancel.addEventListener("click", () => clearDialog.close());
+  clearAccept.addEventListener("click", () => {
+    const target = clearTarget;
+    clearDialog.close();
+    if (target) void mutate("/api/cart/items", "DELETE", target, clearButton);
+  });
+  clearDialog.addEventListener("close", () => {
+    clearTarget = null;
+    if (modal.open) (clearButton.disabled ? modal.querySelector("#cart-close") : clearButton).focus();
+  });
+  clearDialog.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") return;
+    if (event.shiftKey && document.activeElement === clearCancel) { event.preventDefault(); clearAccept.focus(); }
+    else if (!event.shiftKey && document.activeElement === clearAccept) { event.preventDefault(); clearCancel.focus(); }
+  });
   tabs.addEventListener("click", (event) => {
     const tab = event.target.closest(".cart-tab");
     if (!tab) return;
@@ -264,19 +305,23 @@ export const bootstrapCart = () => {
   });
   testButton.addEventListener("click", async () => {
     if (busy || checking || !cart?.items.length) return;
+    const supplier = activeSupplier;
+    const revision = cart.revision;
+    const items = supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier);
     checking = true;
     status.textContent = "Проверяем товары у поставщиков…";
     render();
     try {
-      const result = await api("/api/cart/test-order", { method: "POST", body: JSON.stringify({ revision: cart.revision }) });
-      if (result.testOnly !== true || !Array.isArray(result.results) || result.revision !== cart.revision
-        || result.results.length !== cart.items.length || new Set(result.results.map((item) => item?.id)).size !== cart.items.length
-        || result.results.some((item) => !item || typeof item.message !== "string" || !cart.items.some((line) => line.id === item.id)
+      const result = await api("/api/cart/test-order", { method: "POST", body: JSON.stringify({ revision, supplier }) });
+      if (result.testOnly !== true || result.supplier !== supplier || !Array.isArray(result.results) || result.revision !== revision || cart.revision !== revision
+        || result.results.length !== items.length || new Set(result.results.map((item) => item?.id)).size !== items.length
+        || result.results.some((item) => !item || typeof item.message !== "string" || !items.some((line) => line.id === item.id)
           || !["accepted", "rejected", "unconfirmed"].includes(item.status)
-          || item.status === "accepted" && item.acceptedQuantity !== cart.items.find((line) => line.id === item.id).quantity)) throw new Error("Тестовая проверка не подтверждена.");
-      testResults = new Map(result.results.map((item) => [item.id, item]));
+          || item.status === "accepted" && item.acceptedQuantity !== items.find((line) => line.id === item.id).quantity)) throw new Error("Тестовая проверка не подтверждена.");
+      if (testedRevision !== revision) testResults.clear();
+      result.results.forEach((item) => testResults.set(item.id, item));
       testedRevision = result.revision;
-      status.textContent = result.results.length === cart.items.length && result.results.every((item) => item.status === "accepted")
+      status.textContent = result.results.every((item) => item.status === "accepted")
         ? "Тестовая проверка пройдена. Реальный заказ не создан." : "Проверка завершена. Посмотрите результат под каждой позицией.";
     } catch (error) { status.textContent = error.message; }
     finally {

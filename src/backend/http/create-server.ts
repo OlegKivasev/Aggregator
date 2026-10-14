@@ -236,15 +236,17 @@ export function createAggregatorServer({
       try {
         if (url.pathname === "/api/cart" && request.method === "GET") {
           serveJson(response, 200, cart.view());
-        } else if (url.pathname === "/api/cart/items" && request.method === "POST"
+        } else if (url.pathname === "/api/cart/items" && (request.method === "POST" || request.method === "DELETE")
           || cartItemMatch && (request.method === "PATCH" || request.method === "DELETE")
           || url.pathname === "/api/cart/test-order" && request.method === "POST") {
           const payload = await readJsonBody(request);
           if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new CartError("Неверные параметры корзины.");
           const fields = payload as Record<string, unknown>;
           if (url.pathname === "/api/cart/test-order") {
-            const result = await cart.test(fields.revision, controller.signal);
+            const result = await cart.test(fields.revision, controller.signal, fields.supplier);
             if (!controller.signal.aborted) serveJson(response, 200, result);
+          } else if (url.pathname === "/api/cart/items" && request.method === "DELETE") {
+            serveJson(response, 200, cart.clear(fields.supplier, fields.revision));
           } else {
             const action = cartItemMatch ? request.method === "DELETE" ? "remove" : "update" : "add";
             serveJson(response, action === "add" ? 201 : 200, cart.mutate(action, { ...fields, ...(cartItemMatch ? { id: cartItemMatch[1] } : {}) }));
