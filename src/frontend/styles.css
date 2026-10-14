@@ -161,6 +161,8 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-table .cart-price-column, .cart-item-price, .cart-item-sum { text-align: right; }
 .cart-table .cart-quantity-column, .cart-item-quantity { text-align: center; }
 .cart-item-sum { font-weight: 700; }
+.cart-modal .cart-price { font-weight: 700; }
+.cart-modal .cart-purchase-price { font-size: 11px; }
 .cart-table tr:last-child td { border-bottom: 0; }
 .cart-item-warehouse, .cart-item-stock, .cart-item-check { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .cart-item-check.is-simulated { color: #168956; }

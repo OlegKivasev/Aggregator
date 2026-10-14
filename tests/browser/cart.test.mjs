@@ -285,6 +285,7 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     assert.equal(await firstRow.locator(".cart-item-price .cart-purchase-price").textContent(), "100,00");
     assert.equal(await firstRow.locator(".cart-item-sum .cart-price").textContent(), "270,00");
     assert.equal(await firstRow.locator(".cart-item-sum .cart-purchase-price").textContent(), "200,00");
+    assert.deepEqual(await firstRow.locator(".cart-price").evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).fontWeight)), ["700", "700"]);
     const priceStyle = await firstRow.locator(".cart-item-price").evaluate((cell) => {
       const retail = cell.querySelector(".cart-price");
       const purchase = cell.querySelector(".cart-purchase-price");
@@ -297,7 +298,7 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
       color: getComputedStyle(node).color, size: parseFloat(getComputedStyle(node).fontSize), weight: getComputedStyle(node).fontWeight,
     }));
     assert.equal(priceStyle.purchaseColor, mainPurchaseStyle.color);
-    assert.equal(priceStyle.purchaseSize, mainPurchaseStyle.size);
+    assert.equal(priceStyle.purchaseSize, mainPurchaseStyle.size - 1);
     assert.equal(priceStyle.purchaseWeight, mainPurchaseStyle.weight);
     assert.ok(priceStyle.purchaseTop >= priceStyle.retailBottom);
     assert.equal(await page.locator("#cart-items .cart-item-part > span").count(), 4);
@@ -344,9 +345,10 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     assert.equal(await page.locator(".cart-order-table .cart-item-price .cart-purchase-price").textContent(), "100,00");
     assert.equal(await page.locator(".cart-order-table .cart-item-sum .cart-price").textContent(), "270,00");
     assert.equal(await page.locator(".cart-order-table .cart-item-sum .cart-purchase-price").textContent(), "200,00");
+    assert.deepEqual(await page.locator(".cart-order-table .cart-price").evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).fontWeight)), ["700", "700"]);
     assert.deepEqual(await page.locator(".cart-order-table .cart-purchase-price").first().evaluate((node) => ({
       color: getComputedStyle(node).color, size: parseFloat(getComputedStyle(node).fontSize), weight: getComputedStyle(node).fontWeight,
-    })), mainPurchaseStyle);
+    })), { ...mainPurchaseStyle, size: mainPurchaseStyle.size - 1 });
     assert.match(await page.locator("#cart-order-total").textContent(), /200/);
     await page.locator("#cart-order-accept").click();
     await page.waitForFunction(() => document.querySelectorAll(".cart-item-check").length === 1);
