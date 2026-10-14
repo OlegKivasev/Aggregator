@@ -7,11 +7,14 @@ import { chromium } from "playwright";
 import { createAggregatorServer } from "../../src/backend/http/create-server.ts";
 import { attachPurchaseReference } from "../../src/backend/purchasing/purchase-offer.ts";
 import { formatDeliveryDate } from "../../src/frontend/supplier-search-summary.js";
+import { testPurchaseOrder } from "../../src/backend/application/test-order-application-service.ts";
 
 // The browser uses a real local cart server; supplier searches and checks are fictional fixtures.
+const supplierOrigins = { armtek: "https://etp.armtek.ru/", "part-kom": "https://www.part-kom.ru/",
+  "forum-auto": "https://itrade.forum-auto.ru/", rossko: "https://samara.rossko.ru/" };
 const offer = (supplier, quantity, reference, delivery = {}, title = "Тестовый фильтр <img src=x onerror=window.cartXss=1>") => attachPurchaseReference({ supplier, brand: "TEST", article: "A1", title,
   quantity, price: supplier === "armtek" ? 100 : 120, warehouse: "Тестовый склад", deliveryDate: null, deliveryDateApproximate: false,
-  link: supplier === "armtek" ? "https://etp.armtek.ru/" : "https://www.part-kom.ru/", ...delivery }, reference);
+  link: supplierOrigins[supplier], ...delivery }, reference);
 
 async function withCartPage(check, options = {}) {
   const directory = await mkdtemp(join(tmpdir(), "aggregator-cart-browser-"));
@@ -23,7 +26,8 @@ async function withCartPage(check, options = {}) {
   let browser;
   const orderCalls = [];
   try {
-    const sessions = ["armtek", "part-kom"].map((supplier) => ({ supplier, authorized: true, lastCheckedAt: null, lastAuthorizedAt: null }));
+    const suppliers = options.allSuppliers ? ["armtek", "part-kom", "forum-auto", "rossko"] : ["armtek", "part-kom"];
+    const sessions = suppliers.map((supplier) => ({ supplier, authorized: true, lastCheckedAt: null, lastAuthorizedAt: null }));
     const application = {
       listSupplierSessions: () => sessions,
       getApplicabilityApiKeyState: () => ({ configured: false, persistent: false, maskedKey: null }),
@@ -32,9 +36,15 @@ async function withCartPage(check, options = {}) {
       getApplicabilityCachedBrands: () => [],
       listApplicabilitySavedArticles: () => ({ articles: [], brandCounts: [], hasMore: false }),
       streamSearch: async (query, emit) => {
-        emit({ type: "search_started", article: query.article, suppliers: ["armtek", "part-kom"] });
+        emit({ type: "search_started", article: query.article, suppliers });
         emit({ type: "result", result: offer("armtek", options.stock ?? 4, { supplier: "armtek", keyzak: "TEST01" }, options.deliveries?.armtek, options.title) });
         emit({ type: "result", result: offer("part-kom", 3, { supplier: "part-kom", makerId: "101", providerId: "202" }, options.deliveries?.partkom, options.title) });
+        if (options.allSuppliers) {
+          emit({ type: "result", result: offer("forum-auto", 3, { supplier: "forum-auto", warehouse: "Тестовый склад" }, options.deliveries?.forum, options.title) });
+          emit({ type: "result", result: offer("rossko", 3, { supplier: "rossko", partGuid: "fixture-guid", stockId: "fixture-stock" }, options.deliveries?.rossko, options.title) });
+          emit({ type: "supplier_status", supplier: "forum-auto", status: "completed" });
+          emit({ type: "supplier_status", supplier: "rossko", status: "completed" });
+        }
         emit({ type: "supplier_status", supplier: "armtek", status: "completed" });
         emit({ type: "supplier_status", supplier: "part-kom", status: "completed" });
         emit({ type: "search_completed", article: query.article });
@@ -42,8 +52,7 @@ async function withCartPage(check, options = {}) {
       testCartOrder: async (lines, signal) => {
         orderCalls.push(structuredClone(lines));
         await options.testGate?.(signal);
-        return lines.map((line) => ({ id: line.id, status: line.reference.supplier === "armtek" ? "accepted" : "unconfirmed", acceptedQuantity: line.reference.supplier === "armtek" ? line.quantity : null,
-          message: line.reference.supplier === "armtek" ? "Тестовая проверка пройдена." : "PartKOM: результат не подтверждён." }));
+        return testPurchaseOrder(lines, signal);
       },
     };
     server = createAggregatorServer({ application, publicDir: resolve("src/frontend") });
@@ -54,15 +63,15 @@ async function withCartPage(check, options = {}) {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
-    await page.addInitScript(() => {
-      localStorage.setItem("autoservice.supplierVisibility", JSON.stringify(["armtek", "part-kom"]));
-      localStorage.setItem("autoservice.searchState", JSON.stringify({ activeTabId: "cart-test", tabs: [{ id: "cart-test", article: "A1", enabledSuppliers: ["armtek", "part-kom"], results: [] }] }));
-    });
+    await page.addInitScript((suppliers) => {
+      localStorage.setItem("autoservice.supplierVisibility", JSON.stringify(suppliers));
+      localStorage.setItem("autoservice.searchState", JSON.stringify({ activeTabId: "cart-test", tabs: [{ id: "cart-test", article: "A1", enabledSuppliers: suppliers, results: [] }] }));
+    }, suppliers);
     await page.goto(origin);
     await page.waitForLoadState("networkidle");
     await page.locator("#article-input").fill("A1");
     await page.locator("#submit-button").click();
-    await page.waitForFunction(() => document.querySelectorAll("#results-body .cart-offer-button").length === 2);
+    await page.waitForFunction((count) => document.querySelectorAll("#results-body .cart-offer-button").length === count, suppliers.length);
     await check(page, { orderCalls, origin });
     assert.deepEqual(errors, []);
   } finally {
@@ -72,6 +81,11 @@ async function withCartPage(check, options = {}) {
     if (previousMode === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousMode;
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+async function openCheckout(page) {
+  await page.locator("#cart-test-order").click();
+  await page.waitForFunction(() => document.querySelector("#cart-order-confirm").open);
 }
 
 test("cart adds bounded quantities after garage icon, animates, persists, edits and tests orders", async () => {
@@ -109,15 +123,16 @@ test("cart adds bounded quantities after garage icon, animates, persists, edits 
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "4");
     await page.locator("#cart-toggle").click();
     await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 2);
-    await page.locator("#cart-test-order").click();
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
     await page.waitForFunction(() => document.querySelectorAll(".cart-item-check").length === 2);
     assert.equal(orderCalls.length, 1);
     assert.equal(orderCalls[0][0].reference.keyzak, "TEST01");
     assert.equal(orderCalls[0][0].quantity, 3);
     assert.equal(orderCalls[0][1].reference.providerId, "202");
-    assert.match(await page.locator("#cart-status").textContent(), /Посмотрите результат/);
-    assert.equal(await page.locator(".cart-item-check.is-accepted").count(), 1);
-    assert.equal(await page.locator(".cart-item-check.is-unconfirmed").count(), 1);
+    assert.match(await page.locator("#cart-status").textContent(), /Тестовый заказ успешно завершён/);
+    assert.equal(await page.locator(".cart-item-check.is-simulated").count(), 2);
+    await page.locator("#cart-order-cancel").click();
     assert.match(await page.locator("#cart-total").textContent(), /420/);
     if (process.env.CART_SCREENSHOT_PATH) await page.screenshot({ path: process.env.CART_SCREENSHOT_PATH });
     await page.locator("#cart-items .cart-remove").first().click();
@@ -304,10 +319,12 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     assert.equal(await page.locator("#cart-badge").textContent(), "3");
     await page.locator("#cart-tab-armtek").click();
     assert.equal(await page.locator("#cart-test-order").textContent(), "Оформить заказ");
-    await page.locator("#cart-test-order").click();
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
     await page.waitForFunction(() => document.querySelectorAll(".cart-item-check").length === 1);
     assert.equal(orderCalls.length, 1);
     assert.deepEqual(orderCalls[0].map((line) => line.reference.supplier), ["armtek"]);
+    await page.locator("#cart-order-cancel").click();
     await page.locator("#cart-tab-part-kom").click();
     assert.equal(await page.locator(".cart-item-check").count(), 0);
     await page.locator("#cart-clear").click();
@@ -353,4 +370,131 @@ test("cart clear confirmation rejects a cart changed after the user reviewed it"
     assert.match(await page.locator("#cart-status").textContent(), /Корзина изменилась/);
     assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 1);
   }, { reducedMotion: "reduce" });
+});
+
+test("four supplier checkout requires confirmation, groups exact totals, cancels and only simulates on green order", async () => {
+  await withCartPage(async (page, { orderCalls }) => {
+    const posts = [];
+    page.on("request", (request) => { if (request.method() === "POST" && new URL(request.url()).pathname === "/api/cart/test-order") posts.push(request); });
+    for (let index = 0; index < 4; index++) {
+      assert.equal(await page.locator("#results-body .cart-offer-button").nth(index).isEnabled(), true);
+      if (index === 0) await page.locator("#results-body .cart-quantity").first().fill("2");
+      await page.locator("#results-body .cart-offer-button").nth(index).click();
+      await page.waitForFunction((count) => document.querySelector("#cart-badge").textContent === String(count), index + 2);
+    }
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelectorAll("#cart-tabs .cart-tab").length === 5);
+    await openCheckout(page);
+    assert.equal(orderCalls.length, 0);
+    assert.equal(posts.length, 0);
+    assert.deepEqual(await page.locator(".cart-order-group h3").allTextContents(), ["Armtek", "PartKOM", "Forum Auto", "Rossko"]);
+    assert.deepEqual((await page.locator(".cart-order-group-total").allTextContents()).map((text) => text.replace(/\s/g, "")), ["200,00₽", "120,00₽", "120,00₽", "120,00₽"]);
+    assert.match(await page.locator("#cart-order-total").textContent(), /560/);
+    assert.equal(await page.locator("#cart-order-groups tbody tr").count(), 4);
+    assert.equal(await page.locator("#cart-order-groups img").count(), 0);
+    assert.equal(await page.evaluate(() => window.cartXss), undefined);
+    assert.match(await page.locator("#cart-order-note").textContent(), /не будет отправлен/);
+    assert.equal(await page.locator("#cart-order-accept").evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(22, 137, 86)");
+    await page.locator("#cart-order-cancel").click();
+    assert.equal(posts.length, 0);
+    assert.equal(await page.locator("#cart-test-order").evaluate((node) => node === document.activeElement), true);
+    await openCheckout(page);
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").open);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#cart-order-confirm").open);
+    assert.equal(await page.locator("#cart-order-confirm").isVisible(), false);
+    assert.equal(await page.locator("#cart-modal").isVisible(), true);
+    assert.equal(orderCalls.length, 0);
+    await openCheckout(page);
+    if (process.env.CART_ORDER_SCREENSHOT_PATH) await page.screenshot({ path: process.env.CART_ORDER_SCREENSHOT_PATH });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const bounds = await page.locator("#cart-order-confirm").boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390);
+    assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= 844);
+    const firstGroup = page.locator(".cart-order-group").first();
+    const tableBounds = await firstGroup.locator(".cart-table-scroll").boundingBox();
+    for (const selector of [".cart-item-quantity", ".cart-item-price", ".cart-item-sum"]) {
+      const cell = await firstGroup.locator(selector).boundingBox();
+      assert.ok(cell.x >= tableBounds.x && cell.x + cell.width <= tableBounds.x + tableBounds.width);
+    }
+    for (let index = 0; index < 5; index++) {
+      await page.keyboard.press("Tab");
+      assert.equal(await page.evaluate(() => Boolean(document.activeElement.closest("#cart-order-confirm"))), true);
+    }
+    if (process.env.CART_ORDER_MOBILE_SCREENSHOT_PATH) await page.screenshot({ path: process.env.CART_ORDER_MOBILE_SCREENSHOT_PATH });
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    assert.equal(orderCalls.length, 1);
+    assert.equal(posts.length, 1);
+    assert.equal(orderCalls[0].length, 4);
+    assert.equal(await page.locator("#cart-order-accept").isVisible(), false);
+    assert.match(await page.locator("#cart-order-status").textContent(), /поставщикам ничего не отправлено/);
+    assert.equal(await page.locator("#cart-badge").textContent(), "5");
+    await page.locator("#cart-order-cancel").click();
+    await page.setViewportSize({ width: 1366, height: 850 });
+    for (const [index, supplier] of ["forum-auto", "rossko"].entries()) {
+      await page.locator(`#cart-tab-${supplier}`).click();
+      await openCheckout(page);
+      assert.equal(await page.locator(".cart-order-group").count(), 1);
+      assert.equal(await page.locator(".cart-order-group").getAttribute("data-cart-order-supplier"), supplier);
+      assert.match(await page.locator("#cart-order-total").textContent(), /120/);
+      await page.locator("#cart-order-accept").click();
+      await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+      assert.deepEqual(orderCalls[index + 1].map((line) => line.reference.supplier), [supplier]);
+      await page.locator("#cart-order-cancel").click();
+    }
+    assert.equal(await page.locator("#cart-badge").textContent(), "5");
+  }, { allSuppliers: true, reducedMotion: "reduce" });
+});
+
+test("checkout rejects a changed reviewed cart and requires reviewing the new quantity", async () => {
+  await withCartPage(async (page, { orderCalls }) => {
+    await page.locator("#results-body .cart-offer-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await openCheckout(page);
+    assert.match(await page.locator("#cart-order-total").textContent(), /100/);
+    await page.evaluate(async () => {
+      const cart = await (await fetch("/api/cart")).json();
+      const response = await fetch(`/api/cart/items/${cart.items[0].id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: cart.revision, quantity: 2 }) });
+      if (!response.ok) throw new Error("Fixture update failed");
+    });
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-error"));
+    assert.match(await page.locator("#cart-order-status").textContent(), /Корзина изменилась/);
+    assert.equal(await page.locator("#cart-order-accept").isDisabled(), true);
+    assert.equal(orderCalls.length, 0);
+    await page.locator("#cart-order-cancel").click();
+    await openCheckout(page);
+    assert.match(await page.locator("#cart-order-total").textContent(), /200/);
+    assert.equal(await page.locator(".cart-order-table .cart-item-quantity").textContent(), "2");
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    assert.equal(orderCalls.length, 1);
+    assert.equal(orderCalls[0][0].quantity, 2);
+  }, { reducedMotion: "reduce" });
+});
+
+test("checkout blocks duplicate submission and Escape while the demo request is pending", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  try {
+    await withCartPage(async (page, { orderCalls }) => {
+      await page.locator("#results-body .cart-offer-button").first().click();
+      await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+      await page.locator("#cart-toggle").click();
+      await openCheckout(page);
+      await page.locator("#cart-order-accept").click();
+      await page.waitForFunction(() => document.querySelector("#cart-order-status").textContent === "Завершаем тестовый заказ…");
+      assert.equal(await page.locator("#cart-order-accept").isDisabled(), true);
+      assert.equal(await page.locator("#cart-order-cancel").isDisabled(), true);
+      await page.locator("#cart-order-accept").evaluate((node) => node.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      await page.keyboard.press("Escape");
+      assert.equal(await page.locator("#cart-order-confirm").isVisible(), true);
+      release();
+      await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+      assert.equal(orderCalls.length, 1);
+    }, { reducedMotion: "reduce", testGate: () => gate });
+  } finally { release(); }
 });

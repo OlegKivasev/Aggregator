@@ -2,7 +2,9 @@ import type { NormalizedSearchResult } from "../types.ts";
 
 export type PurchaseReference =
   | { supplier: "part-kom"; makerId: string; providerId: string }
-  | { supplier: "armtek"; keyzak: string };
+  | { supplier: "armtek"; keyzak: string }
+  | { supplier: "forum-auto"; warehouse: string | null }
+  | { supplier: "rossko"; partGuid: string | null; stockId: string | null };
 
 export interface PurchaseLine {
   id: string;
@@ -13,9 +15,9 @@ export interface PurchaseLine {
 
 export interface TestOrderLineResult {
   id: string;
-  status: "accepted" | "rejected" | "unconfirmed";
+  status: "simulated";
   message: string;
-  acceptedQuantity: number | null;
+  acceptedQuantity: null;
 }
 
 export type TestOrder = (lines: PurchaseLine[], signal: AbortSignal) => Promise<TestOrderLineResult[]>;
@@ -34,5 +36,7 @@ export function getPurchaseReference(result: NormalizedSearchResult): PurchaseRe
 }
 
 export function purchaseOfferKey(result: NormalizedSearchResult, reference: PurchaseReference): string {
-  return JSON.stringify([reference, result.article, result.brand]);
+  return JSON.stringify([reference, result.article, result.brand,
+    ...(reference.supplier === "forum-auto" || reference.supplier === "rossko"
+      ? [result.warehouse] : [])]);
 }

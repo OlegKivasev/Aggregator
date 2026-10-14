@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { NormalizedSearchResult } from "../types.ts";
-import { getPurchaseReference, purchaseOfferKey, type PurchaseLine, type TestOrder } from "./purchase-offer.ts";
+import { getPurchaseReference, purchaseOfferKey, type PurchaseLine, type PurchaseReference, type TestOrder } from "./purchase-offer.ts";
 import { SqliteCartRepository } from "./sqlite-cart-repository.ts";
 
 export class CartError extends Error {
@@ -18,10 +18,15 @@ function validateQuantity(value: unknown, maximum: number): number {
   return value;
 }
 
-function normalizeCartSupplier(value: unknown): "all" | "armtek" | "part-kom" {
-  if (value !== "all" && value !== "armtek" && value !== "part-kom") throw new CartError("Выберите вкладку корзины.");
+function normalizeCartSupplier(value: unknown): "all" | PurchaseReference["supplier"] {
+  if (value !== "all" && value !== "armtek" && value !== "part-kom" && value !== "forum-auto" && value !== "rossko") {
+    throw new CartError("Выберите вкладку корзины.");
+  }
   return value;
 }
+
+const nullableIdentifier = (value: unknown): boolean => value === null
+  || typeof value === "string" && value.length > 0 && value.length <= 2000;
 
 function validLine(line: PurchaseLine): boolean {
   return Boolean(line && typeof line.id === "string" && /^[0-9a-f-]{36}$/.test(line.id)
@@ -33,7 +38,9 @@ function validLine(line: PurchaseLine): boolean {
     && line.reference && line.reference.supplier === line.result.supplier
     && (line.reference.supplier === "armtek" && typeof line.reference.keyzak === "string" && /^[\w-]{1,10}$/.test(line.reference.keyzak)
       || line.reference.supplier === "part-kom" && typeof line.reference.makerId === "string" && typeof line.reference.providerId === "string"
-        && /^[1-9]\d{0,19}$/.test(line.reference.makerId) && /^[1-9]\d{0,19}$/.test(line.reference.providerId))
+        && /^[1-9]\d{0,19}$/.test(line.reference.makerId) && /^[1-9]\d{0,19}$/.test(line.reference.providerId)
+      || line.reference.supplier === "forum-auto" && nullableIdentifier(line.reference.warehouse) && line.reference.warehouse === line.result.warehouse
+      || line.reference.supplier === "rossko" && nullableIdentifier(line.reference.partGuid) && nullableIdentifier(line.reference.stockId))
     && Number.isSafeInteger(line.quantity) && line.quantity >= 1 && line.quantity <= stock(line.result));
 }
 

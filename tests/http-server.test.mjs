@@ -13,6 +13,7 @@ import { SqliteApplicabilityCacheRepository } from "../src/backend/applicability
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { attachPurchaseReference } from "../src/backend/purchasing/purchase-offer.ts";
+import { testPurchaseOrder } from "../src/backend/application/test-order-application-service.ts";
 
 const publicDir = join(process.cwd(), "src", "frontend");
 const openServers = new Set();
@@ -28,8 +29,8 @@ test("cart HTTP validates server offers and quantities, hides routing and cannot
       streamSearch: async (_query, emit) => emit({ type: "result", result: attachPurchaseReference({ supplier: "part-kom", article: "A1", brand: "TEST", title: "Тест",
         price: 100, quantity: 3, warehouse: "Тестовый склад", deliveryDate: null, deliveryDateApproximate: false, link: "https://www.part-kom.ru/" },
       { supplier: "part-kom", makerId: "101", providerId: "202" }) }),
-      testCartOrder: async (lines) => { called++; assert.equal(lines[0].result.price, 100); assert.equal(lines[0].reference.providerId, "202");
-        return lines.map((line) => ({ id: line.id, status: "unconfirmed", message: "fixture test only", acceptedQuantity: null })); },
+      testCartOrder: async (lines, signal) => { called++; assert.equal(lines[0].result.price, 100); assert.equal(lines[0].reference.providerId, "202");
+        return testPurchaseOrder(lines, signal); },
     });
     const listening = await listen(application);
     server = listening.server;
@@ -58,6 +59,8 @@ test("cart HTTP validates server offers and quantities, hides routing and cannot
     const tested = await (await send("/api/cart/test-order", { revision: added.revision, supplier: "part-kom", flagTest: 0, testOnly: false })).json();
     assert.equal(tested.testOnly, true);
     assert.equal(tested.supplier, "part-kom");
+    assert.equal(tested.results[0].status, "simulated");
+    assert.equal(tested.results[0].acceptedQuantity, null);
     assert.equal(called, 1);
     assert.equal((await send("/api/cart/test-order", { revision: added.revision, supplier: "stparts" })).status, 400);
     assert.equal((await send("/api/cart/items", { revision: added.revision }, "DELETE")).status, 400);

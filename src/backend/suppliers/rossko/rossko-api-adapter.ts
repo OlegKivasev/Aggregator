@@ -13,6 +13,7 @@ import type {
 } from "../../types.ts";
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
+import { attachPurchaseReference } from "../../purchasing/purchase-offer.ts";
 
 const rosskoApiOrigin = "https://api.rossko.ru";
 const rosskoApiVersion = "v2.1";
@@ -346,7 +347,7 @@ function normalizedResults(part: RosskoPart, requestedArticle: string, isAnalog:
     const derivedDelivery = !deliveryStart && !deliveryEnd && stock.deliveryDays !== null
       ? new Date(Date.now() + stock.deliveryDays * 86_400_000).toISOString()
       : null;
-    return {
+    const result = {
       supplier: "rossko",
       brand: part.brand,
       article: displayArticle,
@@ -361,6 +362,7 @@ function normalizedResults(part: RosskoPart, requestedArticle: string, isAnalog:
       link: portalLink(requestedArticle),
       ...(isAnalog ? { isAnalog: true } : {}),
     } satisfies NormalizedSearchResult;
+    return attachPurchaseReference(result, { supplier: "rossko", partGuid: part.guid, stockId: stock.id });
   });
 }
 

@@ -168,7 +168,7 @@ export function streamSearch(query: SupplierSearchQuery, emit: (event: SearchStr
   return searchService.streamSearch(query, emit, signal);
 }
 
-export const testCartOrder = (lines: PurchaseLine[], signal: AbortSignal) => testPurchaseOrder(sessionManager, lines, signal);
+export const testCartOrder = (lines: PurchaseLine[], signal: AbortSignal) => testPurchaseOrder(lines, signal);
 
 export function searchApplicability(query: ApplicabilitySearchRequest, signal: AbortSignal) {
   return applicabilityService.search(query, signal);

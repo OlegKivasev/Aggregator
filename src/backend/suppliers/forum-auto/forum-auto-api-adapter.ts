@@ -12,6 +12,7 @@ import type {
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
 import { siteHttpRequest, type SiteHttpResponse } from "../site-http.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
+import { attachPurchaseReference } from "../../purchasing/purchase-offer.ts";
 
 interface ForumAutoOffer {
   brand?: unknown;
@@ -183,7 +184,7 @@ function normalizeForumAutoOffer(offer: ForumAutoOffer, isAnalog: boolean): Norm
   }
   const quantity = parseQuantity(offer.num);
   const isReturnable = isForumAutoReturnable(offer.is_returnable);
-  return {
+  const result: NormalizedSearchResult = {
     supplier: "forum-auto",
     brand,
     article,
@@ -197,6 +198,7 @@ function normalizeForumAutoOffer(offer: ForumAutoOffer, isAnalog: boolean): Norm
     link: forumAutoProductUrl(article),
     ...(isAnalog ? { isAnalog: true } : {}),
   };
+  return attachPurchaseReference(result, { supplier: "forum-auto", warehouse: result.warehouse });
 }
 
 export function parseForumAutoApiResults(payload: unknown, requestedArticle: string): NormalizedSearchResult[] {
