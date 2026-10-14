@@ -61,8 +61,8 @@ const validateCart = (value) => {
 };
 
 export const bootstrapCart = ({ getMarkupPrice }) => {
-  const renderPrices = (result, quantity = 1) => `<span class="cart-price" title="Цена с наценкой">${escapeHtml(cartPriceFormat.format(getMarkupPrice(result) * quantity))}</span>
-    <span class="cart-purchase-price" title="Закупочная цена">${escapeHtml(cartPriceFormat.format(result.price * quantity))}</span>`;
+  const renderPrices = (result, quantity = 1) => `<span class="cart-price main-result-price" title="Цена с наценкой">${escapeHtml(cartPriceFormat.format(getMarkupPrice(result) * quantity))}</span>
+    <span class="cart-purchase-price main-result-purchase-price" title="Закупочная цена">${escapeHtml(cartPriceFormat.format(result.price * quantity))}</span>`;
   const toggle = document.querySelector("#cart-toggle");
   const badge = document.querySelector("#cart-badge");
   const modal = document.createElement("dialog");
