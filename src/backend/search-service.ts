@@ -1,4 +1,6 @@
 import { SearchApplicationService } from "./application/search-application-service.ts";
+import { testPurchaseOrder } from "./application/test-order-application-service.ts";
+import type { PurchaseLine } from "./purchasing/purchase-offer.ts";
 import { decodeRosskoApiCredentials, SupplierSessionService } from "./application/supplier-session-service.ts";
 import { ApplicabilityApplicationService } from "./applicability/applicability-application-service.ts";
 import { EncryptedApplicabilityApiKeyStore } from "./applicability/encrypted-api-key-store.ts";
@@ -165,6 +167,8 @@ export function validateSupplierSessions(article: string, suppliers: SupplierId[
 export function streamSearch(query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) {
   return searchService.streamSearch(query, emit, signal);
 }
+
+export const testCartOrder = (lines: PurchaseLine[], signal: AbortSignal) => testPurchaseOrder(sessionManager, lines, signal);
 
 export function searchApplicability(query: ApplicabilitySearchRequest, signal: AbortSignal) {
   return applicabilityService.search(query, signal);

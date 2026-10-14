@@ -12,11 +12,13 @@ import type {
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
 import { siteHttpRequest, type SiteHttpResponse } from "../site-http.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
+import { attachPurchaseReference } from "../../purchasing/purchase-offer.ts";
 
 interface PartKomOffer {
   number?: unknown;
   maker?: unknown;
   makerId?: unknown;
+  providerId?: unknown;
   description?: unknown;
   price?: unknown;
   quantity?: unknown;
@@ -211,7 +213,7 @@ function normalizePartKomOffer(offer: PartKomOffer, isAnalog: boolean): Normaliz
     ? guaranteedDate
     : null;
   const makerId = typeof offer.makerId === "string" || typeof offer.makerId === "number" ? String(offer.makerId) : "";
-  return {
+  const result: NormalizedSearchResult = {
     supplier: "part-kom",
     brand,
     article,
@@ -226,6 +228,11 @@ function normalizePartKomOffer(offer: PartKomOffer, isAnalog: boolean): Normaliz
     link: new URL(`/new/#/search/0/0/0/${encodeURIComponent(article.replace(/\//g, ""))}/${encodeURIComponent(makerId)}`, partKomSiteBaseUrl).toString(),
     ...(isAnalog ? { isAnalog: true } : {}),
   };
+  const providerId = typeof offer.providerId === "string" || typeof offer.providerId === "number" ? String(offer.providerId) : "";
+  if (/^[1-9]\d{0,19}$/.test(makerId) && /^[1-9]\d{0,19}$/.test(providerId)) {
+    attachPurchaseReference(result, { supplier: "part-kom", makerId, providerId });
+  }
+  return result;
 }
 
 export function parsePartKomApiResults(payload: unknown, requestedArticle: string): NormalizedSearchResult[] {

@@ -34,6 +34,7 @@ import {
   searchApplicability,
   shutdownSearchService,
   streamSearch,
+  testCartOrder,
   validateSupplierSessions,
 } from "./search-service.ts";
 
@@ -74,6 +75,7 @@ const application: AggregatorApplication = {
   saveApplicabilityApiKey,
   searchApplicability,
   streamSearch,
+  testCartOrder,
   validateSupplierSessions,
 };
 

@@ -13,6 +13,7 @@ import type {
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../errors.ts";
 import { readBoundedJsonResponse } from "../fetch-json.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
+import { attachPurchaseReference } from "../../purchasing/purchase-offer.ts";
 import { getArmtekApiAccountState, getArmtekApiAccountStateGeneration, invalidateArmtekApiAccountStateWrites, saveArmtekApiAccountState } from "./armtek-api-account-state.ts";
 
 interface ArmtekResponse<T> {
@@ -63,7 +64,7 @@ interface ArmtekStoreItem {
   SKLNAME?: string;
 }
 
-interface ArmtekResolvedConfig {
+export interface ArmtekResolvedConfig {
   vkorg: string;
   kunnrRg: string;
   kunnrZa?: string;
@@ -236,7 +237,7 @@ function armtekStoreItems(response: { ARRAY?: ArmtekStoreItem | ArmtekStoreItem[
   return Array.isArray(response) ? response : toArray(response.ARRAY);
 }
 
-async function requestArmtek<T>(
+export async function requestArmtek<T>(
   path: string,
   credentials: ArmtekCredentials,
   options: {
@@ -298,7 +299,7 @@ async function requestArmtek<T>(
   }
 }
 
-async function resolveArmtekConfig(
+export async function resolveArmtekConfig(
   credentials: ArmtekCredentials,
   signal?: AbortSignal,
 ): Promise<ArmtekResolvedConfig> {
@@ -444,7 +445,7 @@ function normalizeArmtekResult(
     return null;
   }
 
-  return {
+  const result: NormalizedSearchResult = {
     supplier: "armtek",
     brand,
     article,
@@ -458,6 +459,10 @@ function normalizeArmtekResult(
     link: buildArmtekResultLink(article),
     ...(isAnalog ? { isAnalog: true } : {}),
   };
+  if (typeof item.KEYZAK === "string" && /^[\w-]{1,10}$/.test(item.KEYZAK)) {
+    attachPurchaseReference(result, { supplier: "armtek", keyzak: item.KEYZAK });
+  }
+  return result;
 }
 
 function armtekResultKey(result: NormalizedSearchResult): string {

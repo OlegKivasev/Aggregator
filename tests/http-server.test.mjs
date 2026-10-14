@@ -12,9 +12,61 @@ import { EncryptedPartsApiProxyStore } from "../src/backend/applicability/encryp
 import { SqliteApplicabilityCacheRepository } from "../src/backend/applicability/sqlite-applicability-cache-repository.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { attachPurchaseReference } from "../src/backend/purchasing/purchase-offer.ts";
 
 const publicDir = join(process.cwd(), "src", "frontend");
 const openServers = new Set();
+
+test("cart HTTP validates server offers and quantities, hides routing and cannot enable real orders", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "aggregator-cart-http-"));
+  const previousPath = process.env.GARAGE_DB_PATH;
+  process.env.GARAGE_DB_PATH = join(directory, "cart.sqlite");
+  let server;
+  let called = 0;
+  try {
+    const application = createApplication({
+      streamSearch: async (_query, emit) => emit({ type: "result", result: attachPurchaseReference({ supplier: "part-kom", article: "A1", brand: "TEST", title: "Тест",
+        price: 100, quantity: 3, warehouse: "Тестовый склад", deliveryDate: null, deliveryDateApproximate: false, link: "https://www.part-kom.ru/" },
+      { supplier: "part-kom", makerId: "101", providerId: "202" }) }),
+      testCartOrder: async (lines) => { called++; assert.equal(lines[0].result.price, 100); assert.equal(lines[0].reference.providerId, "202");
+        return lines.map((line) => ({ id: line.id, status: "unconfirmed", message: "fixture test only", acceptedQuantity: null })); },
+    });
+    const listening = await listen(application);
+    server = listening.server;
+    const { baseUrl } = listening;
+    const send = (path, body, method = "POST") => fetch(`${baseUrl}${path}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const initialResponse = await fetch(`${baseUrl}/api/cart`);
+    assert.equal(initialResponse.headers.get("cache-control"), "no-store");
+    const initial = await initialResponse.json();
+    assert.equal(initial.count, 0);
+    assert.equal((await send("/api/cart/items", { offerId: "fake", quantity: 1, revision: 0 })).status, 409);
+    const events = parseSseEvents(await (await fetch(`${baseUrl}/api/search?article=A1&supplier=part-kom&stream=once`)).text());
+    assert.ok(!JSON.stringify(events).includes("providerId"));
+    const offerId = events.find((event) => event.type === "result").offerId;
+    assert.equal((await send("/api/cart/items", { offerId, quantity: 4, revision: 0 })).status, 400);
+    assert.equal((await send("/api/cart/items", { offerId, quantity: 1.5, revision: 0 })).status, 400);
+    const addedResponse = await send("/api/cart/items", { offerId, quantity: 2, revision: 0, price: 1, providerId: "999" });
+    assert.equal(addedResponse.status, 201);
+    const added = await addedResponse.json();
+    assert.equal(added.total, 200);
+    assert.ok(!JSON.stringify(added).includes("providerId"));
+    const oversized = await fetch(`${baseUrl}/api/cart/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: "x".repeat(20_000) }) });
+    assert.equal(oversized.status, 413);
+    const malformed = await fetch(`${baseUrl}/api/cart/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{" });
+    assert.equal(malformed.status, 400);
+    assert.equal((await send("/api/cart/test-order", { revision: 0 })).status, 409);
+    const tested = await (await send("/api/cart/test-order", { revision: added.revision, flagTest: 0, testOnly: false })).json();
+    assert.equal(tested.testOnly, true);
+    assert.equal(called, 1);
+    assert.equal((await send("/api/cart/order", { revision: added.revision })).status, 405);
+    assert.equal((await send(`/api/cart/items/${added.items[0].id}`, { revision: added.revision }, "DELETE")).status, 200);
+    assert.equal((await (await fetch(`${baseUrl}/api/cart`)).json()).count, 0);
+  } finally {
+    if (server?.listening) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); openServers.delete(server); }
+    if (previousPath === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previousPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 function session(supplier, authorized = false) {
   return {

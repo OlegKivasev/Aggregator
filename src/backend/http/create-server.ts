@@ -35,8 +35,13 @@ import { securityHeaders, serveJson, writeSseEvent } from "./responses.ts";
 import { serveStatic } from "./static-files.ts";
 import { createHttpGarageApplication } from "../garage/http-garage-application.ts";
 import { GarageConflictError, GarageNotFoundError, GarageOfferExpiredError, GarageValidationError } from "../garage/garage-application-service.ts";
+import { getGarageDatabasePath } from "../config.ts";
+import { CartApplicationService, CartError } from "../purchasing/cart-application-service.ts";
+import { SqliteCartRepository } from "../purchasing/sqlite-cart-repository.ts";
+import type { TestOrder } from "../purchasing/purchase-offer.ts";
 
 export interface AggregatorApplication {
+  testCartOrder?: TestOrder;
   listSupplierSessions(): SupplierSessionState[];
   validateSupplierSessions(
     article: string,
@@ -209,6 +214,10 @@ export function createAggregatorServer({
 }: CreateAggregatorServerOptions): Server {
   const resolvedPublicDir = resolve(publicDir);
   const garage = createHttpGarageApplication(application.streamSearch.bind(application));
+  const cart = new CartApplicationService(new SqliteCartRepository(getGarageDatabasePath()), (lines, signal) => {
+    if (!application.testCartOrder) throw new CartError("Тестовая проверка заказов не настроена.", 503);
+    return application.testCartOrder(lines, signal);
+  });
 
   const server = createServer(async (request, response) => {
     if (!request.url) {
@@ -217,6 +226,41 @@ export function createAggregatorServer({
     }
 
     const url = new URL(request.url, "http://127.0.0.1");
+
+    const cartItemMatch = /^\/api\/cart\/items\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (url.pathname === "/api/cart" || url.pathname === "/api/cart/items" || url.pathname === "/api/cart/test-order" || cartItemMatch) {
+      response.setHeader("Cache-Control", "no-store");
+      const controller = new AbortController();
+      const abort = () => { if (!response.writableEnded) controller.abort(new Error("Client disconnected")); };
+      response.once("close", abort);
+      try {
+        if (url.pathname === "/api/cart" && request.method === "GET") {
+          serveJson(response, 200, cart.view());
+        } else if (url.pathname === "/api/cart/items" && request.method === "POST"
+          || cartItemMatch && (request.method === "PATCH" || request.method === "DELETE")
+          || url.pathname === "/api/cart/test-order" && request.method === "POST") {
+          const payload = await readJsonBody(request);
+          if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new CartError("Неверные параметры корзины.");
+          const fields = payload as Record<string, unknown>;
+          if (url.pathname === "/api/cart/test-order") {
+            const result = await cart.test(fields.revision, controller.signal);
+            if (!controller.signal.aborted) serveJson(response, 200, result);
+          } else {
+            const action = cartItemMatch ? request.method === "DELETE" ? "remove" : "update" : "add";
+            serveJson(response, action === "add" ? 201 : 200, cart.mutate(action, { ...fields, ...(cartItemMatch ? { id: cartItemMatch[1] } : {}) }));
+          }
+        } else serveJson(response, 405, { message: "Method not allowed" });
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          if (error instanceof CartError || error instanceof RequestBodyError) serveJson(response, error.statusCode, { message: error.message });
+          else {
+            reportError({ operation: "cart", category: classifyOperationalError(error) });
+            serveJson(response, 500, { message: "Не удалось выполнить действие в корзине." });
+          }
+        }
+      } finally { response.removeListener("close", abort); }
+      return;
+    }
 
     if (request.method === "GET" && url.pathname === "/api/health") {
       serveJson(response, 200, { status: "ok" });
@@ -596,7 +640,9 @@ export function createAggregatorServer({
             : { article, suppliers };
         await application.streamSearch(query, (event) => {
           if (event.type === "result") {
-            writeSseEvent(response, { ...event, offerId: garage.registerSearchOffer(event.result) });
+            const offerId = garage.registerSearchOffer(event.result);
+            cart.registerOffer(offerId, event.result);
+            writeSseEvent(response, { ...event, offerId });
             return;
           }
           writeSseEvent(response, event);
@@ -619,6 +665,6 @@ export function createAggregatorServer({
 
     serveJson(response, 405, { message: "Method not allowed" });
   });
-  server.once("close", () => garage.close());
+  server.once("close", () => { garage.close(); cart.close(); });
   return server;
 }

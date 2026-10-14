@@ -13,6 +13,7 @@ import {
 } from "./result-formatting.js";
 import { openSearchStream } from "./search-stream.js";
 import { setupTabCloseMenu } from "./tab-close-menu.js";
+import { bootstrapCart, renderCartOfferControls } from "./cart-ui.js";
 import {
   isStpartsWarehouseVisible,
   normalizeStpartsWarehouseColors,
@@ -240,6 +241,7 @@ const tableColumnWidths = {
 };
 Object.assign(tableColumnWidths, restoreLocalColumnWidths("main", tableColumnWidths));
 const garageActionColumnWidth = 52;
+const cartActionColumnWidth = 98;
 let visibleTableColumns = new Set(tableColumnIds);
 let visibleStpartsWarehouses = new Set(["green"]);
 let showArmtekNonReturnable = false;
@@ -921,7 +923,7 @@ const saveTableColumns = () => {
 
 const applyTableColumns = () => {
   const visibleColumns = getVisibleTableColumns();
-  const minimumWidth = visibleColumns.reduce((width, column) => width + tableColumnWidths[column], garageActionColumnWidth);
+  const minimumWidth = visibleColumns.reduce((width, column) => width + tableColumnWidths[column], garageActionColumnWidth + cartActionColumnWidth);
   resultsTable.style.setProperty("--results-table-min-width", `${minimumWidth}px`);
   resultsTable.querySelectorAll("th[data-column]").forEach((header) => {
     header.style.width = visibleColumns.includes(header.dataset.column)
@@ -933,7 +935,7 @@ const applyTableColumns = () => {
     element.hidden = !visibleColumns.includes(element.dataset.column);
   });
   resultsBody.querySelectorAll(".results-table__empty td").forEach((cell) => {
-    cell.colSpan = visibleColumns.length + 1;
+    cell.colSpan = visibleColumns.length + 2;
   });
   Object.entries(filterSections).forEach(([column, section]) => {
     section.hidden = !isFilterColumnVisible(column);
@@ -1245,11 +1247,12 @@ const renderResults = () => {
         <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</span><span class="main-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         <td class="garage-add-cell"><button type="button" class="garage-offer-button" draggable="${Boolean(result.offerId)}" data-garage-offer-id="${escapeHtml(result.offerId ?? "")}" data-garage-offer-quantity="${Number.isFinite(result.quantity) && result.quantity >= 0 ? result.quantity : ""}" aria-disabled="${!result.offerId}" aria-label="Добавить в гараж" title="Добавить в гараж"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5.1 9.75 1.25-3.2A2.25 2.25 0 0 1 8.45 5h7.1a2.25 2.25 0 0 1 2.1 1.55l1.25 3.2"/><path d="M4.5 10.25h15a1.5 1.5 0 0 1 1.5 1.5v4.75h-2.25V19H16.5v-2.5h-9V19H5.25v-2.5H3v-4.75a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="7.25" cy="13.5" r="1"/><circle cx="16.75" cy="13.5" r="1"/></svg></button></td>
+        ${renderCartOfferControls(result)}
       </tr>
     `;
   };
   const renderEmptyRow = (message) => `
-      <tr class="results-table__empty"><td colspan="${Math.max(getVisibleTableColumns().length + 1, 1)}">${message}</td></tr>
+      <tr class="results-table__empty"><td colspan="${Math.max(getVisibleTableColumns().length + 2, 1)}">${message}</td></tr>
   `;
 
   const emptyMessage = exactResults.length ? "Нет позиций с выбранными условиями." : "По вашему запросу ничего не найдено.";
@@ -2957,6 +2960,7 @@ renderTabs();
 renderResults();
 loadSessions().catch(() => undefined);
 const garageUi = bootstrapGarage({ getMarkupPercent: () => markupPercent, startSearch: startSearchForArticle });
+bootstrapCart();
 
 setupColumnResizing({
   table: resultsTable,
