@@ -2960,7 +2960,7 @@ renderTabs();
 renderResults();
 loadSessions().catch(() => undefined);
 const garageUi = bootstrapGarage({ getMarkupPercent: () => markupPercent, startSearch: startSearchForArticle });
-bootstrapCart();
+bootstrapCart({ getMarkupPrice });
 
 setupColumnResizing({
   table: resultsTable,

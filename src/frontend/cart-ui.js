@@ -60,7 +60,9 @@ const validateCart = (value) => {
   return value;
 };
 
-export const bootstrapCart = () => {
+export const bootstrapCart = ({ getMarkupPrice }) => {
+  const renderPrices = (result, quantity = 1) => `<span class="cart-price" title="Цена с наценкой">${escapeHtml(cartPriceFormat.format(getMarkupPrice(result) * quantity))}</span>
+    <span class="cart-purchase-price" title="Закупочная цена">${escapeHtml(cartPriceFormat.format(result.price * quantity))}</span>`;
   const toggle = document.querySelector("#cart-toggle");
   const badge = document.querySelector("#cart-badge");
   const modal = document.createElement("dialog");
@@ -174,10 +176,10 @@ export const bootstrapCart = () => {
         <td class="cart-item-name">${escapeHtml(result.title)}${checked ? `<span class="cart-item-check ${checkClass}">${escapeHtml(checked.message)}</span>` : ""}</td>
         ${activeSupplier === "all" ? `<td class="cart-item-supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
         <td class="cart-item-delivery">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
-        <td class="cart-item-price">${escapeHtml(cartPriceFormat.format(result.price))}</td>
+        <td class="cart-item-price">${renderPrices(result)}</td>
         <td class="cart-item-quantity"><input class="cart-quantity" type="number" min="1" max="${maximumQuantity(result)}" step="1" value="${item.quantity}" inputmode="numeric"
           aria-label="Количество для ${escapeHtml(result.article)}" ${locked ? "disabled" : ""}><span class="cart-item-stock">из ${maximumQuantity(result)}</span></td>
-        <td class="cart-item-sum">${escapeHtml(cartPriceFormat.format(result.price * item.quantity))}</td>
+        <td class="cart-item-sum">${renderPrices(result, item.quantity)}</td>
         <td><button type="button" class="cart-remove btn btn-light" aria-label="Удалить ${escapeHtml(result.article)}" title="Удалить" ${locked ? "disabled" : ""}>×</button></td></tr>`;
     }).join("") : `<tr><td colspan="${activeSupplier === "all" ? 8 : 7}" class="cart-empty">Корзина пуста. Добавьте товары из таблицы предложений.</td></tr>`;
     testButton.disabled = locked || !cart.items.length;
@@ -347,8 +349,8 @@ export const bootstrapCart = () => {
               <span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td><td class="cart-item-name">${escapeHtml(result.title)}
               <span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>
               <span class="cart-item-warehouse">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span></td>
-              <td class="cart-item-quantity" data-label="Кол-во">${quantity}</td><td class="cart-item-price" data-label="Цена, ₽">${escapeHtml(cartPriceFormat.format(result.price))}</td>
-              <td class="cart-item-sum" data-label="Стоимость, ₽">${escapeHtml(cartPriceFormat.format(result.price * quantity))}</td></tr>`).join("")}
+              <td class="cart-item-quantity" data-label="Кол-во">${quantity}</td><td class="cart-item-price" data-label="Цена, ₽">${renderPrices(result)}</td>
+              <td class="cart-item-sum" data-label="Стоимость, ₽">${renderPrices(result, quantity)}</td></tr>`).join("")}
           </tbody></table></div><p class="cart-order-delivery">Дата поставки с учётом всех товаров: ${escapeHtml(formatCartLatestDeliveryDate(group))}</p></section>`;
       }).join("");
       orderDialog.querySelector("#cart-order-total").textContent = formatPrice(items.reduce((sum, item) => sum + item.result.price * item.quantity, 0));
