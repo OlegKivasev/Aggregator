@@ -30,8 +30,13 @@ export const renderCartOfferControls = (result) => {
   return `<td class="cart-add-cell"><div class="cart-offer-controls">
     <input class="cart-quantity" type="number" min="1" max="${Math.max(1, maximum)}" step="1" value="1" inputmode="numeric"
       aria-label="Количество для ${escapeHtml(result.article)}" ${enabled ? "" : "disabled"}>
-    <button type="button" class="cart-offer-button" data-cart-offer-id="${escapeHtml(result.offerId ?? "")}" ${enabled ? "" : "disabled"}
-      aria-label="Добавить в корзину" title="${title}">${cartIcon}</button></div></td>`;
+    <div class="cart-offer-actions">
+      <button type="button" class="cart-offer-button" data-cart-offer-id="${escapeHtml(result.offerId ?? "")}" ${enabled ? "" : "disabled"}
+        aria-label="Добавить в корзину" title="${title}">${cartIcon}</button>
+      <button type="button" class="garage-offer-button" draggable="${Boolean(result.offerId)}"
+        data-garage-offer-id="${escapeHtml(result.offerId ?? "")}" data-garage-offer-quantity="${Number.isFinite(result.quantity) && result.quantity >= 0 ? result.quantity : ""}"
+        aria-disabled="${!result.offerId}" aria-label="Добавить в гараж" title="Добавить в гараж"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5.1 9.75 1.25-3.2A2.25 2.25 0 0 1 8.45 5h7.1a2.25 2.25 0 0 1 2.1 1.55l1.25 3.2"/><path d="M4.5 10.25h15a1.5 1.5 0 0 1 1.5 1.5v4.75h-2.25V19H16.5v-2.5h-9V19H5.25v-2.5H3v-4.75a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="7.25" cy="13.5" r="1"/><circle cx="16.75" cy="13.5" r="1"/></svg></button>
+    </div></div></td>`;
 };
 
 const api = async (path, options = {}) => {
@@ -318,7 +323,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     const button = event.target.closest?.(".cart-offer-button");
     if (button && !button.disabled) {
       event.stopPropagation();
-      const input = button.parentElement.querySelector(".cart-quantity");
+      const input = button.closest(".cart-offer-controls").querySelector(".cart-quantity");
       if (!input.reportValidity()) return;
       void mutate("/api/cart/items", "POST", { offerId: button.dataset.cartOfferId, quantity: Number(input.value) }, button);
     }

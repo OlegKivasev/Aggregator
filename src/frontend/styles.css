@@ -8,7 +8,7 @@
   --page: #f5f7fa;
 }
 
-.garage-control { display: flex; width: 48px; justify-content: center; }
+.garage-control { display: flex; align-self: stretch; align-items: center; }
 .garage-sidebar { --garage-sidebar-width: 260px; position: relative; width: var(--garage-sidebar-width); min-width: 180px; max-width: 420px; padding: .75rem; overflow-y: auto; overscroll-behavior: contain; }
 .garage-sidebar header { display: flex; gap: .75rem; align-items: center; justify-content: space-between; }
 .garage-sidebar__header { min-height: 34px; }
@@ -99,9 +99,8 @@
 .garage-offer-button[draggable="true"]:active { cursor: grabbing; }
 .garage-offer-button:hover:not([aria-disabled="true"]), .garage-offer-button:focus-visible:not([aria-disabled="true"]) { color: var(--accent-dark); background: #fff3ed; outline: 0; }
 .garage-offer-button[aria-disabled="true"] { color: #aab4c0; }
-.search-toolbar { display: flex; min-height: 48px; flex: 0 0 auto; align-items: flex-start; gap: 12px; }
+.search-toolbar { display: flex; min-height: 48px; flex: 0 0 auto; align-items: flex-end; gap: 12px; }
 .search-toolbar > .search-row { flex: 1 1 auto; min-width: 0; }
-.search-toolbar__actions { display: flex; width: 48px; flex: 0 0 48px; flex-direction: column; align-items: center; gap: 4px; }
 .cart-toggle { position: relative; z-index: 3; display: grid; width: 48px; height: 48px; flex: 0 0 48px; padding: 8px 8px 0 0; place-items: center; border: 0; background: transparent; }
 .cart-toggle[hidden] { display: none; }
 .cart-toggle::before { position: absolute; inset: 8px 8px 0 0; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); box-shadow: 0 2px 8px #1118200d; content: ""; }
@@ -112,10 +111,11 @@
 .cart-badge { position: absolute; top: 0; right: 0; min-width: 22px; padding: 1px 5px; border: 2px solid var(--surface); border-radius: 12px; color: #fff; background: var(--accent); font-size: 11px; font-weight: 800; line-height: 16px; white-space: nowrap; }
 .cart-add-column, .cart-add-cell { width: 98px; min-width: 98px; padding: 5px 8px !important; }
 .cart-offer-controls { display: flex; align-items: center; gap: 5px; }
+.cart-offer-actions { display: grid; flex: 0 0 28px; gap: 2px; justify-items: center; }
 .cart-quantity { width: 54px; min-height: 30px; padding: 3px 4px; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 12px; }
 .cart-quantity:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .cart-quantity:disabled { color: var(--muted); background: #f3f5f8; }
-.cart-offer-button { display: grid; flex: 0 0 28px; width: 28px; height: 30px; padding: 5px; place-items: center; border: 0; border-radius: 7px; background: transparent; }
+.cart-offer-button { display: grid; width: 28px; height: 28px; padding: 5px; place-items: center; border: 0; border-radius: 7px; background: transparent; }
 .cart-offer-button img { width: 17px; height: 17px; opacity: .6; }
 .cart-offer-button:hover:enabled, .cart-offer-button:focus-visible:enabled { background: #fff3ed; outline: 2px solid var(--accent); }
 .cart-offer-button:disabled { opacity: .3; cursor: default; }
@@ -900,7 +900,7 @@ input {
 
 .workspace {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   height: calc(100dvh - 52px);
   min-height: 420px;
   align-items: start;
@@ -934,10 +934,9 @@ input {
   gap: 18px;
 }
 
-.workspace:has(.garage-sidebar:not([hidden])) { grid-template-columns: auto minmax(0, 1fr) auto; }
+.garage-control { grid-column: 3; grid-row: 1; }
 .garage-sidebar { grid-column: 3; grid-row: 1; height: 100%; }
 .workspace:has(.garage-sidebar:not([hidden])) .garage-control { display: none; }
-.workspace:has(.garage-sidebar:not([hidden])) .search-toolbar__actions:has(.cart-toggle[hidden]) { display: none; }
 
 .search-row {
   display: flex;
@@ -3315,8 +3314,7 @@ th[aria-sort="descending"] .analogs-sort span::after {
 }
 
 @media (max-width: 575.98px) {
-  .workspace,
-  .workspace:has(.garage-sidebar:not([hidden])) {
+  .workspace {
     grid-template-columns: 1fr;
   }
 
@@ -3327,6 +3325,7 @@ th[aria-sort="descending"] .analogs-sort span::after {
 
   .filters-control,
   .search-shell,
+  .garage-control,
   .garage-sidebar,
   .garage-filters-control,
   .garage-groups-control,

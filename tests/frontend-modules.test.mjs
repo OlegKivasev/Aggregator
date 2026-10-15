@@ -419,8 +419,7 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(app, /Средняя закуп\. цена/);
   assert.match(app, /Средняя цена/);
   assert.match(app, /Math\.max\(180, Math\.round\(width \/ 10\) \* 10\)/);
-  assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
-  assert.match(styles, /\.workspace:has\(\.garage-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\) auto;/s);
+  assert.match(styles, /\.workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\) auto;/s);
   assert.match(styles, /\.workspace\s*\{[^}]*height: calc\(100dvh - 52px\);[^}]*overflow: hidden;/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-items: center;/s);
   assert.match(styles, /\.filters-control:has\(\.filters-sidebar:not\(\[hidden\]\)\)\s*\{[^}]*align-self: stretch;/s);
@@ -475,8 +474,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.doesNotMatch(html, /data-garage-column="availability"/);
   assert.doesNotMatch(html, /<th>Комментарий<\/th>|<th>Нужно<\/th>|<th>Итог<\/th>/);
   assert.doesNotMatch(garage, /const comment = document\.createElement/);
-  assert.match(styles, /\.garage-control\s*\{[^}]*width: 48px;[^}]*justify-content: center;/s);
-  assert.match(styles, /\.search-toolbar__actions\s*\{[^}]*flex-direction: column;[^}]*gap: 4px;/s);
+  assert.match(styles, /\.garage-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
   assert.match(styles, /\.garage-sidebar\s*\{[^}]*--garage-sidebar-width: 260px;[^}]*min-width: 180px;[^}]*max-width: 420px;/s);
   assert.match(styles, /\.garage-search-form\s*\{[^}]*min-height: 40px;/s);
   assert.match(styles, /\.garage-add-column, \.garage-add-cell\s*\{[^}]*width: 52px;/s);

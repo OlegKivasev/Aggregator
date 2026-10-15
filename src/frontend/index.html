@@ -91,6 +91,11 @@
             <div class="filters-sidebar__resize" id="filters-resize" role="separator" aria-label="Изменить ширину фильтров" aria-orientation="vertical" tabindex="0"></div>
           </aside>
         </div>
+        <div class="garage-control">
+          <button type="button" class="filters-toggle garage-toggle" id="garage-toggle" aria-controls="garage-sidebar" aria-expanded="false" aria-label="Открыть гараж" title="Открыть гараж">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5.1 9.75 1.25-3.2A2.25 2.25 0 0 1 8.45 5h7.1a2.25 2.25 0 0 1 2.1 1.55l1.25 3.2"/><path d="M4.5 10.25h15a1.5 1.5 0 0 1 1.5 1.5v4.75h-2.25V19H16.5v-2.5h-9V19H5.25v-2.5H3v-4.75a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="7.25" cy="13.5" r="1"/><circle cx="16.75" cy="13.5" r="1"/></svg>
+          </button>
+        </div>
         <section class="search-shell">
           <div class="search-toolbar">
             <div class="search-row card shadow-sm border-0">
@@ -119,17 +124,10 @@
                 </button>
               </form>
             </div>
-            <div class="search-toolbar__actions">
-              <button type="button" class="cart-toggle" id="cart-toggle" aria-label="Открыть корзину" title="Корзина" hidden>
-                <img src="/shopping-cart.png" alt="" aria-hidden="true">
-                <span class="cart-badge" id="cart-badge" hidden>0</span>
-              </button>
-              <div class="garage-control">
-                <button type="button" class="filters-toggle garage-toggle" id="garage-toggle" aria-controls="garage-sidebar" aria-expanded="false" aria-label="Открыть гараж" title="Открыть гараж">
-                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5.1 9.75 1.25-3.2A2.25 2.25 0 0 1 8.45 5h7.1a2.25 2.25 0 0 1 2.1 1.55l1.25 3.2"/><path d="M4.5 10.25h15a1.5 1.5 0 0 1 1.5 1.5v4.75h-2.25V19H16.5v-2.5h-9V19H5.25v-2.5H3v-4.75a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="7.25" cy="13.5" r="1"/><circle cx="16.75" cy="13.5" r="1"/></svg>
-                </button>
-              </div>
-            </div>
+            <button type="button" class="cart-toggle" id="cart-toggle" aria-label="Открыть корзину" title="Корзина" hidden>
+              <img src="/shopping-cart.png" alt="" aria-hidden="true">
+              <span class="cart-badge" id="cart-badge" hidden>0</span>
+            </button>
           </div>
 
           <div class="results-panel card border-0 shadow-sm overflow-hidden" id="results-panel" aria-busy="false">
@@ -178,13 +176,12 @@
                     <th scope="col" data-column="deliveryDate" aria-sort="none"><button type="button" class="table-sort" data-sort-key="deliveryDate">Доставка<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" data-column="quantity" aria-sort="none"><button type="button" class="table-sort" data-sort-key="quantity">Остаток<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" data-column="markupPrice" aria-sort="ascending"><button type="button" class="table-sort is-active" data-sort-key="markupPrice">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                    <th scope="col" class="garage-add-column"><span class="visually-hidden">Добавить в гараж</span></th>
-                    <th scope="col" class="cart-add-column"><span class="visually-hidden">Количество и добавление в корзину</span></th>
+                    <th scope="col" class="cart-add-column"><span class="visually-hidden">Количество, добавление в корзину и гараж</span></th>
                   </tr>
                 </thead>
                 <tbody id="results-body">
                   <tr class="results-table__empty">
-                    <td colspan="9">По вашему запросу ничего не найдено.</td>
+                    <td colspan="8">По вашему запросу ничего не найдено.</td>
                   </tr>
                 </tbody>
               </table>
