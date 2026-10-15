@@ -5,18 +5,20 @@ import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
 import type { PartKomCredentials } from "../../types.ts";
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
 import { siteHttpRequest } from "../site-http.ts";
+import { parsePartKomApiResponse } from "./part-kom-api-adapter.ts";
 
 const origin = "https://ws.part-kom.ru/v4/";
 const maxBytes = 5 * 1024 * 1024;
 
 async function request(path: string, credentials: PartKomCredentials, signal: AbortSignal,
-  post?: { contentType: string; body: string }): Promise<unknown> {
+  post?: { contentType: string; body: string }, requester: typeof siteHttpRequest = siteHttpRequest): Promise<unknown> {
   const url = new URL(path, origin);
   if (url.origin !== new URL(origin).origin) throw new SupplierIntegrationError("Invalid PartKOM order URL");
-  const response = await siteHttpRequest(url, { signal, timeoutMs: 30_000, maxResponseBytes: maxBytes,
+  const response = await requester(url, { signal, timeoutMs: 30_000, maxResponseBytes: maxBytes,
     method: post ? "POST" : "GET", body: post?.body,
     headers: { Accept: "application/json", Authorization: `Basic ${Buffer.from(`${credentials.login}:${credentials.password}`).toString("base64")}`,
       ...(post ? { "Content-Type": post.contentType } : {}) } });
+  if (!post) return parsePartKomApiResponse(response);
   if (response.status === 401 || response.status === 403) throw new SupplierAuthError("PartKOM rejected order credentials");
   if (response.status < 200 || response.status >= 300) throw new SupplierIntegrationError("PartKOM order request failed");
   if (!response.contentType?.toLowerCase().includes("json")) throw new SupplierIntegrationError("PartKOM order returned unsupported content type");
@@ -41,8 +43,9 @@ export function parsePartKomPickupChoices(payload: unknown): PartKomOrderChoices
   });
 }
 
-export async function getPartKomOrderChoices(credentials: PartKomCredentials, signal: AbortSignal): Promise<PartKomOrderChoices> {
-  const pickups = parsePartKomPickupChoices(await request("basket/pickup-list", credentials, signal));
+export async function getPartKomOrderChoices(credentials: PartKomCredentials, signal: AbortSignal,
+  requester: typeof siteHttpRequest = siteHttpRequest): Promise<PartKomOrderChoices> {
+  const pickups = parsePartKomPickupChoices(await request("basket/pickup-list", credentials, signal, undefined, requester));
   return { deliveries: [{ id: "regular", type: "regular", label: "Регулярная доставка (ближайшая волна)" }, ...pickups] };
 }
 

@@ -14,7 +14,7 @@ import { testPurchaseOrder } from "../src/backend/application/test-order-applica
 import { parseArmtekOrderResult } from "../src/backend/suppliers/armtek/armtek-order.ts";
 import { parseForumAutoOrderResult } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { buildRosskoOrderEnvelope, parseRosskoOrderResult } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
-import { parsePartKomMotion } from "../src/backend/suppliers/part-kom/part-kom-order.ts";
+import { getPartKomOrderChoices, parsePartKomMotion } from "../src/backend/suppliers/part-kom/part-kom-order.ts";
 import { RealOrderApplicationService } from "../src/backend/application/real-order-application-service.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
 
@@ -36,6 +36,20 @@ const withCart = async (check, testOrder = async () => [], realOrder = null) => 
   try { await check(service, () => { service.close(); service = new CartApplicationService(new SqliteCartRepository(path), testOrder, realOrder); return service; }, path); }
   finally { service.close(); rmSync(directory, { recursive: true, force: true }); }
 };
+
+test("PartKOM checkout accepts pickup choices in a text response envelope", async () => {
+  const choices = await getPartKomOrderChoices({ login: "test", password: "test" }, new AbortController().signal,
+    async (url, options) => {
+      assert.equal(url.href, "https://ws.part-kom.ru/v4/basket/pickup-list");
+      assert.equal(options.method, "GET");
+      return { status: 200, contentType: "text/plain; charset=utf-8", setCookie: [],
+        body: `\uFEFF${JSON.stringify({ success: true, data: [{ id: 42, title: "Пункт выдачи", address: "Тестовая улица" }] })}` };
+    });
+  assert.deepEqual(choices.deliveries, [
+    { id: "regular", type: "regular", label: "Регулярная доставка (ближайшая волна)" },
+    { id: "pickup:42", type: "pickup", point: "42", label: "Самовывоз: Пункт выдачи, Тестовая улица" },
+  ]);
+});
 
 test("cart limits integer quantities, combines exact offers and conceals supplier references", async () => {
   await withCart((cart) => {

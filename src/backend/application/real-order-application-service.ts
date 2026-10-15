@@ -88,7 +88,17 @@ export class RealOrderApplicationService implements RealOrderGateway {
     if (suppliers.includes("part-kom")) {
       const credentials = this.sessions.getPartKomCredentials();
       if (!credentials) throw new SupplierAuthError("PartKOM API credentials are missing");
-      result.partKom = await getPartKomOrderChoices(credentials, signal);
+      try {
+        result.partKom = await getPartKomOrderChoices(credentials, signal);
+      } catch (error) {
+        if (error instanceof SupplierIntegrationError) throw new SupplierIntegrationError("PartKOM order choices failed", {
+          cause: error,
+          publicMessage: error.publicMessage === "PartKOM API access is not allowed from this server IP address"
+            ? "PartKOM не разрешает запросы с IP этого сервера. Заказ не отправлен."
+            : "PartKOM не вернул способы доставки. Заказ не отправлен.",
+        });
+        throw error;
+      }
     }
     return result;
   }

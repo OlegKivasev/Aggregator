@@ -78,6 +78,41 @@ test("cart HTTP validates server offers and quantities, hides routing and cannot
   }
 });
 
+test("cart order options return the safe supplier error without exposing upstream details", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "aggregator-cart-options-"));
+  const previousPath = process.env.GARAGE_DB_PATH;
+  process.env.GARAGE_DB_PATH = join(directory, "cart.sqlite");
+  let server;
+  try {
+    const application = createApplication({
+      streamSearch: async (_query, emit) => emit({ type: "result", result: attachPurchaseReference({
+        supplier: "part-kom", article: "A1", brand: "TEST", title: "Тест", price: 100, quantity: 1,
+        warehouse: null, deliveryDate: null, deliveryDateApproximate: false, link: "https://www.part-kom.ru/",
+      }, { supplier: "part-kom", makerId: "101", providerId: "202" }) }),
+      realCartOrder: {
+        choices: async () => { throw new SupplierIntegrationError("private upstream response", {
+          publicMessage: "PartKOM не вернул способы доставки. Заказ не отправлен.",
+        }); },
+      },
+    });
+    const listening = await listen(application);
+    server = listening.server;
+    const { baseUrl } = listening;
+    const events = parseSseEvents(await (await fetch(`${baseUrl}/api/search?article=A1&supplier=part-kom&stream=once`)).text());
+    const offerId = events.find((event) => event.type === "result").offerId;
+    const added = await (await fetch(`${baseUrl}/api/cart/items`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ offerId, quantity: 1, revision: 0 }),
+    })).json();
+    const response = await fetch(`${baseUrl}/api/cart/order-options?revision=${added.revision}&supplier=part-kom`);
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { message: "PartKOM не вернул способы доставки. Заказ не отправлен." });
+  } finally {
+    if (server?.listening) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); openServers.delete(server); }
+    if (previousPath === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previousPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 function session(supplier, authorized = false) {
   return {
     supplier,

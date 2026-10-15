@@ -272,8 +272,11 @@ export function createAggregatorServer({
           if (error instanceof CartError || error instanceof RequestBodyError) serveJson(response, error.statusCode, { message: error.message });
           else if (error instanceof SupplierAuthError) serveJson(response, 401, { message: "Авторизация поставщика недоступна." });
           else if (error instanceof SupplierTimeoutError) serveJson(response, 504, { message: "Поставщик не ответил вовремя." });
-          else if (error instanceof SupplierIntegrationError) serveJson(response, url.pathname === "/api/cart/refresh" && error.publicMessage ? 409 : 502,
-            { message: url.pathname === "/api/cart/refresh" && error.publicMessage ? error.publicMessage : "Не удалось получить параметры заказа у поставщика." });
+          else if (error instanceof SupplierIntegrationError) {
+            const safeMessage = error.publicMessage && (url.pathname === "/api/cart/refresh" || url.pathname === "/api/cart/order-options");
+            serveJson(response, url.pathname === "/api/cart/refresh" && safeMessage ? 409 : 502,
+              { message: safeMessage ? error.publicMessage : "Не удалось получить параметры заказа у поставщика." });
+          }
           else {
             reportError({ operation: "cart", category: classifyOperationalError(error) });
             serveJson(response, 500, { message: "Не удалось выполнить действие в корзине." });
