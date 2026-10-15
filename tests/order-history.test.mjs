@@ -141,12 +141,28 @@ test("supplier histories classify fulfillment without treating a closed Armtek o
     arTovs: [{ ...forumRow.arTovs[0], k3: 1 }] }]).orders[0].items[0];
   assert.equal(partialForum.fulfillment, "partial");
   assert.equal(partialForum.status, "Выдано 1 из 2 шт.");
-  assert.equal(parseForumAutoOrderHistory([{ ...forumRow, statusId: 100 }]).orders[0].items[0].fulfillment, "attention");
+  assert.equal(parseForumAutoOrderHistory([{ ...forumRow, statusId: 100 }]).orders[0].items[0].fulfillment, "unknown");
   for (const [code, fulfillment] of [[0, "processing"], [1, "processing"], [2, "delivered"], [3, "ready"], [6, "ready"],
-    [7, "attention"], [8, "cancelled"], [9, "attention"], [32, "attention"], [35, "attention"], [36, "returned"], [999, "unknown"]]) {
+    [7, "cancelled"], [8, "cancelled"], [9, "unknown"], [31, "returned"], [32, "unknown"], [33, "unknown"],
+    [34, "unknown"], [35, "unknown"], [36, "returned"], [999, "unknown"]]) {
     const xml = rosskoXml(rosskoRow.replace("<status>1</status>", `<status>${code}</status>`));
     assert.equal(parseRosskoOrderHistory(xml).orders[0].items[0].fulfillment, fulfillment);
   }
+});
+
+test("Rossko portal-confirmed return code 31 and documented return code 36 stay separate from stock refusal and procurement", () => {
+  const part = /<part>.*?<\/part>/s.exec(rosskoRow)[0];
+  const returned = part.replace("<status>1</status>", "<status>36</status>");
+  const cancelled = part.replace("<status>1</status>", "<status>7</status>").replace("A1", "B1");
+  const portalReturn = part.replace("<status>1</status>", "<status>31</status>").replace("A1", "C1");
+  const awaiting = part.replace("<status>1</status>", "<status>5</status>").replace("A1", "D1");
+  const items = parseRosskoOrderHistory(rosskoXml(rosskoRow.replace(part, returned + cancelled + portalReturn + awaiting))).orders[0].items;
+  assert.deepEqual(items.map(({ article, fulfillment, status }) => ({ article, fulfillment, status })), [
+    { article: "A1", fulfillment: "returned", status: "Товар возвращён" },
+    { article: "B1", fulfillment: "cancelled", status: "Нет в наличии" },
+    { article: "C1", fulfillment: "returned", status: "Успешно возвращено" },
+    { article: "D1", fulfillment: "processing", status: "Ожидаем поступление" },
+  ]);
 });
 
 test("supplier histories normalize their documented dates, fields and ordered quantities", () => {

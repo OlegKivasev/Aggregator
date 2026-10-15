@@ -159,7 +159,7 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .history-status-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
 .history-status-tab { --tab-ink: #536274; --tab-bg: #edf1f5; min-height: 36px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--surface); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
 .history-status-tab--active { --tab-ink: #1b5f9f; --tab-bg: #e6f1ff; }
-.history-status-tab--partial, .history-status-tab--attention { --tab-ink: #86570e; --tab-bg: #fff3d7; }
+.history-status-tab--partial { --tab-ink: #86570e; --tab-bg: #fff3d7; }
 .history-status-tab--cancelled { --tab-ink: #a12e35; --tab-bg: #fdebec; }
 .history-status-tab--delivered { --tab-ink: #17643b; --tab-bg: #e5f5eb; }
 .history-status-tab:hover, .history-status-tab[aria-selected="true"] { border-color: var(--tab-ink); color: var(--tab-ink); background: var(--tab-bg); }
@@ -182,13 +182,13 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .history-card[data-fulfillment="delivered"] { border-left: 4px solid #23834d; }
 .history-card[data-fulfillment="cancelled"] { border-left: 4px solid #b83c3c; }
 .history-card[data-fulfillment="in_transit"], .history-card[data-fulfillment="ready"] { border-left-color: #2874bb; }
-.history-card[data-fulfillment="partial"], .history-card[data-fulfillment="attention"], .history-card[data-fulfillment="mixed"] { border-left: 4px solid #b47b13; }
+.history-card[data-fulfillment="partial"], .history-card[data-fulfillment="mixed"] { border-left: 4px solid #b47b13; }
 .history-card__states { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .history-status { --status-ink: #536274; --status-bg: #edf1f5; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border: 1px solid currentColor; border-radius: 6px; color: var(--status-ink); background: var(--status-bg); font-size: 12px; font-weight: 700; line-height: 1.3; }
 .history-status--delivered { --status-ink: #17643b; --status-bg: #e5f5eb; }
 .history-status--cancelled { --status-ink: #a12e35; --status-bg: #fdebec; }
 .history-status--in_transit, .history-status--ready { --status-ink: #1b5f9f; --status-bg: #e6f1ff; }
-.history-status--partial, .history-status--attention { --status-ink: #86570e; --status-bg: #fff3d7; }
+.history-status--partial { --status-ink: #86570e; --status-bg: #fff3d7; }
 .history-status__icon { flex: 0 0 14px; text-align: center; font-size: 14px; }
 .history-card td .history-status { display: inline-flex; margin-top: 0; color: var(--status-ink); }
 .history-card td .history-status-detail { margin-top: 8px; line-height: 1.5; }
@@ -265,7 +265,8 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-footer__summary { display: grid; grid-template-columns: max-content minmax(0, 260px); gap: 4px 32px; }
 .cart-footer span { display: block; color: var(--muted); font-size: 12px; }
 .cart-footer strong { display: block; margin: 0; font-size: 23px; font-weight: 700; line-height: 1.3; font-variant-numeric: tabular-nums; }
-.cart-order-confirm { width: min(1040px, calc(100vw - 24px)); }
+.cart-order-confirm { width: min(1040px, calc(100vw - 24px)); border: 3px solid transparent; }
+.cart-order-confirm.is-success { border-color: #168956; }
 .cart-order-confirm::backdrop { background: rgba(17, 24, 32, .48); backdrop-filter: blur(2px); }
 .cart-order-intro { margin: 0 0 20px; padding: 10px 14px; border-left: 3px solid #b42318; color: #b42318; background: #fff0ee; font-size: 14px; font-weight: 800; }
 .cart-order-group + .cart-order-group { margin-top: 24px; }
@@ -291,7 +292,6 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 :is(.cart-partkom-receipt__state, .cart-forum-receipt__state, .cart-supplier-receipt__state) { color: #b42318; font-weight: 700; }
 .cart-order-status { margin: 16px 0 0; font-size: 14px; }
 .cart-order-status:empty { display: none; }
-.cart-order-status.is-success { color: #147548; }
 .cart-order-status.is-error { color: #b63822; }
 .cart-order-confirm .btn { min-height: 40px; padding: 8px 18px; border-radius: 7px; font-size: 13px; font-weight: 700; }
 .cart-order-submit { border: 1px solid #147548; color: #fff; background: #168956; }

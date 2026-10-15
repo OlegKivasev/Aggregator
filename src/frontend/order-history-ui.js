@@ -1,3 +1,5 @@
+import { formatOrderDate } from "./order-date-formatting.js";
+
 const suppliers = [
   ["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"],
 ];
@@ -6,12 +8,12 @@ const fulfillmentLabels = new Map([
   ["processing", ["В обработке", "◷"]], ["in_transit", ["В пути", "→"]],
   ["ready", ["На складе", "▣"]], ["delivered", ["Получен", "✓"]],
   ["cancelled", ["Отменён", "×"]], ["partial", ["Частичная поставка", "◐"]],
-  ["returned", ["Возвращён", "↶"]], ["attention", ["Требует внимания", "!"]],
+  ["returned", ["Возвращён", "↶"]],
   ["unknown", ["Статус не уточнён", "?"]],
 ]);
 const fulfillmentPriority = new Map([
   ["processing", 0], ["in_transit", 1], ["ready", 1], ["partial", 2],
-  ["cancelled", 3], ["delivered", 4], ["returned", 5], ["attention", 6], ["unknown", 7],
+  ["cancelled", 3], ["delivered", 4], ["returned", 5], ["unknown", 6],
 ]);
 const statusGroups = new Map([
   ["", { label: "Все заказы", states: [] }],
@@ -20,7 +22,6 @@ const statusGroups = new Map([
   ["cancelled", { label: "Отменено", states: ["cancelled"] }],
   ["delivered", { label: "Получено", states: ["delivered"] }],
   ["returned", { label: "Возвращено", states: ["returned"] }],
-  ["attention", { label: "Требуют внимания", states: ["attention", "unknown"] }],
 ]);
 
 function orderMatchesFilters(order, values) {
@@ -38,12 +39,6 @@ function element(tag, className, value) {
   if (className) node.className = className;
   if (value !== undefined) node.textContent = value;
   return node;
-}
-
-function formatDate(value) {
-  if (typeof value !== "string") return "Не указана";
-  const match = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(value);
-  return match ? `${match[3]}.${match[2]}.${match[1]}${match[4] ? ` ${match[4]}:${match[5]}` : ""}` : value;
 }
 
 function validHistory(value) {
@@ -88,7 +83,7 @@ function renderOrder(order, limited, supplierName) {
   }
   heading.append(summary);
   header.append(heading);
-  appendMeta(header, "ordered", "Заказано", formatDate(order.date));
+  appendMeta(header, "ordered", "Заказано", formatOrderDate(order.date) ?? "Не указана");
   appendMeta(header, "quantity", limited ? "Показано позиций / штук" : "Позиций / штук", `${order.items.length} / ${order.items.reduce((sum, item) => sum + item.quantity, 0)}`);
   const total = order.items.every((item) => item.price !== null)
     ? order.items.reduce((sum, item) => sum + item.price * item.quantity, 0) : null;
@@ -114,10 +109,9 @@ function renderOrder(order, limited, supplierName) {
     part.append(element("strong", "", [item.brand, item.article].filter(Boolean).join(" ")));
     if (item.title) part.append(element("span", "", item.title));
     const delivery = element("td");
-    if (supplierName === "Rossko" && item.expectedDate) delivery.append(element("span", "", "Желаемая дата"));
-    delivery.append(element("strong", "", formatDate(item.expectedDate)));
+    delivery.append(element("strong", "", formatOrderDate(item.expectedDate) ?? "Не указана"));
     if (item.guaranteedDate && item.guaranteedDate !== item.expectedDate) {
-      delivery.append(element("span", "", `Гарантировано: ${formatDate(item.guaranteedDate)}`));
+      delivery.append(element("span", "", `Гарантировано: ${formatOrderDate(item.guaranteedDate)}`));
     }
     if (item.warehouse) delivery.append(element("span", "", item.warehouse));
     const status = element("td", "history-item-status");
@@ -308,7 +302,7 @@ export function bootstrapOrderHistory() {
     button.dataset.status = id;
     button.setAttribute("role", "tab");
     button.setAttribute("aria-controls", "history-results");
-    if (id === "active" || id === "attention") button.title = group.states.map((state) => fulfillmentLabels.get(state)[0]).join(", ");
+    if (id === "active") button.title = group.states.map((state) => fulfillmentLabels.get(state)[0]).join(", ");
     button.addEventListener("click", () => { filters.get(selected).status = id; updateControls(); render(); });
     statusTabs.append(button);
   }

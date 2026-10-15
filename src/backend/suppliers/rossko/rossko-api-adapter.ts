@@ -25,13 +25,13 @@ const rosskoPortalOrigin = "https://samara.rossko.ru";
 const orderStatuses: Record<number, string> = {
   0: "Ждёт подтверждения", 1: "Комплектуется", 2: "Передан покупателю", 3: "Готово к отгрузке",
   5: "Ожидаем поступление", 6: "На складе филиала", 7: "Нет в наличии", 8: "Отменён клиентом", 9: "Просрочен",
-  31: "Ожидаем товар на складе", 32: "Возврат на согласовании", 33: "Товар на экспертизе",
+  31: "Успешно возвращено", 32: "Возврат на согласовании", 33: "Товар на экспертизе",
   34: "Возврат отклонён", 35: "Возврат частично отклонён", 36: "Товар возвращён",
 };
 const historyFulfillment: Record<number, OrderFulfillment> = {
   0: "processing", 1: "processing", 2: "delivered", 3: "ready", 5: "processing", 6: "ready",
-  7: "attention", 8: "cancelled", 9: "attention", 31: "processing", 32: "attention", 33: "attention",
-  34: "attention", 35: "attention", 36: "returned",
+  7: "cancelled", 8: "cancelled", 9: "unknown", 31: "returned", 32: "unknown", 33: "unknown",
+  34: "unknown", 35: "unknown", 36: "returned",
 };
 
 interface XmlElement {

@@ -1,4 +1,4 @@
-export type OrderFulfillment = "processing" | "in_transit" | "ready" | "delivered" | "cancelled" | "partial" | "returned" | "attention" | "unknown";
+export type OrderFulfillment = "processing" | "in_transit" | "ready" | "delivered" | "cancelled" | "partial" | "returned" | "unknown";
 
 export interface OrderHistoryItem {
   article: string;

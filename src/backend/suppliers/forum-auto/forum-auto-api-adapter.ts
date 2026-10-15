@@ -359,7 +359,7 @@ export function parseForumAutoOrderHistory(payload: unknown): OrderHistory {
       return { article, brand: historyText(item.brand, 200), title: historyText(item.tovname), quantity,
         price: historyNumber(item.price), status: issued === null ? historyText(row.status, 300) : `Выдано ${issued} из ${quantity} шт.`,
         expectedDate: historyDate(row.mdt, "russian"),
-        fulfillment: issued !== null && issued < quantity ? issued === 0 ? "attention" : "partial" : fulfillment,
+        fulfillment: issued !== null && issued < quantity ? issued === 0 ? "unknown" : "partial" : fulfillment,
         guaranteedDate: null, warehouse: null };
     }) };
   });

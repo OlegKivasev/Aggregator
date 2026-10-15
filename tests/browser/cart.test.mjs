@@ -163,12 +163,12 @@ test("cart adds bounded quantities, persists, orders and removes confirmed items
     assert.equal(await page.locator("#cart-partkom-delivery").count(), 0);
     assert.equal(await page.locator("#cart-order-fields").count(), 0);
     await page.locator("#cart-order-accept").click();
-    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
     assert.equal(orderCalls.length, 2);
     assert.equal(orderCalls[0][0].reference.keyzak, "TEST01");
     assert.equal(orderCalls[0][0].quantity, 3);
     assert.equal(orderCalls[1][0].reference.providerId, "202");
-    assert.match(await page.locator("#cart-status").textContent(), /Заказ успешно оформлен/);
+    assert.equal(await page.locator("#cart-status").textContent(), "");
     assert.equal(await page.locator("#cart-order-receipt p").count(), 2);
     await page.locator("#cart-order-cancel").click();
     assert.equal(await page.locator("#cart-badge").isVisible(), false);
@@ -197,12 +197,16 @@ test("checkout orders only marked goods and keeps unmarked goods in the cart", a
     await openCheckout(page);
     assert.deepEqual(await page.locator(".cart-order-group h3").allTextContents(), ["PartKOM"]);
     await page.locator("#cart-order-accept").click();
-    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
     assert.deepEqual(orderCalls.map(([line]) => line.reference.supplier), ["part-kom"]);
     await page.locator("#cart-order-cancel").click();
     assert.equal(await page.locator("#cart-badge").textContent(), "1");
     assert.equal(await page.locator("#cart-items .cart-item-supplier").textContent(), "ArmtekТестовый склад");
     assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    await openCheckout(page);
+    assert.equal(await page.locator("#cart-order-confirm").evaluate((node) => node.classList.contains("is-success")), false);
+    assert.equal(await page.locator("#cart-order-confirm").evaluate((node) => getComputedStyle(node).borderTopColor), "rgba(0, 0, 0, 0)");
+    assert.equal(await page.locator("#cart-order-title").textContent(), "Подтверждение заказа");
   }, { reducedMotion: "reduce" });
 });
 
@@ -214,21 +218,25 @@ test("successful PartKOM checkout displays the confirmed order motion without a 
     await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 1);
     await openCheckout(page);
     await page.locator("#cart-order-accept").click();
-    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
     const receipt = page.locator(".cart-partkom-receipt");
     assert.equal(await receipt.count(), 1);
     assert.match(await receipt.textContent(), /fixture-part-kom/);
     assert.match(await receipt.textContent(), /Принят в работу/);
-    assert.match(await receipt.textContent(), /2026-10-20/);
+    assert.equal(await receipt.locator("dt", { hasText: "Дата заказа" }).evaluate((node) => node.nextElementSibling.textContent), "15-10-26 12:33");
+    assert.equal(await receipt.locator("dt", { hasText: "Ожидаемый срок" }).evaluate((node) => node.nextElementSibling.textContent), "18-10-26 02:41");
+    assert.equal(await receipt.locator("dt", { hasText: "Гарантированный срок" }).evaluate((node) => node.nextElementSibling.textContent), "21-10-26 07:01");
     assert.match(await receipt.textContent(), /120,00/);
     assert.equal(await receipt.locator("img").count(), 0);
     assert.equal(await page.evaluate(() => window.cartXss), undefined);
     assert.equal(await page.locator("#cart-badge").isVisible(), false);
+    if (process.env.CART_ORDER_RESULT_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.CART_ORDER_RESULT_SCREENSHOT_DIR, "order-result-desktop.png") });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await receipt.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+    if (process.env.CART_ORDER_RESULT_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.CART_ORDER_RESULT_SCREENSHOT_DIR, "order-result-mobile.png") });
   }, { reducedMotion: "reduce", partKomReceipt: { orderDate: "2026-10-15 12:33:00", detailNum: "A1", maker: "TEST",
-    description: "Деталь <img src=x onerror=window.cartXss=1>", price: 120, expectedDate: "2026-10-17",
-    guaranteedDate: "2026-10-20", stateTxt: "Принят в работу", refusalCount: 0, storeCount: 0,
+    description: "Деталь <img src=x onerror=window.cartXss=1>", price: 120, expectedDate: "2026-10-18 02:41:00",
+    guaranteedDate: "2026-10-21 07:01:00", stateTxt: "Принят в работу", refusalCount: 0, storeCount: 0,
     releaseCount: 0, comment: "Проверено" } });
 });
 
@@ -239,12 +247,13 @@ test("successful Forum Auto checkout displays the supplier order details", async
     await page.locator("#cart-toggle").click();
     await openCheckout(page);
     await page.locator("#cart-order-accept").click();
-    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
     const receipt = page.locator(".cart-forum-receipt");
     assert.equal(await receipt.count(), 1);
     assert.match(await receipt.textContent(), /fixture-forum-auto/);
     assert.match(await receipt.textContent(), /Отправлен на бронирование/);
-    assert.match(await receipt.textContent(), /17\.10\.2026/);
+    assert.equal(await receipt.locator("dt", { hasText: "Создан" }).evaluate((node) => node.nextElementSibling.textContent), "15-10-26 12:30");
+    assert.equal(await receipt.locator("dt", { hasText: "Доставка" }).evaluate((node) => node.nextElementSibling.textContent), "17-10-26 09:00");
     assert.match(await receipt.textContent(), /Забронировано1/);
     assert.equal(await receipt.locator("img").count(), 0);
     assert.equal(await page.evaluate(() => window.cartXss), undefined);
@@ -265,11 +274,13 @@ for (const supplier of ["rossko", "armtek"]) {
       await page.locator("#cart-toggle").click();
       await openCheckout(page);
       await page.locator("#cart-order-accept").click();
-      await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+      await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
       const receipt = page.locator(`.cart-${supplier}-receipt`);
       assert.equal(await receipt.count(), 1);
       assert.match(await receipt.textContent(), new RegExp(`fixture-${supplier}`));
       assert.match(await receipt.textContent(), /Создан|Комплектуется/);
+      assert.equal(await receipt.locator("dt", { hasText: "Создан" }).evaluate((node) => node.nextElementSibling.textContent), supplier === "rossko" ? "15-10-26 13:33" : "15-10-26 13:46");
+      assert.equal(await receipt.locator("dt", { hasText: "Срок доставки" }).evaluate((node) => node.nextElementSibling.textContent), "16-10-26");
       assert.match(await receipt.textContent(), /120,00|100,00/);
       assert.equal(await receipt.locator("img").count(), 0);
       assert.equal(await page.evaluate(() => window.cartXss), undefined);
@@ -280,7 +291,7 @@ for (const supplier of ["rossko", "armtek"]) {
       ...(supplier === "rossko" ? { rosskoReceipt: { status: "Комплектуется", createdAt: "15.10.2026 13:33:00",
         deliveryAt: "16.10.2026", price: 120, total: 120, deliveryType: "Курьерская доставка",
         deliveryAddress: "Тестовый адрес <img src=x onerror=window.cartXss=1>", paymentType: "Банковский платёж" } }
-        : { armtekReceipt: { status: "Создан", createdAt: "15.10.2026 13:46", price: 100, total: 100,
+        : { armtekReceipt: { status: "Создан", createdAt: "15.10.2026 13:46", deliveryAt: "16.10.2026", price: 100, total: 100,
           deliveryType: "Доставка до клиента", deliveryAddress: "Тестовый адрес <img src=x onerror=window.cartXss=1>" } }) });
   });
 }
@@ -318,6 +329,7 @@ test("a definite Forum Auto refusal keeps the item selectable and names the fail
     await page.locator("#cart-order-accept").click();
     await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-error"));
     assert.equal(await page.locator("#cart-order-title").textContent(), "Заказ не оформлен");
+    assert.equal(await page.locator("#cart-order-confirm").evaluate((node) => node.classList.contains("is-success")), false);
     assert.match(await page.locator("#cart-order-receipt").textContent(), /превышен доступный лимит/);
     assert.equal(await page.locator("#cart-order-receipt").evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(255, 240, 238)");
     await page.locator("#cart-order-cancel").click();
@@ -663,12 +675,18 @@ test("four supplier checkout requires confirmation, details and removes confirme
     assert.equal(await page.locator("#cart-partkom-delivery").count(), 0);
     assert.equal(await page.locator("#cart-rossko-delivery, #cart-rossko-payment, #cart-rossko-name, #cart-rossko-phone").count(), 0);
     await page.locator("#cart-order-accept").click();
-    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
     assert.equal(orderCalls.length, 4);
     assert.equal(posts.length, 1);
     assert.deepEqual(orderCalls.map(([line]) => line.reference.supplier), ["armtek", "part-kom", "forum-auto", "rossko"]);
     assert.equal(await page.locator("#cart-order-accept").isVisible(), false);
-    assert.match(await page.locator("#cart-order-status").textContent(), /Заказ успешно оформлен/);
+    assert.equal(await page.locator("#cart-order-status").textContent(), "");
+    assert.equal(await page.locator("#cart-order-status").isVisible(), false);
+    assert.equal(await page.locator("#cart-status").textContent(), "");
+    assert.equal(await page.locator("#cart-order-title").textContent(), "Заказ");
+    assert.deepEqual(await page.locator("#cart-order-confirm").evaluate((node) => ({
+      color: getComputedStyle(node).borderTopColor, width: getComputedStyle(node).borderTopWidth,
+    })), { color: "rgb(22, 137, 86)", width: "3px" });
     assert.equal(await page.locator("#cart-order-receipt p").count(), 4);
     assert.equal(await page.locator("#cart-badge").isVisible(), false);
     await page.locator("#cart-order-cancel").click();
@@ -699,7 +717,7 @@ test("checkout rejects a changed reviewed cart and requires reviewing the new qu
     assert.match(await page.locator("#cart-order-total .cart-purchase-price").textContent(), /200/);
     assert.equal(await page.locator(".cart-order-table .cart-item-quantity").textContent(), "2");
     await page.locator("#cart-order-accept").click();
-    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
     assert.equal(orderCalls.length, 1);
     assert.equal(orderCalls[0][0].quantity, 2);
   }, { reducedMotion: "reduce" });
@@ -715,7 +733,7 @@ test("checkout displays a refreshed supplier price before the order is sent", as
     assert.equal(await page.locator(".cart-order-table .cart-purchase-price").first().textContent(), "125,00");
     assert.equal(orderCalls.length, 0);
     await page.locator("#cart-order-accept").click();
-    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
     assert.equal(orderCalls[0][0].result.price, 125);
   }, { refreshedPrice: 125, reducedMotion: "reduce" });
 });
@@ -733,7 +751,7 @@ test("opening the cart refreshes its offers and a supplier tab can order without
     assert.equal(refreshCalls.length, 1);
     assert.equal(orderCalls.length, 0);
     await page.locator("#cart-order-accept").click();
-    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
     assert.equal(orderCalls[0][0].result.price, 125);
   }, { refreshedPrice: 125 });
 });
@@ -827,7 +845,7 @@ test("checkout blocks duplicate submission and Escape while the real request is 
       await page.keyboard.press("Escape");
       assert.equal(await page.locator("#cart-order-confirm").isVisible(), true);
       release();
-      await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+      await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
       assert.equal(orderCalls.length, 1);
     }, { reducedMotion: "reduce", testGate: () => gate });
   } finally { release(); }
@@ -840,6 +858,8 @@ test("order history shows one PartKOM list and supplier tabs without rendering s
     await page.locator(".history-card").waitFor();
     assert.match(await page.locator(".history-card__header").innerText(), /Заказ № ORDER-1/);
     assert.match(await page.locator(".history-card").innerText(), /В работе/);
+    assert.equal(await page.locator(".history-card__ordered strong").innerText(), "15-10-26 12:30");
+    assert.equal(await page.locator(".history-card tbody td").nth(1).locator("strong").innerText(), "20-10-26");
     assert.equal(await page.locator(".history-card img").count(), 0);
     assert.equal(await page.evaluate(() => window.historyXss), undefined);
     assert.equal(await page.locator("#history-archive, #history-current").count(), 0);
@@ -876,6 +896,9 @@ test("history supplier tabs show common filters without explanatory notes and qu
       assert.equal(await page.locator("#history-status, #history-toolbar [type=submit]").count(), 0);
       assert.equal(await page.locator("#history-scope, .history-limit").count(), 0);
       assert.match(await page.locator(".history-card").innerText(), new RegExp(`Заказ № ${supplier}-1`));
+      assert.equal(await page.locator(".history-card__ordered strong").innerText(), "15-10-26 12:30");
+      assert.equal(await page.locator(".history-card tbody td").nth(1).locator("strong").innerText(), "20-10-26");
+      assert.doesNotMatch(await page.locator(".history-card").innerText(), /Желаемая дата/);
       assert.equal(await page.locator(".history-card img").count(), 0);
       assert.equal(await page.evaluate(() => window.historyXss), undefined);
       if (supplier === "armtek") {
@@ -926,7 +949,8 @@ test("history filters all suppliers by inclusive order dates and any item status
     for (const [supplier, name] of [["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"]]) {
       if (supplier !== "part-kom") await page.locator(`#history-tab-${supplier}`).click();
       await page.waitForFunction((name) => document.querySelector(".history-card__header small")?.textContent === name, name);
-      assert.equal(await page.locator("#history-status-tabs [role=tab]").count(), 7);
+      assert.equal(await page.locator("#history-status-tabs [role=tab]").count(), 6);
+      assert.equal(await page.locator("#history-status-attention").count(), 0);
       assert.equal(await page.locator("#history-scope, .history-limit").count(), 0);
       assert.doesNotMatch(await page.locator("#history-results").innerText(), /Показана ограниченная|не более 93|Активные заказы|Последние 500|Для полной истории/);
       const toolbar = await page.locator("#history-toolbar").boundingBox();
@@ -943,7 +967,7 @@ test("history filters all suppliers by inclusive order dates and any item status
       const beforeStatus = calls.length;
       await page.locator("#history-status-active").click();
       await shown(["READY", "START-MIXED", "TRANSIT"]);
-      await page.locator("#history-status-attention").click();
+      await page.locator("#history-status-returned").click();
       await page.waitForFunction(() => document.querySelector("#history-results").textContent.includes("По выбранным фильтрам заказов нет"));
       assert.equal(calls.length, beforeStatus);
       await page.locator("#history-reset").click();
@@ -997,7 +1021,7 @@ test("combined history progressively loads all suppliers, groups statuses and fi
       order("CANCEL-MIXED", ["cancelled", "delivered"]), order("UNKNOWN", ["unknown"])] },
     armtek: { limited: false, orders: [order("MOVING", ["in_transit"]), order("PARTIAL", ["partial"])] },
     "forum-auto": { limited: false, orders: [order("WAREHOUSE", ["ready"]), order("RETURN", ["returned"])] },
-    rossko: { limited: true, orders: [order("SHARED", ["delivered"]), order("ATTENTION", ["attention"])] },
+    rossko: { limited: true, orders: [order("SHARED", ["delivered"]), order("UNAVAILABLE", ["cancelled"])] },
   };
   let releaseForum;
   const forumGate = new Promise((resolve) => { releaseForum = resolve; });
@@ -1014,7 +1038,9 @@ test("combined history progressively loads all suppliers, groups statuses and fi
       assert.match(await page.locator(".history-loading").innerText(), /Forum Auto/);
       assert.equal(await page.locator(".history-card__header small", { hasText: "Forum Auto" }).count(), 0);
     } finally { releaseForum(); }
-    await shown(["CANCEL-MIXED", "UNKNOWN", "MOVING", "PARTIAL", "WAREHOUSE", "RETURN", "SHARED", "ATTENTION", "SHARED"]);
+    await shown(["CANCEL-MIXED", "UNKNOWN", "MOVING", "PARTIAL", "WAREHOUSE", "RETURN", "SHARED", "UNAVAILABLE", "SHARED"]);
+    assert.equal(await page.locator(".history-item-status .history-status--unknown").count(), 1);
+    assert.equal(await page.locator("#history-status-attention").count(), 0);
     assert.deepEqual(await page.locator(".history-card__header small").allTextContents(),
       ["PartKOM", "PartKOM", "Armtek", "Armtek", "Forum Auto", "Forum Auto", "Rossko", "Rossko", "PartKOM"]);
     const rossko = page.locator(".history-card").filter({ has: page.locator("small", { hasText: /^Rossko$/ }) });
@@ -1026,15 +1052,14 @@ test("combined history progressively loads all suppliers, groups statuses and fi
     assert.deepEqual(calls.find((query) => query.supplier === "armtek"), { supplier: "armtek", from: "2026-09-16", to: "2026-10-15" });
     const beforeStatus = calls.length;
     for (const [group, expected] of [
-      ["active", ["MOVING", "WAREHOUSE", "SHARED"]], ["partial", ["PARTIAL"]], ["cancelled", ["CANCEL-MIXED"]],
-      ["delivered", ["CANCEL-MIXED", "SHARED"]], ["returned", ["RETURN"]], ["attention", ["UNKNOWN", "ATTENTION"]],
+      ["active", ["MOVING", "WAREHOUSE", "SHARED"]], ["partial", ["PARTIAL"]], ["cancelled", ["CANCEL-MIXED", "UNAVAILABLE"]],
+      ["delivered", ["CANCEL-MIXED", "SHARED"]], ["returned", ["RETURN"]],
     ]) {
       await page.locator(`#history-status-${group}`).click();
       await shown(expected);
       assert.equal(await page.locator(`#history-status-${group}`).getAttribute("aria-selected"), "true");
       assert.equal(await page.locator("#history-reset").isVisible(), true);
-      if (group === "cancelled") assert.equal(await page.locator(".history-card tbody tr").count(), 2);
-      if (group === "attention") assert.equal(await page.locator(".history-item-status .history-status--unknown").count(), 1);
+      if (group === "cancelled") assert.equal(await page.locator(".history-card tbody tr").count(), 3);
     }
     assert.equal(calls.length, beforeStatus);
     await page.locator("#history-status-all").click();
@@ -1056,14 +1081,14 @@ test("combined history progressively loads all suppliers, groups statuses and fi
     await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 9);
     assert.equal(await page.locator("#history-reset").isVisible(), false);
     if (process.env.HISTORY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.HISTORY_SCREENSHOT_DIR, "history-all-desktop.png") });
-    await page.locator("#history-status-attention").click();
+    await page.locator("#history-status-cancelled").click();
     await page.locator("#history-tab-part-kom").click();
     await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 3);
     assert.equal(await page.locator("#history-status-all").getAttribute("aria-selected"), "true");
     await page.locator("#history-tab-all").click();
-    await shown(["UNKNOWN", "ATTENTION"]);
+    await shown(["CANCEL-MIXED", "UNAVAILABLE"]);
     await page.waitForFunction(() => !document.querySelector(".history-loading"));
-    assert.equal(await page.locator("#history-status-attention").getAttribute("aria-selected"), "true");
+    assert.equal(await page.locator("#history-status-cancelled").getAttribute("aria-selected"), "true");
     for (const width of [800, 390]) {
       await page.setViewportSize({ width, height: 844 });
       for (const selector of ["#history-tabs", "#history-status-tabs", "#history-toolbar", "#history-modal"]) {
@@ -1095,6 +1120,7 @@ test("combined history retains successful suppliers when one is unauthorized and
     assert.equal(await page.locator(".history-card img").count(), 0);
     assert.equal(await page.evaluate(() => window.historyXss), undefined);
     await page.keyboard.press("Escape");
+    await page.locator("#history-modal").waitFor({ state: "detached" });
     assert.equal(await page.locator("#history-modal").count(), 0);
   }, { fixedTime: "2026-10-15T12:00:00Z", partKomOrderHistory: async () => history, supplierOrderHistory: async () => history });
 });
@@ -1241,10 +1267,10 @@ test("history sorts every supplier newest first regardless of item status and al
     }),
     order("PROCESSING-NEW", ["processing"]),
     order("UNPRICED", ["in_transit"], null, { price: null }),
-    order("RETURNED", ["returned"]), order("ATTENTION", ["attention"], "2026-10-15 18:45:00"),
+    order("RETURNED", ["returned"]), order("UNAVAILABLE", ["cancelled"], "2026-10-15 18:45:00"),
     order("UNKNOWN", ["processing", "unknown"], "2026-10-12 19:00:00"),
   ], limited: false };
-  const expected = ["ATTENTION", "RECEIVED", "CANCELLED-MIXED", "PARTIAL-MIXED", "PROCESSING-NEW", "RETURNED",
+  const expected = ["UNAVAILABLE", "RECEIVED", "CANCELLED-MIXED", "PARTIAL-MIXED", "PROCESSING-NEW", "RETURNED",
     "READY", "MOVING-MIXED", "UNKNOWN", "PROCESSING-MIXED", "PROCESSING-OLD", "UNPRICED"].map((number) => `Заказ № ${number}`);
   const alignedColumns = async (page) => {
     const cards = await page.locator(".history-card").evaluateAll((nodes) => nodes.map((node) => {
@@ -1277,8 +1303,8 @@ test("history sorts every supplier newest first regardless of item status and al
       const mixed = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: "CANCELLED-MIXED" }) });
       assert.match(await mixed.locator(".history-card__states").innerText(), /Отменён.*Получен/s);
       await alignedColumns(page);
-      await page.locator("#history-status-attention").click();
-      assert.deepEqual(await page.locator(".history-card h3").allTextContents(), ["Заказ № ATTENTION", "Заказ № UNKNOWN"]);
+      await page.locator("#history-status-cancelled").click();
+      assert.deepEqual(await page.locator(".history-card h3").allTextContents(), ["Заказ № UNAVAILABLE", "Заказ № CANCELLED-MIXED", "Заказ № PARTIAL-MIXED", "Заказ № PROCESSING-MIXED"]);
       await page.locator("#history-status-all").click();
     }
     if (process.env.HISTORY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.HISTORY_SCREENSHOT_DIR, "history-desktop.png") });
@@ -1319,6 +1345,34 @@ test("Rossko completed order uses green received badges and handed-to-customer d
   }, { supplierOrderHistory: async () => parseRosskoOrderHistory(`<Envelope><Body><OrdersResult><success>true</success><OrdersList>
     <Order><id>771</id><created_date>15.10.2026 12:30:00</created_date><parts>
     ${part("A1", reloaded ? 1 : 2)}${part("B1", 2)}</parts></Order></OrdersList></OrdersResult></Body></Envelope>`) });
+});
+
+test("Rossko returned and unavailable positions use returned and cancelled tabs without an attention status", async () => {
+  const part = (article, code) => `<part><partnumber>${article}</partnumber><brand>TEST</brand><name>Тестовая деталь</name>
+    <price>100</price><count>1</count><status>${code}</status></part>`;
+  const history = parseRosskoOrderHistory(`<Envelope><Body><OrdersResult><success>true</success><OrdersList>
+    <Order><id>772</id><created_date>15.10.2026 12:30:00</created_date><delivery_date>18.10.2026</delivery_date><parts>
+    ${part("A1", 31)}${part("B1", 31)}${part("C1", 36)}${part("D1", 7)}</parts></Order></OrdersList></OrdersResult></Body></Envelope>`);
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.locator("#history-tab-rossko").click();
+    const card = page.locator(".history-card");
+    await card.waitFor();
+    assert.equal(await card.locator(".history-item-status .history-status--returned").count(), 3);
+    assert.equal(await card.locator(".history-item-status .history-status--cancelled").count(), 1);
+    assert.deepEqual(await card.locator(".history-status-detail").allTextContents(),
+      ["Успешно возвращено", "Успешно возвращено", "Товар возвращён", "Нет в наличии"]);
+    assert.doesNotMatch(await card.innerText(), /Требует внимания|Ожидаем товар на складе|Желаемая дата/);
+    assert.match(await card.locator(".history-card__states").innerText(), /Отменён · 1/);
+    assert.match(await card.locator(".history-card__states").innerText(), /Возвращён · 3/);
+    for (const group of ["cancelled", "returned"]) {
+      await page.locator(`#history-status-${group}`).click();
+      assert.equal(await card.count(), 1);
+      assert.equal(await card.locator("tbody tr").count(), 4);
+    }
+    await page.locator("#history-status-active").click();
+    assert.equal(await card.count(), 0);
+  }, { supplierOrderHistory: async () => history });
 });
 
 test("history cancels stale supplier results and shows safe errors and malformed payloads", async () => {

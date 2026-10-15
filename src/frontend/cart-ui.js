@@ -1,5 +1,6 @@
 import { escapeHtml, formatArticle, formatBrand, formatPrice } from "./result-formatting.js";
 import { formatDeliveryDate } from "./supplier-search-summary.js";
+import { formatOrderDate } from "./order-date-formatting.js";
 
 const supplierNames = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
 const maximumQuantity = (result) => Number.isFinite(result.quantity) ? Math.min(1_000_000, Math.floor(result.quantity)) : 0;
@@ -27,14 +28,14 @@ const partKomReceiptNode = (receipt, orderIds, acceptedQuantity) => {
     if (status) description.className = "cart-partkom-receipt__state";
     details.append(term, description);
   };
-  add("Дата заказа", receipt.orderDate);
+  add("Дата заказа", formatOrderDate(receipt.orderDate));
   add("Деталь", [receipt.detailNum, receipt.maker, receipt.description].filter((value) => typeof value === "string" && value).join(" · "));
   add("Заказано", `${receipt.quantity} шт.`);
   const price = Number.isFinite(receipt.price) && receipt.price > 0 && Number.isFinite(receipt.price * receipt.quantity) ? receipt.price : null;
   add("Цена", price === null ? null : formatPrice(price));
   add("Сумма", price === null ? null : formatPrice(price * receipt.quantity));
-  add("Ожидаемый срок", receipt.expectedDate);
-  add("Гарантированный срок", receipt.guaranteedDate);
+  add("Ожидаемый срок", formatOrderDate(receipt.expectedDate));
+  add("Гарантированный срок", formatOrderDate(receipt.guaranteedDate));
   add("Склад", receipt.placement);
   for (const [label, value] of [["Отказано", receipt.refusalCount], ["На складе", receipt.storeCount], ["Отгружено", receipt.releaseCount]]) {
     if (Number.isSafeInteger(value) && value >= 0 && value <= receipt.quantity) add(label, value);
@@ -68,8 +69,8 @@ const forumAutoReceiptNode = (receipt, orderIds, acceptedQuantity) => {
   };
   add("Номер документа", receipt.documentNumber);
   add("Статус", receipt.status, true);
-  add("Создан", receipt.createdAt);
-  add("Доставка", receipt.deliveryAt);
+  add("Создан", formatOrderDate(receipt.createdAt));
+  add("Доставка", formatOrderDate(receipt.deliveryAt));
   add("Товар", [receipt.article, receipt.brand, receipt.title].filter((value) => typeof value === "string" && value.length <= 500 && value).join(" · "));
   add("Заказано", `${receipt.orderedQuantity} шт.`);
   for (const [label, value] of [["Забронировано", receipt.reservedQuantity], ["Подтверждено", receipt.confirmedQuantity]]) {
@@ -102,7 +103,7 @@ const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity,
     if (status) description.className = "cart-supplier-receipt__state";
     details.append(term, description);
   };
-  add("Создан", receipt.createdAt);
+  add("Создан", formatOrderDate(receipt.createdAt));
   add(supplier === "armtek" ? "Статус заказа" : "Статус позиции", receipt.status, true);
   if (supplier === "armtek") add("Статус позиции", receipt.itemStatus, true);
   add("Товар", [item.result.article, item.result.brand, item.result.title].filter((value) => typeof value === "string" && value.length <= 500).join(" · "));
@@ -110,7 +111,7 @@ const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity,
   if (Number.isFinite(receipt.price) && receipt.price > 0) add("Цена", formatPrice(receipt.price));
   if (Number.isFinite(receipt.total) && receipt.total > 0) add(supplier === "armtek" ? "Сумма заказа" : "Сумма позиции", formatPrice(receipt.total));
   if (supplier === "rossko" && Number.isFinite(receipt.orderTotal) && receipt.orderTotal > 0) add("Сумма заказа", formatPrice(receipt.orderTotal));
-  add("Срок доставки", receipt.deliveryAt ?? receipt.deliveryEnd ?? receipt.deliveryStart);
+  add("Срок доставки", formatOrderDate(receipt.deliveryAt ?? receipt.deliveryEnd ?? receipt.deliveryStart));
   add("Склад", receipt.warehouse);
   add("Доставка", receipt.deliveryType);
   add("Адрес доставки", receipt.deliveryAddress);
@@ -591,6 +592,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       const choices = await api("/api/cart/order-options", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier, itemIds }) });
       if (!modal.open) return;
       orderTarget = { supplier, revision: cart.revision, items: structuredClone(items), itemIds, choices };
+      orderDialog.classList.remove("is-success");
       orderDialog.querySelector("#cart-order-title").textContent = "Подтверждение заказа";
       orderDialog.querySelector("#cart-order-groups").innerHTML = Object.entries(supplierNames).map(([supplier, name]) => {
         const group = items.filter((item) => item.result.supplier === supplier);
@@ -614,7 +616,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       orderReceipt.hidden = true;
       orderReceipt.textContent = "";
       orderStatus.textContent = "";
-      orderStatus.classList.remove("is-error", "is-success");
+      orderStatus.classList.remove("is-error");
       orderAccept.hidden = false;
       orderAccept.disabled = false;
       orderCancel.textContent = "Вернуться в корзину";
@@ -645,7 +647,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     orderAccept.disabled = true;
     orderCancel.disabled = true;
     orderStatus.textContent = "Отправляем заказ поставщикам…";
-    orderStatus.classList.remove("is-error", "is-success");
+    orderStatus.classList.remove("is-error");
     render();
     try {
       if (cart.revision !== revision) throw new Error("Корзина изменилась. Вернитесь в корзину и проверьте заказ заново.");
@@ -723,7 +725,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       selectedIds.clear();
       render();
       const complete = accepted === items.length && failed === 0 && !items.some((item) => cart.items.some((remaining) => remaining.id === item.id));
-      const message = complete ? "Заказ успешно оформлен. Заказанные товары удалены из корзины."
+      const message = complete ? ""
         : accepted ? "Часть заказа оформлена. Подтверждённые товары удалены из корзины; остальные оставлены для проверки."
           : uncertain ? "Заказ не подтверждён. Проверьте результат у поставщика перед повторной попыткой."
             : "Заказ не оформлен. Поставщик отклонил выбранные товары.";
@@ -732,9 +734,9 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       orderReceipt.classList.toggle("is-error", !complete);
       status.textContent = message;
       orderStatus.textContent = message;
-      orderStatus.classList.toggle("is-success", complete);
+      orderDialog.classList.toggle("is-success", complete);
       orderStatus.classList.toggle("is-error", !complete);
-      orderDialog.querySelector("#cart-order-title").textContent = complete ? "Заказ успешно оформлен" : accepted ? "Часть заказа оформлена"
+      orderDialog.querySelector("#cart-order-title").textContent = complete ? "Заказ" : accepted ? "Часть заказа оформлена"
         : uncertain ? "Статус заказа" : "Заказ не оформлен";
       orderAccept.hidden = true;
       orderCancel.textContent = "Закрыть";
