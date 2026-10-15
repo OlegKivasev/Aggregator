@@ -1,6 +1,25 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { after, test } from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parsePartKomOrderHistory } from "../src/backend/suppliers/part-kom/part-kom-order.ts";
+import { listForumAutoOrderHistory, parseForumAutoOrderHistory, parseForumAutoApiResponse } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
+import { listRosskoOrderHistory, parseRosskoOrderHistory } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
+import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
+import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../src/backend/errors.ts";
+import { historyDate } from "../src/backend/purchasing/order-history-values.ts";
+import { armtekRequestTimeoutMs, rosskoConfig } from "../src/backend/config.ts";
+
+const stateDirectory = mkdtempSync(join(tmpdir(), "aggregator-order-history-"));
+const previousStateDirectory = process.env.STATE_DIR;
+process.env.STATE_DIR = stateDirectory;
+const { listArmtekOrderHistory, parseArmtekOrderHistory } = await import("../src/backend/suppliers/armtek/armtek-order.ts");
+const { RealOrderApplicationService } = await import("../src/backend/application/real-order-application-service.ts");
+after(() => {
+  if (previousStateDirectory === undefined) delete process.env.STATE_DIR; else process.env.STATE_DIR = previousStateDirectory;
+  rmSync(stateDirectory, { recursive: true, force: true });
+});
 
 test("PartKOM history groups positions by order, sorts dates and uses only validated fields", () => {
   const history = parsePartKomOrderHistory([
@@ -21,4 +40,139 @@ test("PartKOM history rejects malformed supplier positions", () => {
   assert.throws(() => parsePartKomOrderHistory({ orders: [] }), /history is invalid/);
   assert.throws(() => parsePartKomOrderHistory([{ orderNumber: "O1", detailNum: "A1", quantity: 0 }]), /incomplete/);
   assert.throws(() => parsePartKomOrderHistory([{ orderNumber: "O1", detailNum: "A1", quantity: 1.5 }]), /incomplete/);
+});
+
+const armtekRow = { ORDER: "0000000001", ORDER_DATE: "20261015123000", PIN: "A1", BRAND: "TEST", NAME: "Деталь",
+  KWMENG: "2.000", PRICE: "100.50", CURRENCY: "RUB", STATUS: "позиция частично поставлена", DLVRD: "20261020120000" };
+const forumRow = { did: 123, nr: null, dtc: "15.10.2026 12:30:00", status: "Подтвержден", mdt: "20.10.2026 00:00:00",
+  arTovs: [{ nr: "A1", brand: "TEST", tovname: "Деталь", k1: 2, k3: 0, price: 100.5 }] };
+const rosskoXml = (orders, success = "true", message = "") => `<Envelope><Body><GetOrdersResponse><OrdersResult>
+  <success>${success}</success>${message ? `<message>${message}</message>` : ""}<OrdersList>${orders}</OrdersList>
+  </OrdersResult></GetOrdersResponse></Body></Envelope>`;
+const rosskoRow = `<Order><id>123</id><created_date>15.10.2026 12:30:00</created_date><delivery_date>20.10.2026</delivery_date>
+  <stock_address>Склад</stock_address><parts><part><partnumber>A1</partnumber><brand>TEST</brand><name>Деталь</name>
+  <count>2</count><price>100.50</price><status>1</status></part></parts></Order>`;
+
+test("supplier histories normalize their documented dates, fields and ordered quantities", () => {
+  const armtek = parseArmtekOrderHistory({ DATA: [armtekRow, { ...armtekRow, PIN: "B1", DLVRD: "20260230120000" }] });
+  assert.equal(armtek.orders.length, 1);
+  assert.equal(armtek.orders[0].items.length, 2);
+  for (const history of [armtek, parseForumAutoOrderHistory([forumRow]), parseRosskoOrderHistory(rosskoXml(rosskoRow))]) {
+    assert.equal(history.orders[0].date, "2026-10-15 12:30:00");
+    assert.equal(history.orders[0].items[0].quantity, 2);
+    assert.equal(history.orders[0].items[0].price, 100.5);
+    assert.equal(history.limited, false);
+  }
+  assert.equal(armtek.orders[0].items[1].expectedDate, null);
+  assert.equal(armtek.orders[0].items[0].warehouse, null);
+  assert.equal(parseForumAutoOrderHistory([forumRow]).orders[0].number, "123");
+  assert.equal(parseRosskoOrderHistory(rosskoXml(rosskoRow)).orders[0].items[0].status, "Комплектуется");
+  assert.equal(parseArmtekOrderHistory({ DATA: [{ ...armtekRow, CURRENCY: undefined }] }).orders[0].items[0].price, null);
+});
+
+test("supplier histories reject malformed responses and never turn faults into empty orders", () => {
+  for (const parse of [parseArmtekOrderHistory, parseForumAutoOrderHistory]) {
+    assert.throws(() => parse(null), SupplierIntegrationError);
+    assert.throws(() => parse({ error: "upstream failure" }), SupplierIntegrationError);
+  }
+  assert.throws(() => parseArmtekOrderHistory({ DATA: [{ ...armtekRow, KWMENG: true }] }), SupplierIntegrationError);
+  assert.throws(() => parseArmtekOrderHistory({ DATA: [{ ...armtekRow, CURRENCY: "EUR" }] }), SupplierIntegrationError);
+  assert.throws(() => parseForumAutoOrderHistory([{ ...forumRow, arTovs: [{ nr: "A1", k1: 0 }] }]), SupplierIntegrationError);
+  assert.throws(() => parseRosskoOrderHistory(rosskoXml(rosskoRow.replace("<count>2", "<count>NaN"))), SupplierIntegrationError);
+  assert.throws(() => parseRosskoOrderHistory(rosskoXml("", "false", "private supplier error")), SupplierIntegrationError);
+  assert.throws(() => parseRosskoOrderHistory("<OrdersResult>"), SupplierIntegrationError);
+  assert.throws(() => parseRosskoOrderHistory('<!DOCTYPE foo [<!ENTITY secret SYSTEM "file:///secret">]><root/>'), SupplierIntegrationError);
+  assert.deepEqual(parseArmtekOrderHistory({ DATA: [] }), { orders: [], limited: false });
+  assert.deepEqual(parseForumAutoOrderHistory([]), { orders: [], limited: false });
+  assert.deepEqual(parseRosskoOrderHistory(rosskoXml("")), { orders: [], limited: false });
+  assert.deepEqual(parseRosskoOrderHistory(rosskoXml("", "false", "Ничего не найдено")), { orders: [], limited: false });
+});
+
+test("new histories cap positions and mark partial output without inventing data", () => {
+  const history = parseArmtekOrderHistory({ DATA: Array.from({ length: 501 }, (_, index) => ({ ...armtekRow, PIN: `A${index}` })) });
+  assert.equal(history.orders[0].items.length, 500);
+  assert.equal(history.limited, true);
+  assert.equal(historyDate("2026-02-30"), null);
+  assert.equal(historyDate("2026-10-15 24:00:00"), null);
+  assert.equal(historyDate("20240229010101", "compact"), "2024-02-29 01:01:01");
+});
+
+test("Forum Auto history requests only active orders and preserves transport failures", async () => {
+  const credentials = { login: "fixture", password: "fixture" };
+  const signal = new AbortController().signal;
+  const history = await listForumAutoOrderHistory(credentials, signal, async (method, params, receivedSignal, timeoutMs, receivedCredentials) => {
+    assert.equal(method, "listorders");
+    assert.equal(params.toString(), "did=0");
+    assert.equal(receivedSignal, signal);
+    assert.equal(receivedCredentials, credentials);
+    assert.equal(timeoutMs, 30_000);
+    return [forumRow];
+  });
+  assert.equal(history.orders[0].number, "123");
+  for (const error of [new SupplierAuthError(), new SupplierTimeoutError(), new SupplierIntegrationError()]) {
+    await assert.rejects(listForumAutoOrderHistory(credentials, signal, async () => { throw error; }), (caught) => caught === error);
+  }
+  assert.throws(() => parseForumAutoApiResponse({ status: 200, contentType: "application/json", body: '{"faultCode":10}' }, "listorders"), SupplierAuthError);
+  assert.throws(() => parseForumAutoApiResponse({ status: 200, contentType: "application/json", body: "broken" }, "listorders"), SupplierIntegrationError);
+});
+
+test("Armtek and Rossko histories use fixed read-only methods and honor abort", async (t) => {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith("getUserVkorgList")) return Response.json({ STATUS: 200, RESP: { ARRAY: [{ VKORG: "4000" }] } });
+    if (path.endsWith("getUserInfo")) return Response.json({ STATUS: 200, RESP: { STRUCTURE: { RG_TAB: [{ KUNNR: "fixture", DEFAULT: "1" }] } } });
+    calls.push({ url: String(url), options });
+    options.signal.throwIfAborted();
+    return String(url).includes("armtek")
+      ? Response.json({ STATUS: 200, RESP: { DATA: [armtekRow] } })
+      : new Response(rosskoXml(rosskoRow), { headers: { "Content-Type": "text/xml" } });
+  });
+  const signal = new AbortController().signal;
+  await listArmtekOrderHistory({ login: "fixture", password: "fixture" }, "2026-10-01", "2026-10-15", signal);
+  assert.equal(new URL(calls[0].url).pathname, "/api/ws_reports/getOrderPositionsReportByDate");
+  assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[0].options.body.get("SCRDATE"), "20261001");
+  assert.equal(calls[0].options.body.get("ECRDATE"), "20261015");
+  assert.equal(calls[0].options.body.get("KUNNR_RG"), "fixture");
+  await listRosskoOrderHistory({ key1: "fixture<&", key2: "fixture" }, signal);
+  assert.equal(calls[1].url, "https://api.rossko.ru/service/v2.1/GetOrders");
+  assert.match(calls[1].options.body, /<ros:limit>500<\/ros:limit>/);
+  assert.match(calls[1].options.body, /fixture&lt;&amp;/);
+  assert.doesNotMatch(calls[1].options.body, /GetCheckout|createOrder/);
+  const aborted = AbortSignal.abort(new Error("fixture abort"));
+  await assert.rejects(listRosskoOrderHistory({ key1: "fixture", key2: "fixture" }, aborted), /fixture abort/);
+});
+
+test("history application requires supplier authorization and rejects aborted work", async () => {
+  const service = new RealOrderApplicationService(new SupplierSessionManager(), async () => { throw new Error("Search must not run"); });
+  for (const query of [{ supplier: "armtek", from: "2026-10-01", to: "2026-10-15" }, { supplier: "forum-auto" }, { supplier: "rossko" }]) {
+    await assert.rejects(service.supplierOrderHistory(query, new AbortController().signal), SupplierAuthError);
+    await assert.rejects(service.supplierOrderHistory(query, AbortSignal.abort(new Error("fixture abort"))), /fixture abort/);
+  }
+});
+
+test("history body timeouts preserve typed timeout errors after headers have arrived", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const [supplier, timeout] of [["armtek", armtekRequestTimeoutMs], ["rossko", rosskoConfig.requestTimeoutMs]]) {
+    let started;
+    const ready = new Promise((resolve) => { started = resolve; });
+    const mock = t.mock.method(globalThis, "fetch", async (url, options) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith("getUserVkorgList")) return Response.json({ STATUS: 200, RESP: { ARRAY: [{ VKORG: "4000" }] } });
+      if (path.endsWith("getUserInfo")) return Response.json({ STATUS: 200, RESP: { STRUCTURE: { RG_TAB: [{ KUNNR: "fixture", DEFAULT: "1" }] } } });
+      return new Response(new ReadableStream({ start(controller) {
+        options.signal.addEventListener("abort", () => controller.error(new DOMException("Aborted body", "AbortError")), { once: true });
+        started();
+      } }), { headers: { "Content-Type": supplier === "armtek" ? "application/json" : "text/xml" } });
+    });
+    const signal = new AbortController().signal;
+    const result = supplier === "armtek" ? listArmtekOrderHistory({ login: "fixture", password: "fixture" }, "2026-10-01", "2026-10-15", signal)
+      : listRosskoOrderHistory({ key1: "fixture", key2: "fixture" }, signal);
+    const rejection = assert.rejects(result, SupplierTimeoutError);
+    await ready;
+    t.mock.timers.tick(timeout + 1);
+    await rejection;
+    mock.mock.restore();
+  }
 });

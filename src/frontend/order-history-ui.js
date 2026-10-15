@@ -20,8 +20,9 @@ function validHistory(value) {
   return value && typeof value === "object" && Array.isArray(value.orders) && value.orders.length <= 500
     && typeof value.limited === "boolean" && value.orders.every((order) => order && typeof order.number === "string"
       && (order.date === null || typeof order.date === "string") && Array.isArray(order.items) && order.items.length > 0
-      && order.items.every((item) => item && typeof item.article === "string" && Number.isSafeInteger(item.quantity)
-        && item.quantity > 0 && (item.price === null || Number.isFinite(item.price) && item.price >= 0)
+      && order.items.every((item) => item && typeof item.article === "string" && Number.isFinite(item.quantity)
+        && item.quantity > 0 && item.quantity <= Number.MAX_SAFE_INTEGER
+        && (item.price === null || Number.isFinite(item.price) && item.price >= 0 && item.price <= Number.MAX_SAFE_INTEGER)
         && [item.brand, item.title, item.status, item.expectedDate, item.guaranteedDate, item.warehouse]
           .every((field) => field === null || typeof field === "string")));
 }
@@ -32,14 +33,14 @@ function appendMeta(parent, label, value) {
   parent.append(meta);
 }
 
-function renderOrder(order, limited) {
+function renderOrder(order, limited, supplierName) {
   const card = element("article", "history-card");
   const header = element("header", "history-card__header");
   const heading = element("div");
-  heading.append(element("small", "", "PartKOM"), element("h3", "", `Заказ № ${order.number}`));
+  heading.append(element("small", "", supplierName), element("h3", "", `Заказ № ${order.number}`));
   header.append(heading);
   appendMeta(header, "Заказано", formatDate(order.date));
-  appendMeta(header, "Позиций / штук", `${order.items.length} / ${order.items.reduce((sum, item) => sum + item.quantity, 0)}`);
+  appendMeta(header, limited ? "Показано позиций / штук" : "Позиций / штук", `${order.items.length} / ${order.items.reduce((sum, item) => sum + item.quantity, 0)}`);
   const total = order.items.every((item) => item.price !== null)
     ? order.items.reduce((sum, item) => sum + item.price * item.quantity, 0) : null;
   if (!limited && total !== null && Number.isFinite(total)) header.append(element("strong", "history-card__total", money.format(total)));
@@ -58,6 +59,7 @@ function renderOrder(order, limited) {
     part.append(element("strong", "", [item.brand, item.article].filter(Boolean).join(" ")));
     if (item.title) part.append(element("span", "", item.title));
     const delivery = element("td");
+    if (supplierName === "Rossko" && item.expectedDate) delivery.append(element("span", "", "Желаемая дата"));
     delivery.append(element("strong", "", formatDate(item.expectedDate)));
     if (item.guaranteedDate && item.guaranteedDate !== item.expectedDate) {
       delivery.append(element("span", "", `Гарантировано: ${formatDate(item.guaranteedDate)}`));
@@ -87,14 +89,26 @@ export function bootstrapOrderHistory() {
     <div class="cart-content history-content"><div class="history-toolbar" id="history-toolbar">
       <button type="button" id="history-current" aria-pressed="true">Текущие</button>
       <button type="button" id="history-archive" aria-pressed="false">Архив</button>
+      <div class="history-period" id="history-period" hidden>
+        <label>С <input type="date" id="history-from" required></label>
+        <label>По <input type="date" id="history-to" required></label></div>
       <button type="button" class="history-reload" id="history-reload">Обновить</button></div>
+      <p class="history-scope" id="history-scope" hidden></p>
       <div id="history-results" role="status" aria-live="polite"></div></div>`;
-  document.body.append(dialog);
   const tabs = dialog.querySelector("#history-tabs");
   const results = dialog.querySelector("#history-results");
-  const toolbar = dialog.querySelector("#history-toolbar");
   const current = dialog.querySelector("#history-current");
   const archived = dialog.querySelector("#history-archive");
+  const period = dialog.querySelector("#history-period");
+  const from = dialog.querySelector("#history-from");
+  const to = dialog.querySelector("#history-to");
+  const scope = dialog.querySelector("#history-scope");
+  const reload = dialog.querySelector("#history-reload");
+  const dateValue = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const today = new Date();
+  to.value = dateValue(today);
+  today.setDate(today.getDate() - 29);
+  from.value = dateValue(today);
   let selected = "part-kom";
   let archive = false;
   let pending = null;
@@ -104,28 +118,42 @@ export function bootstrapOrderHistory() {
   };
   const load = async () => {
     pending?.abort();
-    if (selected !== "part-kom") {
-      toolbar.hidden = true;
-      message(`История заказов ${suppliers.find(([id]) => id === selected)?.[1]} пока не подключена.`);
-      return;
-    }
-    toolbar.hidden = false;
+    const supplier = selected;
+    const name = suppliers.find(([id]) => id === supplier)[1];
+    current.hidden = archived.hidden = supplier !== "part-kom";
+    period.hidden = supplier !== "armtek";
+    reload.textContent = supplier === "armtek" ? "Показать" : "Обновить";
+    scope.textContent = supplier === "armtek" ? "Заказы за выбранный период, не более 93 дней. По умолчанию — последние 30 дней."
+      : supplier === "forum-auto" ? "Активные заказы. API Forum Auto не возвращает общую историю аннулированных и выданных заказов."
+        : supplier === "rossko" ? "Последние 500 заказов Rossko, включая отгруженные и отменённые." : "";
+    scope.hidden = !scope.textContent;
     const controller = new AbortController();
     pending = controller;
-    message("Загружаем заказы PartKOM…");
     try {
-      const response = await fetch(`/api/order-history/part-kom?archive=${archive ? "1" : "0"}`, { signal: controller.signal });
+      const params = new URLSearchParams();
+      if (supplier === "part-kom") params.set("archive", archive ? "1" : "0");
+      if (supplier === "armtek") {
+        if (!from.value || !to.value || !from.checkValidity() || !to.checkValidity() || from.value > to.value
+          || Date.parse(to.value) - Date.parse(from.value) > 92 * 86400000) {
+          throw new Error("Выберите корректный период Armtek: не более 93 дней.");
+        }
+        params.set("from", from.value);
+        params.set("to", to.value);
+      }
+      message(`Загружаем заказы ${name}…`);
+      const response = await fetch(`/api/order-history/${supplier}${params.size ? `?${params}` : ""}`, { signal: controller.signal });
       const payload = await response.json();
       if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось получить историю заказов.");
-      if (!validHistory(payload)) throw new Error("PartKOM вернул некорректную историю заказов.");
+      if (!validHistory(payload)) throw new Error(`${name} вернул некорректную историю заказов.`);
       if (controller.signal.aborted || !dialog.open) return;
       if (!payload.orders.length) {
-        message(archive ? "В архиве PartKOM заказов нет." : "Текущих заказов PartKOM нет.");
+        message(supplier === "part-kom" ? archive ? "В архиве PartKOM заказов нет." : "Текущих заказов PartKOM нет."
+          : `В выбранной истории ${name} заказов нет.`);
         return;
       }
       const fragment = document.createDocumentFragment();
-      if (payload.limited) fragment.append(element("p", "history-limit", "Показаны первые 500 позиций. Для полной истории используйте кабинет PartKOM."));
-      for (const order of payload.orders) fragment.append(renderOrder(order, payload.limited));
+      if (payload.limited) fragment.append(element("p", "history-limit", `Показана ограниченная выборка заказов и позиций. Для полной истории используйте кабинет ${name}.`));
+      for (const order of payload.orders) fragment.append(renderOrder(order, payload.limited, name));
       results.replaceChildren(fragment);
     } catch (error) {
       if (!controller.signal.aborted && dialog.open) message(error.message || "Не удалось получить историю заказов.", true);
@@ -145,14 +173,14 @@ export function bootstrapOrderHistory() {
       tabs.append(button);
     }
   };
-  toggle.addEventListener("click", () => { updateTabs(); dialog.showModal(); void load(); });
+  toggle.addEventListener("click", () => { updateTabs(); document.body.append(dialog); dialog.showModal(); void load(); });
   dialog.querySelector("#history-close").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("close", () => { pending?.abort(); toggle.focus(); });
+  dialog.addEventListener("close", () => { pending?.abort(); dialog.remove(); toggle.focus(); });
   current.addEventListener("click", () => {
     if (archive) { archive = false; current.setAttribute("aria-pressed", "true"); archived.setAttribute("aria-pressed", "false"); void load(); }
   });
   archived.addEventListener("click", () => {
     if (!archive) { archive = true; archived.setAttribute("aria-pressed", "true"); current.setAttribute("aria-pressed", "false"); void load(); }
   });
-  dialog.querySelector("#history-reload").addEventListener("click", () => void load());
+  reload.addEventListener("click", () => void load());
 }

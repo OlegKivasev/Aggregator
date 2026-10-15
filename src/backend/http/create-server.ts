@@ -39,12 +39,14 @@ import { getGarageDatabasePath } from "../config.ts";
 import { CartApplicationService, CartError, type RealOrderGateway } from "../purchasing/cart-application-service.ts";
 import { SqliteCartRepository } from "../purchasing/sqlite-cart-repository.ts";
 import type { TestOrder } from "../purchasing/purchase-offer.ts";
-import type { PartKomOrderHistory } from "../purchasing/order-history-contract.ts";
+import type { OrderHistory, SupplierOrderHistoryQuery } from "../purchasing/order-history-contract.ts";
+import { historyDate } from "../purchasing/order-history-values.ts";
 
 export interface AggregatorApplication {
   testCartOrder?: TestOrder;
   realCartOrder?: RealOrderGateway;
-  partKomOrderHistory?: (archive: boolean, signal: AbortSignal) => Promise<PartKomOrderHistory>;
+  partKomOrderHistory?: (archive: boolean, signal: AbortSignal) => Promise<OrderHistory>;
+  supplierOrderHistory?: (query: SupplierOrderHistoryQuery, signal: AbortSignal) => Promise<OrderHistory>;
   listSupplierSessions(): SupplierSessionState[];
   validateSupplierSessions(
     article: string,
@@ -230,35 +232,53 @@ export function createAggregatorServer({
 
     const url = new URL(request.url, "http://127.0.0.1");
 
-    if (url.pathname === "/api/order-history/part-kom") {
+    const historyMatch = /^\/api\/order-history\/(part-kom|armtek|forum-auto|rossko)$/.exec(url.pathname);
+    if (historyMatch) {
+      const supplier = historyMatch[1];
+      const name = ({ "part-kom": "PartKOM", armtek: "Armtek", "forum-auto": "Forum Auto", rossko: "Rossko" } as Record<string, string>)[supplier];
       response.setHeader("Cache-Control", "no-store");
       if (request.method !== "GET") {
         serveJson(response, 405, { message: "Method not allowed" });
         return;
       }
       const archive = url.searchParams.get("archive");
-      if ([...url.searchParams.keys()].some((key) => key !== "archive") || url.searchParams.getAll("archive").length > 1
+      const allowed = supplier === "part-kom" ? ["archive"] : supplier === "armtek" ? ["from", "to"] : [];
+      if ([...url.searchParams.keys()].some((key) => !allowed.includes(key) || url.searchParams.getAll(key).length > 1)
         || archive !== null && archive !== "0" && archive !== "1") {
         serveJson(response, 400, { message: "Неверный фильтр истории заказов." });
         return;
       }
+      let query: SupplierOrderHistoryQuery | null = null;
+      if (supplier === "armtek") {
+        const from = url.searchParams.get("from");
+        const to = url.searchParams.get("to");
+        if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)
+          || historyDate(from) !== from || historyDate(to) !== to || from > to
+          || Date.parse(to) - Date.parse(from) > 92 * 86_400_000) {
+          serveJson(response, 400, { message: "Выберите корректный период Armtek: не более 93 дней." });
+          return;
+        }
+        query = { supplier, from, to };
+      } else if (supplier === "forum-auto" || supplier === "rossko") query = { supplier };
       const controller = new AbortController();
       const abort = () => { if (!response.writableEnded) controller.abort(new Error("Client disconnected")); };
       response.once("close", abort);
       try {
-        if (!application.partKomOrderHistory) {
-          serveJson(response, 503, { message: "История заказов PartKOM недоступна." });
+        const loadHistory = query ? application.supplierOrderHistory?.bind(application, query)
+          : application.partKomOrderHistory?.bind(application, archive === "1");
+        if (!loadHistory) {
+          serveJson(response, 503, { message: `История заказов ${name} недоступна.` });
         } else {
-          const history = await application.partKomOrderHistory(archive === "1", controller.signal);
+          const history = await loadHistory(controller.signal);
           if (!controller.signal.aborted) serveJson(response, 200, history);
         }
       } catch (error) {
         if (!controller.signal.aborted) {
-          if (error instanceof SupplierAuthError) serveJson(response, 401, { message: "Авторизация PartKOM недоступна." });
-          else if (error instanceof SupplierTimeoutError) serveJson(response, 504, { message: "PartKOM не ответил вовремя." });
-          else if (error instanceof SupplierIntegrationError) serveJson(response, 502, { message: "Не удалось получить историю заказов PartKOM." });
+          if (error instanceof SupplierAuthError) serveJson(response, 401, { message: `Авторизация ${name} недоступна.` });
+          else if (error instanceof SupplierTimeoutError) serveJson(response, 504, { message: `${name} не ответил вовремя.` });
+          else if (error instanceof SupplierIntegrationError) serveJson(response, 502, { message: `Не удалось получить историю заказов ${name}.` });
           else {
-            reportError({ operation: "part-kom-order-history", category: classifyOperationalError(error) });
+            reportError({ operation: `${supplier}-order-history`, category: classifyOperationalError(error) });
             serveJson(response, 500, { message: "Не удалось получить историю заказов." });
           }
         }

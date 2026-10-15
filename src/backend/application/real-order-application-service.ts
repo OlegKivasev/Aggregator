@@ -4,11 +4,13 @@ import { getPurchaseReference, type PurchaseLine, type PurchaseReference } from 
 import type { SupplierSessionManager } from "../session/session-manager.ts";
 import type { SearchStreamEvent, SupplierSearchQuery } from "../types.ts";
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../suppliers/errors.ts";
-import { placeArmtekOrder } from "../suppliers/armtek/armtek-order.ts";
+import { listArmtekOrderHistory, placeArmtekOrder } from "../suppliers/armtek/armtek-order.ts";
 import { resolveArmtekConfig } from "../suppliers/armtek/armtek-api-adapter.ts";
-import { placeForumAutoOrder, verifyForumAutoCredentials } from "../suppliers/forum-auto/forum-auto-api-adapter.ts";
+import { listForumAutoOrderHistory, placeForumAutoOrder, verifyForumAutoCredentials } from "../suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { getPartKomOrderChoices, listPartKomOrderHistory, placePartKomOrder } from "../suppliers/part-kom/part-kom-order.ts";
-import { getRosskoOrderChoices, placeRosskoOrder } from "../suppliers/rossko/rossko-api-adapter.ts";
+import { getRosskoOrderChoices, listRosskoOrderHistory, placeRosskoOrder } from "../suppliers/rossko/rossko-api-adapter.ts";
+import type { OrderHistory, SupplierOrderHistoryQuery } from "../purchasing/order-history-contract.ts";
+import { createBoundedAbortSignal } from "../abort.ts";
 
 const validPhone = (value: unknown): value is string => typeof value === "string" && /^[+\d()\s-]{6,40}$/.test(value);
 const sameText = (left: string, right: string): boolean => left.trim().toLocaleUpperCase() === right.trim().toLocaleUpperCase();
@@ -100,6 +102,29 @@ export class RealOrderApplicationService implements RealOrderGateway {
     const credentials = this.sessions.getPartKomCredentials();
     if (!credentials) throw new SupplierAuthError("PartKOM API credentials are missing");
     return listPartKomOrderHistory(credentials, archive, signal);
+  }
+
+  async supplierOrderHistory(query: SupplierOrderHistoryQuery, signal: AbortSignal): Promise<OrderHistory> {
+    signal.throwIfAborted();
+    const bounded = createBoundedAbortSignal(signal, 35_000, "Supplier order history timed out");
+    try {
+      if (query.supplier === "armtek") {
+        const credentials = this.sessions.getArmtekCredentials();
+        if (!credentials) throw new SupplierAuthError("Armtek API credentials are missing");
+        return await listArmtekOrderHistory(credentials, query.from, query.to, bounded.signal);
+      }
+      if (query.supplier === "forum-auto") {
+        const credentials = this.sessions.getForumAutoCredentials();
+        if (!credentials) throw new SupplierAuthError("Forum-Auto API credentials are missing");
+        return await listForumAutoOrderHistory(credentials, bounded.signal);
+      }
+      const credentials = this.sessions.getRosskoApiCredentials();
+      if (!credentials) throw new SupplierAuthError("Rossko API credentials are missing");
+      return await listRosskoOrderHistory(credentials, bounded.signal);
+    } catch (error) {
+      if (bounded.signal.aborted) throw bounded.signal.reason;
+      throw error;
+    } finally { bounded.dispose(); }
   }
 
   async refresh(lines: PurchaseLine[], signal: AbortSignal): Promise<PurchaseLine[]> {

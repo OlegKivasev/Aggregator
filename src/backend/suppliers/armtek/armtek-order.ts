@@ -4,6 +4,41 @@ import type { ArmtekCredentials } from "../../types.ts";
 import { createBoundedAbortSignal } from "../../abort.ts";
 import { SupplierIntegrationError } from "../errors.ts";
 import { requestArmtek, resolveArmtekConfig } from "./armtek-api-adapter.ts";
+import type { OrderHistory, OrderHistoryOrder } from "../../purchasing/order-history-contract.ts";
+import { finishOrderHistory, historyDate, historyNumber, historyText } from "../../purchasing/order-history-values.ts";
+
+export function parseArmtekOrderHistory(payload: unknown): OrderHistory {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new SupplierIntegrationError("Armtek order history is invalid");
+  const data = (payload as { DATA?: unknown }).DATA;
+  if (!Array.isArray(data)) throw new SupplierIntegrationError("Armtek order history data is invalid");
+  const orders = new Map<string, OrderHistoryOrder>();
+  for (const entry of data) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new SupplierIntegrationError("Armtek order history item is invalid");
+    const row = entry as Record<string, unknown>;
+    const number = historyText(row.ORDER, 100);
+    const article = historyText(row.PIN, 128);
+    const quantity = historyNumber(row.KWMENG);
+    if (!number || !article || quantity === null || quantity <= 0) throw new SupplierIntegrationError("Armtek order history item is incomplete");
+    const currency = historyText(row.CURRENCY, 4);
+    if (currency && currency !== "RUB" && currency !== "RUR") throw new SupplierIntegrationError("Armtek history currency is unsupported");
+    const item = { article, brand: historyText(row.BRAND, 200), title: historyText(row.NAME), quantity,
+      price: currency ? historyNumber(row.PRICE) : null, status: historyText(row.STATUS, 300) ?? historyText(row.ORDER_STATUS, 300),
+      expectedDate: historyDate(row.DLVRD, "compact"), guaranteedDate: historyDate(row.WRNTD, "compact"), warehouse: null };
+    const order = orders.get(number);
+    if (order) order.items.push(item);
+    else orders.set(number, { number, date: historyDate(row.ORDER_DATE, "compact"), items: [item] });
+  }
+  return finishOrderHistory([...orders.values()]);
+}
+
+export async function listArmtekOrderHistory(credentials: ArmtekCredentials, from: string, to: string, signal: AbortSignal): Promise<OrderHistory> {
+  signal.throwIfAborted();
+  const resolved = await resolveArmtekConfig(credentials, signal);
+  const payload = await requestArmtek<unknown>("ws_reports/getOrderPositionsReportByDate", credentials, { method: "POST", signal,
+    params: new URLSearchParams({ VKORG: resolved.vkorg, KUNNR_RG: resolved.kunnrRg,
+      SCRDATE: from.replaceAll("-", ""), ECRDATE: to.replaceAll("-", ""), TYPEZK_SALE: "1", TYPEZK_RETN: "0", KURR_LOGIN: "1" }) });
+  return parseArmtekOrderHistory(payload);
+}
 
 interface ArmtekOrderAllocation {
   KWMENG?: unknown;

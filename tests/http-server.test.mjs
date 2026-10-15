@@ -41,6 +41,59 @@ test("PartKOM history HTTP forwards archive selection and hides supplier errors"
   assert.equal(JSON.stringify(await error.json()).includes("private upstream"), false);
 });
 
+test("supplier history HTTP validates supplier-specific filters and sanitizes failures", async () => {
+  const calls = [];
+  const application = createApplication({ supplierOrderHistory: async (query, signal) => {
+    assert.equal(signal.aborted, false);
+    calls.push(query);
+    return { orders: [], limited: false };
+  } });
+  const { baseUrl } = await listen(application);
+  for (const path of ["armtek?from=2026-10-01&to=2026-10-15", "forum-auto", "rossko"]) {
+    const response = await fetch(`${baseUrl}/api/order-history/${path}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await response.json(), { orders: [], limited: false });
+  }
+  assert.deepEqual(calls, [{ supplier: "armtek", from: "2026-10-01", to: "2026-10-15" }, { supplier: "forum-auto" }, { supplier: "rossko" }]);
+  for (const path of ["armtek", "armtek?from=2026-02-30&to=2026-03-01", "armtek?from=2026-10-15&to=2026-10-01",
+    "armtek?from=2026-01-01&to=2026-10-15", "armtek?from=2026-10-01&from=2026-10-02&to=2026-10-15",
+    "armtek?from=2026-10-01&to=2026-10-15&archive=1", "rossko?limit=9999", "forum-auto?archive=1"]) {
+    assert.equal((await fetch(`${baseUrl}/api/order-history/${path}`)).status, 400, path);
+  }
+  assert.equal(calls.length, 3);
+  assert.equal((await fetch(`${baseUrl}/api/order-history/armtek`, { method: "POST" })).status, 405);
+  for (const [error, status] of [[new SupplierAuthError("private credentials"), 401], [new SupplierTimeoutError("private url"), 504],
+    [new SupplierIntegrationError("private payload"), 502], [new Error("private path"), 500]]) {
+    application.supplierOrderHistory = async () => { throw error; };
+    const response = await fetch(`${baseUrl}/api/order-history/rossko`);
+    assert.equal(response.status, status);
+    assert.equal(JSON.stringify(await response.json()).includes("private"), false);
+  }
+  delete application.supplierOrderHistory;
+  assert.equal((await fetch(`${baseUrl}/api/order-history/forum-auto`)).status, 503);
+});
+
+test("supplier history HTTP aborts upstream work when the client disconnects", async () => {
+  let receivedSignal;
+  let started;
+  const ready = new Promise((resolve) => { started = resolve; });
+  const application = createApplication({ supplierOrderHistory: async (_query, signal) => {
+    receivedSignal = signal;
+    started();
+    await new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+  } });
+  const { baseUrl } = await listen(application);
+  const request = httpRequest(`${baseUrl}/api/order-history/rossko`);
+  request.on("error", () => { /* A disconnected test client intentionally receives no response. */ });
+  request.end();
+  await ready;
+  const aborted = once(receivedSignal, "abort");
+  request.destroy();
+  await aborted;
+  assert.equal(receivedSignal.aborted, true);
+});
+
 test("cart HTTP validates server offers and quantities, hides routing and cannot enable real orders", async () => {
   const directory = mkdtempSync(join(tmpdir(), "aggregator-cart-http-"));
   const previousPath = process.env.GARAGE_DB_PATH;

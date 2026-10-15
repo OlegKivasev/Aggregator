@@ -1,4 +1,4 @@
-export interface PartKomHistoryItem {
+export interface OrderHistoryItem {
   article: string;
   brand: string | null;
   title: string | null;
@@ -10,13 +10,17 @@ export interface PartKomHistoryItem {
   warehouse: string | null;
 }
 
-export interface PartKomHistoryOrder {
+export interface OrderHistoryOrder {
   number: string;
   date: string | null;
-  items: PartKomHistoryItem[];
+  items: OrderHistoryItem[];
 }
 
-export interface PartKomOrderHistory {
-  orders: PartKomHistoryOrder[];
+export interface OrderHistory {
+  orders: OrderHistoryOrder[];
   limited: boolean;
 }
+
+export type SupplierOrderHistoryQuery =
+  | { supplier: "armtek"; from: string; to: string }
+  | { supplier: "forum-auto" | "rossko" };

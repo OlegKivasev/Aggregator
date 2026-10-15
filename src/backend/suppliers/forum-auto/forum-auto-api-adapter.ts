@@ -16,6 +16,8 @@ import type { SupplierAdapter } from "../supplier-adapter.ts";
 import { attachPurchaseReference } from "../../purchasing/purchase-offer.ts";
 import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
 import type { ForumAutoOrderReceipt, OrderGroupResult } from "../../purchasing/order-contract.ts";
+import type { OrderHistory } from "../../purchasing/order-history-contract.ts";
+import { finishOrderHistory, historyDate, historyNumber, historyText } from "../../purchasing/order-history-values.ts";
 
 interface ForumAutoOffer {
   gid?: unknown;
@@ -322,6 +324,34 @@ async function forumAutoApiRequest(
     maxResponseBytes: supplierMaxResponseBytes,
   });
   return parseForumAutoApiResponse(response, method);
+}
+
+export function parseForumAutoOrderHistory(payload: unknown): OrderHistory {
+  const orders = apiItems(payload, "order history").map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new SupplierIntegrationError("Forum-Auto history order is invalid");
+    const row = entry as Record<string, unknown>;
+    const id = historyNumber(row.did);
+    if (id === null || !Number.isSafeInteger(id) || id <= 0 || !Array.isArray(row.arTovs) || !row.arTovs.length) {
+      throw new SupplierIntegrationError("Forum-Auto history order is incomplete");
+    }
+    return { number: historyText(row.nr, 100) ?? String(id), date: historyDate(row.dtc, "russian"), items: row.arTovs.map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new SupplierIntegrationError("Forum-Auto history item is invalid");
+      const item = entry as Record<string, unknown>;
+      const article = historyText(item.nr, 128);
+      const quantity = historyNumber(item.k1);
+      if (!article || quantity === null || quantity <= 0) throw new SupplierIntegrationError("Forum-Auto history item is incomplete");
+      return { article, brand: historyText(item.brand, 200), title: historyText(item.tovname), quantity,
+        price: historyNumber(item.price), status: historyText(row.status, 300), expectedDate: historyDate(row.mdt, "russian"),
+        guaranteedDate: null, warehouse: null };
+    }) };
+  });
+  return finishOrderHistory(orders);
+}
+
+export async function listForumAutoOrderHistory(credentials: ForumAutoCredentials, signal: AbortSignal,
+  request: ForumAutoApiRequester = forumAutoApiRequest): Promise<OrderHistory> {
+  signal.throwIfAborted();
+  return parseForumAutoOrderHistory(await request("listorders", new URLSearchParams({ did: "0" }), signal, 30_000, credentials));
 }
 
 export function parseForumAutoOrderResult(payload: unknown, line: PurchaseLine): OrderGroupResult {

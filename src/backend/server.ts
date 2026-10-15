@@ -79,6 +79,7 @@ const application: AggregatorApplication = {
   testCartOrder,
   realCartOrder,
   partKomOrderHistory: (archive, signal) => realCartOrder.partKomOrderHistory(archive, signal),
+  supplierOrderHistory: (query, signal) => realCartOrder.supplierOrderHistory(query, signal),
   validateSupplierSessions,
 };
 

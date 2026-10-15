@@ -32,6 +32,7 @@ async function withCartPage(check, options = {}) {
     const sessions = suppliers.map((supplier) => ({ supplier, authorized: true, lastCheckedAt: null, lastAuthorizedAt: null }));
     const application = {
       partKomOrderHistory: options.partKomOrderHistory ?? (async () => ({ orders: [], limited: false })),
+      supplierOrderHistory: options.supplierOrderHistory ?? (async () => ({ orders: [], limited: false })),
       listSupplierSessions: () => sessions,
       getApplicabilityApiKeyState: () => ({ configured: false, persistent: false, maskedKey: null }),
       getApplicabilityProxyState: () => ({ persistent: false, activeRouteId: null, proxies: [], directLimited: false,
@@ -323,6 +324,11 @@ test("a definite Forum Auto refusal keeps the item selectable and names the fail
 
 test("cart honors reduced motion, constrains focus and fits mobile viewport", async () => {
   await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.locator("#history-tab-armtek").click();
+    await page.waitForFunction(() => document.querySelector("#history-results").textContent.includes("В выбранной истории Armtek заказов нет"));
+    await page.locator("#history-close").click();
+    await page.waitForFunction(() => !document.querySelector("#history-modal"));
     await page.locator("#results-body .cart-offer-button").first().click();
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
     assert.equal(await page.locator(".cart-flying-icon").count(), 0);
@@ -835,8 +841,9 @@ test("order history shows PartKOM cards, archive and supplier tabs without rende
     await page.locator("#history-archive").click();
     await page.waitForFunction(() => document.querySelector("#history-results").textContent.includes("В архиве PartKOM заказов нет"));
     await page.locator("#history-tab-rossko").click();
-    assert.match(await page.locator("#history-results").innerText(), /Rossko пока не подключена/);
-    assert.equal(await page.locator("#history-toolbar").isVisible(), false);
+    await page.waitForFunction(() => document.querySelector("#history-results").textContent.includes("В выбранной истории Rossko заказов нет"));
+    assert.equal(await page.locator("#history-toolbar").isVisible(), true);
+    assert.equal(await page.locator("#history-archive").isVisible(), false);
     await page.locator("#history-tab-part-kom").click();
     await page.locator("#history-current").click();
     await page.locator(".history-card").waitFor();
@@ -849,4 +856,75 @@ test("order history shows PartKOM cards, archive and supplier tabs without rende
       brand: "TEST", title: "<img src=x onerror=window.historyXss=1>", quantity: 2, price: 100,
       status: "В работе", expectedDate: "2026-10-20", guaranteedDate: null, warehouse: "Склад" }] }], limited: false };
   } });
+});
+
+test("history supplier tabs show real response cards, scope and Armtek date selection", async () => {
+  const calls = [];
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    for (const [supplier, name] of [["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"]]) {
+      await page.locator(`#history-tab-${supplier}`).click();
+      await page.waitForFunction((name) => document.querySelector(".history-card__header small")?.textContent === name, name);
+      assert.equal(await page.locator("#history-current").isVisible(), false);
+      assert.equal(await page.locator("#history-archive").isVisible(), false);
+      assert.equal(await page.locator("#history-period").isVisible(), supplier === "armtek");
+      assert.match(await page.locator(".history-card").innerText(), new RegExp(`Заказ № ${supplier}-1`));
+      assert.equal(await page.locator(".history-card img").count(), 0);
+      assert.equal(await page.evaluate(() => window.historyXss), undefined);
+      if (supplier === "armtek") {
+        await page.locator("#history-from").fill("2026-10-01");
+        await page.locator("#history-to").fill("2026-10-15");
+        await page.locator("#history-reload").click();
+        await page.waitForFunction(() => document.querySelector(".history-card") !== null);
+        assert.deepEqual(calls.at(-1), { supplier: "armtek", from: "2026-10-01", to: "2026-10-15" });
+        await page.locator("#history-from").fill("2026-01-01");
+        const previousCalls = calls.length;
+        await page.locator("#history-reload").click();
+        await page.locator(".history-message.is-error").waitFor();
+        assert.match(await page.locator("#history-results").innerText(), /не более 93 дней/);
+        assert.equal(calls.length, previousCalls);
+      }
+      if (supplier === "forum-auto") assert.match(await page.locator("#history-scope").innerText(), /Активные заказы/);
+      if (supplier === "rossko") {
+        assert.match(await page.locator("#history-scope").innerText(), /Последние 500/);
+        assert.equal(await page.locator(".history-limit").count(), 1);
+        assert.equal(await page.locator(".history-card__total").count(), 0);
+      }
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator("#history-tab-armtek").click();
+    assert.equal(await page.locator("#history-toolbar").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+  }, { supplierOrderHistory: async (query) => {
+    calls.push(query);
+    return { orders: [{ number: `${query.supplier}-1`, date: "2026-10-15 12:30:00", items: [{ article: "A1", brand: "TEST",
+      title: "<img src=x onerror=window.historyXss=1>", quantity: 1.5, price: 100, status: "В работе",
+      expectedDate: "2026-10-20", guaranteedDate: null, warehouse: null }] }], limited: query.supplier === "rossko" };
+  } });
+});
+
+test("history cancels stale supplier results and shows safe errors and malformed payloads", async () => {
+  await withCartPage(async (page) => {
+    let releaseArmtek;
+    const armtekGate = new Promise((resolve) => { releaseArmtek = resolve; });
+    let armtekStarted;
+    const started = new Promise((resolve) => { armtekStarted = resolve; });
+    await page.route("**/api/order-history/armtek?*", async (route) => {
+      armtekStarted();
+      await armtekGate;
+      await route.fulfill({ json: { orders: [], limited: false } });
+    });
+    await page.route("**/api/order-history/forum-auto", (route) => route.fulfill({ status: 401, json: { message: "Авторизация Forum Auto недоступна." } }));
+    await page.route("**/api/order-history/rossko", (route) => route.fulfill({ json: { unexpected: true } }));
+    await page.locator("#history-toggle").click();
+    await page.locator("#history-tab-armtek").click();
+    await started;
+    await page.locator("#history-tab-forum-auto").click();
+    await page.locator(".history-message.is-error").waitFor();
+    releaseArmtek();
+    assert.match(await page.locator("#history-results").innerText(), /Авторизация Forum Auto недоступна/);
+    await page.locator("#history-tab-rossko").click();
+    await page.waitForFunction(() => document.querySelector("#history-results").textContent.includes("Rossko вернул некорректную историю"));
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#history-modal[open]").count(), 0);
+  });
 });

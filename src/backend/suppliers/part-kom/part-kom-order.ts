@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { CheckoutDetails, OrderGroupResult, PartKomOrderChoices, PartKomOrderReceipt } from "../../purchasing/order-contract.ts";
-import type { PartKomHistoryItem, PartKomOrderHistory } from "../../purchasing/order-history-contract.ts";
+import type { OrderHistoryItem, OrderHistory } from "../../purchasing/order-history-contract.ts";
 import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
 import type { PartKomCredentials } from "../../types.ts";
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
@@ -57,9 +57,9 @@ function historyPrice(value: unknown): number | null {
   return Number.isFinite(raw) && raw >= 0 ? raw : null;
 }
 
-export function parsePartKomOrderHistory(payload: unknown): PartKomOrderHistory {
+export function parsePartKomOrderHistory(payload: unknown): OrderHistory {
   if (!Array.isArray(payload) || payload.length > historyLimit) throw new SupplierIntegrationError("PartKOM order history is invalid");
-  const orders = new Map<string, PartKomOrderHistory["orders"][number]>();
+  const orders = new Map<string, OrderHistory["orders"][number]>();
   for (const entry of payload) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new SupplierIntegrationError("PartKOM order history item is invalid");
     const row = entry as Record<string, unknown>;
@@ -70,7 +70,7 @@ export function parsePartKomOrderHistory(payload: unknown): PartKomOrderHistory 
     if (!number || !article || typeof quantity !== "number" || !Number.isSafeInteger(quantity) || quantity < 1) {
       throw new SupplierIntegrationError("PartKOM order history item is incomplete");
     }
-    const item: PartKomHistoryItem = {
+    const item: OrderHistoryItem = {
       article, brand: historyText(row.maker, 200), title: historyText(row.description, 500), quantity,
       price: historyPrice(row.price), status: historyText(row.stateTxt, 300),
       expectedDate: historyDate(row.expectedDate), guaranteedDate: historyDate(row.guaranteedDate),
@@ -85,7 +85,7 @@ export function parsePartKomOrderHistory(payload: unknown): PartKomOrderHistory 
   return { orders: [...orders.values()].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")), limited: payload.length === historyLimit };
 }
 
-export async function listPartKomOrderHistory(credentials: PartKomCredentials, archive: boolean, signal: AbortSignal): Promise<PartKomOrderHistory> {
+export async function listPartKomOrderHistory(credentials: PartKomCredentials, archive: boolean, signal: AbortSignal): Promise<OrderHistory> {
   const params = new URLSearchParams({ limit: String(historyLimit), archive: archive ? "1" : "0" });
   return parsePartKomOrderHistory(await request(`basket/motion?${params}`, credentials, signal));
 }

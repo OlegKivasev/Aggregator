@@ -294,6 +294,9 @@ export async function requestArmtek<T>(
     }
 
     return payload.RESP;
+  } catch (error) {
+    if (requestSignal.signal.aborted) throw requestSignal.signal.reason;
+    throw error;
   } finally {
     requestSignal.dispose();
   }
