@@ -78,6 +78,7 @@ const application: AggregatorApplication = {
   streamSearch,
   testCartOrder,
   realCartOrder,
+  partKomOrderHistory: (archive, signal) => realCartOrder.partKomOrderHistory(archive, signal),
   validateSupplierSessions,
 };
 

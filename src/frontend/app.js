@@ -14,6 +14,7 @@ import {
 import { openSearchStream } from "./search-stream.js";
 import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { bootstrapCart, renderCartOfferControls } from "./cart-ui.js";
+import { bootstrapOrderHistory } from "./order-history-ui.js";
 import {
   isStpartsWarehouseVisible,
   normalizeStpartsWarehouseColors,
@@ -2960,6 +2961,7 @@ renderResults();
 loadSessions().catch(() => undefined);
 const garageUi = bootstrapGarage({ getMarkupPercent: () => markupPercent, startSearch: startSearchForArticle });
 bootstrapCart({ getMarkupPrice });
+bootstrapOrderHistory();
 
 setupColumnResizing({
   table: resultsTable,

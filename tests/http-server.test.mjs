@@ -18,6 +18,29 @@ import { testPurchaseOrder } from "../src/backend/application/test-order-applica
 const publicDir = join(process.cwd(), "src", "frontend");
 const openServers = new Set();
 
+test("PartKOM history HTTP forwards archive selection and hides supplier errors", async () => {
+  const calls = [];
+  const application = createApplication({ partKomOrderHistory: async (archive) => {
+    calls.push(archive);
+    return { orders: [{ number: "ORDER-1", date: "2026-10-15", items: [{ article: "A1", brand: "TEST", title: "Фильтр",
+      quantity: 1, price: 100, status: "В работе", expectedDate: null, guaranteedDate: null, warehouse: null }] }], limited: false };
+  } });
+  const { baseUrl } = await listen(application);
+  const current = await fetch(`${baseUrl}/api/order-history/part-kom`);
+  assert.equal(current.headers.get("cache-control"), "no-store");
+  assert.equal(current.status, 200);
+  assert.equal((await current.json()).orders[0].number, "ORDER-1");
+  assert.equal((await fetch(`${baseUrl}/api/order-history/part-kom?archive=1`)).status, 200);
+  assert.deepEqual(calls, [false, true]);
+  assert.equal((await fetch(`${baseUrl}/api/order-history/part-kom?other=1`)).status, 400);
+  assert.equal((await fetch(`${baseUrl}/api/order-history/part-kom?archive=1&archive=0`)).status, 400);
+  assert.equal((await fetch(`${baseUrl}/api/order-history/part-kom`, { method: "POST" })).status, 405);
+  application.partKomOrderHistory = async () => { throw new SupplierIntegrationError("private upstream payload"); };
+  const error = await fetch(`${baseUrl}/api/order-history/part-kom`);
+  assert.equal(error.status, 502);
+  assert.equal(JSON.stringify(await error.json()).includes("private upstream"), false);
+});
+
 test("cart HTTP validates server offers and quantities, hides routing and cannot enable real orders", async () => {
   const directory = mkdtempSync(join(tmpdir(), "aggregator-cart-http-"));
   const previousPath = process.env.GARAGE_DB_PATH;

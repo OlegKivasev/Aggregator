@@ -31,6 +31,7 @@ async function withCartPage(check, options = {}) {
     const suppliers = options.allSuppliers ? ["armtek", "part-kom", "forum-auto", "rossko"] : ["armtek", "part-kom"];
     const sessions = suppliers.map((supplier) => ({ supplier, authorized: true, lastCheckedAt: null, lastAuthorizedAt: null }));
     const application = {
+      partKomOrderHistory: options.partKomOrderHistory ?? (async () => ({ orders: [], limited: false })),
       listSupplierSessions: () => sessions,
       getApplicabilityApiKeyState: () => ({ configured: false, persistent: false, maskedKey: null }),
       getApplicabilityProxyState: () => ({ persistent: false, activeRouteId: null, proxies: [], directLimited: false,
@@ -820,4 +821,32 @@ test("checkout blocks duplicate submission and Escape while the real request is 
       assert.equal(orderCalls.length, 1);
     }, { reducedMotion: "reduce", testGate: () => gate });
   } finally { release(); }
+});
+
+test("order history shows PartKOM cards, archive and supplier tabs without rendering supplier HTML", async () => {
+  const calls = [];
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.locator(".history-card").waitFor();
+    assert.match(await page.locator(".history-card__header").innerText(), /Заказ № ORDER-1/);
+    assert.match(await page.locator(".history-card").innerText(), /В работе/);
+    assert.equal(await page.locator(".history-card img").count(), 0);
+    assert.equal(await page.evaluate(() => window.historyXss), undefined);
+    await page.locator("#history-archive").click();
+    await page.waitForFunction(() => document.querySelector("#history-results").textContent.includes("В архиве PartKOM заказов нет"));
+    await page.locator("#history-tab-rossko").click();
+    assert.match(await page.locator("#history-results").innerText(), /Rossko пока не подключена/);
+    assert.equal(await page.locator("#history-toolbar").isVisible(), false);
+    await page.locator("#history-tab-part-kom").click();
+    await page.locator("#history-current").click();
+    await page.locator(".history-card").waitFor();
+    await page.locator("#history-close").click();
+    assert.equal(await page.locator("#history-toggle").evaluate((node) => node === document.activeElement), true);
+    assert.deepEqual(calls, [false, true, true, false]);
+  }, { partKomOrderHistory: async (archive) => {
+    calls.push(archive);
+    return { orders: archive ? [] : [{ number: "ORDER-1", date: "2026-10-15 12:30:00", items: [{ article: "A1",
+      brand: "TEST", title: "<img src=x onerror=window.historyXss=1>", quantity: 2, price: 100,
+      status: "В работе", expectedDate: "2026-10-20", guaranteedDate: null, warehouse: "Склад" }] }], limited: false };
+  } });
 });

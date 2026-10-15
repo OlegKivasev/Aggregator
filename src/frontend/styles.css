@@ -120,6 +120,10 @@
 .cart-offer-button:hover:enabled, .cart-offer-button:focus-visible:enabled { background: #fff3ed; outline: 2px solid var(--accent); }
 .cart-offer-button:disabled { opacity: .3; cursor: default; }
 .cart-toggle img, .cart-offer-button img, .cart-flying-icon img { mix-blend-mode: multiply; }
+.history-toggle { display: grid; width: 40px; height: 40px; flex: 0 0 40px; margin-bottom: 4px; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); box-shadow: 0 2px 8px #1118200d; }
+.history-toggle img { width: 21px; height: 21px; object-fit: contain; opacity: .72; }
+.history-toggle:hover { border-color: var(--accent); background: #fff3ed; }
+.history-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .cart-modal { position: relative; width: min(1200px, calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 32px); padding: 0; border: 0; border-radius: 16px; color: var(--ink); background: #f8fafc; box-shadow: 0 20px 80px #11182038; }
 .cart-modal[open] { display: flex; flex-direction: column; }
 .cart-refresh-overlay[hidden] { display: none; }
@@ -150,6 +154,30 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-modal .btn:disabled { opacity: .5; cursor: default; }
 #cart-summary { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
 .cart-tabs { display: flex; flex: 0 0 auto; gap: 6px; padding: 0 24px; border-bottom: 1px solid var(--line); overflow-x: auto; background: var(--surface); }
+.history-modal { min-height: min(520px, calc(100dvh - 32px)); }
+.history-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.history-toolbar[hidden] { display: none; }
+.history-toolbar button { min-height: 36px; padding: 7px 14px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: var(--surface); font: inherit; font-size: 13px; cursor: pointer; }
+.history-toolbar [aria-pressed="true"] { border-color: var(--accent); color: var(--accent-dark); background: #fff3ed; font-weight: 700; }
+.history-toolbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.history-toolbar .history-reload { margin-left: auto; }
+.history-message { margin: 20px 0; padding: 24px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: var(--surface); text-align: center; }
+.history-message.is-error { color: #b63822; border-color: #f0b7ab; background: #fff3f1; }
+.history-card { margin-bottom: 16px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.history-card__header { display: flex; align-items: center; flex-wrap: wrap; gap: 14px 36px; padding: 18px 20px; background: #e3e8f0; }
+.history-card__header > div:first-child { flex: 1 1 210px; }
+.history-card__header h3 { margin: 3px 0 0; font-size: 23px; font-weight: 700; overflow-wrap: anywhere; }
+.history-card__header small, .history-card__meta span { display: block; color: var(--muted); font-size: 12px; }
+.history-card__meta strong { display: block; margin-top: 4px; font-size: 13px; }
+.history-card__total { margin-left: auto; font-size: 22px; white-space: nowrap; }
+.history-card__table-wrap { overflow-x: auto; }
+.history-card table { width: 100%; min-width: 680px; border-collapse: collapse; font-size: 13px; }
+.history-card th { color: var(--muted); font-weight: 500; text-align: left; }
+.history-card th, .history-card td { padding: 13px 20px; border-top: 1px solid var(--line); vertical-align: top; }
+.history-card td strong, .history-card td span { display: block; }
+.history-card td span { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.history-card .history-number { text-align: right; white-space: nowrap; }
+.history-limit { margin: 0 0 16px; color: #a75821; font-size: 12px; }
 .cart-tab { display: inline-flex; min-height: 44px; flex: 0 0 auto; align-items: center; gap: 8px; padding: 8px 14px; border: 0; border-bottom: 3px solid transparent; color: var(--muted); background: transparent; font: inherit; font-size: 13px; font-weight: 700; }
 .cart-tab[aria-selected="true"] { color: var(--accent-dark); border-bottom-color: var(--accent); background: #fff8f4; }
 .cart-tab:hover { color: var(--accent-dark); background: #fff3ed; }

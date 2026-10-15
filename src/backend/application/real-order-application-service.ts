@@ -7,7 +7,7 @@ import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } fro
 import { placeArmtekOrder } from "../suppliers/armtek/armtek-order.ts";
 import { resolveArmtekConfig } from "../suppliers/armtek/armtek-api-adapter.ts";
 import { placeForumAutoOrder, verifyForumAutoCredentials } from "../suppliers/forum-auto/forum-auto-api-adapter.ts";
-import { getPartKomOrderChoices, placePartKomOrder } from "../suppliers/part-kom/part-kom-order.ts";
+import { getPartKomOrderChoices, listPartKomOrderHistory, placePartKomOrder } from "../suppliers/part-kom/part-kom-order.ts";
 import { getRosskoOrderChoices, placeRosskoOrder } from "../suppliers/rossko/rossko-api-adapter.ts";
 
 const validPhone = (value: unknown): value is string => typeof value === "string" && /^[+\d()\s-]{6,40}$/.test(value);
@@ -93,6 +93,13 @@ export class RealOrderApplicationService implements RealOrderGateway {
     search: (query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) => Promise<void>) {
     this.sessions = sessions;
     this.search = search;
+  }
+
+  async partKomOrderHistory(archive: boolean, signal: AbortSignal) {
+    signal.throwIfAborted();
+    const credentials = this.sessions.getPartKomCredentials();
+    if (!credentials) throw new SupplierAuthError("PartKOM API credentials are missing");
+    return listPartKomOrderHistory(credentials, archive, signal);
   }
 
   async refresh(lines: PurchaseLine[], signal: AbortSignal): Promise<PurchaseLine[]> {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { CheckoutDetails, OrderGroupResult, PartKomOrderChoices, PartKomOrderReceipt } from "../../purchasing/order-contract.ts";
+import type { PartKomHistoryItem, PartKomOrderHistory } from "../../purchasing/order-history-contract.ts";
 import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
 import type { PartKomCredentials } from "../../types.ts";
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
@@ -9,6 +10,7 @@ import { parsePartKomApiResponse } from "./part-kom-api-adapter.ts";
 
 const origin = "https://ws.part-kom.ru/v4/";
 const maxBytes = 5 * 1024 * 1024;
+const historyLimit = 500;
 
 async function request(path: string, credentials: PartKomCredentials, signal: AbortSignal,
   post?: { contentType: string; body: string }): Promise<unknown> {
@@ -31,6 +33,61 @@ async function request(path: string, credentials: PartKomCredentials, signal: Ab
 
 export function getPartKomOrderChoices(): PartKomOrderChoices {
   return { deliveries: [{ id: "regular", type: "regular", label: "Регулярная доставка (ближайшая волна)" }] };
+}
+
+function historyText(value: unknown, maxLength: number): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  return text && text.length <= maxLength ? text : null;
+}
+
+function historyDate(value: unknown): string | null {
+  const text = historyText(value, 32);
+  const match = text?.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!match) return null;
+  const [, year, month, day, hour = "00", minute = "00", second = "00"] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+  return date.getFullYear() === Number(year) && date.getMonth() === Number(month) - 1 && date.getDate() === Number(day)
+    && date.getHours() === Number(hour) && date.getMinutes() === Number(minute) && date.getSeconds() === Number(second) ? text : null;
+}
+
+function historyPrice(value: unknown): number | null {
+  const raw = typeof value === "number" ? value : typeof value === "string" && /^\d+(?:[.,]\d{1,2})?$/.test(value.trim())
+    ? Number(value.trim().replace(",", ".")) : Number.NaN;
+  return Number.isFinite(raw) && raw >= 0 ? raw : null;
+}
+
+export function parsePartKomOrderHistory(payload: unknown): PartKomOrderHistory {
+  if (!Array.isArray(payload) || payload.length > historyLimit) throw new SupplierIntegrationError("PartKOM order history is invalid");
+  const orders = new Map<string, PartKomOrderHistory["orders"][number]>();
+  for (const entry of payload) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new SupplierIntegrationError("PartKOM order history item is invalid");
+    const row = entry as Record<string, unknown>;
+    const number = typeof row.orderNumber === "number" && Number.isSafeInteger(row.orderNumber) && row.orderNumber > 0
+      ? String(row.orderNumber) : historyText(row.orderNumber, 100);
+    const article = historyText(row.detailNum, 128);
+    const quantity = row.quantity;
+    if (!number || !article || typeof quantity !== "number" || !Number.isSafeInteger(quantity) || quantity < 1) {
+      throw new SupplierIntegrationError("PartKOM order history item is incomplete");
+    }
+    const item: PartKomHistoryItem = {
+      article, brand: historyText(row.maker, 200), title: historyText(row.description, 500), quantity,
+      price: historyPrice(row.price), status: historyText(row.stateTxt, 300),
+      expectedDate: historyDate(row.expectedDate), guaranteedDate: historyDate(row.guaranteedDate),
+      warehouse: historyText(row.placement, 200),
+    };
+    const order = orders.get(number);
+    if (order) {
+      order.items.push(item);
+      if (!order.date) order.date = historyDate(row.orderDate);
+    } else orders.set(number, { number, date: historyDate(row.orderDate), items: [item] });
+  }
+  return { orders: [...orders.values()].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")), limited: payload.length === historyLimit };
+}
+
+export async function listPartKomOrderHistory(credentials: PartKomCredentials, archive: boolean, signal: AbortSignal): Promise<PartKomOrderHistory> {
+  const params = new URLSearchParams({ limit: String(historyLimit), archive: archive ? "1" : "0" });
+  return parsePartKomOrderHistory(await request(`basket/motion?${params}`, credentials, signal));
 }
 
 function multipart(fields: Record<string, string>): { contentType: string; body: string } {
