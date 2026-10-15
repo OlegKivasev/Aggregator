@@ -33,10 +33,6 @@ function orderMatchesFilters(order, values) {
     && (!values.from || date >= values.from) && (!values.to || date <= values.to);
 }
 
-function orderPriority(order) {
-  return order.items.reduce((priority, item) => Math.min(priority, fulfillmentPriority.get(item.fulfillment)), Infinity);
-}
-
 function element(tag, className, value) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -229,8 +225,7 @@ export function bootstrapOrderHistory() {
       }
     }
     if (loading.length) fragment.append(element("p", "history-loading", `Загружаем заказы: ${loading.join(", ")}…`));
-    orders.sort((a, b) => orderPriority(a.order) - orderPriority(b.order)
-      || (b.order.date ?? "").localeCompare(a.order.date ?? ""));
+    orders.sort((a, b) => (b.order.date ?? "").localeCompare(a.order.date ?? ""));
     for (const { order, name, limited } of orders) fragment.append(renderOrder(order, limited, name));
     if (!orders.length && !loading.length && !failures) {
       const empty = selected === "all" ? "В выбранной истории заказов нет."

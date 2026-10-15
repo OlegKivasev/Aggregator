@@ -935,14 +935,14 @@ test("history filters all suppliers by inclusive order dates and any item status
       await page.locator("#history-from").fill("2026-10-15");
       await page.locator("#history-to").fill("2026-10-16");
       await page.locator("#history-status-cancelled").click();
-      await shown(["START-MIXED", "END"]);
-      assert.equal(await page.locator(".history-card").first().locator("tbody tr").count(), 3);
+      await shown(["END", "START-MIXED"]);
+      assert.equal(await page.locator(".history-card").filter({ has: page.locator("h3", { hasText: "START-MIXED" }) }).locator("tbody tr").count(), 3);
       assert.equal(await page.locator(".history-card__total").count(), 0);
       if (supplier === "armtek") assert.deepEqual(calls.at(-1), { supplier, from: "2026-10-15", to: "2026-10-16" });
       else assert.deepEqual(calls.at(-1), { supplier });
       const beforeStatus = calls.length;
       await page.locator("#history-status-active").click();
-      await shown(["START-MIXED", "READY", "TRANSIT"]);
+      await shown(["READY", "START-MIXED", "TRANSIT"]);
       await page.locator("#history-status-attention").click();
       await page.waitForFunction(() => document.querySelector("#history-results").textContent.includes("По выбранным фильтрам заказов нет"));
       assert.equal(calls.length, beforeStatus);
@@ -1014,9 +1014,9 @@ test("combined history progressively loads all suppliers, groups statuses and fi
       assert.match(await page.locator(".history-loading").innerText(), /Forum Auto/);
       assert.equal(await page.locator(".history-card__header small", { hasText: "Forum Auto" }).count(), 0);
     } finally { releaseForum(); }
-    await shown(["SHARED", "MOVING", "WAREHOUSE", "PARTIAL", "CANCEL-MIXED", "SHARED", "RETURN", "ATTENTION", "UNKNOWN"]);
+    await shown(["CANCEL-MIXED", "UNKNOWN", "MOVING", "PARTIAL", "WAREHOUSE", "RETURN", "SHARED", "ATTENTION", "SHARED"]);
     assert.deepEqual(await page.locator(".history-card__header small").allTextContents(),
-      ["PartKOM", "Armtek", "Forum Auto", "Armtek", "PartKOM", "Rossko", "Forum Auto", "Rossko", "PartKOM"]);
+      ["PartKOM", "PartKOM", "Armtek", "Armtek", "Forum Auto", "Forum Auto", "Rossko", "Rossko", "PartKOM"]);
     const rossko = page.locator(".history-card").filter({ has: page.locator("small", { hasText: /^Rossko$/ }) });
     assert.equal(await rossko.locator(".history-card__total").count(), 0);
     const partkom = page.locator(".history-card").filter({ has: page.locator("small", { hasText: /^PartKOM$/ }) });
@@ -1026,8 +1026,8 @@ test("combined history progressively loads all suppliers, groups statuses and fi
     assert.deepEqual(calls.find((query) => query.supplier === "armtek"), { supplier: "armtek", from: "2026-09-16", to: "2026-10-15" });
     const beforeStatus = calls.length;
     for (const [group, expected] of [
-      ["active", ["SHARED", "MOVING", "WAREHOUSE"]], ["partial", ["PARTIAL"]], ["cancelled", ["CANCEL-MIXED"]],
-      ["delivered", ["CANCEL-MIXED", "SHARED"]], ["returned", ["RETURN"]], ["attention", ["ATTENTION", "UNKNOWN"]],
+      ["active", ["MOVING", "WAREHOUSE", "SHARED"]], ["partial", ["PARTIAL"]], ["cancelled", ["CANCEL-MIXED"]],
+      ["delivered", ["CANCEL-MIXED", "SHARED"]], ["returned", ["RETURN"]], ["attention", ["UNKNOWN", "ATTENTION"]],
     ]) {
       await page.locator(`#history-status-${group}`).click();
       await shown(expected);
@@ -1061,7 +1061,7 @@ test("combined history progressively loads all suppliers, groups statuses and fi
     await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 3);
     assert.equal(await page.locator("#history-status-all").getAttribute("aria-selected"), "true");
     await page.locator("#history-tab-all").click();
-    await shown(["ATTENTION", "UNKNOWN"]);
+    await shown(["UNKNOWN", "ATTENTION"]);
     await page.waitForFunction(() => !document.querySelector(".history-loading"));
     assert.equal(await page.locator("#history-status-attention").getAttribute("aria-selected"), "true");
     for (const width of [800, 390]) {
@@ -1223,7 +1223,7 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
       status: "Отгружено", fulfillment: "in_transit", expectedDate: null, guaranteedDate: null, warehouse: null }] }], limited: false }) });
 });
 
-test("history sorts every supplier by item priority and aligns columns across different card contents", async () => {
+test("history sorts every supplier newest first regardless of item status and aligns columns across different card contents", async () => {
   const order = (number, states, date = "2026-10-15 12:30:00", fields = {}) => ({ number, date,
     items: states.map((fulfillment) => ({ article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 2, price: 343,
       status: null, fulfillment, expectedDate: "2026-10-20", guaranteedDate: null, warehouse: null, ...fields })) });
@@ -1241,10 +1241,11 @@ test("history sorts every supplier by item priority and aligns columns across di
     }),
     order("PROCESSING-NEW", ["processing"]),
     order("UNPRICED", ["in_transit"], null, { price: null }),
-    order("RETURNED", ["returned"]), order("ATTENTION", ["attention"]), order("UNKNOWN", ["unknown"]),
+    order("RETURNED", ["returned"]), order("ATTENTION", ["attention"], "2026-10-15 18:45:00"),
+    order("UNKNOWN", ["processing", "unknown"], "2026-10-12 19:00:00"),
   ], limited: false };
-  const expected = ["PROCESSING-NEW", "PROCESSING-MIXED", "PROCESSING-OLD", "READY", "MOVING-MIXED", "UNPRICED",
-    "PARTIAL-MIXED", "CANCELLED-MIXED", "RECEIVED", "RETURNED", "ATTENTION", "UNKNOWN"].map((number) => `Заказ № ${number}`);
+  const expected = ["ATTENTION", "RECEIVED", "CANCELLED-MIXED", "PARTIAL-MIXED", "PROCESSING-NEW", "RETURNED",
+    "READY", "MOVING-MIXED", "UNKNOWN", "PROCESSING-MIXED", "PROCESSING-OLD", "UNPRICED"].map((number) => `Заказ № ${number}`);
   const alignedColumns = async (page) => {
     const cards = await page.locator(".history-card").evaluateAll((nodes) => nodes.map((node) => {
       const rect = (element) => { const { x, width } = element.getBoundingClientRect(); return { x, width }; };
@@ -1276,6 +1277,9 @@ test("history sorts every supplier by item priority and aligns columns across di
       const mixed = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: "CANCELLED-MIXED" }) });
       assert.match(await mixed.locator(".history-card__states").innerText(), /Отменён.*Получен/s);
       await alignedColumns(page);
+      await page.locator("#history-status-attention").click();
+      assert.deepEqual(await page.locator(".history-card h3").allTextContents(), ["Заказ № ATTENTION", "Заказ № UNKNOWN"]);
+      await page.locator("#history-status-all").click();
     }
     if (process.env.HISTORY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.HISTORY_SCREENSHOT_DIR, "history-desktop.png") });
     await page.locator("#history-reload").click();
