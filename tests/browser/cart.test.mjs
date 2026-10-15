@@ -89,7 +89,7 @@ async function withCartPage(check, options = {}) {
     const origin = `http://127.0.0.1:${server.address().port}`;
     browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER_EXECUTABLE_PATH });
     const page = await browser.newPage({ viewport: { width: 1366, height: 850 }, reducedMotion: options.reducedMotion ?? "no-preference",
-      timezoneId: options.fixedTime ? "UTC" : undefined });
+      timezoneId: options.timezoneId ?? (options.fixedTime ? "UTC" : undefined) });
     if (options.fixedTime) await page.clock.setFixedTime(new Date(options.fixedTime));
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -949,7 +949,7 @@ test("history filters all suppliers by inclusive order dates and any item status
     for (const [supplier, name] of [["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"]]) {
       if (supplier !== "part-kom") await page.locator(`#history-tab-${supplier}`).click();
       await page.waitForFunction((name) => document.querySelector(".history-card__header small")?.textContent === name, name);
-      assert.equal(await page.locator("#history-status-tabs [role=tab]").count(), 6);
+      assert.equal(await page.locator("#history-status-tabs [role=tab]").count(), 7);
       assert.equal(await page.locator("#history-status-attention").count(), 0);
       assert.equal(await page.locator("#history-scope, .history-limit").count(), 0);
       assert.doesNotMatch(await page.locator("#history-results").innerText(), /Показана ограниченная|не более 93|Активные заказы|Последние 500|Для полной истории/);
@@ -1008,6 +1008,72 @@ test("history filters all suppliers by inclusive order dates and any item status
       assert.equal(await page.locator("#history-modal").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
     }
   }, { fixedTime: "2026-10-15T12:00:00Z", partKomOrderHistory: async () => { calls.push({ supplier: "part-kom" }); return history; },
+    supplierOrderHistory: async (query) => { calls.push(query); return history; } });
+});
+
+test("arriving today tab uses local delivery dates, excludes finished items and works across suppliers", async () => {
+  const calls = [];
+  const item = (expectedDate, fulfillment = "in_transit", guaranteedDate = null) => ({
+    article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 100, status: null, fulfillment,
+    expectedDate, guaranteedDate, warehouse: null,
+  });
+  const order = (number, items, date = "2026-10-14 12:30:00") => ({ number, date, items });
+  const history = { limited: false, orders: [
+    order("EARLY", [item("2026-10-15 00:10:00", "processing")], "2026-10-13 12:30:00"),
+    order("TRANSIT", [item("2026-10-15")]), order("READY", [item("2026-10-15T23:59:59", "ready")]),
+    order("PARTIAL", [item("2026-10-15 12:00", "partial")]), order("UNKNOWN", [item("2026-10-15", "unknown")]),
+    order("MIXED", [item("2026-10-15"), item("2026-10-15", "delivered")]),
+    order("YESTERDAY", [item("2026-10-14")]), order("TOMORROW", [item("2026-10-16")]),
+    order("NO-DATE", [item(null, "in_transit", "2026-10-15")]),
+    order("INVALID", [item("2026-10-15T25:61:00"), item("2026-10-15 invalid")]),
+    order("FINISHED", ["delivered", "cancelled", "returned"].map((state) => item("2026-10-15", state))),
+    order("MISMATCH", [item("2026-10-15", "delivered"), item("2026-10-16", "processing")]),
+  ] };
+  await withCartPage(async (page) => {
+    const expected = ["TRANSIT", "READY", "PARTIAL", "UNKNOWN", "MIXED", "EARLY"];
+    const shown = async (numbers) => page.waitForFunction((expected) => JSON.stringify([...document.querySelectorAll(".history-card h3")]
+      .map((node) => node.textContent)) === JSON.stringify(expected), numbers.map((number) => `Заказ № ${number}`));
+    await page.locator("#history-toggle").click();
+    assert.equal(await page.locator("#history-status-today").textContent(), "Придут сегодня");
+    for (const [supplier, name] of [["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"]]) {
+      if (supplier !== "part-kom") await page.locator(`#history-tab-${supplier}`).click();
+      await page.waitForFunction((name) => !document.querySelector(".history-loading")
+        && document.querySelector(".history-card__header small")?.textContent === name, name);
+      const before = calls.length;
+      await page.locator("#history-status-today").click();
+      await shown(expected);
+      assert.equal(await page.locator("#history-status-today").getAttribute("aria-selected"), "true");
+      assert.equal(await page.locator("#history-reset").isVisible(), true);
+      assert.equal(await page.locator(".history-card").filter({ has: page.locator("h3", { hasText: "MIXED" }) }).locator("tbody tr").count(), 2);
+      assert.equal(calls.length, before);
+    }
+    await page.locator("#history-tab-all").click();
+    await page.waitForFunction(() => !document.querySelector(".history-loading") && document.querySelectorAll(".history-card").length === 48);
+    const before = calls.length;
+    await page.locator("#history-status-today").click();
+    await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 24);
+    for (const name of ["PartKOM", "Armtek", "Forum Auto", "Rossko"]) {
+      assert.equal(await page.locator(".history-card__header small", { hasText: new RegExp(`^${name}$`) }).count(), 6);
+    }
+    assert.equal(calls.length, before);
+    if (process.env.HISTORY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.HISTORY_SCREENSHOT_DIR, "history-today-desktop.png") });
+    await page.locator("#history-from").fill("2026-10-14");
+    await page.waitForFunction(() => !document.querySelector(".history-loading") && document.querySelectorAll(".history-card").length === 20);
+    assert.equal(await page.locator(".history-card h3", { hasText: "EARLY" }).count(), 0);
+    await page.locator("#history-reset").click();
+    await page.waitForFunction(() => !document.querySelector(".history-loading") && document.querySelectorAll(".history-card").length === 48);
+    assert.equal(await page.locator("#history-reset").isVisible(), false);
+    assert.equal(await page.locator("#history-status-all").getAttribute("aria-selected"), "true");
+    await page.locator("#history-tab-part-kom").click();
+    await shown(expected);
+    await page.clock.setFixedTime(new Date("2026-10-15T22:00:00Z"));
+    await page.locator("#history-status-today").click();
+    await shown(["TOMORROW", "MISMATCH"]);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.locator("#history-status-tabs").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+    if (process.env.HISTORY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.HISTORY_SCREENSHOT_DIR, "history-today-mobile.png") });
+  }, { fixedTime: "2026-10-14T22:00:00Z", timezoneId: "Asia/Dubai",
+    partKomOrderHistory: async () => { calls.push({ supplier: "part-kom" }); return history; },
     supplierOrderHistory: async (query) => { calls.push(query); return history; } });
 });
 

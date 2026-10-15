@@ -18,15 +18,23 @@ const fulfillmentPriority = new Map([
 const statusGroups = new Map([
   ["", { label: "Все заказы", states: [] }],
   ["active", { label: "В работе", states: ["processing", "in_transit", "ready"] }],
+  ["today", { label: "Придут сегодня", states: [] }],
   ["partial", { label: "Частичная поставка", states: ["partial"] }],
   ["cancelled", { label: "Отменено", states: ["cancelled"] }],
   ["delivered", { label: "Получено", states: ["delivered"] }],
   ["returned", { label: "Возвращено", states: ["returned"] }],
 ]);
 
-function orderMatchesFilters(order, values) {
+const dateValue = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+function orderMatchesFilters(order, values, today) {
   const states = statusGroups.get(values.status).states;
   if (states.length && !order.items.some((item) => states.includes(item.fulfillment))) return false;
+  if (values.status === "today" && !order.items.some((item) => {
+    if (["delivered", "cancelled", "returned"].includes(item.fulfillment)) return false;
+    const date = /^(\d{4}-\d{2}-\d{2})(?:[ T](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)?$/.exec(item.expectedDate ?? "")?.[1];
+    return date === today;
+  })) return false;
   if (!values.from && !values.to) return true;
   const date = order.date?.slice(0, 10);
   const parsed = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
@@ -154,7 +162,6 @@ export function bootstrapOrderHistory() {
   const reset = dialog.querySelector("#history-reset");
   const statusTabs = dialog.querySelector("#history-status-tabs");
   const views = [...suppliers, ["all", "Все поставщики"]];
-  const dateValue = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   const defaultPeriod = (end = new Date()) => {
     const start = new Date(end);
     start.setDate(start.getDate() - 29);
@@ -204,6 +211,7 @@ export function bootstrapOrderHistory() {
     if (error) { message(error, true); return; }
     const values = filters.get(selected);
     const fragment = document.createDocumentFragment();
+    const today = dateValue(new Date());
     const orders = [];
     const loading = [];
     let failures = 0;
@@ -215,7 +223,7 @@ export function bootstrapOrderHistory() {
       if (!history.payload) continue;
       total += history.payload.orders.length;
       for (const order of history.payload.orders) {
-        if (orderMatchesFilters(order, values)) orders.push({ order, name, limited: history.payload.limited });
+        if (orderMatchesFilters(order, values, today)) orders.push({ order, name, limited: history.payload.limited });
       }
     }
     if (loading.length) fragment.append(element("p", "history-loading", `Загружаем заказы: ${loading.join(", ")}…`));
