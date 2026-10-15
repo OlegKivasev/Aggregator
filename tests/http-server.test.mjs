@@ -108,10 +108,18 @@ test("cart order options return the safe supplier error without exposing upstrea
     const response = await fetch(`${baseUrl}/api/cart/order-options?revision=${added.revision}&supplier=part-kom`);
     assert.equal(response.status, 502);
     assert.deepEqual(await response.json(), { message: "Поставщик не предложил подходящие параметры заказа. Заказ не отправлен." });
+    const missingSelection = await fetch(`${baseUrl}/api/cart/order-options`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: added.revision, supplier: "part-kom", itemIds: [] }) });
+    assert.equal(missingSelection.status, 400);
+    const selectedOptions = await fetch(`${baseUrl}/api/cart/order-options`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: added.revision, supplier: "part-kom", itemIds: [added.items[0].id] }) });
+    assert.equal(selectedOptions.status, 502);
+    assert.deepEqual(await selectedOptions.json(), { message: "Поставщик не предложил подходящие параметры заказа. Заказ не отправлен." });
     const refreshed = await (await fetch(`${baseUrl}/api/cart/refresh`, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ revision: added.revision, supplier: "part-kom" }) })).json();
     const order = await fetch(`${baseUrl}/api/cart/order`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ revision: refreshed.revision, supplier: "part-kom", details: { partKom: { deliveryId: "regular" } } }) });
+      body: JSON.stringify({ revision: refreshed.revision, supplier: "part-kom", itemIds: [refreshed.items[0].id],
+        details: { partKom: { deliveryId: "regular" } } }) });
     assert.equal(order.status, 502);
     assert.deepEqual(await order.json(), { message: "Не удалось подготовить заказ у поставщика. Заказ не отправлен." });
   } finally {

@@ -245,17 +245,21 @@ export function createAggregatorServer({
           if (!controller.signal.aborted) serveJson(response, 200, choices);
         } else if (url.pathname === "/api/cart/items" && (request.method === "POST" || request.method === "DELETE")
           || cartItemMatch && (request.method === "PATCH" || request.method === "DELETE")
-          || (url.pathname === "/api/cart/test-order" || url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh") && request.method === "POST") {
+          || (url.pathname === "/api/cart/test-order" || url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh"
+            || url.pathname === "/api/cart/order-options") && request.method === "POST") {
           const payload = await readJsonBody(request);
           if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new CartError("Неверные параметры корзины.");
           const fields = payload as Record<string, unknown>;
-          if (url.pathname === "/api/cart/refresh") {
+          if (url.pathname === "/api/cart/order-options") {
+            const choices = await cart.orderChoices(fields.revision, fields.supplier, controller.signal, fields.itemIds);
+            if (!controller.signal.aborted) serveJson(response, 200, choices);
+          } else if (url.pathname === "/api/cart/refresh") {
             const result = await cart.refreshForOrder(fields.revision, fields.supplier, controller.signal);
             if (!controller.signal.aborted) serveJson(response, 200, result);
           } else if (url.pathname === "/api/cart/order") {
             const details = fields.details;
             if (!details || typeof details !== "object" || Array.isArray(details)) throw new CartError("Неверные параметры заказа.");
-            const result = await cart.order(fields.revision, fields.supplier, details, controller.signal);
+            const result = await cart.order(fields.revision, fields.supplier, fields.itemIds, details, controller.signal);
             if (!controller.signal.aborted) serveJson(response, 200, result);
           } else if (url.pathname === "/api/cart/test-order") {
             const result = await cart.test(fields.revision, controller.signal, fields.supplier);

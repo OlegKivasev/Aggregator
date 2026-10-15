@@ -33,6 +33,18 @@ function normalizeCartSupplier(value: unknown): "all" | PurchaseReference["suppl
   return value;
 }
 
+function selectedOrderLines(lines: PurchaseLine[], scope: "all" | OrderSupplier, itemIds: unknown): PurchaseLine[] {
+  if (!Array.isArray(itemIds) || !itemIds.length || itemIds.length > 500
+    || itemIds.some((id) => typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id))
+    || new Set(itemIds).size !== itemIds.length) {
+    throw new CartError("Выберите товары для заказа.");
+  }
+  const ids = new Set<string>(itemIds);
+  const selected = lines.filter((line) => ids.has(line.id) && (scope === "all" || line.reference.supplier === scope));
+  if (selected.length !== ids.size) throw new CartError("Выбранные товары изменились. Проверьте корзину.", 409);
+  return selected;
+}
+
 const nullableIdentifier = (value: unknown): boolean => value === null
   || typeof value === "string" && value.length > 0 && value.length <= 2000;
 
@@ -192,29 +204,29 @@ export class CartApplicationService {
     } finally { this.testing = false; }
   }
 
-  async orderChoices(revision: unknown, supplier: unknown, signal: AbortSignal): Promise<OrderChoices> {
+  async orderChoices(revision: unknown, supplier: unknown, signal: AbortSignal, itemIds?: unknown): Promise<OrderChoices> {
     if (!this.realOrder) throw new CartError("Оформление заказов не настроено.", 503);
     const scope = normalizeCartSupplier(supplier);
     const cart = this.load();
     if (cart.revision !== revision) throw new CartError("Корзина изменилась. Обновите её.", 409);
-    const lines = scope === "all" ? cart.lines : cart.lines.filter((line) => line.reference.supplier === scope);
+    const lines = itemIds === undefined ? scope === "all" ? cart.lines : cart.lines.filter((line) => line.reference.supplier === scope)
+      : selectedOrderLines(cart.lines, scope, itemIds);
     if (!lines.length) throw new CartError("Добавьте товары в выбранную вкладку корзины.");
     const pending = new Set(this.repository.pendingLineIds());
     if (lines.some((line) => pending.has(line.id))) throw new CartError("Статус предыдущего заказа нужно сверить с поставщиком.", 409);
     return this.realOrder.choices([...new Set(lines.map((line) => line.reference.supplier))], AbortSignal.any([signal, this.controller.signal]));
   }
 
-  async order(revision: unknown, supplier: unknown, details: CheckoutDetails, signal: AbortSignal) {
+  async order(revision: unknown, supplier: unknown, itemIds: unknown, details: CheckoutDetails, signal: AbortSignal) {
     if (!this.realOrder) throw new CartError("Оформление заказов не настроено.", 503);
     if (this.testing) throw new CartError("Заказ уже оформляется.", 409);
     const scope = normalizeCartSupplier(supplier);
     const cart = this.load();
     if (revision !== cart.revision) throw new CartError("Корзина изменилась. Проверьте заказ заново.", 409);
-    const lines = scope === "all" ? cart.lines : cart.lines.filter((line) => line.reference.supplier === scope);
-    if (!lines.length) throw new CartError("Добавьте товары в выбранную вкладку корзины.");
+    const lines = selectedOrderLines(cart.lines, scope, itemIds);
     const pending = new Set(this.repository.pendingLineIds());
     if (lines.some((line) => pending.has(line.id))) throw new CartError("Статус предыдущего заказа нужно сверить с поставщиком.", 409);
-    const refreshedLines = this.refreshed?.supplier === "all" ? cart.lines : lines;
+    const refreshedLines = this.refreshed?.supplier === "all" ? cart.lines : cart.lines.filter((line) => line.reference.supplier === scope);
     if (!this.refreshed || this.refreshed.revision !== cart.revision
       || this.refreshed.supplier !== "all" && this.refreshed.supplier !== scope
       || this.refreshed.lineIds !== JSON.stringify(refreshedLines.map((line) => line.id)) || this.refreshed.expires <= Date.now()) {

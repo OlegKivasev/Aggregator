@@ -1,4 +1,4 @@
-import type { RealOrderGateway } from "../purchasing/cart-application-service.ts";
+import { CartError, type RealOrderGateway } from "../purchasing/cart-application-service.ts";
 import type { CheckoutDetails, OrderChoices, OrderSupplier, RosskoOrderChoices } from "../purchasing/order-contract.ts";
 import { getPurchaseReference, type PurchaseLine, type PurchaseReference } from "../purchasing/purchase-offer.ts";
 import type { SupplierSessionManager } from "../session/session-manager.ts";
@@ -17,7 +17,7 @@ const sameArticle = (left: string, right: string): boolean => left.replace(/[^\p
 
 export function allowedRosskoOrderChoices(options: RosskoOrderChoices): RosskoOrderChoices {
   const deliveries = options.deliveries.filter((item) => item.addressId !== null);
-  const payments = options.payments.filter((item) => /безнал|банковск\S*\s+(?:плат[её]ж|перевод)|перечислен|расч[её]тн\S*\s+сч[её]т/i.test(item.label)
+  const payments = options.payments.filter((item) => /безнал|банковск\S*\s+(?:плат[её]ж|перевод)|через\s+банк|перечислен|расч[её]тн\S*\s+сч[её]т/i.test(item.label)
     && !/(?:^|[^\p{L}])наличн|карт|эквайр|онлайн/iu.test(item.label));
   if (!deliveries.length) throw new SupplierIntegrationError("Rossko has no delivery address", {
     publicMessage: "Rossko не предложил доставку по адресу. Заказ не отправлен.",
@@ -26,6 +26,49 @@ export function allowedRosskoOrderChoices(options: RosskoOrderChoices): RosskoOr
     publicMessage: "Rossko не предложил оплату банковским переводом. Заказ не отправлен.",
   });
   return { ...options, deliveries, payments };
+}
+
+interface RosskoOrderConfiguration {
+  buyerName?: string;
+  contactName?: string;
+  contactPhone?: string;
+  deliveryAddressId?: string;
+}
+
+export function resolveRosskoOrderDefaults(options: RosskoOrderChoices, config: RosskoOrderConfiguration): NonNullable<CheckoutDetails["rossko"]> {
+  const buyerName = config.buyerName?.trim();
+  const name = config.contactName?.trim();
+  const phone = config.contactPhone?.trim();
+  if (!buyerName || !name || name.length > 100 || !validPhone(phone)) {
+    throw new CartError("Настройте покупателя, контактное лицо и телефон для заказа Rossko.", 503);
+  }
+  const allowed = allowedRosskoOrderChoices(options);
+  const companies = allowed.companies.filter((item) => sameText(item.label, buyerName));
+  if (companies.length !== 1) throw new SupplierIntegrationError("Rossko buyer is missing or ambiguous", {
+    publicMessage: "Rossko не подтвердил заданного покупателя. Заказ не отправлен.",
+  });
+  const payments = allowed.payments.filter((item) => /через\s+банк/iu.test(item.label));
+  const bankPayments = payments.length ? payments : allowed.payments;
+  if (bankPayments.length !== 1) throw new SupplierIntegrationError("Rossko bank payment is ambiguous", {
+    publicMessage: "Rossko предложил несколько вариантов оплаты через банк. Заказ не отправлен.",
+  });
+  const deliveries = config.deliveryAddressId
+    ? allowed.deliveries.filter((item) => item.addressId === config.deliveryAddressId)
+    : allowed.deliveries;
+  if (deliveries.length !== 1) throw new SupplierIntegrationError("Rossko delivery address is ambiguous", {
+    publicMessage: "Rossko предложил несколько адресов доставки. Укажите адрес для заказа.",
+  });
+  return { deliveryId: deliveries[0].id, addressId: deliveries[0].addressId, paymentId: bankPayments[0].id,
+    companyId: companies[0].id, name, phone, deliveryParts: false };
+}
+
+function configuredRosskoOrderDefaults(options: RosskoOrderChoices): NonNullable<CheckoutDetails["rossko"]> {
+  return resolveRosskoOrderDefaults(options, {
+    buyerName: process.env.ROSSKO_ORDER_BUYER_NAME,
+    contactName: process.env.ROSSKO_ORDER_CONTACT_NAME,
+    contactPhone: process.env.ROSSKO_ORDER_CONTACT_PHONE,
+    deliveryAddressId: process.env.ROSSKO_ORDER_DELIVERY_ADDRESS_ID,
+  });
 }
 
 function sameOffer(current: PurchaseLine, fresh: { result: PurchaseLine["result"]; reference: PurchaseReference }): boolean {
@@ -98,6 +141,7 @@ export class RealOrderApplicationService implements RealOrderGateway {
       const credentials = this.sessions.getRosskoApiCredentials();
       if (!credentials) throw new SupplierAuthError("Rossko API keys are missing");
       result.rossko = allowedRosskoOrderChoices(await getRosskoOrderChoices(credentials, signal));
+      configuredRosskoOrderDefaults(result.rossko);
     }
     if (suppliers.includes("part-kom")) {
       const credentials = this.sessions.getPartKomCredentials();
@@ -144,15 +188,8 @@ export class RealOrderApplicationService implements RealOrderGateway {
     if (lines.some((line) => line.reference.supplier !== supplier || !line.reference.stockId)) {
       throw new SupplierIntegrationError("Rossko order reference is invalid");
     }
-    const selected = details.rossko;
     const options = allowedRosskoOrderChoices(await getRosskoOrderChoices(credentials, signal));
-    const delivery = options.deliveries.find((item) => item.id === selected?.deliveryId && item.addressId === selected.addressId);
-    const payment = options.payments.find((item) => item.id === selected?.paymentId);
-    if (!delivery || !payment || typeof selected?.name !== "string" || !selected.name.trim() || selected.name.length > 100
-      || !validPhone(selected.phone) || typeof selected.deliveryParts !== "boolean"
-      || selected.companyId !== null && !options.companies.some((item) => item.id === selected.companyId)) {
-      throw new SupplierIntegrationError("Rossko checkout settings are invalid");
-    }
-    return (_attemptId: string, orderSignal: AbortSignal) => placeRosskoOrder(lines, credentials, details, orderSignal);
+    const selected = configuredRosskoOrderDefaults(options);
+    return (_attemptId: string, orderSignal: AbortSignal) => placeRosskoOrder(lines, credentials, { ...details, rossko: selected }, orderSignal);
   }
 }

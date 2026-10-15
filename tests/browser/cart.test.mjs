@@ -97,6 +97,7 @@ async function withCartPage(check, options = {}) {
 }
 
 async function openCheckout(page) {
+  if (!await page.locator("#cart-items .cart-item-select:checked").count()) await page.locator("#cart-select-all").check();
   await page.locator("#cart-test-order").click();
   await page.waitForFunction(() => document.querySelector("#cart-order-confirm").open);
 }
@@ -123,6 +124,7 @@ test("cart adds bounded quantities, persists, orders and removes confirmed items
     assert.equal(await page.locator(".cart-flying-icon").count(), 1);
     await page.locator("#cart-toggle").click();
     await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 1);
+    await page.locator("#cart-select-all").check();
     assert.ok(await page.locator("#cart-modal").isVisible());
     assert.match(await page.locator("#cart-total .cart-purchase-price").textContent(), /200/);
     assert.equal(await page.evaluate(() => window.cartXss), undefined);
@@ -141,7 +143,7 @@ test("cart adds bounded quantities, persists, orders and removes confirmed items
     await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 2);
     await openCheckout(page);
     assert.equal(await page.locator("#cart-partkom-delivery").count(), 0);
-    assert.match(await page.locator("#cart-order-fields").textContent(), /Регулярная доставка/);
+    assert.equal(await page.locator("#cart-order-fields").count(), 0);
     await page.locator("#cart-order-accept").click();
     await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
     assert.equal(orderCalls.length, 2);
@@ -155,6 +157,35 @@ test("cart adds bounded quantities, persists, orders and removes confirmed items
     if (process.env.CART_SCREENSHOT_PATH) await page.screenshot({ path: process.env.CART_SCREENSHOT_PATH });
     assert.match(await page.locator(".cart-empty").textContent(), /Корзина пуста/);
   });
+});
+
+test("checkout orders only marked goods and keeps unmarked goods in the cart", async () => {
+  await withCartPage(async (page, { orderCalls }) => {
+    await page.locator("#results-body .cart-offer-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#results-body .cart-offer-button").nth(1).click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 2);
+    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    assert.equal(await page.locator("#cart-total .cart-purchase-price").textContent(), "0,00 ₽");
+    await page.locator("#cart-items .cart-item-select").nth(1).check();
+    assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 2 шт. Выбрано к заказу: 1 шт.");
+    assert.equal(await page.locator("#cart-total .cart-purchase-price").textContent(), "120,00 ₽");
+    await page.locator("#cart-tab-armtek").click();
+    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    await page.locator("#cart-tab-all").click();
+    assert.equal(await page.locator("#cart-items .cart-item-select:checked").count(), 1);
+    await openCheckout(page);
+    assert.deepEqual(await page.locator(".cart-order-group h3").allTextContents(), ["PartKOM"]);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    assert.deepEqual(orderCalls.map(([line]) => line.reference.supplier), ["part-kom"]);
+    await page.locator("#cart-order-cancel").click();
+    assert.equal(await page.locator("#cart-badge").textContent(), "1");
+    assert.equal(await page.locator("#cart-items .cart-item-supplier").textContent(), "ArmtekТестовый склад");
+    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+  }, { reducedMotion: "reduce" });
 });
 
 test("cart honors reduced motion, constrains focus and fits mobile viewport", async () => {
@@ -237,6 +268,7 @@ test("cart supplier tabs filter rows, hide suppliers and recalculate purchase to
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "3");
     await page.locator("#cart-toggle").click();
     await page.waitForFunction(() => document.querySelectorAll("#cart-tabs .cart-tab").length === 3);
+    await page.locator("#cart-select-all").check();
     assert.equal(await page.locator("#cart-tab-all").getAttribute("aria-selected"), "true");
     assert.equal(await page.locator("#cart-items .cart-item-supplier").count(), 2);
     assert.equal(await page.locator("#cart-items .cart-item-delivery").count(), 2);
@@ -292,10 +324,11 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "3");
     await page.locator("#cart-toggle").click();
     await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 2);
+    await page.locator("#cart-select-all").check();
     assert.equal(await page.locator("#cart-modal header #cart-summary").count(), 0);
     assert.equal(await page.locator(".cart-test-note").count(), 0);
     assert.equal(await page.locator("#cart-items a").count(), 0);
-    assert.deepEqual(await page.locator("#cart-modal .cart-table th").allTextContents(), ["Запчасть", "Наименование", "Поставщик", "Доставка", "Цена, ₽", "Кол-во", "Стоимость, ₽", "Удалить"]);
+    assert.deepEqual(await page.locator("#cart-modal .cart-table th").allTextContents(), ["", "Запчасть", "Наименование", "Поставщик", "Доставка", "Цена, ₽", "Кол-во", "Стоимость, ₽", "Удалить"]);
     assert.equal(await page.locator("#cart-items .cart-item-name").first().textContent(), "Сайлентблок балки моста");
     const firstRow = page.locator("#cart-items tr[data-cart-item-id]").first();
     assert.equal(await firstRow.locator(".cart-item-price .cart-price").textContent(), "135,00");
@@ -319,7 +352,7 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     assert.equal(priceStyle.purchaseWeight, mainPurchaseStyle.weight);
     assert.ok(priceStyle.purchaseTop >= priceStyle.retailBottom);
     assert.equal(await page.locator("#cart-items .cart-item-part > span").count(), 4);
-    assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 3 шт.");
+    assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 3 шт. Выбрано к заказу: 3 шт.");
     assert.equal(await page.locator("#cart-total .cart-total-price").textContent(), "432,00 ₽");
     assert.equal(await page.locator("#cart-total .cart-purchase-price").textContent(), "320,00 ₽");
     assert.deepEqual(await page.locator("#cart-total .cart-purchase-price").evaluate((node) => ({
@@ -339,7 +372,7 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     });
     assert.deepEqual(totals.amount, totals.date);
     assert.equal(totals.amountTop, totals.dateTop);
-    assert.equal(await page.locator(".cart-footer__summary > span").nth(1).textContent(), "Дата поставки с учётом всех товаров");
+    assert.equal(await page.locator(".cart-footer__summary > span").nth(1).textContent(), "Дата поставки выбранных товаров");
     assert.equal(await page.locator("#cart-test-order").textContent(), "Оформить заказы");
     assert.equal(await page.locator("#cart-test-order").getAttribute("title"), null);
     const clearBox = await page.locator("#cart-clear").boundingBox();
@@ -389,12 +422,12 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
     assert.equal(await page.locator("#cart-tab-part-kom").count(), 0);
     assert.equal(await page.locator("#cart-items .cart-item-supplier").textContent(), "ArmtekТестовый склад");
-    assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 2 шт.");
+    assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 2 шт. Выбрано к заказу: 2 шт.");
     await page.locator("#cart-clear").click();
     assert.equal(await page.locator("#cart-clear-title").textContent(), "Очистить вкладку «Все»?");
     await page.locator("#cart-clear-accept").click();
     await page.waitForFunction(() => document.querySelector("#cart-toggle").hidden);
-    assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 0 шт.");
+    assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 0 шт. Выбрано к заказу: 0 шт.");
     assert.equal(await page.locator("#cart-clear").isDisabled(), true);
     await page.reload();
     await page.waitForLoadState("networkidle");
@@ -455,6 +488,7 @@ test("four supplier checkout requires confirmation, details and removes confirme
       color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight,
     })), { color: "rgb(180, 35, 24)", weight: "800" });
     assert.equal(await page.locator("#cart-order-accept").evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(22, 137, 86)");
+    assert.equal(await page.locator("#cart-order-fields").count(), 0);
     await page.locator("#cart-order-cancel").click();
     assert.equal(posts.length, 0);
     await page.waitForFunction(() => document.activeElement?.id === "cart-test-order");
@@ -483,13 +517,8 @@ test("four supplier checkout requires confirmation, details and removes confirme
       assert.equal(await page.evaluate(() => Boolean(document.activeElement.closest("#cart-order-confirm"))), true);
     }
     if (process.env.CART_ORDER_MOBILE_SCREENSHOT_PATH) await page.screenshot({ path: process.env.CART_ORDER_MOBILE_SCREENSHOT_PATH });
-    await page.locator("#cart-order-accept").click();
-    assert.equal(posts.length, 0);
     assert.equal(await page.locator("#cart-partkom-delivery").count(), 0);
-    await page.locator("#cart-rossko-delivery").selectOption("0");
-    await page.locator("#cart-rossko-payment").selectOption("bank");
-    await page.locator("#cart-rossko-name").fill("Тестовый покупатель");
-    await page.locator("#cart-rossko-phone").fill("+79990000000");
+    assert.equal(await page.locator("#cart-rossko-delivery, #cart-rossko-payment, #cart-rossko-name, #cart-rossko-phone").count(), 0);
     await page.locator("#cart-order-accept").click();
     await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
     assert.equal(orderCalls.length, 4);
@@ -554,7 +583,7 @@ test("opening the cart refreshes its offers and a supplier tab can order without
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
     await page.locator("#cart-toggle").click();
     await page.waitForFunction(() => document.querySelector("#cart-items .cart-purchase-price")?.textContent === "125,00");
-    assert.equal(await page.locator("#cart-test-order").isEnabled(), true);
+    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
     assert.equal(refreshCalls.length, 1);
     await page.locator("#cart-tab-armtek").click();
     await openCheckout(page);
@@ -577,7 +606,9 @@ test("opening the cart blocks checkout until supplier offers finish refreshing",
       await page.waitForFunction(() => document.querySelector("#cart-status").textContent.includes("Обновляем предложения"));
       assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
       release();
-      await page.waitForFunction(() => !document.querySelector("#cart-test-order").disabled);
+      await page.waitForFunction(() => !document.querySelector("#cart-select-all").disabled);
+      await page.locator("#cart-select-all").check();
+      assert.equal(await page.locator("#cart-test-order").isEnabled(), true);
       assert.equal(refreshCalls.length, 1);
       assert.equal(await page.locator("#cart-status").textContent(), "");
     }, { refreshGate: () => gate });

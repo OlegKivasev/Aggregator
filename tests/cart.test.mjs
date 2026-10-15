@@ -15,7 +15,7 @@ import { parseArmtekOrderResult } from "../src/backend/suppliers/armtek/armtek-o
 import { parseForumAutoOrderResult } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { buildRosskoOrderEnvelope, parseRosskoOrderResult } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { getPartKomOrderChoices, parsePartKomMotion } from "../src/backend/suppliers/part-kom/part-kom-order.ts";
-import { allowedRosskoOrderChoices, RealOrderApplicationService } from "../src/backend/application/real-order-application-service.ts";
+import { allowedRosskoOrderChoices, RealOrderApplicationService, resolveRosskoOrderDefaults } from "../src/backend/application/real-order-application-service.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
 
 // All offers and upstream responses in this file are fictional fixtures.
@@ -71,6 +71,20 @@ test("Rossko checkout permits only address delivery and bank transfer", () => {
   assert.throws(() => allowedRosskoOrderChoices({ ...options, payments: [{ id: "5", label: "Безналичный или наличный расчёт" }] }), /bank transfer/);
   assert.throws(() => allowedRosskoOrderChoices({ ...options, payments: options.payments.slice(1) }), /bank transfer/);
   assert.throws(() => allowedRosskoOrderChoices({ ...options, deliveries: options.deliveries.slice(0, 1) }), /delivery address/);
+});
+
+test("Rossko default checkout selects the configured buyer, bank payment and whole order", () => {
+  const options = { deliveries: [{ id: "pickup", label: "Самовывоз", addressId: null },
+    { id: "courier", label: "Доставка", addressId: "address-1" }],
+  payments: [{ id: "cash", label: "При получении" }, { id: "bank", label: "Через банк" }],
+  companies: [{ id: "other", label: "Другой покупатель" }, { id: "buyer", label: "Тестовый покупатель" }] };
+  const config = { buyerName: "Тестовый покупатель", contactName: "Тест", contactPhone: "+70000000000" };
+  assert.deepEqual(resolveRosskoOrderDefaults(options, config), { deliveryId: "courier", addressId: "address-1",
+    paymentId: "bank", companyId: "buyer", name: "Тест", phone: "+70000000000", deliveryParts: false });
+  assert.throws(() => resolveRosskoOrderDefaults(options, { ...config, contactPhone: "" }), /Настройте покупателя/);
+  assert.throws(() => resolveRosskoOrderDefaults(options, { ...config, buyerName: "Нет такого" }), /buyer is missing/);
+  assert.throws(() => resolveRosskoOrderDefaults({ ...options, deliveries: [...options.deliveries,
+    { id: "courier", label: "Другой адрес", addressId: "address-2" }] }, config), /delivery address is ambiguous/);
 });
 
 test("cart limits integer quantities, combines exact offers and conceals supplier references", async () => {
@@ -302,7 +316,7 @@ test("real checkout removes only confirmed quantities and preserves rejected ite
       cart.mutate("add", { offerId: id, quantity: 2, revision: cart.view().revision });
     }
     await cart.refreshForOrder(2, "all", new AbortController().signal);
-    const response = await cart.order(2, "all", {}, new AbortController().signal);
+    const response = await cart.order(2, "all", cart.view().items.map((item) => item.id), {}, new AbortController().signal);
     assert.deepEqual(calls, ["armtek", "forum-auto"]);
     assert.equal(response.results.length, 2);
     assert.equal(response.cart.count, 3);
@@ -327,10 +341,42 @@ test("refreshing the whole cart authorizes a supplier tab without another refres
       cart.mutate("add", { offerId: id, quantity: 1, revision: cart.view().revision });
     }
     await cart.refreshForOrder(2, "all", new AbortController().signal);
-    const response = await cart.order(2, "armtek", {}, new AbortController().signal);
+    const response = await cart.order(2, "armtek", cart.view().items.filter((item) => item.result.supplier === "armtek").map((item) => item.id), {}, new AbortController().signal);
     assert.equal(refreshes, 1);
     assert.equal(response.cart.count, 1);
     assert.equal(response.cart.items[0].result.supplier, "forum-auto");
+  }, undefined, gateway);
+});
+
+test("real checkout sends only selected lines and leaves other cart goods untouched", async () => {
+  const prepared = [];
+  const choicesFor = [];
+  const gateway = {
+    refresh: async (lines) => lines,
+    choices: async (suppliers) => { choicesFor.push(suppliers); return {}; },
+    prepare: async (supplier, lines) => {
+      prepared.push({ supplier, ids: lines.map((item) => item.id) });
+      return async () => ({ confirmed: lines.map((item) => ({ id: item.id, acceptedQuantity: item.quantity, orderIds: ["A-1"] })), rejected: [] });
+    },
+  };
+  await withCart(async (cart) => {
+    for (const supplier of ["armtek", "forum-auto"]) {
+      const id = randomUUID();
+      cart.registerOffer(id, result(supplier));
+      cart.mutate("add", { offerId: id, quantity: 1, revision: cart.view().revision });
+    }
+    const items = cart.view().items;
+    const selected = [items[1].id];
+    await cart.refreshForOrder(2, "all", new AbortController().signal);
+    await cart.orderChoices(2, "all", new AbortController().signal, selected);
+    assert.deepEqual(choicesFor, [["forum-auto"]]);
+    await assert.rejects(cart.order(2, "all", [], {}, new AbortController().signal), /Выберите товары/);
+    await assert.rejects(cart.order(2, "all", [items[0].id, items[0].id], {}, new AbortController().signal), /Выберите товары/);
+    await assert.rejects(cart.order(2, "armtek", selected, {}, new AbortController().signal), /Выбранные товары изменились/);
+    const response = await cart.order(2, "all", selected, {}, new AbortController().signal);
+    assert.deepEqual(prepared, [{ supplier: "forum-auto", ids: selected }]);
+    assert.equal(response.cart.items.length, 1);
+    assert.equal(response.cart.items[0].id, items[0].id);
   }, undefined, gateway);
 });
 
@@ -342,12 +388,12 @@ test("uncertain supplier response remains in cart and blocks duplicate checkout 
     cart.registerOffer(id, result());
     cart.mutate("add", { offerId: id, quantity: 1, revision: 0 });
     await cart.refreshForOrder(1, "armtek", new AbortController().signal);
-    const response = await cart.order(1, "armtek", {}, new AbortController().signal);
+    const response = await cart.order(1, "armtek", cart.view().items.map((item) => item.id), {}, new AbortController().signal);
     assert.equal(response.results[0].status, "uncertain");
     assert.equal(response.cart.count, 1);
     assert.equal(response.cart.pendingIds.length, 1);
     const restored = reopen();
-    await assert.rejects(restored.order(1, "armtek", {}, new AbortController().signal), /сверить/);
+    await assert.rejects(restored.order(1, "armtek", restored.view().items.map((item) => item.id), {}, new AbortController().signal), /сверить/);
     assert.throws(() => restored.clear("armtek", 1), /сверить/);
     assert.equal(calls, 1);
   }, undefined, gateway);
@@ -363,11 +409,11 @@ test("an existing Forum Auto cart line obtains a fresh product id before order",
     assert.equal(repository.save({ revision: 1, lines: [oldLine] }, 0), true);
     repository.close();
     assert.equal(cart.view().items.length, 1);
-    await assert.rejects(cart.order(1, "forum-auto", {}, new AbortController().signal), /Сначала обновите/);
+    await assert.rejects(cart.order(1, "forum-auto", cart.view().items.map((item) => item.id), {}, new AbortController().signal), /Сначала обновите/);
     const refreshed = await cart.refreshForOrder(1, "forum-auto", new AbortController().signal);
     assert.equal(refreshed.revision, 2);
     assert.equal(refreshed.items[0].result.price, 125);
-    assert.equal((await cart.order(2, "forum-auto", {}, new AbortController().signal)).cart.count, 0);
+    assert.equal((await cart.order(2, "forum-auto", cart.view().items.map((item) => item.id), {}, new AbortController().signal)).cart.count, 0);
   }, undefined, gateway);
 });
 
@@ -407,7 +453,7 @@ test("refresh failure keeps the cart unchanged and cannot authorize a real order
     const before = cart.mutate("add", { offerId, quantity: 2, revision: 0 });
     await assert.rejects(cart.refreshForOrder(before.revision, "armtek", new AbortController().signal), /Supplier unavailable/);
     assert.deepEqual(cart.view(), before);
-    await assert.rejects(cart.order(before.revision, "armtek", {}, new AbortController().signal), /Сначала обновите/);
+    await assert.rejects(cart.order(before.revision, "armtek", before.items.map((item) => item.id), {}, new AbortController().signal), /Сначала обновите/);
     assert.equal(sends, 0);
   }, undefined, gateway);
 });

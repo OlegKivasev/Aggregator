@@ -89,11 +89,11 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     <div class="cart-tabs" id="cart-tabs" role="tablist" aria-label="Поставщики в корзине"></div>
     <div class="cart-content" id="cart-tab-panel" role="tabpanel" aria-labelledby="cart-tab-all">
       <div class="cart-table-scroll"><table class="table align-middle cart-table"><thead><tr>
-        <th>Запчасть</th><th>Наименование</th><th id="cart-supplier-column">Поставщик</th><th>Доставка</th><th class="cart-price-column">Цена, ₽</th><th class="cart-quantity-column">Кол-во</th><th class="cart-price-column">Стоимость, ₽</th><th><span class="visually-hidden">Удалить</span></th>
+        <th class="cart-select-column"><input id="cart-select-all" type="checkbox" aria-label="Выбрать все товары вкладки" title="Выбрать все товары вкладки"></th><th>Запчасть</th><th>Наименование</th><th id="cart-supplier-column">Поставщик</th><th>Доставка</th><th class="cart-price-column">Цена, ₽</th><th class="cart-quantity-column">Кол-во</th><th class="cart-price-column">Стоимость, ₽</th><th><span class="visually-hidden">Удалить</span></th>
       </tr></thead><tbody id="cart-items"></tbody></table></div>
       <p id="cart-summary"></p>
       <p class="cart-status" id="cart-status" role="status" aria-live="polite"></p></div>
-    <footer class="cart-footer"><div class="cart-footer__summary"><span>Итого</span><span>Дата поставки с учётом всех товаров</span>
+    <footer class="cart-footer"><div class="cart-footer__summary"><span>К заказу</span><span>Дата поставки выбранных товаров</span>
       <div id="cart-total"></div><strong id="cart-delivery-date"></strong></div>
       <button type="button" class="btn btn-primary" id="cart-test-order">Оформить заказы</button></footer>`;
   document.body.append(modal);
@@ -112,7 +112,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   orderDialog.setAttribute("aria-describedby", "cart-order-intro");
   orderDialog.innerHTML = `<header class="analogs-modal__header"><h2 id="cart-order-title">Подтверждение заказа</h2></header>
     <div class="cart-content"><p class="cart-order-intro" id="cart-order-intro">Внимательно проверьте товары, количество, склады, сроки доставки и суммы перед заказом.</p>
-      <div id="cart-order-groups"></div><div id="cart-order-fields" class="cart-order-fields"></div>
+      <div id="cart-order-groups"></div>
       <div id="cart-order-receipt" class="cart-order-receipt" hidden></div>
       <p class="cart-order-status" id="cart-order-status" role="status" aria-live="polite"></p></div>
     <footer class="cart-footer"><div><span>Итого</span><div id="cart-order-total"></div></div>
@@ -135,7 +135,6 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   const orderCancel = orderDialog.querySelector("#cart-order-cancel");
   const orderAccept = orderDialog.querySelector("#cart-order-accept");
   const orderStatus = orderDialog.querySelector("#cart-order-status");
-  const orderFields = orderDialog.querySelector("#cart-order-fields");
   const orderReceipt = orderDialog.querySelector("#cart-order-receipt");
   let orderTarget = null;
   let clearTarget = null;
@@ -148,6 +147,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   let refreshedRevision = null;
   let refreshedScope = null;
   let refreshedUntil = 0;
+  const selectedIds = new Set();
 
   const notify = (message, error = false) => {
     clearTimeout(toastTimeout);
@@ -161,12 +161,18 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     const focusedControl = document.activeElement.closest?.("#cart-items input, #cart-items button");
     const focusedTab = document.activeElement.closest?.(".cart-tab")?.dataset.cartSupplier;
     const focusedId = focusedControl?.closest("tr")?.dataset.cartItemId;
-    const focusedSelector = focusedControl?.matches("input") ? ".cart-quantity" : ".cart-remove";
+    const focusedSelector = focusedControl?.matches(".cart-item-select") ? ".cart-item-select"
+      : focusedControl?.matches("input") ? ".cart-quantity" : ".cart-remove";
     const locked = busy || checking || cart.testing;
     const suppliers = Object.keys(supplierNames).filter((supplier) => cart.items.some((item) => item.result.supplier === supplier));
     if (activeSupplier !== "all" && !suppliers.includes(activeSupplier)) activeSupplier = "all";
     const items = activeSupplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === activeSupplier);
     const count = items.reduce((sum, item) => sum + item.quantity, 0);
+    const currentIds = new Set(cart.items.map((item) => item.id));
+    for (const id of selectedIds) if (!currentIds.has(id)) selectedIds.delete(id);
+    const pending = new Set(cart.pendingIds ?? []);
+    const selected = items.filter((item) => selectedIds.has(item.id) && !pending.has(item.id));
+    const selectable = items.filter((item) => !pending.has(item.id));
     tabs.innerHTML = ["all", ...suppliers].map((supplier) => {
       const name = supplier === "all" ? "Все" : supplierNames[supplier];
       const tabCount = supplier === "all" ? cart.count : cart.items.filter((item) => item.result.supplier === supplier).reduce((sum, item) => sum + item.quantity, 0);
@@ -181,14 +187,17 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     badge.hidden = cart.count === 0;
     toggle.hidden = cart.count === 0;
     toggle.setAttribute("aria-label", `Открыть корзину: ${cart.count} шт.`);
-    modal.querySelector("#cart-summary").textContent = `Количество: ${count} шт.`;
-    modal.querySelector("#cart-total").innerHTML = renderTotals(items);
-    modal.querySelector("#cart-delivery-date").textContent = formatCartLatestDeliveryDate(items);
-    const pending = new Set(cart.pendingIds ?? []);
+    modal.querySelector("#cart-summary").textContent = `Количество: ${count} шт. Выбрано к заказу: ${selected.reduce((sum, item) => sum + item.quantity, 0)} шт.`;
+    modal.querySelector("#cart-total").innerHTML = renderTotals(selected);
+    modal.querySelector("#cart-delivery-date").textContent = formatCartLatestDeliveryDate(selected);
+    const selectAll = modal.querySelector("#cart-select-all");
+    selectAll.disabled = locked || !selectable.length;
+    selectAll.checked = selectable.length > 0 && selected.length === selectable.length;
+    selectAll.indeterminate = selected.length > 0 && selected.length < selectable.length;
     body.innerHTML = items.length ? items.map((item) => {
       const result = item.result;
       const unresolved = pending.has(item.id);
-      return `<tr data-cart-item-id="${escapeHtml(item.id)}"><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
+      return `<tr data-cart-item-id="${escapeHtml(item.id)}" class="${selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || unresolved ? "disabled" : ""}></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
         <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : ""}</td>
         ${activeSupplier === "all" ? `<td class="cart-item-supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
         <td class="cart-item-delivery">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
@@ -197,8 +206,8 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
           aria-label="Количество для ${escapeHtml(result.article)}" ${locked || unresolved ? "disabled" : ""}><span class="cart-item-stock">из ${maximumQuantity(result)}</span></td>
         <td class="cart-item-sum">${renderPrices(result, item.quantity)}</td>
         <td><button type="button" class="cart-remove btn btn-light" aria-label="Удалить ${escapeHtml(result.article)}" title="Удалить" ${locked || unresolved ? "disabled" : ""}>×</button></td></tr>`;
-    }).join("") : `<tr><td colspan="${activeSupplier === "all" ? 8 : 7}" class="cart-empty">Корзина пуста. Добавьте товары из таблицы предложений.</td></tr>`;
-    testButton.disabled = locked || !items.length || items.some((item) => pending.has(item.id));
+    }).join("") : `<tr><td colspan="${activeSupplier === "all" ? 9 : 8}" class="cart-empty">Корзина пуста. Добавьте товары из таблицы предложений.</td></tr>`;
+    testButton.disabled = locked || !selected.length;
     testButton.textContent = checking ? "Оформляем…" : activeSupplier === "all" ? "Оформить заказы" : "Оформить заказ";
     clearButton.disabled = locked || !items.length || items.some((item) => pending.has(item.id));
     const clearLabel = `Очистить вкладку «${activeSupplier === "all" ? "Все" : supplierNames[activeSupplier]}»`;
@@ -253,6 +262,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   toggle.addEventListener("click", async () => {
     returnFocus = document.activeElement;
     activeSupplier = "all";
+    selectedIds.clear();
     if (!modal.open) modal.showModal();
     if (busy || checking) return;
     busy = true;
@@ -345,65 +355,37 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     if (remove) void mutate(`/api/cart/items/${encodeURIComponent(remove.closest("tr").dataset.cartItemId)}`, "DELETE", {}, remove);
   });
   body.addEventListener("change", (event) => {
+    const choice = event.target.closest(".cart-item-select");
+    if (choice) {
+      const id = choice.closest("tr").dataset.cartItemId;
+      if (choice.checked) selectedIds.add(id); else selectedIds.delete(id);
+      render();
+      return;
+    }
     const input = event.target.closest(".cart-quantity");
     if (!input || !input.reportValidity()) return;
     void mutate(`/api/cart/items/${encodeURIComponent(input.closest("tr").dataset.cartItemId)}`, "PATCH", { quantity: Number(input.value) });
   });
-
-  const choiceOptions = (values) => {
-    if (!Array.isArray(values) || !values.length || values.some((item) => !item || typeof item.id !== "string"
-      || typeof item.label !== "string" || item.id.length > 200 || item.label.length > 500)) {
-      throw new Error("Поставщик не вернул доступные параметры заказа.");
+  modal.querySelector("#cart-select-all").addEventListener("change", (event) => {
+    const items = activeSupplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === activeSupplier);
+    const pending = new Set(cart.pendingIds ?? []);
+    for (const item of items) if (!pending.has(item.id)) {
+      if (event.target.checked) selectedIds.add(item.id); else selectedIds.delete(item.id);
     }
-    return `<option value="">Выберите вариант</option>${values.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join("")}`;
-  };
-  const renderOrderFields = (items, choices) => {
+    render();
+  });
+
+  const validateOrderChoices = (items, choices) => {
     const suppliers = new Set(items.map((item) => item.result.supplier));
-    const sections = [];
     if (suppliers.has("part-kom")) {
       const deliveries = choices?.partKom?.deliveries;
       if (!Array.isArray(deliveries) || deliveries.length !== 1 || deliveries[0]?.id !== "regular" || deliveries[0]?.type !== "regular") {
         throw new Error("PartKOM не подтвердил обычную доставку.");
       }
-      sections.push(`<section class="cart-order-field-group"><h3>PartKOM — доставка</h3>
-        <p>Регулярная доставка. Оплата по условиям договора с PartKOM.</p></section>`);
     }
-    if (suppliers.has("rossko")) {
-      const options = choices?.rossko;
-      if (!Array.isArray(options?.deliveries) || options.deliveries.some((item) => item.addressId !== null && typeof item.addressId !== "string")) {
-        throw new Error("Rossko не вернул способы доставки.");
-      }
-      sections.push(`<section class="cart-order-field-group"><h3>Rossko — данные заказа</h3>
-        <label>Доставка<select id="cart-rossko-delivery" required>${choiceOptions(options.deliveries.map((item, index) => ({ id: String(index), label: item.label })))}</select></label>
-        <label>Оплата банковским переводом<select id="cart-rossko-payment" required>${choiceOptions(options.payments)}</select></label>
-        <label>Реквизиты<select id="cart-rossko-company"><option value="">Не выбраны</option>${Array.isArray(options.companies)
-          ? options.companies.filter((item) => item && typeof item.id === "string" && typeof item.label === "string")
-            .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join("") : ""}</select></label>
-        <label>Контактное лицо<input id="cart-rossko-name" required maxlength="100" autocomplete="name"></label>
-        <label>Телефон<input id="cart-rossko-phone" required maxlength="40" autocomplete="tel"></label>
-        <label class="cart-order-checkbox"><input id="cart-rossko-parts" type="checkbox"> Доставлять заказ по частям</label></section>`);
-    }
-    orderFields.innerHTML = sections.join("");
-  };
-  const collectOrderDetails = (choices) => {
-    const inputs = [...orderFields.querySelectorAll("input, select")];
-    if (inputs.some((input) => !input.reportValidity())) return null;
-    const details = {};
-    if (choices?.partKom) details.partKom = { deliveryId: "regular" };
-    const rossko = orderFields.querySelector("#cart-rossko-delivery");
-    if (rossko) {
-      const choice = choices.rossko.deliveries[Number(rossko.value)];
-      if (!choice) throw new Error("Выберите способ доставки Rossko.");
-      details.rossko = { deliveryId: choice.id, addressId: choice.addressId,
-        paymentId: orderFields.querySelector("#cart-rossko-payment").value,
-        companyId: orderFields.querySelector("#cart-rossko-company").value || null,
-        name: orderFields.querySelector("#cart-rossko-name").value.trim(), phone: orderFields.querySelector("#cart-rossko-phone").value.trim(),
-        deliveryParts: orderFields.querySelector("#cart-rossko-parts").checked };
-    }
-    return details;
   };
   testButton.addEventListener("click", async () => {
-    if (busy || checking || cart?.testing || !cart?.items.length) return;
+    if (busy || checking || cart?.testing || !cart?.items.length || !selectedIds.size) return;
     const supplier = activeSupplier;
     busy = true;
     render();
@@ -421,11 +403,13 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       }
       status.textContent = "";
       render();
-      const items = supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier);
-      if (!items.length) throw new Error("Добавьте товары в выбранную вкладку корзины.");
-      const choices = await api(`/api/cart/order-options?revision=${cart.revision}&supplier=${encodeURIComponent(supplier)}`);
+      const items = (supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier))
+        .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id));
+      if (!items.length) throw new Error("Выберите товары для заказа.");
+      const itemIds = items.map((item) => item.id);
+      const choices = await api("/api/cart/order-options", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier, itemIds }) });
       if (!modal.open) return;
-      orderTarget = { supplier, revision: cart.revision, items: structuredClone(items), choices };
+      orderTarget = { supplier, revision: cart.revision, items: structuredClone(items), itemIds, choices };
       orderDialog.querySelector("#cart-order-title").textContent = "Подтверждение заказа";
       orderDialog.querySelector("#cart-order-groups").innerHTML = Object.entries(supplierNames).map(([supplier, name]) => {
         const group = items.filter((item) => item.result.supplier === supplier);
@@ -445,8 +429,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
           </tbody></table></div><p class="cart-order-delivery">Дата поставки с учётом всех товаров: ${escapeHtml(formatCartLatestDeliveryDate(group))}</p></section>`;
       }).join("");
       orderDialog.querySelector("#cart-order-total").innerHTML = renderTotals(items);
-      renderOrderFields(items, choices);
-      orderFields.hidden = false;
+      validateOrderChoices(items, choices);
       orderReceipt.hidden = true;
       orderReceipt.textContent = "";
       orderStatus.textContent = "";
@@ -475,11 +458,8 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   });
   orderAccept.addEventListener("click", async () => {
     if (busy || checking || !orderTarget || !orderDialog.open) return;
-    const { supplier, revision, items, choices } = orderTarget;
-    let details;
-    try { details = collectOrderDetails(choices); }
-    catch (error) { orderStatus.textContent = error.message; orderStatus.classList.add("is-error"); return; }
-    if (!details) return;
+    const { supplier, revision, items, itemIds, choices } = orderTarget;
+    const details = choices?.partKom ? { partKom: { deliveryId: "regular" } } : {};
     checking = true;
     orderAccept.disabled = true;
     orderCancel.disabled = true;
@@ -488,7 +468,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     render();
     try {
       if (cart.revision !== revision) throw new Error("Корзина изменилась. Вернитесь в корзину и проверьте заказ заново.");
-      const result = await api("/api/cart/order", { method: "POST", body: JSON.stringify({ revision, supplier, details }) });
+      const result = await api("/api/cart/order", { method: "POST", body: JSON.stringify({ revision, supplier, itemIds, details }) });
       if (result.supplier !== supplier || !Array.isArray(result.results) || !result.results.length) {
         throw new Error("Не удалось подтвердить результат заказа.");
       }
@@ -522,6 +502,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
         }
       }
       cart = nextCart;
+      selectedIds.clear();
       render();
       const complete = accepted === items.length && failed === 0 && !items.some((item) => cart.items.some((remaining) => remaining.id === item.id));
       const message = complete ? "Заказ успешно оформлен. Заказанные товары удалены из корзины."
@@ -529,7 +510,6 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
           : "Заказ не подтверждён. Проверьте результат у поставщика перед повторной попыткой.";
       orderReceipt.replaceChildren(...receipts.map((entry) => { const row = document.createElement("p"); row.textContent = entry; return row; }));
       orderReceipt.hidden = false;
-      orderFields.hidden = true;
       status.textContent = message;
       orderStatus.textContent = message;
       orderStatus.classList.toggle("is-success", complete);
