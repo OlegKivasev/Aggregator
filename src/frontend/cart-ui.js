@@ -651,6 +651,12 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
           receipts.push(row);
         }
       }
+      if (uncertain && !result.results.some((group) => group.supplier === "armtek" && group.status === "uncertain")
+        && accepted + failed < items.length) {
+        const row = document.createElement("p");
+        row.textContent = `Остальные выбранные товары не отправлялись: ${items.length - accepted - failed} поз.`;
+        receipts.push(row);
+      }
       cart = nextCart;
       selectedIds.clear();
       render();

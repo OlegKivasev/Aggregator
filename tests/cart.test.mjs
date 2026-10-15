@@ -444,6 +444,23 @@ test("an uncertain Forum Auto creation fault exposes only its safe code", async 
   }, undefined, gateway);
 });
 
+test("an uncertain Forum Auto response shows its order number for supplier verification", async () => {
+  const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => {
+    throw new SupplierIntegrationError("Forum-Auto order confirmation is incomplete", {
+      publicMessage: "Forum Auto вернул заказ №42, но не подтвердил выбранную позицию. Найдите заказ по номеру в кабинете поставщика.",
+    });
+  } };
+  await withCart(async (cart) => {
+    const offerId = randomUUID();
+    cart.registerOffer(offerId, result("forum-auto"));
+    cart.mutate("add", { offerId, quantity: 1, revision: 0 });
+    await cart.refreshForOrder(1, "forum-auto", new AbortController().signal);
+    const response = await cart.order(1, "forum-auto", [cart.view().items[0].id], {}, new AbortController().signal);
+    assert.match(response.results[0].message, /№42/);
+    assert.deepEqual(response.cart.pendingIds, [cart.view().items[0].id]);
+  }, undefined, gateway);
+});
+
 test("an existing Forum Auto cart line obtains a fresh product id before order", async () => {
   const gateway = { refresh: async (lines) => lines.map((item) => ({ ...item, reference: reference("forum-auto"), result: { ...item.result, price: 125 } })),
     choices: async () => ({}), prepare: async (_supplier, lines) => async () => ({ confirmed: [{ id: lines[0].id, acceptedQuantity: 2, orderIds: ["F-1"] }], rejected: [] }) };
@@ -520,6 +537,10 @@ test("supplier order parsers require matching real confirmations", () => {
     k2: -1, k3: 3, price: "bad", sum: Infinity }] }], forum).confirmed[0].forumAutoOrder,
   { orderId: "42", orderedQuantity: 2 });
   assert.throws(() => parseForumAutoOrderResult([{ did: 42, arTovs: [] }], forum));
+  assert.throws(() => parseForumAutoOrderResult([{ did: 42, arTovs: [{ gid: "other-gid", k1: 2 }] }], forum),
+    (error) => error.publicMessage.includes("№42") && !error.publicMessage.includes("other-gid"));
+  assert.throws(() => parseForumAutoOrderResult([], forum),
+    (error) => error.publicMessage.includes("пустой ответ") && !error.publicMessage.includes("№"));
   const partKom = line("part-kom");
   assert.equal(parsePartKomMotion([{ orderNumber: "P-1", detailNum: "A1", providerId: 202, quantity: 2 }], partKom).confirmed[0].acceptedQuantity, 2);
   assert.deepEqual(parsePartKomMotion([{ orderNumber: "P-1", orderDate: "2026-10-15 12:33:00", detailNum: "A1", maker: "TEST",

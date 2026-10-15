@@ -25,7 +25,7 @@ function uncertainOrderMessage(supplier: OrderSupplier, error: unknown): string 
     return "Forum Auto сообщил об ошибке создания заказа (код 25). Проверьте кабинет поставщика перед повторной попыткой.";
   }
   if (error instanceof SupplierIntegrationError && error.message === "Forum-Auto order confirmation is incomplete") {
-    return "Ответ Forum Auto не подтвердил выбранный товар. Проверьте кабинет поставщика перед повторной попыткой.";
+    return error.publicMessage ?? "Ответ Forum Auto не подтвердил выбранный товар. Проверьте кабинет поставщика перед повторной попыткой.";
   }
   return generic;
 }

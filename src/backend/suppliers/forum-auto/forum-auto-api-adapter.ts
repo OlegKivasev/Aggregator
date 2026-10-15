@@ -334,7 +334,21 @@ export function parseForumAutoOrderResult(payload: unknown, line: PurchaseLine):
         && Array.isArray(items) ? items.map((item) => ({ id: String(id), order, item })) : [];
     }).filter(({ item }) => item && typeof item === "object" && !Array.isArray(item)
       && (item as Record<string, unknown>).gid === gid);
-  if (matches.length !== 1) throw new SupplierIntegrationError("Forum-Auto order confirmation is incomplete");
+  if (matches.length !== 1) {
+    const orderIds = [...new Set(orders.flatMap((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const id = (value as Record<string, unknown>).did;
+      if (typeof id === "number" && Number.isSafeInteger(id) && id > 0) return [String(id)];
+      if (typeof id === "string" && /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id))) return [id];
+      return [];
+    }))];
+    const publicMessage = orderIds.length === 1
+      ? `Forum Auto вернул заказ №${orderIds[0]}, но не подтвердил выбранную позицию. Найдите заказ по номеру в кабинете поставщика.`
+      : Array.isArray(payload) && payload.length === 0
+        ? "Forum Auto вернул пустой ответ на создание заказа. Проверьте кабинет поставщика перед повторной попыткой."
+        : "Ответ Forum Auto не содержит подтверждения выбранной позиции и номера заказа. Проверьте кабинет поставщика перед повторной попыткой.";
+    throw new SupplierIntegrationError("Forum-Auto order confirmation is incomplete", { publicMessage });
+  }
   const { id, order, item } = matches[0];
   const product = item as Record<string, unknown>;
   const quantity = product.k1;
