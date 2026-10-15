@@ -13,6 +13,25 @@ const fulfillmentPriority = new Map([
   ["processing", 0], ["in_transit", 1], ["ready", 1], ["partial", 2],
   ["cancelled", 3], ["delivered", 4], ["returned", 5], ["attention", 6], ["unknown", 7],
 ]);
+const statusGroups = new Map([
+  ["", { label: "Все заказы", states: [] }],
+  ["active", { label: "В работе", states: ["processing", "in_transit", "ready"] }],
+  ["partial", { label: "Частичная поставка", states: ["partial"] }],
+  ["cancelled", { label: "Отменено", states: ["cancelled"] }],
+  ["delivered", { label: "Получено", states: ["delivered"] }],
+  ["returned", { label: "Возвращено", states: ["returned"] }],
+  ["attention", { label: "Требуют внимания", states: ["attention", "unknown"] }],
+]);
+
+function orderMatchesFilters(order, values) {
+  const states = statusGroups.get(values.status).states;
+  if (states.length && !order.items.some((item) => states.includes(item.fulfillment))) return false;
+  if (!values.from && !values.to) return true;
+  const date = order.date?.slice(0, 10);
+  const parsed = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
+  return parsed && Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date
+    && (!values.from || date >= values.from) && (!values.to || date <= values.to);
+}
 
 function orderPriority(order) {
   return order.items.reduce((priority, item) => Math.min(priority, fulfillmentPriority.get(item.fulfillment)), Infinity);
@@ -129,122 +148,186 @@ export function bootstrapOrderHistory() {
   dialog.innerHTML = `<header class="analogs-modal__header"><h2 id="history-title">История заказов</h2>
     <button type="button" class="btn btn-light analogs-modal__close" id="history-close" aria-label="Закрыть историю заказов">×</button></header>
     <div class="cart-tabs" id="history-tabs" role="tablist" aria-label="Поставщики"></div>
-    <div class="cart-content history-content"><form class="history-toolbar" id="history-toolbar" aria-label="Фильтры заказов" novalidate>
+    <div class="cart-content history-content">
+      <div class="history-status-tabs" id="history-status-tabs" role="tablist" aria-label="Статус заказа"></div>
+      <form class="history-toolbar" id="history-toolbar" aria-label="Фильтры заказов" novalidate>
       <div class="history-period" id="history-period">
         <label>Дата заказа с <input type="date" id="history-from"></label>
         <label>по <input type="date" id="history-to"></label></div>
-      <label class="history-status-filter">Статус <select id="history-status"><option value="">Все статусы</option></select></label>
-      <div class="history-actions"><button type="button" id="history-reset">Сбросить</button>
-        <button type="submit" id="history-reload">Показать</button></div></form>
-      <div id="history-results" role="status" aria-live="polite"></div></div>`;
+      <div class="history-actions"><button type="button" id="history-reset" hidden>Сбросить</button>
+        <button type="button" id="history-reload">Обновить</button></div></form>
+      <div id="history-results" role="tabpanel" aria-live="polite"></div></div>`;
   const tabs = dialog.querySelector("#history-tabs");
   const results = dialog.querySelector("#history-results");
   const from = dialog.querySelector("#history-from");
   const to = dialog.querySelector("#history-to");
-  const status = dialog.querySelector("#history-status");
-  for (const [state, [label]] of [...fulfillmentLabels].sort(([a], [b]) => fulfillmentPriority.get(a) - fulfillmentPriority.get(b))) {
-    const option = element("option", "", label);
-    option.value = state;
-    status.append(option);
-  }
+  const reset = dialog.querySelector("#history-reset");
+  const statusTabs = dialog.querySelector("#history-status-tabs");
+  const views = [...suppliers, ["all", "Все поставщики"]];
   const dateValue = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  const defaultFilters = (supplier) => {
-    const today = new Date();
-    const end = dateValue(today);
-    today.setDate(today.getDate() - 29);
-    return { from: supplier === "armtek" ? dateValue(today) : "", to: supplier === "armtek" ? end : "", status: "" };
+  const defaultPeriod = (end = new Date()) => {
+    const start = new Date(end);
+    start.setDate(start.getDate() - 29);
+    return { from: dateValue(start), to: dateValue(end) };
   };
-  const filters = new Map(suppliers.map(([supplier]) => [supplier, defaultFilters(supplier)]));
+  const defaultFilters = (supplier) => {
+    return { ...(supplier === "armtek" ? defaultPeriod() : { from: "", to: "" }), status: "" };
+  };
+  const defaults = new Map(views.map(([supplier]) => [supplier, defaultFilters(supplier)]));
+  const filters = new Map([...defaults].map(([supplier, values]) => [supplier, { ...values }]));
   let selected = "part-kom";
-  let pending = null;
-  const saveFilters = () => filters.set(selected, { from: from.value, to: to.value, status: status.value });
+  let histories = new Map();
+  const saveFilters = () => {
+    const values = filters.get(selected);
+    filters.set(selected, { ...values, from: from.value, to: to.value });
+  };
+  const updateControls = () => {
+    const values = filters.get(selected);
+    const initial = defaults.get(selected);
+    reset.hidden = values.status === "" && values.from === initial.from && values.to === initial.to;
+    for (const button of tabs.children) button.setAttribute("aria-selected", String(button.dataset.supplier === selected));
+    for (const button of statusTabs.children) button.setAttribute("aria-selected", String(button.dataset.status === values.status));
+    results.setAttribute("aria-labelledby", `history-tab-${selected} history-status-${values.status || "all"}`);
+  };
   const showFilters = () => {
     const values = filters.get(selected);
     from.value = values.from;
     to.value = values.to;
-    status.value = values.status;
     from.required = to.required = selected === "armtek";
+    updateControls();
   };
 
   const message = (value, error = false) => {
     results.replaceChildren(element("p", `history-message${error ? " is-error" : ""}`, value));
   };
-  const load = async () => {
-    pending?.abort();
-    const supplier = selected;
+  const filterError = () => {
+    const values = filters.get(selected);
+    if ([from, to].some((input) => !input.checkValidity() || input.value && !/^\d{4}-\d{2}-\d{2}$/.test(input.value))) {
+      return "Укажите корректные даты заказа.";
+    }
+    return values.from && values.to && values.from > values.to
+      ? "Выберите корректный период заказа: дата начала не должна быть позже даты окончания." : null;
+  };
+  const render = () => {
+    if (!dialog.open) return;
+    const error = filterError();
+    if (error) { message(error, true); return; }
+    const values = filters.get(selected);
+    const fragment = document.createDocumentFragment();
+    const orders = [];
+    const loading = [];
+    let failures = 0;
+    let total = 0;
+    for (const [supplier, history] of histories) {
+      const name = suppliers.find(([id]) => id === supplier)[1];
+      if (history.loading) loading.push(name);
+      if (history.error) { fragment.append(element("p", "history-message is-error", `${name}: ${history.error}`)); failures++; }
+      if (!history.payload) continue;
+      total += history.payload.orders.length;
+      for (const order of history.payload.orders) {
+        if (orderMatchesFilters(order, values)) orders.push({ order, name, limited: history.payload.limited });
+      }
+    }
+    if (loading.length) fragment.append(element("p", "history-loading", `Загружаем заказы: ${loading.join(", ")}…`));
+    orders.sort((a, b) => orderPriority(a.order) - orderPriority(b.order)
+      || (b.order.date ?? "").localeCompare(a.order.date ?? ""));
+    for (const { order, name, limited } of orders) fragment.append(renderOrder(order, limited, name));
+    if (!orders.length && !loading.length && !failures) {
+      const empty = selected === "all" ? "В выбранной истории заказов нет."
+        : `В выбранной истории ${suppliers.find(([id]) => id === selected)[1]} заказов нет.`;
+      fragment.append(element("p", "history-message", total ? "По выбранным фильтрам заказов нет." : empty));
+    }
+    results.replaceChildren(fragment);
+  };
+  const requestSource = async (supplier, force = false) => {
     const name = suppliers.find(([id]) => id === supplier)[1];
-    saveFilters();
-    const values = filters.get(supplier);
+    const params = new URLSearchParams();
+    let queryError = null;
+    if (supplier === "armtek") {
+      const values = filters.get(selected);
+      const period = defaultPeriod(values.to ? new Date(`${values.to}T12:00:00`) : new Date());
+      const start = values.from || period.from;
+      const end = values.to || period.to;
+      if (start > end || Date.parse(end) - Date.parse(start) > 92 * 86400000) {
+        queryError = "Выберите корректный период Armtek: не более 93 дней.";
+      }
+      params.set("from", start);
+      params.set("to", end);
+    }
+    const key = params.toString();
+    const previous = histories.get(supplier);
+    if (!force && previous?.key === key) return;
+    previous?.controller?.abort();
     const controller = new AbortController();
-    pending = controller;
+    const history = { controller, key, payload: null, error: queryError, loading: !queryError };
+    histories.set(supplier, history);
+    render();
+    if (queryError) return;
     try {
-      const params = new URLSearchParams();
-      if ([from, to].some((input) => !input.checkValidity() || input.value && !/^\d{4}-\d{2}-\d{2}$/.test(input.value))) {
-        throw new Error("Укажите корректные даты заказа.");
-      }
-      if (values.from && values.to && values.from > values.to) {
-        throw new Error("Выберите корректный период заказа: дата начала не должна быть позже даты окончания.");
-      }
-      if (supplier === "armtek") {
-        if (!values.from || !values.to || Date.parse(values.to) - Date.parse(values.from) > 92 * 86400000) {
-          throw new Error("Выберите корректный период Armtek: не более 93 дней.");
-        }
-        params.set("from", values.from);
-        params.set("to", values.to);
-      }
-      message(`Загружаем заказы ${name}…`);
       const response = await fetch(`/api/order-history/${supplier}${params.size ? `?${params}` : ""}`, { signal: controller.signal });
       const payload = await response.json();
       if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось получить историю заказов.");
       if (!validHistory(payload)) throw new Error(`${name} вернул некорректную историю заказов.`);
-      if (controller.signal.aborted || !dialog.open) return;
-      if (!payload.orders.length) {
-        message(`В выбранной истории ${name} заказов нет.`);
-        return;
-      }
-      const fragment = document.createDocumentFragment();
-      const orders = payload.orders.filter((order) => {
-        if (values.status && !order.items.some((item) => item.fulfillment === values.status)) return false;
-        if (!values.from && !values.to) return true;
-        const date = order.date?.slice(0, 10);
-        const parsed = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
-        return parsed && Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date
-          && (!values.from || date >= values.from) && (!values.to || date <= values.to);
-      }).sort((a, b) => orderPriority(a) - orderPriority(b)
-        || (b.date ?? "").localeCompare(a.date ?? ""));
-      if (!orders.length) {
-        message("По выбранным фильтрам заказов нет.");
-        return;
-      }
-      for (const order of orders) fragment.append(renderOrder(order, payload.limited, name));
-      results.replaceChildren(fragment);
+      if (controller.signal.aborted || histories.get(supplier) !== history || !dialog.open) return;
+      history.payload = payload;
     } catch (error) {
-      if (!controller.signal.aborted && dialog.open) message(error.message || "Не удалось получить историю заказов.", true);
+      if (!controller.signal.aborted) history.error = error.message || "Не удалось получить историю заказов.";
     } finally {
-      if (pending === controller) pending = null;
+      if (!controller.signal.aborted && histories.get(supplier) === history && dialog.open) { history.loading = false; render(); }
     }
   };
-  const updateTabs = () => {
-    tabs.replaceChildren();
-    for (const [id, name] of suppliers) {
-      const button = element("button", "cart-tab", name);
-      button.type = "button";
-      button.id = `history-tab-${id}`;
-      button.setAttribute("role", "tab");
-      button.setAttribute("aria-selected", String(selected === id));
-      button.addEventListener("click", () => {
-        if (selected !== id) { saveFilters(); selected = id; showFilters(); updateTabs(); void load(); }
-      });
-      tabs.append(button);
-    }
+  const abortLoads = () => { for (const history of histories.values()) history.controller?.abort(); };
+  const load = () => {
+    abortLoads();
+    histories = new Map();
+    const error = filterError();
+    if (error) { message(error, true); return; }
+    const sources = selected === "all" ? suppliers : suppliers.filter(([id]) => id === selected);
+    for (const [id] of sources) histories.set(id, { loading: true });
+    for (const [id] of sources) void requestSource(id, true);
   };
-  toggle.addEventListener("click", () => { showFilters(); updateTabs(); document.body.append(dialog); dialog.showModal(); void load(); });
+  const applyFilters = () => {
+    saveFilters();
+    updateControls();
+    if (!filterError() && !histories.size) { load(); return; }
+    if (!filterError() && histories.has("armtek")) void requestSource("armtek");
+    render();
+  };
+  for (const [id, name] of views) {
+    const button = element("button", "cart-tab", name);
+    if (id === "all") button.classList.add("history-tab--all");
+    button.type = "button";
+    button.id = `history-tab-${id}`;
+    button.dataset.supplier = id;
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-controls", "history-results");
+    button.addEventListener("click", () => {
+      if (selected !== id) { saveFilters(); selected = id; showFilters(); load(); }
+    });
+    tabs.append(button);
+  }
+  for (const [id, group] of statusGroups) {
+    const button = element("button", `history-status-tab history-status-tab--${id || "all"}`, group.label);
+    button.type = "button";
+    button.id = `history-status-${id || "all"}`;
+    button.dataset.status = id;
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-controls", "history-results");
+    if (id === "active" || id === "attention") button.title = group.states.map((state) => fulfillmentLabels.get(state)[0]).join(", ");
+    button.addEventListener("click", () => { filters.get(selected).status = id; updateControls(); render(); });
+    statusTabs.append(button);
+  }
+  toggle.addEventListener("click", () => { showFilters(); document.body.append(dialog); dialog.showModal(); load(); });
   dialog.querySelector("#history-close").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("close", () => { pending?.abort(); dialog.remove(); toggle.focus(); });
-  dialog.querySelector("#history-toolbar").addEventListener("submit", (event) => { event.preventDefault(); void load(); });
-  dialog.querySelector("#history-reset").addEventListener("click", () => {
-    filters.set(selected, defaultFilters(selected));
+  dialog.addEventListener("close", () => { abortLoads(); histories.clear(); dialog.remove(); toggle.focus(); });
+  dialog.querySelector("#history-toolbar").addEventListener("submit", (event) => { event.preventDefault(); applyFilters(); });
+  for (const input of [from, to]) input.addEventListener("change", applyFilters);
+  dialog.querySelector("#history-reload").addEventListener("click", load);
+  reset.addEventListener("click", () => {
+    const values = defaultFilters(selected);
+    defaults.set(selected, values);
+    filters.set(selected, { ...values });
     showFilters();
-    void load();
+    applyFilters();
   });
 }
