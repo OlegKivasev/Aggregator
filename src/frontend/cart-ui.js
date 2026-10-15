@@ -146,6 +146,9 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   let toastTimeout;
   let returnFocus = toggle;
   let activeSupplier = "all";
+  let refreshedRevision = null;
+  let refreshedScope = null;
+  let refreshedUntil = 0;
 
   const notify = (message, error = false) => {
     clearTimeout(toastTimeout);
@@ -252,9 +255,21 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     returnFocus = document.activeElement;
     activeSupplier = "all";
     if (!modal.open) modal.showModal();
+    if (busy || checking) return;
+    busy = true;
     render();
-    status.textContent = "";
-    try { await refresh(); } catch (error) { status.textContent = error.message; }
+    status.textContent = "Обновляем предложения у поставщиков…";
+    try {
+      await refresh();
+      if (cart.items.length) {
+        cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier: "all" }) }));
+        refreshedRevision = cart.revision;
+        refreshedScope = "all";
+        refreshedUntil = Date.now() + 110_000;
+      }
+      status.textContent = "";
+    } catch (error) { refreshedRevision = null; status.textContent = error.message; }
+    finally { busy = false; render(); }
   });
   modal.querySelector("#cart-close").addEventListener("click", () => modal.close());
   clearButton.addEventListener("click", () => {
@@ -397,8 +412,14 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       await refresh();
       if (!modal.open) return;
       if (cart.testing) throw new Error("Дождитесь завершения действия в корзине.");
-      status.textContent = "Обновляем предложения у поставщиков…";
-      cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier }) }));
+      if (refreshedRevision !== cart.revision || refreshedUntil <= Date.now()
+        || refreshedScope !== "all" && refreshedScope !== supplier) {
+        status.textContent = "Обновляем предложения у поставщиков…";
+        cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier }) }));
+        refreshedRevision = cart.revision;
+        refreshedScope = supplier;
+        refreshedUntil = Date.now() + 110_000;
+      }
       status.textContent = "";
       render();
       const items = supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier);

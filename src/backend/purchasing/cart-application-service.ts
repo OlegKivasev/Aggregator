@@ -214,8 +214,10 @@ export class CartApplicationService {
     if (!lines.length) throw new CartError("Добавьте товары в выбранную вкладку корзины.");
     const pending = new Set(this.repository.pendingLineIds());
     if (lines.some((line) => pending.has(line.id))) throw new CartError("Статус предыдущего заказа нужно сверить с поставщиком.", 409);
-    if (!this.refreshed || this.refreshed.revision !== cart.revision || this.refreshed.supplier !== scope
-      || this.refreshed.lineIds !== JSON.stringify(lines.map((line) => line.id)) || this.refreshed.expires <= Date.now()) {
+    const refreshedLines = this.refreshed?.supplier === "all" ? cart.lines : lines;
+    if (!this.refreshed || this.refreshed.revision !== cart.revision
+      || this.refreshed.supplier !== "all" && this.refreshed.supplier !== scope
+      || this.refreshed.lineIds !== JSON.stringify(refreshedLines.map((line) => line.id)) || this.refreshed.expires <= Date.now()) {
       throw new CartError("Сначала обновите предложения и проверьте заказ заново.", 409);
     }
     if (!details || typeof details !== "object" || Array.isArray(details)) throw new CartError("Неверные параметры заказа.");

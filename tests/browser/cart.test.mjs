@@ -25,6 +25,7 @@ async function withCartPage(check, options = {}) {
   let server;
   let browser;
   const orderCalls = [];
+  const refreshCalls = [];
   try {
     const suppliers = options.allSuppliers ? ["armtek", "part-kom", "forum-auto", "rossko"] : ["armtek", "part-kom"];
     const sessions = suppliers.map((supplier) => ({ supplier, authorized: true, lastCheckedAt: null, lastAuthorizedAt: null }));
@@ -55,8 +56,8 @@ async function withCartPage(check, options = {}) {
         return testPurchaseOrder(lines, signal);
       },
       realCartOrder: {
-        refresh: async (lines) => lines.map((line) => ({ ...structuredClone(line),
-          result: { ...line.result, price: options.refreshedPrice ?? line.result.price } })),
+        refresh: async (lines) => { refreshCalls.push(structuredClone(lines)); await options.refreshGate?.(); return lines.map((line) => ({ ...structuredClone(line),
+          result: { ...line.result, price: options.refreshedPrice ?? line.result.price } })); },
         choices: async () => ({ partKom: { deliveries: [{ id: "regular", label: "Обычная доставка", type: "regular" }] },
           rossko: { deliveries: [{ id: "delivery", label: "Доставка", addressId: null }],
             payments: [{ id: "bank", label: "Оплата банковским платежом" }], companies: [] } }),
@@ -84,7 +85,7 @@ async function withCartPage(check, options = {}) {
     await page.locator("#article-input").fill("A1");
     await page.locator("#submit-button").click();
     await page.waitForFunction((count) => document.querySelectorAll("#results-body .cart-offer-button").length === count, suppliers.length);
-    await check(page, { orderCalls, origin });
+    await check(page, { orderCalls, refreshCalls, origin });
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
@@ -180,6 +181,7 @@ test("cart honors reduced motion, constrains focus and fits mobile viewport", as
     assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
     assert.match(await page.locator(".cart-empty").textContent(), /Корзина пуста/);
     await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.activeElement?.id === "submit-button");
     assert.equal(await page.locator("#submit-button").evaluate((node) => node === document.activeElement), true);
   }, { reducedMotion: "reduce" });
 });
@@ -451,6 +453,7 @@ test("four supplier checkout requires confirmation, details and removes confirme
     assert.equal(await page.locator("#cart-order-accept").evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(22, 137, 86)");
     await page.locator("#cart-order-cancel").click();
     assert.equal(posts.length, 0);
+    await page.waitForFunction(() => document.activeElement?.id === "cart-test-order");
     assert.equal(await page.locator("#cart-test-order").evaluate((node) => node === document.activeElement), true);
     await openCheckout(page);
     await page.waitForFunction(() => document.querySelector("#cart-order-confirm").open);
@@ -539,6 +542,42 @@ test("checkout displays a refreshed supplier price before the order is sent", as
     await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
     assert.equal(orderCalls[0][0].result.price, 125);
   }, { refreshedPrice: 125, reducedMotion: "reduce" });
+});
+
+test("opening the cart refreshes its offers and a supplier tab can order without refreshing again", async () => {
+  await withCartPage(async (page, { refreshCalls, orderCalls }) => {
+    await page.locator("#results-body .cart-offer-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#cart-items .cart-purchase-price")?.textContent === "125,00");
+    assert.equal(await page.locator("#cart-test-order").isEnabled(), true);
+    assert.equal(refreshCalls.length, 1);
+    await page.locator("#cart-tab-armtek").click();
+    await openCheckout(page);
+    assert.equal(refreshCalls.length, 1);
+    assert.equal(orderCalls.length, 0);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    assert.equal(orderCalls[0][0].result.price, 125);
+  }, { refreshedPrice: 125 });
+});
+
+test("opening the cart blocks checkout until supplier offers finish refreshing", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  try {
+    await withCartPage(async (page, { refreshCalls }) => {
+      await page.locator("#results-body .cart-offer-button").first().click();
+      await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+      await page.locator("#cart-toggle").click();
+      await page.waitForFunction(() => document.querySelector("#cart-status").textContent.includes("Обновляем предложения"));
+      assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+      release();
+      await page.waitForFunction(() => !document.querySelector("#cart-test-order").disabled);
+      assert.equal(refreshCalls.length, 1);
+      assert.equal(await page.locator("#cart-status").textContent(), "");
+    }, { refreshGate: () => gate });
+  } finally { release(); }
 });
 
 test("checkout blocks duplicate submission and Escape while the real request is pending", async () => {

@@ -308,6 +308,29 @@ test("real checkout removes only confirmed quantities and preserves rejected ite
   }, undefined, gateway);
 });
 
+test("refreshing the whole cart authorizes a supplier tab without another refresh", async () => {
+  let refreshes = 0;
+  const gateway = {
+    refresh: async (lines) => { refreshes++; return lines; },
+    choices: async () => ({}),
+    prepare: async (_supplier, lines) => async () => ({
+      confirmed: lines.map((item) => ({ id: item.id, acceptedQuantity: item.quantity, orderIds: ["A-1"] })), rejected: [],
+    }),
+  };
+  await withCart(async (cart) => {
+    for (const supplier of ["armtek", "forum-auto"]) {
+      const id = randomUUID();
+      cart.registerOffer(id, result(supplier));
+      cart.mutate("add", { offerId: id, quantity: 1, revision: cart.view().revision });
+    }
+    await cart.refreshForOrder(2, "all", new AbortController().signal);
+    const response = await cart.order(2, "armtek", {}, new AbortController().signal);
+    assert.equal(refreshes, 1);
+    assert.equal(response.cart.count, 1);
+    assert.equal(response.cart.items[0].result.supplier, "forum-auto");
+  }, undefined, gateway);
+});
+
 test("uncertain supplier response remains in cart and blocks duplicate checkout after restart", async () => {
   let calls = 0;
   const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => { calls++; throw new Error("Connection lost"); } };
