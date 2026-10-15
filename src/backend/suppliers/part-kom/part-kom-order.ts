@@ -65,7 +65,7 @@ export function parsePartKomMotion(payload: unknown, line: PurchaseLine): OrderG
 export async function placePartKomOrder(line: PurchaseLine, credentials: PartKomCredentials, details: CheckoutDetails,
   attemptId: string, signal: AbortSignal): Promise<OrderGroupResult> {
   if (line.reference.supplier !== "part-kom") throw new SupplierIntegrationError("PartKOM order received another supplier's line");
-  if (!Number.isSafeInteger(line.result.price)) throw new SupplierIntegrationError("PartKOM requires an integer order price");
+  if (!Number.isFinite(line.result.price) || line.result.price <= 0) throw new SupplierIntegrationError("PartKOM order price is invalid");
   if (details.partKom?.deliveryId !== "regular") throw new SupplierIntegrationError("PartKOM delivery choice is invalid");
   const reference = attemptId;
   const fields: Record<string, string> = {

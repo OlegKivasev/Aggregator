@@ -275,7 +275,8 @@ export function createAggregatorServer({
           else if (error instanceof SupplierIntegrationError) {
             const safeMessage = error.publicMessage && (url.pathname === "/api/cart/refresh" || url.pathname === "/api/cart/order-options");
             serveJson(response, url.pathname === "/api/cart/refresh" && safeMessage ? 409 : 502,
-              { message: safeMessage ? error.publicMessage : "Не удалось получить параметры заказа у поставщика." });
+              { message: safeMessage ? error.publicMessage : url.pathname === "/api/cart/order"
+                ? "Не удалось подготовить заказ у поставщика. Заказ не отправлен." : "Не удалось получить параметры заказа у поставщика." });
           }
           else {
             reportError({ operation: "cart", category: classifyOperationalError(error) });

@@ -90,9 +90,11 @@ test("cart order options return the safe supplier error without exposing upstrea
         warehouse: null, deliveryDate: null, deliveryDateApproximate: false, link: "https://www.part-kom.ru/",
       }, { supplier: "part-kom", makerId: "101", providerId: "202" }) }),
       realCartOrder: {
+        refresh: async (lines) => lines,
         choices: async () => { throw new SupplierIntegrationError("private upstream response", {
           publicMessage: "Поставщик не предложил подходящие параметры заказа. Заказ не отправлен.",
         }); },
+        prepare: async () => { throw new SupplierIntegrationError("private preparation failure"); },
       },
     });
     const listening = await listen(application);
@@ -106,6 +108,12 @@ test("cart order options return the safe supplier error without exposing upstrea
     const response = await fetch(`${baseUrl}/api/cart/order-options?revision=${added.revision}&supplier=part-kom`);
     assert.equal(response.status, 502);
     assert.deepEqual(await response.json(), { message: "Поставщик не предложил подходящие параметры заказа. Заказ не отправлен." });
+    const refreshed = await (await fetch(`${baseUrl}/api/cart/refresh`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: added.revision, supplier: "part-kom" }) })).json();
+    const order = await fetch(`${baseUrl}/api/cart/order`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: refreshed.revision, supplier: "part-kom", details: { partKom: { deliveryId: "regular" } } }) });
+    assert.equal(order.status, 502);
+    assert.deepEqual(await order.json(), { message: "Не удалось подготовить заказ у поставщика. Заказ не отправлен." });
   } finally {
     if (server?.listening) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); openServers.delete(server); }
     if (previousPath === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previousPath;

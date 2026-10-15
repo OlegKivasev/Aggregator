@@ -178,8 +178,7 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-footer strong { display: block; margin: 0; font-size: 23px; font-weight: 700; line-height: 1.3; font-variant-numeric: tabular-nums; }
 .cart-order-confirm { width: min(1040px, calc(100vw - 24px)); }
 .cart-order-confirm::backdrop { background: rgba(17, 24, 32, .48); backdrop-filter: blur(2px); }
-.cart-order-intro { margin: 0 0 10px; font-size: 14px; }
-.cart-order-note { margin: 0 0 20px; padding: 10px 14px; border-left: 3px solid #ac5420; color: #854315; background: #fff4e7; font-size: 13px; }
+.cart-order-intro { margin: 0 0 20px; padding: 10px 14px; border-left: 3px solid #b42318; color: #b42318; background: #fff0ee; font-size: 14px; font-weight: 800; }
 .cart-order-group + .cart-order-group { margin-top: 24px; }
 .cart-order-group-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .cart-order-group-header h3 { margin: 0 0 3px; font-size: 18px; font-weight: 700; }

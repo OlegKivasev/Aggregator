@@ -130,7 +130,8 @@ export class RealOrderApplicationService implements RealOrderGateway {
     if (supplier === "part-kom") {
       const credentials = this.sessions.getPartKomCredentials();
       if (!credentials) throw new SupplierAuthError("PartKOM credentials are missing");
-      if (lines.length !== 1 || lines[0].reference.supplier !== supplier || !Number.isSafeInteger(lines[0].result.price)) {
+      if (lines.length !== 1 || lines[0].reference.supplier !== supplier
+        || !Number.isFinite(lines[0].result.price) || lines[0].result.price <= 0) {
         throw new SupplierIntegrationError("PartKOM order reference or price is invalid");
       }
       if (details.partKom?.deliveryId !== "regular") {

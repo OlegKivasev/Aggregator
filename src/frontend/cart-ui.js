@@ -109,10 +109,9 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   orderDialog.id = "cart-order-confirm";
   orderDialog.className = "cart-modal cart-order-confirm";
   orderDialog.setAttribute("aria-labelledby", "cart-order-title");
-  orderDialog.setAttribute("aria-describedby", "cart-order-note");
+  orderDialog.setAttribute("aria-describedby", "cart-order-intro");
   orderDialog.innerHTML = `<header class="analogs-modal__header"><h2 id="cart-order-title">Подтверждение заказа</h2></header>
-    <div class="cart-content"><p class="cart-order-intro">Внимательно проверьте товары, количество, склады, сроки доставки и суммы перед заказом.</p>
-      <p class="cart-order-note" id="cart-order-note">Предложения обновлены у поставщиков перед подтверждением. Проверьте цену, остаток и срок: после нажатия «Заказать» заказ будет отправлен поставщикам.</p>
+    <div class="cart-content"><p class="cart-order-intro" id="cart-order-intro">Внимательно проверьте товары, количество, склады, сроки доставки и суммы перед заказом.</p>
       <div id="cart-order-groups"></div><div id="cart-order-fields" class="cart-order-fields"></div>
       <div id="cart-order-receipt" class="cart-order-receipt" hidden></div>
       <p class="cart-order-status" id="cart-order-status" role="status" aria-live="polite"></p></div>

@@ -449,7 +449,11 @@ test("four supplier checkout requires confirmation, details and removes confirme
     assert.equal(await page.locator("#cart-order-groups tbody tr").count(), 4);
     assert.equal(await page.locator("#cart-order-groups img").count(), 0);
     assert.equal(await page.evaluate(() => window.cartXss), undefined);
-    assert.match(await page.locator("#cart-order-note").textContent(), /будет отправлен поставщикам/);
+    assert.equal(await page.locator("#cart-order-note").count(), 0);
+    assert.match(await page.locator("#cart-order-intro").textContent(), /Внимательно проверьте товары/);
+    assert.deepEqual(await page.locator("#cart-order-intro").evaluate((node) => ({
+      color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight,
+    })), { color: "rgb(180, 35, 24)", weight: "800" });
     assert.equal(await page.locator("#cart-order-accept").evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(22, 137, 86)");
     await page.locator("#cart-order-cancel").click();
     assert.equal(posts.length, 0);
@@ -535,7 +539,7 @@ test("checkout displays a refreshed supplier price before the order is sent", as
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
     await page.locator("#cart-toggle").click();
     await openCheckout(page);
-    assert.match(await page.locator("#cart-order-note").textContent(), /Предложения обновлены/);
+    assert.equal(await page.locator("#cart-order-note").count(), 0);
     assert.equal(await page.locator(".cart-order-table .cart-purchase-price").first().textContent(), "125,00");
     assert.equal(orderCalls.length, 0);
     await page.locator("#cart-order-accept").click();

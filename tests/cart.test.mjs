@@ -47,6 +47,9 @@ test("PartKOM checkout uses documented regular delivery without requesting picku
     { id: "regular", type: "regular", label: "Регулярная доставка (ближайшая волна)" },
   ]);
   assert.equal(typeof await service.prepare("part-kom", [line("part-kom")], { partKom: { deliveryId: "regular" } }, new AbortController().signal), "function");
+  const fractionalPrice = line("part-kom");
+  fractionalPrice.result.price = 1483.07;
+  assert.equal(typeof await service.prepare("part-kom", [fractionalPrice], { partKom: { deliveryId: "regular" } }, new AbortController().signal), "function");
   await assert.rejects(service.prepare("part-kom", [line("part-kom")], { partKom: { deliveryId: "pickup:42" } }, new AbortController().signal),
     /delivery settings are invalid/);
 });
