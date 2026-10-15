@@ -129,27 +129,42 @@ export function bootstrapOrderHistory() {
   dialog.innerHTML = `<header class="analogs-modal__header"><h2 id="history-title">История заказов</h2>
     <button type="button" class="btn btn-light analogs-modal__close" id="history-close" aria-label="Закрыть историю заказов">×</button></header>
     <div class="cart-tabs" id="history-tabs" role="tablist" aria-label="Поставщики"></div>
-    <div class="cart-content history-content"><div class="history-toolbar" id="history-toolbar">
-      <div class="history-period" id="history-period" hidden>
-        <label>С <input type="date" id="history-from" required></label>
-        <label>По <input type="date" id="history-to" required></label></div>
-      <button type="button" class="history-reload" id="history-reload">Обновить</button></div>
-      <p class="history-scope" id="history-scope" hidden></p>
+    <div class="cart-content history-content"><form class="history-toolbar" id="history-toolbar" aria-label="Фильтры заказов" novalidate>
+      <div class="history-period" id="history-period">
+        <label>Дата заказа с <input type="date" id="history-from"></label>
+        <label>по <input type="date" id="history-to"></label></div>
+      <label class="history-status-filter">Статус <select id="history-status"><option value="">Все статусы</option></select></label>
+      <div class="history-actions"><button type="button" id="history-reset">Сбросить</button>
+        <button type="submit" id="history-reload">Показать</button></div></form>
       <div id="history-results" role="status" aria-live="polite"></div></div>`;
   const tabs = dialog.querySelector("#history-tabs");
   const results = dialog.querySelector("#history-results");
-  const period = dialog.querySelector("#history-period");
   const from = dialog.querySelector("#history-from");
   const to = dialog.querySelector("#history-to");
-  const scope = dialog.querySelector("#history-scope");
-  const reload = dialog.querySelector("#history-reload");
+  const status = dialog.querySelector("#history-status");
+  for (const [state, [label]] of [...fulfillmentLabels].sort(([a], [b]) => fulfillmentPriority.get(a) - fulfillmentPriority.get(b))) {
+    const option = element("option", "", label);
+    option.value = state;
+    status.append(option);
+  }
   const dateValue = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  const today = new Date();
-  to.value = dateValue(today);
-  today.setDate(today.getDate() - 29);
-  from.value = dateValue(today);
+  const defaultFilters = (supplier) => {
+    const today = new Date();
+    const end = dateValue(today);
+    today.setDate(today.getDate() - 29);
+    return { from: supplier === "armtek" ? dateValue(today) : "", to: supplier === "armtek" ? end : "", status: "" };
+  };
+  const filters = new Map(suppliers.map(([supplier]) => [supplier, defaultFilters(supplier)]));
   let selected = "part-kom";
   let pending = null;
+  const saveFilters = () => filters.set(selected, { from: from.value, to: to.value, status: status.value });
+  const showFilters = () => {
+    const values = filters.get(selected);
+    from.value = values.from;
+    to.value = values.to;
+    status.value = values.status;
+    from.required = to.required = selected === "armtek";
+  };
 
   const message = (value, error = false) => {
     results.replaceChildren(element("p", `history-message${error ? " is-error" : ""}`, value));
@@ -158,23 +173,24 @@ export function bootstrapOrderHistory() {
     pending?.abort();
     const supplier = selected;
     const name = suppliers.find(([id]) => id === supplier)[1];
-    period.hidden = supplier !== "armtek";
-    reload.textContent = supplier === "armtek" ? "Показать" : "Обновить";
-    scope.textContent = supplier === "armtek" ? "Заказы за выбранный период, не более 93 дней. По умолчанию — последние 30 дней."
-      : supplier === "forum-auto" ? "Активные заказы. API Forum Auto не возвращает общую историю аннулированных и выданных заказов."
-        : supplier === "rossko" ? "Последние 500 заказов Rossko, включая отгруженные и отменённые." : "";
-    scope.hidden = !scope.textContent;
+    saveFilters();
+    const values = filters.get(supplier);
     const controller = new AbortController();
     pending = controller;
     try {
       const params = new URLSearchParams();
+      if ([from, to].some((input) => !input.checkValidity() || input.value && !/^\d{4}-\d{2}-\d{2}$/.test(input.value))) {
+        throw new Error("Укажите корректные даты заказа.");
+      }
+      if (values.from && values.to && values.from > values.to) {
+        throw new Error("Выберите корректный период заказа: дата начала не должна быть позже даты окончания.");
+      }
       if (supplier === "armtek") {
-        if (!from.value || !to.value || !from.checkValidity() || !to.checkValidity() || from.value > to.value
-          || Date.parse(to.value) - Date.parse(from.value) > 92 * 86400000) {
+        if (!values.from || !values.to || Date.parse(values.to) - Date.parse(values.from) > 92 * 86400000) {
           throw new Error("Выберите корректный период Armtek: не более 93 дней.");
         }
-        params.set("from", from.value);
-        params.set("to", to.value);
+        params.set("from", values.from);
+        params.set("to", values.to);
       }
       message(`Загружаем заказы ${name}…`);
       const response = await fetch(`/api/order-history/${supplier}${params.size ? `?${params}` : ""}`, { signal: controller.signal });
@@ -187,9 +203,19 @@ export function bootstrapOrderHistory() {
         return;
       }
       const fragment = document.createDocumentFragment();
-      if (payload.limited) fragment.append(element("p", "history-limit", `Показана ограниченная выборка заказов и позиций. Для полной истории используйте кабинет ${name}.`));
-      const orders = [...payload.orders].sort((a, b) => orderPriority(a) - orderPriority(b)
+      const orders = payload.orders.filter((order) => {
+        if (values.status && !order.items.some((item) => item.fulfillment === values.status)) return false;
+        if (!values.from && !values.to) return true;
+        const date = order.date?.slice(0, 10);
+        const parsed = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
+        return parsed && Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date
+          && (!values.from || date >= values.from) && (!values.to || date <= values.to);
+      }).sort((a, b) => orderPriority(a) - orderPriority(b)
         || (b.date ?? "").localeCompare(a.date ?? ""));
+      if (!orders.length) {
+        message("По выбранным фильтрам заказов нет.");
+        return;
+      }
       for (const order of orders) fragment.append(renderOrder(order, payload.limited, name));
       results.replaceChildren(fragment);
     } catch (error) {
@@ -206,12 +232,19 @@ export function bootstrapOrderHistory() {
       button.id = `history-tab-${id}`;
       button.setAttribute("role", "tab");
       button.setAttribute("aria-selected", String(selected === id));
-      button.addEventListener("click", () => { if (selected !== id) { selected = id; updateTabs(); void load(); } });
+      button.addEventListener("click", () => {
+        if (selected !== id) { saveFilters(); selected = id; showFilters(); updateTabs(); void load(); }
+      });
       tabs.append(button);
     }
   };
-  toggle.addEventListener("click", () => { updateTabs(); document.body.append(dialog); dialog.showModal(); void load(); });
+  toggle.addEventListener("click", () => { showFilters(); updateTabs(); document.body.append(dialog); dialog.showModal(); void load(); });
   dialog.querySelector("#history-close").addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => { pending?.abort(); dialog.remove(); toggle.focus(); });
-  reload.addEventListener("click", () => void load());
+  dialog.querySelector("#history-toolbar").addEventListener("submit", (event) => { event.preventDefault(); void load(); });
+  dialog.querySelector("#history-reset").addEventListener("click", () => {
+    filters.set(selected, defaultFilters(selected));
+    showFilters();
+    void load();
+  });
 }
