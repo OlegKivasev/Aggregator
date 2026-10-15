@@ -8,6 +8,7 @@ import { createAggregatorServer } from "../../src/backend/http/create-server.ts"
 import { attachPurchaseReference } from "../../src/backend/purchasing/purchase-offer.ts";
 import { formatDeliveryDate } from "../../src/frontend/supplier-search-summary.js";
 import { testPurchaseOrder } from "../../src/backend/application/test-order-application-service.ts";
+import { CartError } from "../../src/backend/purchasing/cart-application-service.ts";
 
 // The browser uses a real local cart server; supplier searches and checks are fictional fixtures.
 const supplierOrigins = { armtek: "https://etp.armtek.ru/", "part-kom": "https://www.part-kom.ru/",
@@ -726,7 +727,7 @@ test("opening the cart refreshes its offers and a supplier tab can order without
   }, { refreshedPrice: 125 });
 });
 
-test("opening the cart blocks checkout until supplier offers finish refreshing", async () => {
+test("opening the cart shows a centered blocking refresh state until supplier offers finish refreshing", async () => {
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
   try {
@@ -734,15 +735,67 @@ test("opening the cart blocks checkout until supplier offers finish refreshing",
       await page.locator("#results-body .cart-offer-button").first().click();
       await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
       await page.locator("#cart-toggle").click();
-      await page.waitForFunction(() => document.querySelector("#cart-status").textContent.includes("Обновляем предложения"));
+      const overlay = page.locator("#cart-refresh-overlay");
+      await overlay.waitFor({ state: "visible" });
+      assert.match(await overlay.textContent(), /Обновляем корзину/);
+      const modalBounds = await page.locator("#cart-modal").boundingBox();
+      const messageBounds = await page.locator(".cart-refresh-overlay__message").boundingBox();
+      assert.ok(Math.abs(messageBounds.x + messageBounds.width / 2 - (modalBounds.x + modalBounds.width / 2)) < 2);
+      assert.ok(Math.abs(messageBounds.y + messageBounds.height / 2 - (modalBounds.y + modalBounds.height / 2)) < 2);
+      assert.equal(await page.locator("#cart-tabs").evaluate((element) => element.inert), true);
+      assert.equal(await page.locator("#cart-close").evaluate((element) => element.closest("header").inert), true);
       assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+      await page.keyboard.press("Tab");
+      assert.equal(await page.locator("#cart-refresh-overlay").evaluate((element) => document.activeElement === element), true);
+      await page.keyboard.press("Escape");
+      assert.equal(await page.locator("#cart-modal").isVisible(), true);
       release();
-      await page.waitForFunction(() => !document.querySelector("#cart-select-all").disabled);
+      await overlay.waitFor({ state: "hidden" });
+      assert.equal(await page.locator("#cart-tabs").evaluate((element) => element.inert), false);
       await page.locator("#cart-select-all").check();
       assert.equal(await page.locator("#cart-test-order").isEnabled(), true);
       assert.equal(refreshCalls.length, 1);
       assert.equal(await page.locator("#cart-status").textContent(), "");
     }, { refreshGate: () => gate });
+  } finally { release(); }
+});
+
+test("a failed cart refresh restores controls and shows a safe error", async () => {
+  await withCartPage(async (page) => {
+    await page.locator("#results-body .cart-offer-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#cart-status").textContent.includes("Обновление временно недоступно"));
+    assert.equal(await page.locator("#cart-refresh-overlay").isVisible(), false);
+    assert.equal(await page.locator("#cart-tabs").evaluate((element) => element.inert), false);
+    await page.locator("#cart-close").click();
+    assert.equal(await page.locator("#cart-modal").isVisible(), false);
+  }, { refreshGate: () => { throw new CartError("Обновление временно недоступно", 503); } });
+});
+
+test("checkout also shows the blocking refresh state when cart data became stale", async () => {
+  let release;
+  let refreshCount = 0;
+  const gate = new Promise((resolve) => { release = resolve; });
+  try {
+    await withCartPage(async (page, { refreshCalls }) => {
+      await page.locator("#results-body .cart-offer-button").first().click();
+      await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+      await page.locator("#cart-toggle").click();
+      await page.waitForFunction(() => document.querySelector("#cart-refresh-overlay").hidden);
+      assert.equal(refreshCalls.length, 1);
+      await page.locator("#cart-select-all").check();
+      await page.locator("#cart-items .cart-quantity").fill("2");
+      await page.locator("#cart-items .cart-quantity").press("Tab");
+      await page.waitForFunction(() => document.querySelector("#cart-summary").textContent.includes("2 шт."));
+      await page.locator("#cart-test-order").click();
+      await page.locator("#cart-refresh-overlay").waitFor({ state: "visible" });
+      assert.equal(await page.locator("#cart-tabs").evaluate((element) => element.inert), true);
+      assert.equal(refreshCalls.length, 2);
+      release();
+      await page.locator("#cart-order-confirm").waitFor({ state: "visible" });
+      assert.equal(await page.locator("#cart-refresh-overlay").isVisible(), false);
+    }, { refreshGate: () => ++refreshCount === 2 ? gate : undefined });
   } finally { release(); }
 });
 

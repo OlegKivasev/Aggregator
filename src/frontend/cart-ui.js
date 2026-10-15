@@ -208,7 +208,10 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       <p class="cart-status" id="cart-status" role="status" aria-live="polite"></p></div>
     <footer class="cart-footer"><div class="cart-footer__summary"><span>К заказу</span><span>Дата поставки выбранных товаров</span>
       <div id="cart-total"></div><strong id="cart-delivery-date"></strong></div>
-      <button type="button" class="btn btn-primary" id="cart-test-order">Оформить заказы</button></footer>`;
+      <button type="button" class="btn btn-primary" id="cart-test-order">Оформить заказы</button></footer>
+    <div class="cart-refresh-overlay" id="cart-refresh-overlay" role="status" aria-live="polite" tabindex="-1" hidden>
+      <div class="cart-refresh-overlay__message"><span class="cart-refresh-overlay__spinner" aria-hidden="true"></span>
+        <strong>Обновляем корзину</strong><span>Проверяем цены, остатки и сроки у поставщиков…</span></div></div>`;
   document.body.append(modal);
   const clearDialog = document.createElement("dialog");
   clearDialog.id = "cart-clear-confirm";
@@ -253,6 +256,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   const body = modal.querySelector("#cart-items");
   const tabs = modal.querySelector("#cart-tabs");
   const status = modal.querySelector("#cart-status");
+  const refreshOverlay = modal.querySelector("#cart-refresh-overlay");
   const testButton = modal.querySelector("#cart-test-order");
   const clearButton = modal.querySelector("#cart-clear");
   const clearCancel = clearDialog.querySelector("#cart-clear-cancel");
@@ -276,6 +280,14 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   let refreshedScope = null;
   let refreshedUntil = 0;
   const selectedIds = new Set();
+
+  const setCartRefreshing = (refreshing) => {
+    refreshOverlay.hidden = !refreshing;
+    modal.classList.toggle("is-refreshing", refreshing);
+    for (const section of modal.children) if (section !== refreshOverlay) section.inert = refreshing;
+    if (refreshing && modal.open) refreshOverlay.focus();
+    else if (!refreshing && modal.open && document.activeElement === refreshOverlay) modal.querySelector("#cart-close").focus();
+  };
 
   const notify = (message, error = false) => {
     clearTimeout(toastTimeout);
@@ -394,8 +406,9 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     if (!modal.open) modal.showModal();
     if (busy || checking) return;
     busy = true;
+    setCartRefreshing(true);
     render();
-    status.textContent = "Обновляем предложения у поставщиков…";
+    status.textContent = "";
     try {
       await refresh();
       if (cart.items.length) {
@@ -406,7 +419,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       }
       status.textContent = "";
     } catch (error) { refreshedRevision = null; status.textContent = error.message; }
-    finally { busy = false; render(); }
+    finally { busy = false; setCartRefreshing(false); render(); }
   });
   modal.querySelector("#cart-close").addEventListener("click", () => modal.close());
   clearButton.addEventListener("click", () => {
@@ -450,16 +463,18 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     render();
     tabs.querySelector('[aria-selected="true"]').focus();
   });
-  modal.addEventListener("click", (event) => { if (event.target === modal) {
+  modal.addEventListener("click", (event) => { if (event.target === modal && !modal.classList.contains("is-refreshing")) {
     const rect = modal.getBoundingClientRect();
     if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) modal.close();
   } });
+  modal.addEventListener("cancel", (event) => { if (modal.classList.contains("is-refreshing")) event.preventDefault(); });
   modal.addEventListener("close", () => {
     const target = returnFocus?.hidden ? document.querySelector("#submit-button") : returnFocus;
     target?.focus();
   });
   modal.addEventListener("keydown", (event) => {
     if (event.key !== "Tab") return;
+    if (modal.classList.contains("is-refreshing")) { event.preventDefault(); refreshOverlay.focus(); return; }
     const controls = [...modal.querySelectorAll('button:not(:disabled):not([tabindex="-1"]), input:not(:disabled), [tabindex="0"]')]
       .filter((node) => node.getClientRects().length > 0);
     const first = controls[0];
@@ -559,8 +574,10 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       if (cart.testing) throw new Error("Дождитесь завершения действия в корзине.");
       if (refreshedRevision !== cart.revision || refreshedUntil <= Date.now()
         || refreshedScope !== "all" && refreshedScope !== supplier) {
-        status.textContent = "Обновляем предложения у поставщиков…";
-        cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier }) }));
+        setCartRefreshing(true);
+        try {
+          cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier }) }));
+        } finally { setCartRefreshing(false); }
         refreshedRevision = cart.revision;
         refreshedScope = supplier;
         refreshedUntil = Date.now() + 110_000;
