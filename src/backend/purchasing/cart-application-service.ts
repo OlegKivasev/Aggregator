@@ -21,8 +21,9 @@ function uncertainOrderMessage(supplier: OrderSupplier, error: unknown): string 
   const generic = "Статус заказа не подтверждён. Проверьте его в кабинете поставщика перед повторной попыткой.";
   if (supplier !== "forum-auto") return generic;
   if (error instanceof SupplierTimeoutError) return "Forum Auto не ответил вовремя после отправки. Проверьте кабинет поставщика перед повторной попыткой.";
-  if (error instanceof SupplierIntegrationError && error.diagnosticCode === "forum_auto_fault_25") {
-    return "Forum Auto сообщил об ошибке создания заказа (код 25). Проверьте кабинет поставщика перед повторной попыткой.";
+  if (error instanceof SupplierIntegrationError && /^forum_auto_fault_\d+$/.test(error.diagnosticCode ?? "")) {
+    const code = (error.diagnosticCode ?? "").slice("forum_auto_fault_".length);
+    return `Forum Auto вернул ошибку API (код ${code}). Проверьте кабинет поставщика перед повторной попыткой.`;
   }
   if (error instanceof SupplierIntegrationError && error.message === "Forum-Auto order confirmation is incomplete") {
     return error.publicMessage ?? "Ответ Forum Auto не подтвердил выбранный товар. Проверьте кабинет поставщика перед повторной попыткой.";

@@ -33,6 +33,7 @@ interface ForumAutoOffer {
 interface ForumAutoFault {
   FaultCode?: unknown;
   faultCode?: unknown;
+  faultcode?: unknown;
   code?: unknown;
 }
 
@@ -118,11 +119,12 @@ function deliveryDateFromDuration(days: unknown, hours: unknown): string | null 
 }
 
 function forumAutoFaultCode(payload: unknown): number | null {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+  const candidate = Array.isArray(payload) && payload.length === 1 ? payload[0] : payload;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
     return null;
   }
-  const fault = payload as ForumAutoFault;
-  const rawCode = fault.FaultCode ?? fault.faultCode ?? fault.code;
+  const fault = candidate as ForumAutoFault;
+  const rawCode = fault.FaultCode ?? fault.faultCode ?? fault.faultcode ?? fault.code;
   const code = typeof rawCode === "string" && rawCode.trim()
     ? Number(rawCode)
     : typeof rawCode === "number" ? rawCode : Number.NaN;
@@ -342,11 +344,19 @@ export function parseForumAutoOrderResult(payload: unknown, line: PurchaseLine):
       if (typeof id === "string" && /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id))) return [id];
       return [];
     }))];
+    const hasErrorField = orders.some((value) => value && typeof value === "object" && !Array.isArray(value)
+      && (Object.hasOwn(value, "error") || Object.hasOwn(value, "errors") || Object.hasOwn(value, "fault")));
+    const hasOrderField = orders.some((value) => value && typeof value === "object" && !Array.isArray(value)
+      && (Object.hasOwn(value, "did") || Object.hasOwn(value, "arTovs")));
     const publicMessage = orderIds.length === 1
       ? `Forum Auto вернул заказ №${orderIds[0]}, но не подтвердил выбранную позицию. Найдите заказ по номеру в кабинете поставщика.`
       : Array.isArray(payload) && payload.length === 0
         ? "Forum Auto вернул пустой ответ на создание заказа. Проверьте кабинет поставщика перед повторной попыткой."
-        : "Ответ Forum Auto не содержит подтверждения выбранной позиции и номера заказа. Проверьте кабинет поставщика перед повторной попыткой.";
+        : hasErrorField
+          ? "Forum Auto вернул ошибку без документированного кода. Заказ не подтверждён; нужна сверка с поставщиком."
+          : hasOrderField
+            ? "Forum Auto вернул данные заказа без корректного номера. Заказ не подтверждён; нужна сверка с поставщиком."
+            : "Forum Auto вернул ответ без полей заказа и кода ошибки. Заказ не подтверждён; нужна сверка с поставщиком.";
     throw new SupplierIntegrationError("Forum-Auto order confirmation is incomplete", { publicMessage });
   }
   const { id, order, item } = matches[0];

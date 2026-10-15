@@ -429,19 +429,21 @@ test("verified missing Forum Auto order can be unlocked while retaining the atte
   }, undefined, gateway);
 });
 
-test("an uncertain Forum Auto creation fault exposes only its safe code", async () => {
-  const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => {
-    throw new SupplierIntegrationError("Internal upstream details", { diagnosticCode: "forum_auto_fault_25" });
-  } };
-  await withCart(async (cart) => {
-    const offerId = randomUUID();
-    cart.registerOffer(offerId, result("forum-auto"));
-    cart.mutate("add", { offerId, quantity: 1, revision: 0 });
-    await cart.refreshForOrder(1, "forum-auto", new AbortController().signal);
-    const response = await cart.order(1, "forum-auto", [cart.view().items[0].id], {}, new AbortController().signal);
-    assert.match(response.results[0].message, /код 25/);
-    assert.doesNotMatch(response.results[0].message, /Internal upstream details/);
-  }, undefined, gateway);
+test("an uncertain Forum Auto fault exposes only its safe supplier code", async () => {
+  for (const code of [25, 30]) {
+    const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => {
+      throw new SupplierIntegrationError("Internal upstream details", { diagnosticCode: `forum_auto_fault_${code}` });
+    } };
+    await withCart(async (cart) => {
+      const offerId = randomUUID();
+      cart.registerOffer(offerId, result("forum-auto"));
+      cart.mutate("add", { offerId, quantity: 1, revision: 0 });
+      await cart.refreshForOrder(1, "forum-auto", new AbortController().signal);
+      const response = await cart.order(1, "forum-auto", [cart.view().items[0].id], {}, new AbortController().signal);
+      assert.match(response.results[0].message, new RegExp(`код ${code}`));
+      assert.doesNotMatch(response.results[0].message, /Internal upstream details/);
+    }, undefined, gateway);
+  }
 });
 
 test("an uncertain Forum Auto response shows its order number for supplier verification", async () => {
@@ -541,6 +543,11 @@ test("supplier order parsers require matching real confirmations", () => {
     (error) => error.publicMessage.includes("№42") && !error.publicMessage.includes("other-gid"));
   assert.throws(() => parseForumAutoOrderResult([], forum),
     (error) => error.publicMessage.includes("пустой ответ") && !error.publicMessage.includes("№"));
+  assert.throws(() => parseForumAutoOrderResult({ error: "private upstream detail" }, forum),
+    (error) => error.publicMessage.includes("ошибку без документированного кода")
+      && !error.publicMessage.includes("private upstream detail"));
+  assert.throws(() => parseForumAutoOrderResult({ did: "invalid", arTovs: [] }, forum),
+    (error) => error.publicMessage.includes("без корректного номера"));
   const partKom = line("part-kom");
   assert.equal(parsePartKomMotion([{ orderNumber: "P-1", detailNum: "A1", providerId: 202, quantity: 2 }], partKom).confirmed[0].acceptedQuantity, 2);
   assert.deepEqual(parsePartKomMotion([{ orderNumber: "P-1", orderDate: "2026-10-15 12:33:00", detailNum: "A1", maker: "TEST",
@@ -606,14 +613,15 @@ test("Forum Auto checks an externally tagged order after a lost creation respons
 
 test("Forum Auto treats a documented order refusal as rejected without leaving an uncertain attempt", async () => {
   const orderedLine = line("forum-auto");
-  for (const status of [200, 400]) {
+  for (const [status, payload] of [[200, { FaultCode: 28 }], [400, { faultcode: "28" }],
+    [200, [{ FaultCode: 28 }]]]) {
     let calls = 0;
     const response = await placeForumAutoOrder(orderedLine, { login: "fixture", password: "fixture" },
       new AbortController().signal, "33333333-3333-4333-8333-333333333333", async (method) => {
         calls++;
         assert.equal(method, "addgoodstoorder");
         return parseForumAutoApiResponse({ status, contentType: "application/json", setCookie: [],
-          body: JSON.stringify({ FaultCode: 28 }) }, method);
+          body: JSON.stringify(payload) }, method);
       });
     assert.deepEqual(response, { confirmed: [], rejected: [{ id: orderedLine.id,
       message: "Forum Auto отклонил количество: оно меньше кратности упаковки." }] });
