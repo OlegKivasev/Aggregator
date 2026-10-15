@@ -3,20 +3,22 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { CartApplicationService } from "../src/backend/purchasing/cart-application-service.ts";
 import { SqliteCartRepository } from "../src/backend/purchasing/sqlite-cart-repository.ts";
 import { attachPurchaseReference, getPurchaseReference } from "../src/backend/purchasing/purchase-offer.ts";
 import { parsePartKomApiResults } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
-import { parseForumAutoApiResults, parseForumAutoApiAnalogResults } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
+import { parseForumAutoApiResults, parseForumAutoApiAnalogResults, parseForumAutoApiResponse } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { normalizeRosskoApiSearchResults, normalizeRosskoApiAnalogResults } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { testPurchaseOrder } from "../src/backend/application/test-order-application-service.ts";
 import { parseArmtekOrderResult } from "../src/backend/suppliers/armtek/armtek-order.ts";
-import { parseForumAutoOrderResult } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
+import { parseForumAutoOrderResult, placeForumAutoOrder } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { buildRosskoOrderEnvelope, parseRosskoOrderResult } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { getPartKomOrderChoices, parsePartKomMotion } from "../src/backend/suppliers/part-kom/part-kom-order.ts";
 import { allowedRosskoOrderChoices, RealOrderApplicationService, resolveRosskoOrderDefaults } from "../src/backend/application/real-order-application-service.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
+import { SupplierIntegrationError } from "../src/backend/errors.ts";
 
 // All offers and upstream responses in this file are fictional fixtures.
 const suppliers = ["armtek", "part-kom", "forum-auto", "rossko"];
@@ -321,6 +323,7 @@ test("real checkout removes only confirmed quantities and preserves rejected ite
     assert.equal(response.results.length, 2);
     assert.equal(response.cart.count, 3);
     assert.equal(response.cart.revision, 3);
+    assert.deepEqual(response.cart.pendingIds, []);
     assert.equal(reopen().view().count, 3);
   }, undefined, gateway);
 });
@@ -396,6 +399,48 @@ test("uncertain supplier response remains in cart and blocks duplicate checkout 
     await assert.rejects(restored.order(1, "armtek", restored.view().items.map((item) => item.id), {}, new AbortController().signal), /сверить/);
     assert.throws(() => restored.clear("armtek", 1), /сверить/);
     assert.equal(calls, 1);
+  }, undefined, gateway);
+});
+
+test("verified missing Forum Auto order can be unlocked while retaining the attempt record", async () => {
+  const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => { throw new Error("Connection lost"); } };
+  await withCart(async (cart, reopen, path) => {
+    const offerId = randomUUID();
+    cart.registerOffer(offerId, result("forum-auto"));
+    cart.mutate("add", { offerId, quantity: 1, revision: 0 });
+    await cart.refreshForOrder(1, "forum-auto", new AbortController().signal);
+    const itemId = cart.view().items[0].id;
+    const attempt = await cart.order(1, "forum-auto", [itemId], {}, new AbortController().signal);
+    assert.equal(attempt.results[0].status, "uncertain");
+    assert.deepEqual(attempt.cart.pendingIds, [itemId]);
+    assert.throws(() => cart.resolveUncertainForumAutoLine(itemId, attempt.cart.revision, false), /Подтвердите/);
+    assert.throws(() => cart.resolveUncertainForumAutoLine(itemId, attempt.cart.revision - 1, true), /Корзина изменилась/);
+    const resolved = cart.resolveUncertainForumAutoLine(itemId, attempt.cart.revision, true);
+    assert.equal(resolved.count, 1);
+    assert.deepEqual(resolved.pendingIds, []);
+    const restored = reopen();
+    assert.deepEqual(restored.view().pendingIds, []);
+    const database = new DatabaseSync(path);
+    try {
+      assert.equal(database.prepare("SELECT COUNT(*) AS count FROM purchase_order_attempt WHERE state = 'uncertain'").get().count, 1);
+      assert.equal(database.prepare("SELECT resolution FROM purchase_order_resolution").get().resolution, "customer_verified_missing");
+    } finally { database.close(); }
+    assert.throws(() => restored.resolveUncertainForumAutoLine(itemId, resolved.revision, true), /Не найдена/);
+  }, undefined, gateway);
+});
+
+test("an uncertain Forum Auto creation fault exposes only its safe code", async () => {
+  const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => {
+    throw new SupplierIntegrationError("Internal upstream details", { diagnosticCode: "forum_auto_fault_25" });
+  } };
+  await withCart(async (cart) => {
+    const offerId = randomUUID();
+    cart.registerOffer(offerId, result("forum-auto"));
+    cart.mutate("add", { offerId, quantity: 1, revision: 0 });
+    await cart.refreshForOrder(1, "forum-auto", new AbortController().signal);
+    const response = await cart.order(1, "forum-auto", [cart.view().items[0].id], {}, new AbortController().signal);
+    assert.match(response.results[0].message, /код 25/);
+    assert.doesNotMatch(response.results[0].message, /Internal upstream details/);
   }, undefined, gateway);
 });
 
@@ -498,4 +543,59 @@ test("supplier order parsers require matching real confirmations", () => {
     <stock>fixture-stock</stock><count>2</count><order_id>77</order_id></Item></ItemsList></CheckoutResult></Body></Envelope>`;
   assert.equal(parseRosskoOrderResult(xml, [rossko]).confirmed[0].orderIds[0], "77");
   assert.throws(() => parseRosskoOrderResult(xml.replace("fixture-stock", "wrong-stock"), [rossko]));
+});
+
+test("Forum Auto verifies an incomplete creation response with a read-only order lookup", async () => {
+  const calls = [];
+  const orderedLine = line("forum-auto");
+  const attemptId = "11111111-1111-4111-8111-111111111111";
+  const request = async (method, params) => {
+    calls.push({ method, params: Object.fromEntries(params) });
+    return method === "addgoodstoorder" ? [{ did: 42, arTovs: [] }]
+      : [{ did: 42, status: "Отправлен на бронирование", arTovs: [{ gid: "fixture-gid", k1: 2 }] }];
+  };
+  const response = await placeForumAutoOrder(orderedLine, { login: "fixture", password: "fixture" }, new AbortController().signal, attemptId, request);
+  assert.equal(response.confirmed[0].forumAutoOrder.status, "Отправлен на бронирование");
+  assert.deepEqual(calls.map(({ method }) => method), ["addgoodstoorder", "listorders"]);
+  assert.deepEqual({ tid: calls[0].params.tid, num: calls[0].params.num }, { tid: "fixture-gid", num: "2" });
+  assert.match(calls[0].params.eoid, /^[1-9]\d*$/);
+  assert.deepEqual(calls[1].params, { did: "42" });
+  await assert.rejects(placeForumAutoOrder(orderedLine, { login: "fixture", password: "fixture" },
+    new AbortController().signal, attemptId, async (method) => method === "addgoodstoorder" ? [{ did: 42, arTovs: [] }]
+      : [{ did: 42, arTovs: [{ gid: "different-gid", k1: 2 }] }]), /incomplete/);
+});
+
+test("Forum Auto checks an externally tagged order after a lost creation response without resubmitting it", async () => {
+  const orderedLine = line("forum-auto");
+  const calls = [];
+  let externalOrderId;
+  const response = await placeForumAutoOrder(orderedLine, { login: "fixture", password: "fixture" },
+    new AbortController().signal, "22222222-2222-4222-8222-222222222222", async (method, params) => {
+      calls.push(method);
+      if (method === "addgoodstoorder") {
+        externalOrderId = params.get("eoid");
+        throw new Error("Connection lost");
+      }
+      assert.deepEqual(Object.fromEntries(params), { did: "0" });
+      return [{ did: 71, eoid: externalOrderId, arTovs: [{ gid: "fixture-gid", k1: 2 }] }];
+    });
+  assert.equal(response.confirmed[0].orderIds[0], "71");
+  assert.deepEqual(calls, ["addgoodstoorder", "listorders"]);
+});
+
+test("Forum Auto treats a documented order refusal as rejected without leaving an uncertain attempt", async () => {
+  const orderedLine = line("forum-auto");
+  for (const status of [200, 400]) {
+    let calls = 0;
+    const response = await placeForumAutoOrder(orderedLine, { login: "fixture", password: "fixture" },
+      new AbortController().signal, "33333333-3333-4333-8333-333333333333", async (method) => {
+        calls++;
+        assert.equal(method, "addgoodstoorder");
+        return parseForumAutoApiResponse({ status, contentType: "application/json", setCookie: [],
+          body: JSON.stringify({ FaultCode: 28 }) }, method);
+      });
+    assert.deepEqual(response, { confirmed: [], rejected: [{ id: orderedLine.id,
+      message: "Forum Auto отклонил количество: оно меньше кратности упаковки." }] });
+    assert.equal(calls, 1);
+  }
 });

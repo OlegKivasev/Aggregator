@@ -230,7 +230,8 @@ export function createAggregatorServer({
 
     const cartItemMatch = /^\/api\/cart\/items\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (url.pathname === "/api/cart" || url.pathname === "/api/cart/items" || url.pathname === "/api/cart/test-order"
-      || url.pathname === "/api/cart/order-options" || url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh" || cartItemMatch) {
+      || url.pathname === "/api/cart/order-options" || url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh"
+      || url.pathname === "/api/cart/uncertain/resolve" || cartItemMatch) {
       response.setHeader("Cache-Control", "no-store");
       const controller = new AbortController();
       const abort = () => { if (!response.writableEnded) controller.abort(new Error("Client disconnected")); };
@@ -246,6 +247,7 @@ export function createAggregatorServer({
         } else if (url.pathname === "/api/cart/items" && (request.method === "POST" || request.method === "DELETE")
           || cartItemMatch && (request.method === "PATCH" || request.method === "DELETE")
           || (url.pathname === "/api/cart/test-order" || url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh"
+            || url.pathname === "/api/cart/uncertain/resolve"
             || url.pathname === "/api/cart/order-options") && request.method === "POST") {
           const payload = await readJsonBody(request);
           if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new CartError("Неверные параметры корзины.");
@@ -256,6 +258,8 @@ export function createAggregatorServer({
           } else if (url.pathname === "/api/cart/refresh") {
             const result = await cart.refreshForOrder(fields.revision, fields.supplier, controller.signal);
             if (!controller.signal.aborted) serveJson(response, 200, result);
+          } else if (url.pathname === "/api/cart/uncertain/resolve") {
+            serveJson(response, 200, cart.resolveUncertainForumAutoLine(fields.id, fields.revision, fields.confirmedAbsent));
           } else if (url.pathname === "/api/cart/order") {
             const details = fields.details;
             if (!details || typeof details !== "object" || Array.isArray(details)) throw new CartError("Неверные параметры заказа.");

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { SupplierIntegrationError, SupplierTimeoutError } from "../errors.ts";
 import type { NormalizedSearchResult } from "../types.ts";
 import { getPurchaseReference, purchaseOfferKey, type PurchaseLine, type PurchaseReference, type TestOrder } from "./purchase-offer.ts";
 import { SqliteCartRepository } from "./sqlite-cart-repository.ts";
@@ -14,6 +15,19 @@ export interface RealOrderGateway {
 export class CartError extends Error {
   readonly statusCode: number;
   constructor(message: string, statusCode = 400) { super(message); this.statusCode = statusCode; }
+}
+
+function uncertainOrderMessage(supplier: OrderSupplier, error: unknown): string {
+  const generic = "Статус заказа не подтверждён. Проверьте его в кабинете поставщика перед повторной попыткой.";
+  if (supplier !== "forum-auto") return generic;
+  if (error instanceof SupplierTimeoutError) return "Forum Auto не ответил вовремя после отправки. Проверьте кабинет поставщика перед повторной попыткой.";
+  if (error instanceof SupplierIntegrationError && error.diagnosticCode === "forum_auto_fault_25") {
+    return "Forum Auto сообщил об ошибке создания заказа (код 25). Проверьте кабинет поставщика перед повторной попыткой.";
+  }
+  if (error instanceof SupplierIntegrationError && error.message === "Forum-Auto order confirmation is incomplete") {
+    return "Ответ Forum Auto не подтвердил выбранный товар. Проверьте кабинет поставщика перед повторной попыткой.";
+  }
+  return generic;
 }
 
 const stock = (result: NormalizedSearchResult): number => typeof result.quantity === "number" && Number.isFinite(result.quantity)
@@ -151,6 +165,19 @@ export class CartApplicationService {
     return this.view();
   }
 
+  resolveUncertainForumAutoLine(id: unknown, revision: unknown, confirmedAbsent: unknown) {
+    if (this.testing) throw new CartError("Дождитесь завершения заказа.", 409);
+    if (confirmedAbsent !== true) throw new CartError("Подтвердите, что проверили отсутствие заказа в кабинете Forum Auto.");
+    if (typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id)) throw new CartError("Позиция не найдена в корзине.");
+    const cart = this.load();
+    if (revision !== cart.revision) throw new CartError("Корзина изменилась. Обновите её и повторите действие.", 409);
+    if (!this.repository.resolveUncertainForumAutoLine(id, cart.revision)) {
+      throw new CartError("Не найдена неопределённая попытка заказа Forum Auto для этой позиции.", 409);
+    }
+    this.refreshed = null;
+    return this.view();
+  }
+
   async refreshForOrder(revision: unknown, supplier: unknown, signal: AbortSignal) {
     if (!this.realOrder) throw new CartError("Оформление заказов не настроено.", 503);
     if (this.testing) throw new CartError("Дождитесь завершения действия в корзине.", 409);
@@ -265,9 +292,9 @@ export class CartApplicationService {
           }
           this.repository.finishOrder(attemptId, result.confirmed);
           results.push({ supplier: group, status: "confirmed", result });
-        } catch {
+        } catch (error) {
           this.repository.markOrderUncertain(attemptId);
-          results.push({ supplier: group, status: "uncertain", message: "Статус заказа не подтверждён. Проверьте его в кабинете поставщика перед повторной попыткой." });
+          results.push({ supplier: group, status: "uncertain", message: uncertainOrderMessage(group, error) });
           break;
         }
       }

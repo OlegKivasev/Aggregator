@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { forumAutoSearchTimeoutMs, supplierMaxResponseBytes } from "../../config.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
 import type {
@@ -35,7 +36,29 @@ interface ForumAutoFault {
   code?: unknown;
 }
 
-export type ForumAutoApiMethod = "clientinfo" | "listgoods" | "listbrands" | "addgoodstoorder";
+class ForumAutoOrderRefusalError extends Error {
+  readonly publicMessage: string;
+
+  constructor(publicMessage: string) {
+    super("Forum-Auto explicitly rejected the order request");
+    this.name = "ForumAutoOrderRefusalError";
+    this.publicMessage = publicMessage;
+  }
+}
+
+const orderRefusalMessages = new Map<number, string>([
+  [1, "Forum Auto отклонил параметры заказа."], [2, "Forum Auto не распознал метод оформления заказа."],
+  [5, "Forum Auto ограничил число запросов за минуту."], [6, "Forum Auto ограничил число запросов за сутки."],
+  [10, "Forum Auto отклонил логин или пароль."], [11, "Forum Auto не разрешает оформлять заказы через API."],
+  [12, "Forum Auto заблокировал оформление заказов. Обратитесь к менеджеру."],
+  [13, "Forum Auto отклонил заказ: превышен доступный лимит."],
+  [20, "Forum Auto не нашёл выбранный товар."], [27, "Forum Auto не нашёл выбранный товар."],
+  [28, "Forum Auto отклонил количество: оно меньше кратности упаковки."],
+  [29, "Forum Auto отклонил идентификатор товара в заказе."],
+  [31, "Предложение Forum Auto устарело. Откройте корзину для обновления."],
+]);
+
+export type ForumAutoApiMethod = "clientinfo" | "listgoods" | "listbrands" | "addgoodstoorder" | "listorders";
 export type ForumAutoApiRequester = (
   method: ForumAutoApiMethod,
   params: URLSearchParams,
@@ -106,7 +129,9 @@ function forumAutoFaultCode(payload: unknown): number | null {
   return Number.isInteger(code) ? code : null;
 }
 
-function forumAutoFaultError(code: number): SupplierAuthError | SupplierIntegrationError {
+function forumAutoFaultError(code: number, method?: ForumAutoApiMethod): Error {
+  const orderRefusal = method === "addgoodstoorder" ? orderRefusalMessages.get(code) : undefined;
+  if (orderRefusal) return new ForumAutoOrderRefusalError(orderRefusal);
   if ([10, 11, 12].includes(code)) {
     return new SupplierAuthError("Forum-Auto rejected the configured credentials or access");
   }
@@ -128,6 +153,13 @@ export function parseForumAutoApiResponse(response: SiteHttpResponse, method?: F
   }
   if ((method === "listgoods" || method === "listbrands") && (response.status === 400 || response.status === 422)) {
     return [];
+  }
+  if (method === "addgoodstoorder" && response.status >= 400
+    && response.contentType?.toLocaleLowerCase().startsWith("application/json")) {
+    let fault: unknown;
+    try { fault = JSON.parse(response.body) as unknown; } catch { /* The non-success status remains an integration error. */ }
+    const code = forumAutoFaultCode(fault);
+    if (code !== null) throw forumAutoFaultError(code, method);
   }
   if (response.status < 200 || response.status >= 300) {
     throw new SupplierIntegrationError("Forum-Auto API returned an unsuccessful HTTP status", {
@@ -160,7 +192,7 @@ export function parseForumAutoApiResponse(response: SiteHttpResponse, method?: F
     if ((method === "listgoods" || method === "listbrands") && ![5, 6, 10, 11, 12].includes(faultCode)) {
       return [];
     }
-    throw forumAutoFaultError(faultCode);
+    throw forumAutoFaultError(faultCode, method);
   }
   if ((method === "listgoods" || method === "listbrands") && !Array.isArray(payload)) {
     return [];
@@ -339,11 +371,60 @@ export function parseForumAutoOrderResult(payload: unknown, line: PurchaseLine):
 }
 
 export async function placeForumAutoOrder(line: PurchaseLine, credentials: ForumAutoCredentials, signal: AbortSignal,
-  request: ForumAutoApiRequester = forumAutoApiRequest): Promise<OrderGroupResult> {
+  attemptId: string, request: ForumAutoApiRequester = forumAutoApiRequest): Promise<OrderGroupResult> {
   if (line.reference.supplier !== "forum-auto" || !line.reference.gid) throw new SupplierIntegrationError("Forum-Auto order is missing a product identifier");
-  const params = new URLSearchParams({ tid: line.reference.gid, num: String(line.quantity) });
-  const payload = await request("addgoodstoorder", params, signal, forumAutoSearchTimeoutMs, credentials);
-  return parseForumAutoOrderResult(payload, line);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)) {
+    throw new SupplierIntegrationError("Forum-Auto order attempt is invalid");
+  }
+  const externalOrderId = (createHash("sha256").update(attemptId).digest().readUInt32BE(0) & 0x7fffffff) || 1;
+  const params = new URLSearchParams({ tid: line.reference.gid, num: String(line.quantity), eoid: String(externalOrderId) });
+  let payload: unknown;
+  let orderError: unknown;
+  try {
+    payload = await request("addgoodstoorder", params, signal, forumAutoSearchTimeoutMs, credentials);
+    try { return parseForumAutoOrderResult(payload, line); }
+    catch (error) { orderError = error; }
+  } catch (error) {
+    if (error instanceof ForumAutoOrderRefusalError) {
+      return { confirmed: [], rejected: [{ id: line.id, message: error.publicMessage }] };
+    }
+    if (error instanceof SupplierAuthError) {
+      return { confirmed: [], rejected: [{ id: line.id, message: "Forum Auto отклонил доступ к API." }] };
+    }
+    orderError = error;
+  }
+  if (signal.aborted) throw orderError;
+  // A write may succeed even when its response is incomplete or the connection times out.
+  // Only read-only lookups follow; an uncertain write is never submitted again.
+  const orders = Array.isArray(payload) ? payload : [payload];
+  const ids = [...new Set(orders.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const id = (value as Record<string, unknown>).did;
+    if (typeof id === "number" && Number.isSafeInteger(id) && id > 0) return [String(id)];
+    if (typeof id === "string" && /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id))) return [id];
+    return [];
+  }))];
+  if (ids.length === 1) {
+    try {
+      const details = await request("listorders", new URLSearchParams({ did: ids[0] }), signal, forumAutoSearchTimeoutMs, credentials);
+      return parseForumAutoOrderResult(details, line);
+    } catch {
+      // Continue to the external order ID lookup if the known order is not yet readable.
+    }
+  }
+  if (signal.aborted) throw orderError;
+  try {
+    const details = await request("listorders", new URLSearchParams({ did: "0" }), signal, forumAutoSearchTimeoutMs, credentials);
+    const matches = (Array.isArray(details) ? details : [details]).filter((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+      const id = (value as Record<string, unknown>).eoid;
+      return id === externalOrderId || id === String(externalOrderId);
+    });
+    if (matches.length === 1) return parseForumAutoOrderResult(matches, line);
+  } catch {
+    // A missing or invalid read-only confirmation leaves the original attempt uncertain.
+  }
+  throw orderError;
 }
 
 function validateForumAutoClientInfo(payload: unknown): void {

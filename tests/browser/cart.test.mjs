@@ -64,6 +64,9 @@ async function withCartPage(check, options = {}) {
         prepare: async (_supplier, lines) => async (_attemptId, signal) => {
           orderCalls.push(structuredClone(lines));
           await options.testGate?.(signal);
+          if (lines[0].reference.supplier === "forum-auto" && options.forumAutoRefusal) {
+            return { confirmed: [], rejected: [{ id: lines[0].id, message: options.forumAutoRefusal }] };
+          }
           return { confirmed: lines.map((line) => ({ id: line.id, acceptedQuantity: line.quantity, orderIds: [`fixture-${line.reference.supplier}`],
             ...(line.reference.supplier === "part-kom" && options.partKomReceipt ? { partKomOrders: [{ orderNumber: "fixture-part-kom",
               quantity: line.quantity, ...options.partKomReceipt }] } : {}),
@@ -241,6 +244,47 @@ test("successful Forum Auto checkout displays the supplier order details", async
     status: "Отправлен на бронирование", createdAt: "15.10.2026 12:30:00", deliveryAt: "17.10.2026 09:00:00",
     article: "A1", brand: "TEST", title: "Деталь <img src=x onerror=window.cartXss=1>", reservedQuantity: 1,
     confirmedQuantity: 0, price: 120, total: 120 } });
+});
+
+test("a verified absent Forum Auto order can be unlocked without sending another order", async () => {
+  await withCartPage(async (page, { orderCalls }) => {
+    await page.locator("#results-body .cart-offer-button").nth(2).click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-error"));
+    assert.equal(orderCalls.length, 1);
+    await page.locator("#cart-order-cancel").click();
+    await page.locator("#cart-tab-forum-auto").click();
+    assert.equal(await page.locator("#cart-status").textContent(), "");
+    assert.equal(await page.locator("#cart-items .cart-item-select").isDisabled(), true);
+    await page.locator(".cart-resolve-button").click();
+    assert.equal(await page.locator("#cart-resolve-accept").isDisabled(), true);
+    await page.locator("#cart-resolve-checked").check();
+    await page.locator("#cart-resolve-accept").click();
+    await page.waitForFunction(() => !document.querySelector("#cart-resolve-confirm").open);
+    assert.equal(await page.locator("#cart-items .cart-item-select").isEnabled(), true);
+    assert.equal(await page.locator(".cart-resolve-button").count(), 0);
+    assert.equal(orderCalls.length, 1);
+  }, { allSuppliers: true, reducedMotion: "reduce", testGate: async () => { throw new Error("Connection lost"); } });
+});
+
+test("a definite Forum Auto refusal keeps the item selectable and names the failure", async () => {
+  await withCartPage(async (page, { orderCalls }) => {
+    await page.locator("#results-body .cart-offer-button").nth(2).click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-error"));
+    assert.equal(await page.locator("#cart-order-title").textContent(), "Заказ не оформлен");
+    assert.match(await page.locator("#cart-order-receipt").textContent(), /превышен доступный лимит/);
+    assert.equal(await page.locator("#cart-order-receipt").evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(255, 240, 238)");
+    await page.locator("#cart-order-cancel").click();
+    assert.equal(await page.locator("#cart-items .cart-item-select").isEnabled(), true);
+    assert.equal(orderCalls.length, 1);
+  }, { allSuppliers: true, reducedMotion: "reduce", forumAutoRefusal: "Forum Auto отклонил заказ: превышен доступный лимит." });
 });
 
 test("cart honors reduced motion, constrains focus and fits mobile viewport", async () => {

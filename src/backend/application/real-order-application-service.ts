@@ -169,7 +169,7 @@ export class RealOrderApplicationService implements RealOrderGateway {
         throw new SupplierIntegrationError("Forum-Auto order reference is invalid");
       }
       await verifyForumAutoCredentials(credentials, undefined, signal);
-      return (_attemptId: string, orderSignal: AbortSignal) => placeForumAutoOrder(lines[0], credentials, orderSignal);
+      return (attemptId: string, orderSignal: AbortSignal) => placeForumAutoOrder(lines[0], credentials, orderSignal, attemptId);
     }
     if (supplier === "part-kom") {
       const credentials = this.sessions.getPartKomCredentials();
