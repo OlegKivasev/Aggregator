@@ -912,6 +912,7 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
     { ...row, orderNumber: "MOVING", releaseCount: 0 },
     { ...row, orderNumber: "PROCESSING", quantity: 2, releaseCount: 0, refusalCount: 0, storeCount: 0,
       stateTxt: "Заказ передан поставщику. Поставщик подтвердил наличие товара." },
+    { ...row, orderNumber: "INITIAL", state: 0, stateTxt: "", releaseCount: 0, refusalCount: 0, storeCount: 0 },
     { ...row, orderNumber: "READY", storeCount: 1 },
     { ...row, orderNumber: "PARTIAL", quantity: 2, releaseCount: 1, refusalCount: 1 },
     { ...row, orderNumber: "MIXED", releaseCount: 1 },
@@ -933,12 +934,20 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
     assert.notEqual(await cancelled.locator(".history-status").first().evaluate((node) => getComputedStyle(node).color),
       await received.locator(".history-status").first().evaluate((node) => getComputedStyle(node).color));
     assert.match(await page.locator('.history-card[data-fulfillment="in_transit"] .history-card__states').innerText(), /В пути/);
-    const processing = page.locator('.history-card[data-fulfillment="processing"]');
+    const processing = page.locator('.history-card[data-fulfillment="processing"]').filter({
+      has: page.locator("h3", { hasText: /^Заказ № PROCESSING$/ }),
+    });
     assert.match(await processing.locator(".history-card__states").innerText(), /В обработке/);
     assert.equal(await processing.locator(".history-item-status .history-status--processing").count(), 1);
     assert.equal(await processing.locator(".history-status-detail").innerText(),
       "Заказ передан поставщику. Поставщик подтвердил наличие товара.");
     assert.doesNotMatch(await processing.innerText(), /Статус не уточнён|В пути|Получен/);
+    const initial = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: /^Заказ № INITIAL$/ }) });
+    assert.equal(await initial.getAttribute("data-fulfillment"), "processing");
+    assert.match(await initial.locator(".history-card__states").innerText(), /В обработке/);
+    assert.equal(await initial.locator(".history-item-status .history-status--processing").count(), 1);
+    assert.equal(await initial.locator(".history-status-detail").innerText(), "Принят в работу");
+    assert.doesNotMatch(await initial.innerText(), /Статус не уточнён|В пути|Получен/);
     assert.match(await page.locator('.history-card[data-fulfillment="ready"] .history-card__states').innerText(), /На складе/);
     assert.match(await page.locator('.history-card[data-fulfillment="partial"] .history-card__states').innerText(), /Частично выполнен/);
     assert.match(await page.locator('.history-card[data-fulfillment="unknown"] .history-card__states').innerText(), /Статус не уточнён/);

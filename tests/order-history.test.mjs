@@ -80,6 +80,30 @@ test("PartKOM supplier handoff remains processing and preserves the supplier des
   assert.equal(item({ stateTxt: "Заказ не передан поставщику." }).fulfillment, "unknown");
 });
 
+test("PartKOM state zero identifies accepted orders with no description without inventing missing states", () => {
+  const row = { orderNumber: "FIXTURE-INITIAL", detailNum: "A1", quantity: 1,
+    state: 0, stateTxt: "", releaseCount: 0, refusalCount: 0, storeCount: 0 };
+  const item = (fields = {}) => parsePartKomOrderHistory([{ ...row, ...fields }]).orders[0].items[0];
+  for (const state of [0, "0"]) {
+    for (const stateTxt of ["", "  ", null, undefined]) {
+      assert.equal(item({ state, stateTxt }).fulfillment, "processing");
+      assert.equal(item({ state, stateTxt }).status, "Принят в работу");
+    }
+  }
+  for (const state of [undefined, null, false, true, "", " ", [], {}, -1, 999, "999"]) {
+    assert.equal(item({ state }).fulfillment, "unknown");
+    assert.equal(item({ state }).status, null);
+  }
+  assert.equal(item({ releaseCount: 1 }).fulfillment, "delivered");
+  assert.equal(item({ refusalCount: 1 }).fulfillment, "cancelled");
+  assert.equal(item({ storeCount: 1 }).fulfillment, "ready");
+  assert.equal(item({ releaseCount: 1, refusalCount: 1 }).fulfillment, "unknown");
+  assert.equal(item({ stateTxt: "Заказ передан в службу доставки." }).fulfillment, "in_transit");
+  const unknown = item({ stateTxt: "Неизвестный этап" });
+  assert.equal(unknown.fulfillment, "unknown");
+  assert.equal(unknown.status, "Неизвестный этап");
+});
+
 const armtekRow = { ORDER: "0000000001", ORDER_DATE: "20261015123000", PIN: "A1", BRAND: "TEST", NAME: "Деталь",
   KWMENG: "2.000", PRICE: "100.50", CURRENCY: "RUB", STATUS: "позиция частично поставлена", DLVRD: "20261020120000" };
 const forumRow = { did: 123, nr: null, dtc: "15.10.2026 12:30:00", status: "Подтвержден", mdt: "20.10.2026 00:00:00",

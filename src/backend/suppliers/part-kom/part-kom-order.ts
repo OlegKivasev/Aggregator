@@ -59,6 +59,7 @@ function historyPrice(value: unknown): number | null {
 }
 
 interface PartKomHistoryMovement {
+  state?: unknown;
   stateTxt?: unknown;
   releaseCount?: unknown;
   refusalCount?: unknown;
@@ -95,6 +96,9 @@ function partKomHistoryStatus(row: PartKomHistoryMovement, quantity: number): Pi
   }
   if (/^(?:в работе|заказан|принят в работу|заказ принят|заказ передан поставщику|ожидает подтверждения)(?:\s|$|[.])/u.test(text)) {
     return { status, fulfillment: "processing" };
+  }
+  if (!status && (row.state === 0 || row.state === "0")) {
+    return { status: "Принят в работу", fulfillment: "processing" };
   }
   return { status, fulfillment: "unknown" };
 }
