@@ -6,6 +6,45 @@ const maximumQuantity = (result) => Number.isFinite(result.quantity) ? Math.min(
 const cartIcon = '<img src="/shopping-cart.png" alt="" aria-hidden="true">';
 const cartPriceFormat = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const partKomReceiptNode = (receipt, orderIds, acceptedQuantity) => {
+  if (!receipt || typeof receipt !== "object" || typeof receipt.orderNumber !== "string"
+    || receipt.orderNumber.length > 100 || !orderIds.includes(receipt.orderNumber)
+    || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1 || receipt.quantity > acceptedQuantity) return null;
+  const card = document.createElement("section");
+  card.className = "cart-partkom-receipt";
+  const heading = document.createElement("h4");
+  heading.textContent = `PartKOM · заказ № ${receipt.orderNumber}`;
+  card.append(heading);
+  const details = document.createElement("dl");
+  const add = (label, value, status = false) => {
+    if (value === null || value === undefined || value === "") return;
+    if (typeof value !== "string" && typeof value !== "number") return;
+    if (typeof value === "number" && !Number.isFinite(value) || typeof value === "string" && value.length > 500) return;
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = String(value);
+    if (status) description.className = "cart-partkom-receipt__state";
+    details.append(term, description);
+  };
+  add("Дата заказа", receipt.orderDate);
+  add("Деталь", [receipt.detailNum, receipt.maker, receipt.description].filter((value) => typeof value === "string" && value).join(" · "));
+  add("Заказано", `${receipt.quantity} шт.`);
+  const price = Number.isFinite(receipt.price) && receipt.price > 0 && Number.isFinite(receipt.price * receipt.quantity) ? receipt.price : null;
+  add("Цена", price === null ? null : formatPrice(price));
+  add("Сумма", price === null ? null : formatPrice(price * receipt.quantity));
+  add("Ожидаемый срок", receipt.expectedDate);
+  add("Гарантированный срок", receipt.guaranteedDate);
+  add("Склад", receipt.placement);
+  for (const [label, value] of [["Отказано", receipt.refusalCount], ["На складе", receipt.storeCount], ["Отгружено", receipt.releaseCount]]) {
+    if (Number.isSafeInteger(value) && value >= 0 && value <= receipt.quantity) add(label, value);
+  }
+  add("Состояние", receipt.stateTxt, true);
+  add("Комментарий", receipt.comment);
+  card.append(details);
+  return card;
+};
+
 export const formatCartLatestDeliveryDate = (items) => {
   if (!items.length) return "Не указана";
   let latest = null;
@@ -483,7 +522,9 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
         }
         if (group.status === "uncertain") {
           failed++;
-          receipts.push(`${supplierNames[group.supplier]}: статус не подтверждён. Проверьте кабинет поставщика перед повторной попыткой.`);
+          const row = document.createElement("p");
+          row.textContent = `${supplierNames[group.supplier]}: статус не подтверждён. Проверьте кабинет поставщика перед повторной попыткой.`;
+          receipts.push(row);
           continue;
         }
         if (!Array.isArray(group.result?.confirmed) || !Array.isArray(group.result?.rejected)) throw new Error("Некорректный результат заказа.");
@@ -493,12 +534,28 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
             throw new Error("Некорректное подтверждение поставщика.");
           }
           accepted++;
-          receipts.push(`${supplierNames[group.supplier]}: заказ ${line.orderIds.join(", ")}, ${line.acceptedQuantity} шт.${line.message ? ` ${line.message}` : ""}`);
+          const partKomOrders = group.supplier === "part-kom" && Array.isArray(line.partKomOrders)
+            ? line.partKomOrders.map((receipt) => partKomReceiptNode(receipt, line.orderIds, line.acceptedQuantity)).filter(Boolean) : [];
+          if (partKomOrders.length) {
+            receipts.push(...partKomOrders);
+            if (typeof line.message === "string" && line.message) {
+              const note = document.createElement("p");
+              note.textContent = line.message;
+              receipts.push(note);
+            }
+          }
+          else {
+            const row = document.createElement("p");
+            row.textContent = `${supplierNames[group.supplier]}: заказ ${line.orderIds.join(", ")}, ${line.acceptedQuantity} шт.${line.message ? ` ${line.message}` : ""}`;
+            receipts.push(row);
+          }
         }
         for (const line of group.result.rejected) {
           if (!known.has(line.id) || typeof line.message !== "string") throw new Error("Некорректный отказ поставщика.");
           failed++;
-          receipts.push(`${supplierNames[group.supplier]}: ${line.message}`);
+          const row = document.createElement("p");
+          row.textContent = `${supplierNames[group.supplier]}: ${line.message}`;
+          receipts.push(row);
         }
       }
       cart = nextCart;
@@ -508,7 +565,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       const message = complete ? "Заказ успешно оформлен. Заказанные товары удалены из корзины."
         : accepted ? "Часть заказа оформлена. Подтверждённые товары удалены из корзины; остальные оставлены для проверки."
           : "Заказ не подтверждён. Проверьте результат у поставщика перед повторной попыткой.";
-      orderReceipt.replaceChildren(...receipts.map((entry) => { const row = document.createElement("p"); row.textContent = entry; return row; }));
+      orderReceipt.replaceChildren(...receipts);
       orderReceipt.hidden = false;
       status.textContent = message;
       orderStatus.textContent = message;

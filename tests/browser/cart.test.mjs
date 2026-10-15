@@ -64,7 +64,9 @@ async function withCartPage(check, options = {}) {
         prepare: async (_supplier, lines) => async (_attemptId, signal) => {
           orderCalls.push(structuredClone(lines));
           await options.testGate?.(signal);
-          return { confirmed: lines.map((line) => ({ id: line.id, acceptedQuantity: line.quantity, orderIds: [`fixture-${line.reference.supplier}`] })), rejected: [] };
+          return { confirmed: lines.map((line) => ({ id: line.id, acceptedQuantity: line.quantity, orderIds: [`fixture-${line.reference.supplier}`],
+            ...(line.reference.supplier === "part-kom" && options.partKomReceipt ? { partKomOrders: [{ orderNumber: "fixture-part-kom",
+              quantity: line.quantity, ...options.partKomReceipt }] } : {}) })), rejected: [] };
         },
       },
     };
@@ -186,6 +188,32 @@ test("checkout orders only marked goods and keeps unmarked goods in the cart", a
     assert.equal(await page.locator("#cart-items .cart-item-supplier").textContent(), "ArmtekТестовый склад");
     assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
   }, { reducedMotion: "reduce" });
+});
+
+test("successful PartKOM checkout displays the confirmed order motion without a history page", async () => {
+  await withCartPage(async (page) => {
+    await page.locator("#results-body .cart-offer-button").nth(1).click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 1);
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    const receipt = page.locator(".cart-partkom-receipt");
+    assert.equal(await receipt.count(), 1);
+    assert.match(await receipt.textContent(), /fixture-part-kom/);
+    assert.match(await receipt.textContent(), /Принят в работу/);
+    assert.match(await receipt.textContent(), /2026-10-20/);
+    assert.match(await receipt.textContent(), /120,00/);
+    assert.equal(await receipt.locator("img").count(), 0);
+    assert.equal(await page.evaluate(() => window.cartXss), undefined);
+    assert.equal(await page.locator("#cart-badge").isVisible(), false);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await receipt.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+  }, { reducedMotion: "reduce", partKomReceipt: { orderDate: "2026-10-15 12:33:00", detailNum: "A1", maker: "TEST",
+    description: "Деталь <img src=x onerror=window.cartXss=1>", price: 120, expectedDate: "2026-10-17",
+    guaranteedDate: "2026-10-20", stateTxt: "Принят в работу", refusalCount: 0, storeCount: 0,
+    releaseCount: 0, comment: "Проверено" } });
 });
 
 test("cart honors reduced motion, constrains focus and fits mobile viewport", async () => {

@@ -7,6 +7,25 @@ export interface ConfirmedOrderLine {
   acceptedQuantity: number;
   orderIds: string[];
   message?: string;
+  partKomOrders?: PartKomOrderReceipt[];
+}
+
+export interface PartKomOrderReceipt {
+  orderNumber: string;
+  quantity: number;
+  orderDate?: string;
+  detailNum?: string;
+  maker?: string;
+  description?: string;
+  price?: number;
+  stateTxt?: string;
+  expectedDate?: string;
+  guaranteedDate?: string;
+  placement?: string;
+  refusalCount?: number;
+  storeCount?: number;
+  releaseCount?: number;
+  comment?: string;
 }
 
 export interface OrderGroupResult {

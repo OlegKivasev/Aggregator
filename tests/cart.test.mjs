@@ -468,6 +468,17 @@ test("supplier order parsers require matching real confirmations", () => {
   assert.throws(() => parseForumAutoOrderResult([{ did: 42, arTovs: [] }], forum));
   const partKom = line("part-kom");
   assert.equal(parsePartKomMotion([{ orderNumber: "P-1", detailNum: "A1", providerId: 202, quantity: 2 }], partKom).confirmed[0].acceptedQuantity, 2);
+  assert.deepEqual(parsePartKomMotion([{ orderNumber: "P-1", orderDate: "2026-10-15 12:33:00", detailNum: "A1", maker: "TEST",
+    description: "Тестовая деталь", providerId: 202, quantity: 2, price: "1483.07", stateTxt: "Принят в работу",
+    expectedDate: "2026-10-17", guaranteedDate: "2026-10-20", placement: "Склад", refusalCount: 0,
+    storeCount: 0, releaseCount: 0, comment: "Комментарий" }], partKom).confirmed[0].partKomOrders,
+  [{ orderNumber: "P-1", quantity: 2, orderDate: "2026-10-15 12:33:00", detailNum: "A1", maker: "TEST",
+    description: "Тестовая деталь", price: 1483.07, stateTxt: "Принят в работу", expectedDate: "2026-10-17",
+    guaranteedDate: "2026-10-20", placement: "Склад", refusalCount: 0, storeCount: 0, releaseCount: 0,
+    comment: "Комментарий" }]);
+  assert.deepEqual(parsePartKomMotion([{ orderNumber: "P-2", detailNum: "A1", providerId: 202, quantity: 2,
+    stateTxt: { unexpected: "data" }, price: "invalid", refusalCount: -1 }], partKom).confirmed[0].partKomOrders,
+  [{ orderNumber: "P-2", quantity: 2, detailNum: "A1" }]);
   assert.equal(parsePartKomMotion([], partKom), null);
   const rossko = line("rossko");
   const credentials = { key1: "fixture-one", key2: "fixture-two" };

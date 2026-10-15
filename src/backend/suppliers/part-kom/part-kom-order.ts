@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import type { CheckoutDetails, OrderGroupResult, PartKomOrderChoices } from "../../purchasing/order-contract.ts";
+import type { CheckoutDetails, OrderGroupResult, PartKomOrderChoices, PartKomOrderReceipt } from "../../purchasing/order-contract.ts";
 import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
 import type { PartKomCredentials } from "../../types.ts";
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
@@ -47,6 +47,7 @@ export function parsePartKomMotion(payload: unknown, line: PurchaseLine): OrderG
   const confirmed: OrderGroupResult["confirmed"] = [];
   let total = 0;
   const orderIds: string[] = [];
+  const partKomOrders: PartKomOrderReceipt[] = [];
   for (const item of matches) {
     const value = item as Record<string, unknown>;
     const id = typeof value.orderNumber === "string" || typeof value.orderNumber === "number" ? String(value.orderNumber) : "";
@@ -55,9 +56,24 @@ export function parsePartKomMotion(payload: unknown, line: PurchaseLine): OrderG
       || String(value.providerId) !== line.reference.providerId) throw new SupplierIntegrationError("PartKOM order history does not match the requested item");
     total += quantity;
     if (!orderIds.includes(id)) orderIds.push(id);
+    const receipt: PartKomOrderReceipt = { orderNumber: id, quantity };
+    for (const [key, limit] of [["orderDate", 100], ["detailNum", 128], ["maker", 200], ["description", 500],
+      ["stateTxt", 300], ["expectedDate", 100], ["guaranteedDate", 100], ["placement", 200], ["comment", 500]] as const) {
+      const text = value[key];
+      if (typeof text === "string" && text.trim() && text.length <= limit) receipt[key] = text.trim();
+    }
+    for (const key of ["refusalCount", "storeCount", "releaseCount"] as const) {
+      const count = value[key];
+      if (typeof count === "number" && Number.isSafeInteger(count) && count >= 0 && count <= quantity) receipt[key] = count;
+    }
+    const rawPrice = value.price;
+    const price = typeof rawPrice === "number" ? rawPrice : typeof rawPrice === "string" && /^\d+(?:[.,]\d{1,2})?$/.test(rawPrice.trim())
+      ? Number(rawPrice.trim().replace(",", ".")) : Number.NaN;
+    if (Number.isFinite(price) && price > 0) receipt.price = price;
+    partKomOrders.push(receipt);
   }
   if (total > line.quantity) throw new SupplierIntegrationError("PartKOM confirmed too many items");
-  if (total > 0) confirmed.push({ id: line.id, acceptedQuantity: total, orderIds,
+  if (total > 0) confirmed.push({ id: line.id, acceptedQuantity: total, orderIds, partKomOrders,
     ...(total < line.quantity ? { message: "PartKOM подтвердил только часть количества." } : {}) });
   return { confirmed, rejected: total === 0 ? [{ id: line.id, message: "PartKOM не принял позицию." }] : [] };
 }
