@@ -55,6 +55,8 @@ async function withCartPage(check, options = {}) {
         return testPurchaseOrder(lines, signal);
       },
       realCartOrder: {
+        refresh: async (lines) => lines.map((line) => ({ ...structuredClone(line),
+          result: { ...line.result, price: options.refreshedPrice ?? line.result.price } })),
         choices: async () => ({ partKom: { deliveries: [{ id: "regular", label: "Обычная доставка", type: "regular" }] },
           rossko: { deliveries: [{ id: "delivery", label: "Доставка", addressId: null }],
             payments: [{ id: "cash", label: "Наличные" }], companies: [] } }),
@@ -518,6 +520,21 @@ test("checkout rejects a changed reviewed cart and requires reviewing the new qu
     assert.equal(orderCalls.length, 1);
     assert.equal(orderCalls[0][0].quantity, 2);
   }, { reducedMotion: "reduce" });
+});
+
+test("checkout displays a refreshed supplier price before the order is sent", async () => {
+  await withCartPage(async (page, { orderCalls }) => {
+    await page.locator("#results-body .cart-offer-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await openCheckout(page);
+    assert.match(await page.locator("#cart-order-note").textContent(), /Предложения обновлены/);
+    assert.equal(await page.locator(".cart-order-table .cart-purchase-price").first().textContent(), "125,00");
+    assert.equal(orderCalls.length, 0);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    assert.equal(orderCalls[0][0].result.price, 125);
+  }, { refreshedPrice: 125, reducedMotion: "reduce" });
 });
 
 test("checkout blocks duplicate submission and Escape while the real request is pending", async () => {

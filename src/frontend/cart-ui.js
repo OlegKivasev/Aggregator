@@ -107,7 +107,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   orderDialog.setAttribute("aria-describedby", "cart-order-note");
   orderDialog.innerHTML = `<header class="analogs-modal__header"><h2 id="cart-order-title">Подтверждение заказа</h2></header>
     <div class="cart-content"><p class="cart-order-intro">Внимательно проверьте товары, количество, склады, сроки доставки и суммы перед заказом.</p>
-      <p class="cart-order-note" id="cart-order-note">Заказ будет отправлен поставщикам. Цена, наличие и срок могли измениться после поиска.</p>
+      <p class="cart-order-note" id="cart-order-note">Предложения обновлены у поставщиков перед подтверждением. Проверьте цену, остаток и срок: после нажатия «Заказать» заказ будет отправлен поставщикам.</p>
       <div id="cart-order-groups"></div><div id="cart-order-fields" class="cart-order-fields"></div>
       <div id="cart-order-receipt" class="cart-order-receipt" hidden></div>
       <p class="cart-order-status" id="cart-order-status" role="status" aria-live="polite"></p></div>
@@ -405,6 +405,10 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       await refresh();
       if (!modal.open) return;
       if (cart.testing) throw new Error("Дождитесь завершения действия в корзине.");
+      status.textContent = "Обновляем предложения у поставщиков…";
+      cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier }) }));
+      status.textContent = "";
+      render();
       const items = supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier);
       if (!items.length) throw new Error("Добавьте товары в выбранную вкладку корзины.");
       const choices = await api(`/api/cart/order-options?revision=${cart.revision}&supplier=${encodeURIComponent(supplier)}`);

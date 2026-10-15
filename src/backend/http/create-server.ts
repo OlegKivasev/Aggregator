@@ -230,7 +230,7 @@ export function createAggregatorServer({
 
     const cartItemMatch = /^\/api\/cart\/items\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (url.pathname === "/api/cart" || url.pathname === "/api/cart/items" || url.pathname === "/api/cart/test-order"
-      || url.pathname === "/api/cart/order-options" || url.pathname === "/api/cart/order" || cartItemMatch) {
+      || url.pathname === "/api/cart/order-options" || url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh" || cartItemMatch) {
       response.setHeader("Cache-Control", "no-store");
       const controller = new AbortController();
       const abort = () => { if (!response.writableEnded) controller.abort(new Error("Client disconnected")); };
@@ -245,11 +245,14 @@ export function createAggregatorServer({
           if (!controller.signal.aborted) serveJson(response, 200, choices);
         } else if (url.pathname === "/api/cart/items" && (request.method === "POST" || request.method === "DELETE")
           || cartItemMatch && (request.method === "PATCH" || request.method === "DELETE")
-          || (url.pathname === "/api/cart/test-order" || url.pathname === "/api/cart/order") && request.method === "POST") {
+          || (url.pathname === "/api/cart/test-order" || url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh") && request.method === "POST") {
           const payload = await readJsonBody(request);
           if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new CartError("Неверные параметры корзины.");
           const fields = payload as Record<string, unknown>;
-          if (url.pathname === "/api/cart/order") {
+          if (url.pathname === "/api/cart/refresh") {
+            const result = await cart.refreshForOrder(fields.revision, fields.supplier, controller.signal);
+            if (!controller.signal.aborted) serveJson(response, 200, result);
+          } else if (url.pathname === "/api/cart/order") {
             const details = fields.details;
             if (!details || typeof details !== "object" || Array.isArray(details)) throw new CartError("Неверные параметры заказа.");
             const result = await cart.order(fields.revision, fields.supplier, details, controller.signal);
@@ -269,7 +272,8 @@ export function createAggregatorServer({
           if (error instanceof CartError || error instanceof RequestBodyError) serveJson(response, error.statusCode, { message: error.message });
           else if (error instanceof SupplierAuthError) serveJson(response, 401, { message: "Авторизация поставщика недоступна." });
           else if (error instanceof SupplierTimeoutError) serveJson(response, 504, { message: "Поставщик не ответил вовремя." });
-          else if (error instanceof SupplierIntegrationError) serveJson(response, 502, { message: "Не удалось получить параметры заказа у поставщика." });
+          else if (error instanceof SupplierIntegrationError) serveJson(response, url.pathname === "/api/cart/refresh" && error.publicMessage ? 409 : 502,
+            { message: url.pathname === "/api/cart/refresh" && error.publicMessage ? error.publicMessage : "Не удалось получить параметры заказа у поставщика." });
           else {
             reportError({ operation: "cart", category: classifyOperationalError(error) });
             serveJson(response, 500, { message: "Не удалось выполнить действие в корзине." });

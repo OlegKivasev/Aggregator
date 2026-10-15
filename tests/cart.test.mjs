@@ -15,6 +15,8 @@ import { parseArmtekOrderResult } from "../src/backend/suppliers/armtek/armtek-o
 import { parseForumAutoOrderResult } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { buildRosskoOrderEnvelope, parseRosskoOrderResult } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { parsePartKomMotion } from "../src/backend/suppliers/part-kom/part-kom-order.ts";
+import { RealOrderApplicationService } from "../src/backend/application/real-order-application-service.ts";
+import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
 
 // All offers and upstream responses in this file are fictional fixtures.
 const suppliers = ["armtek", "part-kom", "forum-auto", "rossko"];
@@ -248,6 +250,7 @@ test("demo completion covers all suppliers without credentials, keeps the cart a
 test("real checkout removes only confirmed quantities and preserves rejected items", async () => {
   const calls = [];
   const gateway = {
+    refresh: async (lines) => lines,
     choices: async () => ({}),
     prepare: async (supplier, lines) => async () => {
       calls.push(supplier);
@@ -262,6 +265,7 @@ test("real checkout removes only confirmed quantities and preserves rejected ite
       cart.registerOffer(id, result(supplier));
       cart.mutate("add", { offerId: id, quantity: 2, revision: cart.view().revision });
     }
+    await cart.refreshForOrder(2, "all", new AbortController().signal);
     const response = await cart.order(2, "all", {}, new AbortController().signal);
     assert.deepEqual(calls, ["armtek", "forum-auto"]);
     assert.equal(response.results.length, 2);
@@ -273,11 +277,12 @@ test("real checkout removes only confirmed quantities and preserves rejected ite
 
 test("uncertain supplier response remains in cart and blocks duplicate checkout after restart", async () => {
   let calls = 0;
-  const gateway = { choices: async () => ({}), prepare: async () => async () => { calls++; throw new Error("Connection lost"); } };
+  const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => { calls++; throw new Error("Connection lost"); } };
   await withCart(async (cart, reopen) => {
     const id = randomUUID();
     cart.registerOffer(id, result());
     cart.mutate("add", { offerId: id, quantity: 1, revision: 0 });
+    await cart.refreshForOrder(1, "armtek", new AbortController().signal);
     const response = await cart.order(1, "armtek", {}, new AbortController().signal);
     assert.equal(response.results[0].status, "uncertain");
     assert.equal(response.cart.count, 1);
@@ -289,8 +294,9 @@ test("uncertain supplier response remains in cart and blocks duplicate checkout 
   }, undefined, gateway);
 });
 
-test("an existing Forum Auto cart line without a product id stays visible but cannot be ordered", async () => {
-  const gateway = { choices: async () => ({}), prepare: async () => { throw new Error("Must not prepare a legacy line"); } };
+test("an existing Forum Auto cart line obtains a fresh product id before order", async () => {
+  const gateway = { refresh: async (lines) => lines.map((item) => ({ ...item, reference: reference("forum-auto"), result: { ...item.result, price: 125 } })),
+    choices: async () => ({}), prepare: async (_supplier, lines) => async () => ({ confirmed: [{ id: lines[0].id, acceptedQuantity: 2, orderIds: ["F-1"] }], rejected: [] }) };
   await withCart(async (cart, _reopen, path) => {
     const oldLine = structuredClone(line("forum-auto"));
     delete oldLine.reference.gid;
@@ -298,9 +304,52 @@ test("an existing Forum Auto cart line without a product id stays visible but ca
     assert.equal(repository.save({ revision: 1, lines: [oldLine] }, 0), true);
     repository.close();
     assert.equal(cart.view().items.length, 1);
-    await assert.rejects(cart.orderChoices(1, "forum-auto", new AbortController().signal), /повторить поиск/);
-    await assert.rejects(cart.order(1, "forum-auto", {}, new AbortController().signal), /повторить поиск/);
-    assert.equal(cart.mutate("remove", { id: oldLine.id, revision: 1 }).count, 0);
+    await assert.rejects(cart.order(1, "forum-auto", {}, new AbortController().signal), /Сначала обновите/);
+    const refreshed = await cart.refreshForOrder(1, "forum-auto", new AbortController().signal);
+    assert.equal(refreshed.revision, 2);
+    assert.equal(refreshed.items[0].result.price, 125);
+    assert.equal((await cart.order(2, "forum-auto", {}, new AbortController().signal)).cart.count, 0);
+  }, undefined, gateway);
+});
+
+test("supplier refresh matches a legacy Forum Auto row and rejects ambiguous or insufficient offers", async () => {
+  const oldLine = structuredClone(line("forum-auto"));
+  delete oldLine.reference.gid;
+  const fresh = result("forum-auto", 3);
+  fresh.price = 125;
+  const service = new RealOrderApplicationService(new SupplierSessionManager(), async (_query, emit) => {
+    emit({ type: "result", result: fresh });
+    emit({ type: "supplier_status", supplier: "forum-auto", status: "completed" });
+  });
+  const [updated] = await service.refresh([oldLine], new AbortController().signal);
+  assert.equal(updated.reference.gid, "fixture-gid");
+  assert.equal(updated.result.price, 125);
+  const ambiguous = new RealOrderApplicationService(new SupplierSessionManager(), async (_query, emit) => {
+    emit({ type: "result", result: fresh });
+    emit({ type: "result", result: result("forum-auto") });
+    emit({ type: "supplier_status", supplier: "forum-auto", status: "completed" });
+  });
+  await assert.rejects(ambiguous.refresh([oldLine], new AbortController().signal), /ambiguous/);
+  const scarce = result("forum-auto", 1);
+  const insufficient = new RealOrderApplicationService(new SupplierSessionManager(), async (_query, emit) => {
+    emit({ type: "result", result: scarce });
+    emit({ type: "supplier_status", supplier: "forum-auto", status: "completed" });
+  });
+  await assert.rejects(insufficient.refresh([oldLine], new AbortController().signal), /insufficient/);
+});
+
+test("refresh failure keeps the cart unchanged and cannot authorize a real order", async () => {
+  let sends = 0;
+  const gateway = { refresh: async () => { throw new Error("Supplier unavailable"); }, choices: async () => ({}),
+    prepare: async () => async () => { sends++; return { confirmed: [], rejected: [] }; } };
+  await withCart(async (cart) => {
+    const offerId = randomUUID();
+    cart.registerOffer(offerId, result());
+    const before = cart.mutate("add", { offerId, quantity: 2, revision: 0 });
+    await assert.rejects(cart.refreshForOrder(before.revision, "armtek", new AbortController().signal), /Supplier unavailable/);
+    assert.deepEqual(cart.view(), before);
+    await assert.rejects(cart.order(before.revision, "armtek", {}, new AbortController().signal), /Сначала обновите/);
+    assert.equal(sends, 0);
   }, undefined, gateway);
 });
 

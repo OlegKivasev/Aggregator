@@ -1,8 +1,9 @@
 import type { RealOrderGateway } from "../purchasing/cart-application-service.ts";
 import type { CheckoutDetails, OrderChoices, OrderSupplier } from "../purchasing/order-contract.ts";
-import type { PurchaseLine } from "../purchasing/purchase-offer.ts";
+import { getPurchaseReference, type PurchaseLine, type PurchaseReference } from "../purchasing/purchase-offer.ts";
 import type { SupplierSessionManager } from "../session/session-manager.ts";
-import { SupplierAuthError, SupplierIntegrationError } from "../suppliers/errors.ts";
+import type { SearchStreamEvent, SupplierSearchQuery } from "../types.ts";
+import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../suppliers/errors.ts";
 import { placeArmtekOrder } from "../suppliers/armtek/armtek-order.ts";
 import { resolveArmtekConfig } from "../suppliers/armtek/armtek-api-adapter.ts";
 import { placeForumAutoOrder, verifyForumAutoCredentials } from "../suppliers/forum-auto/forum-auto-api-adapter.ts";
@@ -10,11 +11,72 @@ import { getPartKomOrderChoices, placePartKomOrder } from "../suppliers/part-kom
 import { getRosskoOrderChoices, placeRosskoOrder } from "../suppliers/rossko/rossko-api-adapter.ts";
 
 const validPhone = (value: unknown): value is string => typeof value === "string" && /^[+\d()\s-]{6,40}$/.test(value);
+const sameText = (left: string, right: string): boolean => left.trim().toLocaleUpperCase() === right.trim().toLocaleUpperCase();
+const sameArticle = (left: string, right: string): boolean => left.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase()
+  === right.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase();
+
+function sameOffer(current: PurchaseLine, fresh: { result: PurchaseLine["result"]; reference: PurchaseReference }): boolean {
+  if (!sameArticle(current.result.article, fresh.result.article) || !sameText(current.result.brand, fresh.result.brand)
+    || current.reference.supplier !== fresh.reference.supplier) return false;
+  const old = current.reference;
+  const next = fresh.reference;
+  if (old.supplier === "armtek" && next.supplier === "armtek") return old.keyzak === next.keyzak;
+  if (old.supplier === "part-kom" && next.supplier === "part-kom") return old.makerId === next.makerId && old.providerId === next.providerId;
+  if (old.supplier === "forum-auto" && next.supplier === "forum-auto") {
+    return old.gid ? old.gid === next.gid : old.warehouse === next.warehouse;
+  }
+  return old.supplier === "rossko" && next.supplier === "rossko" && old.stockId === next.stockId
+    && old.partGuid === next.partGuid;
+}
 
 export class RealOrderApplicationService implements RealOrderGateway {
   private readonly sessions: SupplierSessionManager;
+  private readonly search: (query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) => Promise<void>;
 
-  constructor(sessions: SupplierSessionManager) { this.sessions = sessions; }
+  constructor(sessions: SupplierSessionManager,
+    search: (query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) => Promise<void>) {
+    this.sessions = sessions;
+    this.search = search;
+  }
+
+  async refresh(lines: PurchaseLine[], signal: AbortSignal): Promise<PurchaseLine[]> {
+    const found = new Map<string, Array<{ result: PurchaseLine["result"]; reference: PurchaseReference }>>();
+    for (const line of lines) {
+      const key = JSON.stringify([line.reference.supplier, line.result.article]);
+      if (found.has(key)) continue;
+      const offers: Array<{ result: PurchaseLine["result"]; reference: PurchaseReference }> = [];
+      let status: string | null = null;
+      await this.search({ article: line.result.article, suppliers: [line.reference.supplier] }, (event) => {
+        if (event.type === "result") {
+          const reference = getPurchaseReference(event.result);
+          if (reference) offers.push({ result: event.result, reference });
+        } else if (event.type === "supplier_status" && event.supplier === line.reference.supplier) status = event.status;
+      }, signal);
+      signal.throwIfAborted();
+      if (status === "auth_error") throw new SupplierAuthError("Supplier authorization is unavailable for order refresh");
+      if (status === "timeout") throw new SupplierTimeoutError("Supplier order refresh timed out");
+      if (status !== "completed") throw new SupplierIntegrationError("Supplier offer refresh failed", {
+        publicMessage: "Не удалось обновить предложение у поставщика. Заказ не отправлен.",
+      });
+      found.set(key, offers);
+    }
+    return lines.map((line) => {
+      const offers = found.get(JSON.stringify([line.reference.supplier, line.result.article])) ?? [];
+      const matches = offers.filter((offer) => sameOffer(line, offer));
+      if (matches.length !== 1) throw new SupplierIntegrationError("Supplier offer is missing or ambiguous", {
+        publicMessage: matches.length ? "Найдено несколько подходящих предложений. Заказ не отправлен."
+          : "Предложение больше не найдено у поставщика. Заказ не отправлен.",
+      });
+      const offer = matches[0];
+      if (typeof offer.result.quantity !== "number" || !Number.isSafeInteger(offer.result.quantity)
+        || offer.result.quantity < line.quantity) {
+        throw new SupplierIntegrationError("Supplier offer has insufficient confirmed stock", {
+          publicMessage: "Остаток у поставщика меньше количества в корзине. Заказ не отправлен.",
+        });
+      }
+      return { id: line.id, quantity: line.quantity, result: offer.result, reference: offer.reference };
+    });
+  }
 
   async choices(suppliers: OrderSupplier[], signal: AbortSignal): Promise<OrderChoices> {
     const result: OrderChoices = {};

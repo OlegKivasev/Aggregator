@@ -48,7 +48,6 @@ import type {
 } from "./types.ts";
 
 const sessionManager = new SupplierSessionManager();
-export const realCartOrder = new RealOrderApplicationService(sessionManager);
 const credentialStore = new EncryptedSupplierCredentialStore(
   getStateFilePath("supplier-credentials.enc.json"),
   supplierCredentialsEncryptionKey,
@@ -86,6 +85,7 @@ const searchService = new SearchApplicationService(
   sessionManager,
   (supplier) => sessionService.disconnectSupplier(supplier),
 );
+export const realCartOrder = new RealOrderApplicationService(sessionManager, (query, emit, signal) => searchService.streamSearch(query, emit, signal));
 const applicabilityProxyStore = new EncryptedPartsApiProxyStore(getStateFilePath("partsapi-proxies.enc.json"), supplierCredentialsEncryptionKey);
 const applicabilityService = new ApplicabilityApplicationService(
   new PartsApiRoutingClient(new PartsApiApplicabilityClient(), applicabilityProxyStore), applicabilityApiKeyStore, applicabilityCacheRepository,
