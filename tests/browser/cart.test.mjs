@@ -10,6 +10,7 @@ import { formatDeliveryDate } from "../../src/frontend/supplier-search-summary.j
 import { testPurchaseOrder } from "../../src/backend/application/test-order-application-service.ts";
 import { CartError } from "../../src/backend/purchasing/cart-application-service.ts";
 import { parsePartKomOrderHistory } from "../../src/backend/suppliers/part-kom/part-kom-order.ts";
+import { parseRosskoOrderHistory } from "../../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 
 // The browser uses a real local cart server; supplier searches and checks are fictional fixtures.
 const supplierOrigins = { armtek: "https://etp.armtek.ru/", "part-kom": "https://www.part-kom.ru/",
@@ -952,6 +953,33 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
   }, { partKomOrderHistory: async () => history, supplierOrderHistory: async (query) => ({ orders: [{ number: query.supplier,
     date: null, items: [{ article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 100,
       status: "Отгружено", fulfillment: "in_transit", expectedDate: null, guaranteedDate: null, warehouse: null }] }], limited: false }) });
+});
+
+test("Rossko completed order uses green received badges and handed-to-customer details, while mixed orders remain mixed", async () => {
+  let reloaded = false;
+  const part = (article, status) => `<part><partnumber>${article}</partnumber><brand>TEST</brand><name>Тестовая деталь</name>
+    <count>1</count><price>100</price><status>${status}</status></part>`;
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.locator("#history-tab-rossko").click();
+    const card = page.locator('.history-card[data-fulfillment="delivered"]');
+    await card.waitFor();
+    assert.match(await card.locator(".history-card__states").innerText(), /Получен/);
+    assert.equal(await card.locator(".history-item-status .history-status--delivered").count(), 2);
+    assert.deepEqual(await card.locator(".history-status-detail").allTextContents(), ["Передан покупателю", "Передан покупателю"]);
+    assert.doesNotMatch(await card.innerText(), /В пути|Отгружено/);
+    assert.equal(await card.evaluate((node) => getComputedStyle(node).borderLeftColor), "rgb(35, 131, 77)");
+    reloaded = true;
+    await page.locator("#history-reload").click();
+    const mixed = page.locator('.history-card[data-fulfillment="mixed"]');
+    await mixed.waitFor();
+    assert.equal(await mixed.locator(".history-item-status .history-status--delivered").count(), 1);
+    assert.equal(await mixed.locator(".history-item-status .history-status--processing").count(), 1);
+    assert.match(await mixed.locator(".history-card__states").innerText(), /Получен · 1/);
+    assert.match(await mixed.locator(".history-card__states").innerText(), /В обработке · 1/);
+  }, { supplierOrderHistory: async () => parseRosskoOrderHistory(`<Envelope><Body><OrdersResult><success>true</success><OrdersList>
+    <Order><id>771</id><created_date>15.10.2026 12:30:00</created_date><parts>
+    ${part("A1", reloaded ? 1 : 2)}${part("B1", 2)}</parts></Order></OrdersList></OrdersResult></Body></Envelope>`) });
 });
 
 test("history cancels stale supplier results and shows safe errors and malformed payloads", async () => {

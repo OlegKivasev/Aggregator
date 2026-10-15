@@ -77,7 +77,7 @@ const rosskoRow = `<Order><id>123</id><created_date>15.10.2026 12:30:00</created
   <stock_address>Склад</stock_address><parts><part><partnumber>A1</partnumber><brand>TEST</brand><name>Деталь</name>
   <count>2</count><price>100.50</price><status>1</status></part></parts></Order>`;
 
-test("all supplier histories classify documented fulfillment without treating shipment or a closed order as receipt", () => {
+test("supplier histories classify fulfillment without treating a closed Armtek order as receipt", () => {
   const armtek = (fields) => parseArmtekOrderHistory({ DATA: [{ ...armtekRow, ...fields }] }).orders[0].items[0].fulfillment;
   assert.equal(armtek({ STATUS: "позиция полностью поставлена" }), "delivered");
   assert.equal(armtek({ STATUS: "позиция полностью отклонена" }), "cancelled");
@@ -102,7 +102,7 @@ test("all supplier histories classify documented fulfillment without treating sh
   assert.equal(partialForum.fulfillment, "partial");
   assert.equal(partialForum.status, "Выдано 1 из 2 шт.");
   assert.equal(parseForumAutoOrderHistory([{ ...forumRow, statusId: 100 }]).orders[0].items[0].fulfillment, "attention");
-  for (const [code, fulfillment] of [[0, "processing"], [1, "processing"], [2, "in_transit"], [3, "ready"], [6, "ready"],
+  for (const [code, fulfillment] of [[0, "processing"], [1, "processing"], [2, "delivered"], [3, "ready"], [6, "ready"],
     [7, "attention"], [8, "cancelled"], [9, "attention"], [32, "attention"], [35, "attention"], [36, "returned"], [999, "unknown"]]) {
     const xml = rosskoXml(rosskoRow.replace("<status>1</status>", `<status>${code}</status>`));
     assert.equal(parseRosskoOrderHistory(xml).orders[0].items[0].fulfillment, fulfillment);
@@ -124,6 +124,18 @@ test("supplier histories normalize their documented dates, fields and ordered qu
   assert.equal(parseForumAutoOrderHistory([forumRow]).orders[0].number, "123");
   assert.equal(parseRosskoOrderHistory(rosskoXml(rosskoRow)).orders[0].items[0].status, "Комплектуется");
   assert.equal(parseArmtekOrderHistory({ DATA: [{ ...armtekRow, CURRENCY: undefined }] }).orders[0].items[0].price, null);
+});
+
+test("Rossko terminal status 2 matches the portal's handed-to-customer state for every order position", () => {
+  const completed = rosskoRow.replace("<status>1</status>", "<status>2</status>");
+  const part = completed.match(/<part>[\s\S]*<\/part>/)[0];
+  const xml = rosskoXml(completed.replace("</parts>", `${part.replace("A1", "B1")}</parts>`));
+  const items = parseRosskoOrderHistory(xml).orders[0].items;
+  assert.equal(items.length, 2);
+  assert.deepEqual(items.map(({ fulfillment }) => fulfillment), ["delivered", "delivered"]);
+  assert.deepEqual(items.map(({ status }) => status), ["Передан покупателю", "Передан покупателю"]);
+  const mixed = parseRosskoOrderHistory(xml.replace("<status>2</status>", "<status>1</status>")).orders[0].items;
+  assert.deepEqual(mixed.map(({ fulfillment }) => fulfillment), ["processing", "delivered"]);
 });
 
 test("supplier histories reject malformed responses and never turn faults into empty orders", () => {
