@@ -15,7 +15,7 @@ import { parseArmtekOrderResult } from "../src/backend/suppliers/armtek/armtek-o
 import { parseForumAutoOrderResult } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { buildRosskoOrderEnvelope, parseRosskoOrderResult } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { getPartKomOrderChoices, parsePartKomMotion } from "../src/backend/suppliers/part-kom/part-kom-order.ts";
-import { RealOrderApplicationService } from "../src/backend/application/real-order-application-service.ts";
+import { allowedRosskoOrderChoices, RealOrderApplicationService } from "../src/backend/application/real-order-application-service.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
 
 // All offers and upstream responses in this file are fictional fixtures.
@@ -37,18 +37,37 @@ const withCart = async (check, testOrder = async () => [], realOrder = null) => 
   finally { service.close(); rmSync(directory, { recursive: true, force: true }); }
 };
 
-test("PartKOM checkout accepts pickup choices in a text response envelope", async () => {
-  const choices = await getPartKomOrderChoices({ login: "test", password: "test" }, new AbortController().signal,
-    async (url, options) => {
-      assert.equal(url.href, "https://ws.part-kom.ru/v4/basket/pickup-list");
-      assert.equal(options.method, "GET");
-      return { status: 200, contentType: "text/plain; charset=utf-8", setCookie: [],
-        body: `\uFEFF${JSON.stringify({ success: true, data: [{ id: 42, title: "Пункт выдачи", address: "Тестовая улица" }] })}` };
-    });
-  assert.deepEqual(choices.deliveries, [
+test("PartKOM checkout uses documented regular delivery without requesting pickup points", async () => {
+  const sessions = new SupplierSessionManager();
+  sessions.setPartKomCredentials({ login: "test", password: "test" });
+  const service = new RealOrderApplicationService(sessions, async () => { throw new Error("Unexpected search"); });
+  const choices = await service.choices(["part-kom"], new AbortController().signal);
+  assert.deepEqual(choices.partKom, getPartKomOrderChoices());
+  assert.deepEqual(choices.partKom.deliveries, [
     { id: "regular", type: "regular", label: "Регулярная доставка (ближайшая волна)" },
-    { id: "pickup:42", type: "pickup", point: "42", label: "Самовывоз: Пункт выдачи, Тестовая улица" },
   ]);
+  assert.equal(typeof await service.prepare("part-kom", [line("part-kom")], { partKom: { deliveryId: "regular" } }, new AbortController().signal), "function");
+  await assert.rejects(service.prepare("part-kom", [line("part-kom")], { partKom: { deliveryId: "pickup:42" } }, new AbortController().signal),
+    /delivery settings are invalid/);
+});
+
+test("Rossko checkout permits only address delivery and bank transfer", () => {
+  const options = { deliveries: [
+    { id: "pickup", label: "Самовывоз", addressId: null },
+    { id: "courier", label: "Курьерская доставка", addressId: "address-1" },
+  ], payments: [
+    { id: "1", label: "Оплата банковским платежом" },
+    { id: "2", label: "Оплата наличными при получении товара" },
+    { id: "3", label: "Оплата картой онлайн" },
+  ], companies: [] };
+  assert.deepEqual(allowedRosskoOrderChoices(options), { deliveries: [options.deliveries[1]], payments: [options.payments[0]], companies: [] });
+  assert.deepEqual(allowedRosskoOrderChoices({ ...options, payments: [{ id: "4", label: "Безналичный расчёт" }] }).payments,
+    [{ id: "4", label: "Безналичный расчёт" }]);
+  assert.deepEqual(allowedRosskoOrderChoices({ ...options, payments: [{ id: "6", label: "Банковский перевод" }] }).payments,
+    [{ id: "6", label: "Банковский перевод" }]);
+  assert.throws(() => allowedRosskoOrderChoices({ ...options, payments: [{ id: "5", label: "Безналичный или наличный расчёт" }] }), /bank transfer/);
+  assert.throws(() => allowedRosskoOrderChoices({ ...options, payments: options.payments.slice(1) }), /bank transfer/);
+  assert.throws(() => allowedRosskoOrderChoices({ ...options, deliveries: options.deliveries.slice(0, 1) }), /delivery address/);
 });
 
 test("cart limits integer quantities, combines exact offers and conceals supplier references", async () => {

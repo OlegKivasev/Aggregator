@@ -23,7 +23,7 @@ export interface RosskoOrderChoices {
 }
 
 export interface PartKomOrderChoices {
-  deliveries: Array<OrderChoice & { type: "regular" | "pickup" | "express"; point?: string; hash?: string; payway?: string }>;
+  deliveries: Array<OrderChoice & { type: "regular" }>;
 }
 
 export interface OrderChoices {
@@ -34,5 +34,5 @@ export interface OrderChoices {
 export interface CheckoutDetails {
   rossko?: { deliveryId: string; addressId: string | null; paymentId: string; companyId: string | null;
     name: string; phone: string; deliveryParts: boolean };
-  partKom?: { deliveryId: string; name?: string; phone?: string };
+  partKom?: { deliveryId: string };
 }

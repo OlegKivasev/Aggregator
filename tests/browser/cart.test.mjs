@@ -59,7 +59,7 @@ async function withCartPage(check, options = {}) {
           result: { ...line.result, price: options.refreshedPrice ?? line.result.price } })),
         choices: async () => ({ partKom: { deliveries: [{ id: "regular", label: "Обычная доставка", type: "regular" }] },
           rossko: { deliveries: [{ id: "delivery", label: "Доставка", addressId: null }],
-            payments: [{ id: "cash", label: "Наличные" }], companies: [] } }),
+            payments: [{ id: "bank", label: "Оплата банковским платежом" }], companies: [] } }),
         prepare: async (_supplier, lines) => async (_attemptId, signal) => {
           orderCalls.push(structuredClone(lines));
           await options.testGate?.(signal);
@@ -136,7 +136,8 @@ test("cart adds bounded quantities, persists, orders and removes confirmed items
     await page.locator("#cart-toggle").click();
     await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 2);
     await openCheckout(page);
-    await page.locator("#cart-partkom-delivery").selectOption("regular");
+    assert.equal(await page.locator("#cart-partkom-delivery").count(), 0);
+    assert.match(await page.locator("#cart-order-fields").textContent(), /Регулярная доставка/);
     await page.locator("#cart-order-accept").click();
     await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
     assert.equal(orderCalls.length, 2);
@@ -474,9 +475,9 @@ test("four supplier checkout requires confirmation, details and removes confirme
     if (process.env.CART_ORDER_MOBILE_SCREENSHOT_PATH) await page.screenshot({ path: process.env.CART_ORDER_MOBILE_SCREENSHOT_PATH });
     await page.locator("#cart-order-accept").click();
     assert.equal(posts.length, 0);
-    await page.locator("#cart-partkom-delivery").selectOption("regular");
+    assert.equal(await page.locator("#cart-partkom-delivery").count(), 0);
     await page.locator("#cart-rossko-delivery").selectOption("0");
-    await page.locator("#cart-rossko-payment").selectOption("cash");
+    await page.locator("#cart-rossko-payment").selectOption("bank");
     await page.locator("#cart-rossko-name").fill("Тестовый покупатель");
     await page.locator("#cart-rossko-phone").fill("+79990000000");
     await page.locator("#cart-order-accept").click();

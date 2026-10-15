@@ -91,7 +91,7 @@ test("cart order options return the safe supplier error without exposing upstrea
       }, { supplier: "part-kom", makerId: "101", providerId: "202" }) }),
       realCartOrder: {
         choices: async () => { throw new SupplierIntegrationError("private upstream response", {
-          publicMessage: "PartKOM не вернул способы доставки. Заказ не отправлен.",
+          publicMessage: "Поставщик не предложил подходящие параметры заказа. Заказ не отправлен.",
         }); },
       },
     });
@@ -105,7 +105,7 @@ test("cart order options return the safe supplier error without exposing upstrea
     })).json();
     const response = await fetch(`${baseUrl}/api/cart/order-options?revision=${added.revision}&supplier=part-kom`);
     assert.equal(response.status, 502);
-    assert.deepEqual(await response.json(), { message: "PartKOM не вернул способы доставки. Заказ не отправлен." });
+    assert.deepEqual(await response.json(), { message: "Поставщик не предложил подходящие параметры заказа. Заказ не отправлен." });
   } finally {
     if (server?.listening) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); openServers.delete(server); }
     if (previousPath === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previousPath;

@@ -343,10 +343,11 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     const sections = [];
     if (suppliers.has("part-kom")) {
       const deliveries = choices?.partKom?.deliveries;
+      if (!Array.isArray(deliveries) || deliveries.length !== 1 || deliveries[0]?.id !== "regular" || deliveries[0]?.type !== "regular") {
+        throw new Error("PartKOM не подтвердил обычную доставку.");
+      }
       sections.push(`<section class="cart-order-field-group"><h3>PartKOM — доставка</h3>
-        <label>Способ доставки<select id="cart-partkom-delivery" required>${choiceOptions(deliveries)}</select></label>
-        <div id="cart-partkom-contact" hidden><label>Получатель<input id="cart-partkom-name" maxlength="100" autocomplete="name"></label>
-        <label>Телефон<input id="cart-partkom-phone" maxlength="40" autocomplete="tel"></label></div></section>`);
+        <p>Регулярная доставка. Оплата по условиям договора с PartKOM.</p></section>`);
     }
     if (suppliers.has("rossko")) {
       const options = choices?.rossko;
@@ -355,7 +356,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       }
       sections.push(`<section class="cart-order-field-group"><h3>Rossko — данные заказа</h3>
         <label>Доставка<select id="cart-rossko-delivery" required>${choiceOptions(options.deliveries.map((item, index) => ({ id: String(index), label: item.label })))}</select></label>
-        <label>Оплата<select id="cart-rossko-payment" required>${choiceOptions(options.payments)}</select></label>
+        <label>Оплата банковским переводом<select id="cart-rossko-payment" required>${choiceOptions(options.payments)}</select></label>
         <label>Реквизиты<select id="cart-rossko-company"><option value="">Не выбраны</option>${Array.isArray(options.companies)
           ? options.companies.filter((item) => item && typeof item.id === "string" && typeof item.label === "string")
             .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join("") : ""}</select></label>
@@ -364,26 +365,12 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
         <label class="cart-order-checkbox"><input id="cart-rossko-parts" type="checkbox"> Доставлять заказ по частям</label></section>`);
     }
     orderFields.innerHTML = sections.join("");
-    const partKomDelivery = orderFields.querySelector("#cart-partkom-delivery");
-    const updatePartKomContact = () => {
-      if (!partKomDelivery) return;
-      const selected = choices.partKom.deliveries.find((item) => item.id === partKomDelivery.value);
-      const pickup = selected?.type === "pickup";
-      const contact = orderFields.querySelector("#cart-partkom-contact");
-      contact.hidden = !pickup;
-      for (const input of contact.querySelectorAll("input")) input.required = pickup;
-    };
-    partKomDelivery?.addEventListener("change", updatePartKomContact);
-    updatePartKomContact();
   };
   const collectOrderDetails = (choices) => {
     const inputs = [...orderFields.querySelectorAll("input, select")];
     if (inputs.some((input) => !input.reportValidity())) return null;
     const details = {};
-    const partKom = orderFields.querySelector("#cart-partkom-delivery");
-    if (partKom) details.partKom = { deliveryId: partKom.value,
-      name: orderFields.querySelector("#cart-partkom-name").value,
-      phone: orderFields.querySelector("#cart-partkom-phone").value };
+    if (choices?.partKom) details.partKom = { deliveryId: "regular" };
     const rossko = orderFields.querySelector("#cart-rossko-delivery");
     if (rossko) {
       const choice = choices.rossko.deliveries[Number(rossko.value)];

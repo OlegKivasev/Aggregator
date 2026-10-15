@@ -1,5 +1,5 @@
 import type { RealOrderGateway } from "../purchasing/cart-application-service.ts";
-import type { CheckoutDetails, OrderChoices, OrderSupplier } from "../purchasing/order-contract.ts";
+import type { CheckoutDetails, OrderChoices, OrderSupplier, RosskoOrderChoices } from "../purchasing/order-contract.ts";
 import { getPurchaseReference, type PurchaseLine, type PurchaseReference } from "../purchasing/purchase-offer.ts";
 import type { SupplierSessionManager } from "../session/session-manager.ts";
 import type { SearchStreamEvent, SupplierSearchQuery } from "../types.ts";
@@ -14,6 +14,19 @@ const validPhone = (value: unknown): value is string => typeof value === "string
 const sameText = (left: string, right: string): boolean => left.trim().toLocaleUpperCase() === right.trim().toLocaleUpperCase();
 const sameArticle = (left: string, right: string): boolean => left.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase()
   === right.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase();
+
+export function allowedRosskoOrderChoices(options: RosskoOrderChoices): RosskoOrderChoices {
+  const deliveries = options.deliveries.filter((item) => item.addressId !== null);
+  const payments = options.payments.filter((item) => /безнал|банковск\S*\s+(?:плат[её]ж|перевод)|перечислен|расч[её]тн\S*\s+сч[её]т/i.test(item.label)
+    && !/(?:^|[^\p{L}])наличн|карт|эквайр|онлайн/iu.test(item.label));
+  if (!deliveries.length) throw new SupplierIntegrationError("Rossko has no delivery address", {
+    publicMessage: "Rossko не предложил доставку по адресу. Заказ не отправлен.",
+  });
+  if (!payments.length) throw new SupplierIntegrationError("Rossko has no bank transfer payment", {
+    publicMessage: "Rossko не предложил оплату банковским переводом. Заказ не отправлен.",
+  });
+  return { ...options, deliveries, payments };
+}
 
 function sameOffer(current: PurchaseLine, fresh: { result: PurchaseLine["result"]; reference: PurchaseReference }): boolean {
   if (!sameArticle(current.result.article, fresh.result.article) || !sameText(current.result.brand, fresh.result.brand)
@@ -79,26 +92,17 @@ export class RealOrderApplicationService implements RealOrderGateway {
   }
 
   async choices(suppliers: OrderSupplier[], signal: AbortSignal): Promise<OrderChoices> {
+    signal.throwIfAborted();
     const result: OrderChoices = {};
     if (suppliers.includes("rossko")) {
       const credentials = this.sessions.getRosskoApiCredentials();
       if (!credentials) throw new SupplierAuthError("Rossko API keys are missing");
-      result.rossko = await getRosskoOrderChoices(credentials, signal);
+      result.rossko = allowedRosskoOrderChoices(await getRosskoOrderChoices(credentials, signal));
     }
     if (suppliers.includes("part-kom")) {
       const credentials = this.sessions.getPartKomCredentials();
       if (!credentials) throw new SupplierAuthError("PartKOM API credentials are missing");
-      try {
-        result.partKom = await getPartKomOrderChoices(credentials, signal);
-      } catch (error) {
-        if (error instanceof SupplierIntegrationError) throw new SupplierIntegrationError("PartKOM order choices failed", {
-          cause: error,
-          publicMessage: error.publicMessage === "PartKOM API access is not allowed from this server IP address"
-            ? "PartKOM не разрешает запросы с IP этого сервера. Заказ не отправлен."
-            : "PartKOM не вернул способы доставки. Заказ не отправлен.",
-        });
-        throw error;
-      }
+      result.partKom = getPartKomOrderChoices();
     }
     return result;
   }
@@ -129,13 +133,10 @@ export class RealOrderApplicationService implements RealOrderGateway {
       if (lines.length !== 1 || lines[0].reference.supplier !== supplier || !Number.isSafeInteger(lines[0].result.price)) {
         throw new SupplierIntegrationError("PartKOM order reference or price is invalid");
       }
-      const options = await getPartKomOrderChoices(credentials, signal);
-      const choice = options.deliveries.find((item) => item.id === details.partKom?.deliveryId);
-      if (!choice || choice.type === "pickup" && (typeof details.partKom?.name !== "string" || !details.partKom.name.trim()
-        || details.partKom.name.length > 100 || !validPhone(details.partKom.phone))) {
+      if (details.partKom?.deliveryId !== "regular") {
         throw new SupplierIntegrationError("PartKOM delivery settings are invalid");
       }
-      return (attemptId: string, orderSignal: AbortSignal) => placePartKomOrder(lines[0], credentials, details, choice, attemptId, orderSignal);
+      return (attemptId: string, orderSignal: AbortSignal) => placePartKomOrder(lines[0], credentials, details, attemptId, orderSignal);
     }
     const credentials = this.sessions.getRosskoApiCredentials();
     if (!credentials) throw new SupplierAuthError("Rossko API keys are missing");
@@ -143,13 +144,12 @@ export class RealOrderApplicationService implements RealOrderGateway {
       throw new SupplierIntegrationError("Rossko order reference is invalid");
     }
     const selected = details.rossko;
-    const options = await getRosskoOrderChoices(credentials, signal);
+    const options = allowedRosskoOrderChoices(await getRosskoOrderChoices(credentials, signal));
     const delivery = options.deliveries.find((item) => item.id === selected?.deliveryId && item.addressId === selected.addressId);
     const payment = options.payments.find((item) => item.id === selected?.paymentId);
     if (!delivery || !payment || typeof selected?.name !== "string" || !selected.name.trim() || selected.name.length > 100
       || !validPhone(selected.phone) || typeof selected.deliveryParts !== "boolean"
-      || selected.companyId !== null && !options.companies.some((item) => item.id === selected.companyId)
-      || /карт/i.test(payment.label) && delivery.addressId !== null && selected.companyId === null) {
+      || selected.companyId !== null && !options.companies.some((item) => item.id === selected.companyId)) {
       throw new SupplierIntegrationError("Rossko checkout settings are invalid");
     }
     return (_attemptId: string, orderSignal: AbortSignal) => placeRosskoOrder(lines, credentials, details, orderSignal);
