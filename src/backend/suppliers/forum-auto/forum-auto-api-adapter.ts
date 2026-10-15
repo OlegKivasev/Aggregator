@@ -13,8 +13,11 @@ import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
 import { siteHttpRequest, type SiteHttpResponse } from "../site-http.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
 import { attachPurchaseReference } from "../../purchasing/purchase-offer.ts";
+import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
+import type { OrderGroupResult } from "../../purchasing/order-contract.ts";
 
 interface ForumAutoOffer {
+  gid?: unknown;
   brand?: unknown;
   art?: unknown;
   name?: unknown;
@@ -32,7 +35,7 @@ interface ForumAutoFault {
   code?: unknown;
 }
 
-export type ForumAutoApiMethod = "clientinfo" | "listgoods" | "listbrands";
+export type ForumAutoApiMethod = "clientinfo" | "listgoods" | "listbrands" | "addgoodstoorder";
 export type ForumAutoApiRequester = (
   method: ForumAutoApiMethod,
   params: URLSearchParams,
@@ -198,7 +201,8 @@ function normalizeForumAutoOffer(offer: ForumAutoOffer, isAnalog: boolean): Norm
     link: forumAutoProductUrl(article),
     ...(isAnalog ? { isAnalog: true } : {}),
   };
-  return attachPurchaseReference(result, { supplier: "forum-auto", warehouse: result.warehouse });
+  const gid = typeof offer.gid === "string" ? offer.gid.trim() : "";
+  return gid ? attachPurchaseReference(result, { supplier: "forum-auto", warehouse: result.warehouse, gid }) : result;
 }
 
 export function parseForumAutoApiResults(payload: unknown, requestedArticle: string): NormalizedSearchResult[] {
@@ -284,6 +288,37 @@ async function forumAutoApiRequest(
     maxResponseBytes: supplierMaxResponseBytes,
   });
   return parseForumAutoApiResponse(response, method);
+}
+
+export function parseForumAutoOrderResult(payload: unknown, line: PurchaseLine): OrderGroupResult {
+  if (line.reference.supplier !== "forum-auto") throw new SupplierIntegrationError("Forum-Auto order line has invalid supplier");
+  const gid = line.reference.gid;
+  const orders = Array.isArray(payload) ? payload : [payload];
+  const matches = orders.filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value)))
+    .flatMap((order) => {
+      const id = order.did;
+      const items = order.arTovs;
+      return (typeof id === "number" && Number.isSafeInteger(id) && id > 0 || typeof id === "string" && /^\d+$/.test(id))
+        && Array.isArray(items) ? items.map((item) => ({ id: String(id), item })) : [];
+    }).filter(({ item }) => item && typeof item === "object" && !Array.isArray(item)
+      && (item as Record<string, unknown>).gid === gid);
+  if (matches.length !== 1) throw new SupplierIntegrationError("Forum-Auto order confirmation is incomplete");
+  const { id, item } = matches[0];
+  const quantity = (item as Record<string, unknown>).k1;
+  const acceptedQuantity = typeof quantity === "number" ? quantity : typeof quantity === "string" && /^\d+$/.test(quantity) ? Number(quantity) : Number.NaN;
+  if (!Number.isSafeInteger(acceptedQuantity) || acceptedQuantity < 1 || acceptedQuantity > line.quantity) {
+    throw new SupplierIntegrationError("Forum-Auto confirmed an invalid quantity");
+  }
+  return { confirmed: [{ id: line.id, acceptedQuantity, orderIds: [id],
+    ...(acceptedQuantity < line.quantity ? { message: "Forum Auto подтвердил только часть количества." } : {}) }], rejected: [] };
+}
+
+export async function placeForumAutoOrder(line: PurchaseLine, credentials: ForumAutoCredentials, signal: AbortSignal,
+  request: ForumAutoApiRequester = forumAutoApiRequest): Promise<OrderGroupResult> {
+  if (line.reference.supplier !== "forum-auto" || !line.reference.gid) throw new SupplierIntegrationError("Forum-Auto order is missing a product identifier");
+  const params = new URLSearchParams({ tid: line.reference.gid, num: String(line.quantity) });
+  const payload = await request("addgoodstoorder", params, signal, forumAutoSearchTimeoutMs, credentials);
+  return parseForumAutoOrderResult(payload, line);
 }
 
 function validateForumAutoClientInfo(payload: unknown): void {

@@ -35,6 +35,7 @@ import {
   shutdownSearchService,
   streamSearch,
   testCartOrder,
+  realCartOrder,
   validateSupplierSessions,
 } from "./search-service.ts";
 
@@ -76,6 +77,7 @@ const application: AggregatorApplication = {
   searchApplicability,
   streamSearch,
   testCartOrder,
+  realCartOrder,
   validateSupplierSessions,
 };
 

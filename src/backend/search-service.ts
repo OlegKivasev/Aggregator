@@ -3,6 +3,7 @@ import { testPurchaseOrder } from "./application/test-order-application-service.
 import type { PurchaseLine } from "./purchasing/purchase-offer.ts";
 import { decodeRosskoApiCredentials, SupplierSessionService } from "./application/supplier-session-service.ts";
 import { ApplicabilityApplicationService } from "./applicability/applicability-application-service.ts";
+import { RealOrderApplicationService } from "./application/real-order-application-service.ts";
 import { EncryptedApplicabilityApiKeyStore } from "./applicability/encrypted-api-key-store.ts";
 import { PartsApiApplicabilityClient } from "./applicability/partsapi-client.ts";
 import { EncryptedPartsApiProxyStore } from "./applicability/encrypted-proxy-store.ts";
@@ -47,6 +48,7 @@ import type {
 } from "./types.ts";
 
 const sessionManager = new SupplierSessionManager();
+export const realCartOrder = new RealOrderApplicationService(sessionManager);
 const credentialStore = new EncryptedSupplierCredentialStore(
   getStateFilePath("supplier-credentials.enc.json"),
   supplierCredentialsEncryptionKey,

@@ -3,7 +3,7 @@ import type { NormalizedSearchResult } from "../types.ts";
 export type PurchaseReference =
   | { supplier: "part-kom"; makerId: string; providerId: string }
   | { supplier: "armtek"; keyzak: string }
-  | { supplier: "forum-auto"; warehouse: string | null }
+  | { supplier: "forum-auto"; warehouse: string | null; gid?: string }
   | { supplier: "rossko"; partGuid: string | null; stockId: string | null };
 
 export interface PurchaseLine {

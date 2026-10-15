@@ -65,7 +65,8 @@ test("cart HTTP validates server offers and quantities, hides routing and cannot
     assert.equal((await send("/api/cart/test-order", { revision: added.revision, supplier: "stparts" })).status, 400);
     assert.equal((await send("/api/cart/items", { revision: added.revision }, "DELETE")).status, 400);
     assert.equal((await send("/api/cart/items", { revision: 0, supplier: "all" }, "DELETE")).status, 409);
-    assert.equal((await send("/api/cart/order", { revision: added.revision })).status, 405);
+    assert.equal((await send("/api/cart/order", { revision: added.revision })).status, 400);
+    assert.equal((await send("/api/cart/order", { revision: added.revision, supplier: "part-kom", details: {} })).status, 503);
     const unaffected = await (await send("/api/cart/items", { revision: added.revision, supplier: "armtek" }, "DELETE")).json();
     assert.equal(unaffected.count, 2);
     assert.equal((await send("/api/cart/items", { revision: added.revision, supplier: "part-kom" }, "DELETE")).status, 200);

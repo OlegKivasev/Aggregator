@@ -57,6 +57,9 @@ const validateCart = (value) => {
     || Math.abs(value.total - value.items.reduce((sum, item) => sum + item.quantity * item.result.price, 0)) > .005) {
     throw new Error("Некорректные данные корзины.");
   }
+  if (!Array.isArray(value.pendingIds) || value.pendingIds.some((id) => typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id))) {
+    throw new Error("Некорректный статус заказов в корзине.");
+  }
   return value;
 };
 
@@ -87,7 +90,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       <p class="cart-status" id="cart-status" role="status" aria-live="polite"></p></div>
     <footer class="cart-footer"><div class="cart-footer__summary"><span>Итого</span><span>Дата поставки с учётом всех товаров</span>
       <div id="cart-total"></div><strong id="cart-delivery-date"></strong></div>
-      <button type="button" class="btn btn-primary" id="cart-test-order" title="Тестовый режим">Оформить заказы</button></footer>`;
+      <button type="button" class="btn btn-primary" id="cart-test-order">Оформить заказы</button></footer>`;
   document.body.append(modal);
   const clearDialog = document.createElement("dialog");
   clearDialog.id = "cart-clear-confirm";
@@ -104,8 +107,10 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   orderDialog.setAttribute("aria-describedby", "cart-order-note");
   orderDialog.innerHTML = `<header class="analogs-modal__header"><h2 id="cart-order-title">Подтверждение заказа</h2></header>
     <div class="cart-content"><p class="cart-order-intro">Внимательно проверьте товары, количество, склады, сроки доставки и суммы перед заказом.</p>
-      <p class="cart-order-note" id="cart-order-note">Тестовый режим. Заказ не будет отправлен поставщикам, оплата не производится.</p>
-      <div id="cart-order-groups"></div><p class="cart-order-status" id="cart-order-status" role="status" aria-live="polite"></p></div>
+      <p class="cart-order-note" id="cart-order-note">Заказ будет отправлен поставщикам. Цена, наличие и срок могли измениться после поиска.</p>
+      <div id="cart-order-groups"></div><div id="cart-order-fields" class="cart-order-fields"></div>
+      <div id="cart-order-receipt" class="cart-order-receipt" hidden></div>
+      <p class="cart-order-status" id="cart-order-status" role="status" aria-live="polite"></p></div>
     <footer class="cart-footer"><div><span>Итого</span><div id="cart-order-total"></div></div>
       <div class="cart-confirm-actions"><button type="button" class="btn btn-light" id="cart-order-cancel" autofocus>Вернуться в корзину</button>
         <button type="button" class="btn cart-order-submit" id="cart-order-accept">Заказать</button></div></footer>`;
@@ -126,13 +131,13 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   const orderCancel = orderDialog.querySelector("#cart-order-cancel");
   const orderAccept = orderDialog.querySelector("#cart-order-accept");
   const orderStatus = orderDialog.querySelector("#cart-order-status");
+  const orderFields = orderDialog.querySelector("#cart-order-fields");
+  const orderReceipt = orderDialog.querySelector("#cart-order-receipt");
   let orderTarget = null;
   let clearTarget = null;
   let cart = null;
   let busy = false;
   let checking = false;
-  let testResults = new Map();
-  let testedRevision = null;
   let toastTimeout;
   let returnFocus = toggle;
   let activeSupplier = "all";
@@ -172,24 +177,23 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     modal.querySelector("#cart-summary").textContent = `Количество: ${count} шт.`;
     modal.querySelector("#cart-total").innerHTML = renderTotals(items);
     modal.querySelector("#cart-delivery-date").textContent = formatCartLatestDeliveryDate(items);
-    if (testedRevision !== cart.revision) testResults.clear();
+    const pending = new Set(cart.pendingIds ?? []);
     body.innerHTML = items.length ? items.map((item) => {
       const result = item.result;
-      const checked = testResults.get(item.id);
-      const checkClass = "is-simulated";
+      const unresolved = pending.has(item.id);
       return `<tr data-cart-item-id="${escapeHtml(item.id)}"><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
-        <td class="cart-item-name">${escapeHtml(result.title)}${checked ? `<span class="cart-item-check ${checkClass}">${escapeHtml(checked.message)}</span>` : ""}</td>
+        <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : ""}</td>
         ${activeSupplier === "all" ? `<td class="cart-item-supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
         <td class="cart-item-delivery">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
         <td class="cart-item-price">${renderPrices(result)}</td>
         <td class="cart-item-quantity"><input class="cart-quantity" type="number" min="1" max="${maximumQuantity(result)}" step="1" value="${item.quantity}" inputmode="numeric"
-          aria-label="Количество для ${escapeHtml(result.article)}" ${locked ? "disabled" : ""}><span class="cart-item-stock">из ${maximumQuantity(result)}</span></td>
+          aria-label="Количество для ${escapeHtml(result.article)}" ${locked || unresolved ? "disabled" : ""}><span class="cart-item-stock">из ${maximumQuantity(result)}</span></td>
         <td class="cart-item-sum">${renderPrices(result, item.quantity)}</td>
-        <td><button type="button" class="cart-remove btn btn-light" aria-label="Удалить ${escapeHtml(result.article)}" title="Удалить" ${locked ? "disabled" : ""}>×</button></td></tr>`;
+        <td><button type="button" class="cart-remove btn btn-light" aria-label="Удалить ${escapeHtml(result.article)}" title="Удалить" ${locked || unresolved ? "disabled" : ""}>×</button></td></tr>`;
     }).join("") : `<tr><td colspan="${activeSupplier === "all" ? 8 : 7}" class="cart-empty">Корзина пуста. Добавьте товары из таблицы предложений.</td></tr>`;
-    testButton.disabled = locked || !cart.items.length;
-    testButton.textContent = checking ? "Завершаем…" : activeSupplier === "all" ? "Оформить заказы" : "Оформить заказ";
-    clearButton.disabled = locked || !items.length;
+    testButton.disabled = locked || !items.length || items.some((item) => pending.has(item.id));
+    testButton.textContent = checking ? "Оформляем…" : activeSupplier === "all" ? "Оформить заказы" : "Оформить заказ";
+    clearButton.disabled = locked || !items.length || items.some((item) => pending.has(item.id));
     const clearLabel = `Очистить вкладку «${activeSupplier === "all" ? "Все" : supplierNames[activeSupplier]}»`;
     clearButton.title = clearLabel;
     clearButton.setAttribute("aria-label", clearLabel);
@@ -230,7 +234,6 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     try {
       if (!cart) await refresh();
       cart = validateCart(await api(path, { method, body: JSON.stringify({ revision: cart.revision, ...fields }) }));
-      testedRevision = null;
       status.textContent = "";
       if (source?.matches(".cart-offer-button")) { flyToCart(source); notify("Товар добавлен в корзину."); }
     } catch (error) {
@@ -327,6 +330,72 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
     if (!input || !input.reportValidity()) return;
     void mutate(`/api/cart/items/${encodeURIComponent(input.closest("tr").dataset.cartItemId)}`, "PATCH", { quantity: Number(input.value) });
   });
+
+  const choiceOptions = (values) => {
+    if (!Array.isArray(values) || !values.length || values.some((item) => !item || typeof item.id !== "string"
+      || typeof item.label !== "string" || item.id.length > 200 || item.label.length > 500)) {
+      throw new Error("Поставщик не вернул доступные параметры заказа.");
+    }
+    return `<option value="">Выберите вариант</option>${values.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join("")}`;
+  };
+  const renderOrderFields = (items, choices) => {
+    const suppliers = new Set(items.map((item) => item.result.supplier));
+    const sections = [];
+    if (suppliers.has("part-kom")) {
+      const deliveries = choices?.partKom?.deliveries;
+      sections.push(`<section class="cart-order-field-group"><h3>PartKOM — доставка</h3>
+        <label>Способ доставки<select id="cart-partkom-delivery" required>${choiceOptions(deliveries)}</select></label>
+        <div id="cart-partkom-contact" hidden><label>Получатель<input id="cart-partkom-name" maxlength="100" autocomplete="name"></label>
+        <label>Телефон<input id="cart-partkom-phone" maxlength="40" autocomplete="tel"></label></div></section>`);
+    }
+    if (suppliers.has("rossko")) {
+      const options = choices?.rossko;
+      if (!Array.isArray(options?.deliveries) || options.deliveries.some((item) => item.addressId !== null && typeof item.addressId !== "string")) {
+        throw new Error("Rossko не вернул способы доставки.");
+      }
+      sections.push(`<section class="cart-order-field-group"><h3>Rossko — данные заказа</h3>
+        <label>Доставка<select id="cart-rossko-delivery" required>${choiceOptions(options.deliveries.map((item, index) => ({ id: String(index), label: item.label })))}</select></label>
+        <label>Оплата<select id="cart-rossko-payment" required>${choiceOptions(options.payments)}</select></label>
+        <label>Реквизиты<select id="cart-rossko-company"><option value="">Не выбраны</option>${Array.isArray(options.companies)
+          ? options.companies.filter((item) => item && typeof item.id === "string" && typeof item.label === "string")
+            .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join("") : ""}</select></label>
+        <label>Контактное лицо<input id="cart-rossko-name" required maxlength="100" autocomplete="name"></label>
+        <label>Телефон<input id="cart-rossko-phone" required maxlength="40" autocomplete="tel"></label>
+        <label class="cart-order-checkbox"><input id="cart-rossko-parts" type="checkbox"> Доставлять заказ по частям</label></section>`);
+    }
+    orderFields.innerHTML = sections.join("");
+    const partKomDelivery = orderFields.querySelector("#cart-partkom-delivery");
+    const updatePartKomContact = () => {
+      if (!partKomDelivery) return;
+      const selected = choices.partKom.deliveries.find((item) => item.id === partKomDelivery.value);
+      const pickup = selected?.type === "pickup";
+      const contact = orderFields.querySelector("#cart-partkom-contact");
+      contact.hidden = !pickup;
+      for (const input of contact.querySelectorAll("input")) input.required = pickup;
+    };
+    partKomDelivery?.addEventListener("change", updatePartKomContact);
+    updatePartKomContact();
+  };
+  const collectOrderDetails = (choices) => {
+    const inputs = [...orderFields.querySelectorAll("input, select")];
+    if (inputs.some((input) => !input.reportValidity())) return null;
+    const details = {};
+    const partKom = orderFields.querySelector("#cart-partkom-delivery");
+    if (partKom) details.partKom = { deliveryId: partKom.value,
+      name: orderFields.querySelector("#cart-partkom-name").value,
+      phone: orderFields.querySelector("#cart-partkom-phone").value };
+    const rossko = orderFields.querySelector("#cart-rossko-delivery");
+    if (rossko) {
+      const choice = choices.rossko.deliveries[Number(rossko.value)];
+      if (!choice) throw new Error("Выберите способ доставки Rossko.");
+      details.rossko = { deliveryId: choice.id, addressId: choice.addressId,
+        paymentId: orderFields.querySelector("#cart-rossko-payment").value,
+        companyId: orderFields.querySelector("#cart-rossko-company").value || null,
+        name: orderFields.querySelector("#cart-rossko-name").value.trim(), phone: orderFields.querySelector("#cart-rossko-phone").value.trim(),
+        deliveryParts: orderFields.querySelector("#cart-rossko-parts").checked };
+    }
+    return details;
+  };
   testButton.addEventListener("click", async () => {
     if (busy || checking || cart?.testing || !cart?.items.length) return;
     const supplier = activeSupplier;
@@ -338,7 +407,9 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       if (cart.testing) throw new Error("Дождитесь завершения действия в корзине.");
       const items = supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier);
       if (!items.length) throw new Error("Добавьте товары в выбранную вкладку корзины.");
-      orderTarget = { supplier, revision: cart.revision, items: structuredClone(items) };
+      const choices = await api(`/api/cart/order-options?revision=${cart.revision}&supplier=${encodeURIComponent(supplier)}`);
+      if (!modal.open) return;
+      orderTarget = { supplier, revision: cart.revision, items: structuredClone(items), choices };
       orderDialog.querySelector("#cart-order-title").textContent = "Подтверждение заказа";
       orderDialog.querySelector("#cart-order-groups").innerHTML = Object.entries(supplierNames).map(([supplier, name]) => {
         const group = items.filter((item) => item.result.supplier === supplier);
@@ -358,6 +429,10 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
           </tbody></table></div><p class="cart-order-delivery">Дата поставки с учётом всех товаров: ${escapeHtml(formatCartLatestDeliveryDate(group))}</p></section>`;
       }).join("");
       orderDialog.querySelector("#cart-order-total").innerHTML = renderTotals(items);
+      renderOrderFields(items, choices);
+      orderFields.hidden = false;
+      orderReceipt.hidden = true;
+      orderReceipt.textContent = "";
       orderStatus.textContent = "";
       orderStatus.classList.remove("is-error", "is-success");
       orderAccept.hidden = false;
@@ -375,33 +450,75 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   });
   orderDialog.addEventListener("keydown", (event) => {
     if (event.key !== "Tab") return;
-    const last = orderAccept.hidden || orderAccept.disabled ? orderCancel : orderAccept;
-    if (event.shiftKey && document.activeElement === orderCancel) { event.preventDefault(); last.focus(); }
-    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); orderCancel.focus(); }
+    const controls = [...orderDialog.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled)")]
+      .filter((element) => element.getClientRects().length > 0);
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   });
   orderAccept.addEventListener("click", async () => {
     if (busy || checking || !orderTarget || !orderDialog.open) return;
-    const { supplier, revision, items } = orderTarget;
+    const { supplier, revision, items, choices } = orderTarget;
+    let details;
+    try { details = collectOrderDetails(choices); }
+    catch (error) { orderStatus.textContent = error.message; orderStatus.classList.add("is-error"); return; }
+    if (!details) return;
     checking = true;
     orderAccept.disabled = true;
     orderCancel.disabled = true;
-    orderStatus.textContent = "Завершаем тестовый заказ…";
+    orderStatus.textContent = "Отправляем заказ поставщикам…";
+    orderStatus.classList.remove("is-error", "is-success");
     render();
     try {
       if (cart.revision !== revision) throw new Error("Корзина изменилась. Вернитесь в корзину и проверьте заказ заново.");
-      const result = await api("/api/cart/test-order", { method: "POST", body: JSON.stringify({ revision, supplier }) });
-      if (result.testOnly !== true || result.supplier !== supplier || !Array.isArray(result.results) || result.revision !== revision || cart.revision !== revision
-        || result.results.length !== items.length || new Set(result.results.map((item) => item?.id)).size !== items.length
-        || result.results.some((item) => !item || typeof item.message !== "string" || !items.some((line) => line.id === item.id)
-          || item.status !== "simulated" || item.acceptedQuantity !== null)) throw new Error("Не удалось подтвердить завершение тестового заказа.");
-      if (testedRevision !== revision) testResults.clear();
-      result.results.forEach((item) => testResults.set(item.id, item));
-      testedRevision = result.revision;
-      const message = "Тестовый заказ успешно завершён. Реальные заказы не созданы, поставщикам ничего не отправлено. Товары остались в корзине.";
+      const result = await api("/api/cart/order", { method: "POST", body: JSON.stringify({ revision, supplier, details }) });
+      if (result.supplier !== supplier || !Array.isArray(result.results) || !result.results.length) {
+        throw new Error("Не удалось подтвердить результат заказа.");
+      }
+      const nextCart = validateCart(result.cart);
+      const known = new Set(items.map((item) => item.id));
+      const receipts = [];
+      let accepted = 0;
+      let failed = 0;
+      for (const group of result.results) {
+        if (!group || !Object.hasOwn(supplierNames, group.supplier) || !["confirmed", "uncertain"].includes(group.status)) {
+          throw new Error("Некорректный результат заказа.");
+        }
+        if (group.status === "uncertain") {
+          failed++;
+          receipts.push(`${supplierNames[group.supplier]}: статус не подтверждён. Проверьте кабинет поставщика перед повторной попыткой.`);
+          continue;
+        }
+        if (!Array.isArray(group.result?.confirmed) || !Array.isArray(group.result?.rejected)) throw new Error("Некорректный результат заказа.");
+        for (const line of group.result.confirmed) {
+          if (!known.has(line.id) || !Number.isSafeInteger(line.acceptedQuantity) || line.acceptedQuantity < 1
+            || !Array.isArray(line.orderIds) || !line.orderIds.length || line.orderIds.some((id) => typeof id !== "string" || id.length > 100)) {
+            throw new Error("Некорректное подтверждение поставщика.");
+          }
+          accepted++;
+          receipts.push(`${supplierNames[group.supplier]}: заказ ${line.orderIds.join(", ")}, ${line.acceptedQuantity} шт.${line.message ? ` ${line.message}` : ""}`);
+        }
+        for (const line of group.result.rejected) {
+          if (!known.has(line.id) || typeof line.message !== "string") throw new Error("Некорректный отказ поставщика.");
+          failed++;
+          receipts.push(`${supplierNames[group.supplier]}: ${line.message}`);
+        }
+      }
+      cart = nextCart;
+      render();
+      const complete = accepted === items.length && failed === 0 && !items.some((item) => cart.items.some((remaining) => remaining.id === item.id));
+      const message = complete ? "Заказ успешно оформлен. Заказанные товары удалены из корзины."
+        : accepted ? "Часть заказа оформлена. Подтверждённые товары удалены из корзины; остальные оставлены для проверки."
+          : "Заказ не подтверждён. Проверьте результат у поставщика перед повторной попыткой.";
+      orderReceipt.replaceChildren(...receipts.map((entry) => { const row = document.createElement("p"); row.textContent = entry; return row; }));
+      orderReceipt.hidden = false;
+      orderFields.hidden = true;
       status.textContent = message;
       orderStatus.textContent = message;
-      orderStatus.classList.add("is-success");
-      orderDialog.querySelector("#cart-order-title").textContent = "Тестовый заказ завершён";
+      orderStatus.classList.toggle("is-success", complete);
+      orderStatus.classList.toggle("is-error", !complete);
+      orderDialog.querySelector("#cart-order-title").textContent = complete ? "Заказ успешно оформлен" : accepted ? "Часть заказа оформлена" : "Статус заказа";
       orderAccept.hidden = true;
       orderCancel.textContent = "Закрыть";
     } catch (error) {
@@ -413,7 +530,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       checking = false;
       orderCancel.disabled = false;
       orderCancel.focus();
-      try { await refresh(); } catch { render(); } // Keep the check result visible if the optional reload fails.
+      try { await refresh(); } catch { render(); } // The saved receipt remains visible if the optional refresh fails.
     }
   });
   document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy && !checking) void refresh().catch(() => {}); }); // Background refresh is optional.

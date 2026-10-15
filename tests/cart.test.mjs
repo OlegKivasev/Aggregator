@@ -11,11 +11,15 @@ import { parsePartKomApiResults } from "../src/backend/suppliers/part-kom/part-k
 import { parseForumAutoApiResults, parseForumAutoApiAnalogResults } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { normalizeRosskoApiSearchResults, normalizeRosskoApiAnalogResults } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { testPurchaseOrder } from "../src/backend/application/test-order-application-service.ts";
+import { parseArmtekOrderResult } from "../src/backend/suppliers/armtek/armtek-order.ts";
+import { parseForumAutoOrderResult } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
+import { buildRosskoOrderEnvelope, parseRosskoOrderResult } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
+import { parsePartKomMotion } from "../src/backend/suppliers/part-kom/part-kom-order.ts";
 
 // All offers and upstream responses in this file are fictional fixtures.
 const suppliers = ["armtek", "part-kom", "forum-auto", "rossko"];
 const references = { armtek: { supplier: "armtek", keyzak: "TEST01" }, "part-kom": { supplier: "part-kom", makerId: "101", providerId: "202" },
-  "forum-auto": { supplier: "forum-auto", warehouse: "Тестовый склад" }, rossko: { supplier: "rossko", partGuid: "fixture-guid", stockId: "fixture-stock" } };
+  "forum-auto": { supplier: "forum-auto", warehouse: "Тестовый склад", gid: "fixture-gid" }, rossko: { supplier: "rossko", partGuid: "fixture-guid", stockId: "fixture-stock" } };
 const reference = (supplier = "armtek") => references[supplier];
 const supplierOrigins = { armtek: "https://etp.armtek.ru/", "part-kom": "https://www.part-kom.ru/",
   "forum-auto": "https://itrade.forum-auto.ru/", rossko: "https://samara.rossko.ru/" };
@@ -23,11 +27,11 @@ const result = (supplier = "armtek", quantity = 4) => attachPurchaseReference({ 
   price: 100, quantity, warehouse: "Тестовый склад", deliveryDate: null, deliveryDateApproximate: false, link: supplierOrigins[supplier] }, reference(supplier));
 const line = (supplier = "armtek") => ({ id: randomUUID(), result: result(supplier), quantity: 2, reference: reference(supplier) });
 
-const withCart = async (check, testOrder = async () => []) => {
+const withCart = async (check, testOrder = async () => [], realOrder = null) => {
   const directory = mkdtempSync(join(tmpdir(), "aggregator-cart-"));
   const path = join(directory, "cart.sqlite");
-  let service = new CartApplicationService(new SqliteCartRepository(path), testOrder);
-  try { await check(service, () => { service.close(); service = new CartApplicationService(new SqliteCartRepository(path), testOrder); return service; }); }
+  let service = new CartApplicationService(new SqliteCartRepository(path), testOrder, realOrder);
+  try { await check(service, () => { service.close(); service = new CartApplicationService(new SqliteCartRepository(path), testOrder, realOrder); return service; }, path); }
   finally { service.close(); rmSync(directory, { recursive: true, force: true }); }
 };
 
@@ -170,7 +174,7 @@ test("PartKOM normalization retains actual ordering identifiers without altering
 });
 
 test("Forum Auto and Rossko exact and analog offers keep real references private", () => {
-  const forumPayload = [{ art: "A1", brand: "TEST", name: "Тест", price: 100, num: 4, whse: "Тестовый склад" }];
+  const forumPayload = [{ gid: "fixture-gid", art: "A1", brand: "TEST", name: "Тест", price: 100, num: 4, whse: "Тестовый склад" }];
   const [forum] = parseForumAutoApiResults(forumPayload, "A1");
   assert.deepEqual(getPurchaseReference(forum), reference("forum-auto"));
   const [forumAnalog] = parseForumAutoApiAnalogResults(forumPayload, "OTHER", "TEST");
@@ -197,7 +201,7 @@ test("new supplier cart offers persist, keep warehouses separate and merge repea
       add(result(supplier));
       const other = result(supplier);
       other.warehouse = "Другой тестовый склад";
-      attachPurchaseReference(other, supplier === "forum-auto" ? { supplier, warehouse: other.warehouse }
+      attachPurchaseReference(other, supplier === "forum-auto" ? { supplier, warehouse: other.warehouse, gid: "other-fixture-gid" }
         : { ...reference(supplier), stockId: "other-fixture-stock" });
       add(other);
       const otherPrice = result(supplier);
@@ -239,4 +243,85 @@ test("demo completion covers all suppliers without credentials, keeps the cart a
     assert.equal((await cart.test(before.revision, new AbortController().signal)).results.length, 4);
     assert.deepEqual(cart.view(), before);
   }, testPurchaseOrder);
+});
+
+test("real checkout removes only confirmed quantities and preserves rejected items", async () => {
+  const calls = [];
+  const gateway = {
+    choices: async () => ({}),
+    prepare: async (supplier, lines) => async () => {
+      calls.push(supplier);
+      return supplier === "armtek"
+        ? { confirmed: [{ id: lines[0].id, acceptedQuantity: 1, orderIds: ["A-1"], message: "Часть количества" }], rejected: [] }
+        : { confirmed: [], rejected: [{ id: lines[0].id, message: "Нет в наличии" }] };
+    },
+  };
+  await withCart(async (cart, reopen) => {
+    for (const supplier of ["armtek", "forum-auto"]) {
+      const id = randomUUID();
+      cart.registerOffer(id, result(supplier));
+      cart.mutate("add", { offerId: id, quantity: 2, revision: cart.view().revision });
+    }
+    const response = await cart.order(2, "all", {}, new AbortController().signal);
+    assert.deepEqual(calls, ["armtek", "forum-auto"]);
+    assert.equal(response.results.length, 2);
+    assert.equal(response.cart.count, 3);
+    assert.equal(response.cart.revision, 3);
+    assert.equal(reopen().view().count, 3);
+  }, undefined, gateway);
+});
+
+test("uncertain supplier response remains in cart and blocks duplicate checkout after restart", async () => {
+  let calls = 0;
+  const gateway = { choices: async () => ({}), prepare: async () => async () => { calls++; throw new Error("Connection lost"); } };
+  await withCart(async (cart, reopen) => {
+    const id = randomUUID();
+    cart.registerOffer(id, result());
+    cart.mutate("add", { offerId: id, quantity: 1, revision: 0 });
+    const response = await cart.order(1, "armtek", {}, new AbortController().signal);
+    assert.equal(response.results[0].status, "uncertain");
+    assert.equal(response.cart.count, 1);
+    assert.equal(response.cart.pendingIds.length, 1);
+    const restored = reopen();
+    await assert.rejects(restored.order(1, "armtek", {}, new AbortController().signal), /сверить/);
+    assert.throws(() => restored.clear("armtek", 1), /сверить/);
+    assert.equal(calls, 1);
+  }, undefined, gateway);
+});
+
+test("an existing Forum Auto cart line without a product id stays visible but cannot be ordered", async () => {
+  const gateway = { choices: async () => ({}), prepare: async () => { throw new Error("Must not prepare a legacy line"); } };
+  await withCart(async (cart, _reopen, path) => {
+    const oldLine = structuredClone(line("forum-auto"));
+    delete oldLine.reference.gid;
+    const repository = new SqliteCartRepository(path);
+    assert.equal(repository.save({ revision: 1, lines: [oldLine] }, 0), true);
+    repository.close();
+    assert.equal(cart.view().items.length, 1);
+    await assert.rejects(cart.orderChoices(1, "forum-auto", new AbortController().signal), /повторить поиск/);
+    await assert.rejects(cart.order(1, "forum-auto", {}, new AbortController().signal), /повторить поиск/);
+    assert.equal(cart.mutate("remove", { id: oldLine.id, revision: 1 }).count, 0);
+  }, undefined, gateway);
+});
+
+test("supplier order parsers require matching real confirmations", () => {
+  const armtek = line("armtek");
+  assert.deepEqual(parseArmtekOrderResult({ ITEMS: [{ PIN: "A1", BRAND: "TEST", KEYZAK: "TEST01", REMAIN: "0",
+    RESULT: [{ KWMENG: "2", KEYZAK: "TEST01", VBELN: "A-1" }] }] }, [armtek]).confirmed[0].acceptedQuantity, 2);
+  assert.throws(() => parseArmtekOrderResult({ ITEMS: [{ PIN: "A1", BRAND: "TEST", KEYZAK: "TEST01", REMAIN: "0", RESULT: [] }] }, [armtek]));
+  const forum = line("forum-auto");
+  assert.equal(parseForumAutoOrderResult([{ did: 42, arTovs: [{ gid: "fixture-gid", k1: 2 }] }], forum).confirmed[0].orderIds[0], "42");
+  assert.throws(() => parseForumAutoOrderResult([{ did: 42, arTovs: [] }], forum));
+  const partKom = line("part-kom");
+  assert.equal(parsePartKomMotion([{ orderNumber: "P-1", detailNum: "A1", providerId: 202, quantity: 2 }], partKom).confirmed[0].acceptedQuantity, 2);
+  assert.equal(parsePartKomMotion([], partKom), null);
+  const rossko = line("rossko");
+  const credentials = { key1: "fixture-one", key2: "fixture-two" };
+  const envelope = buildRosskoOrderEnvelope(credentials,
+    { deliveryId: "1", addressId: null, paymentId: "2", companyId: null, name: "Тест", phone: "+70000000000", deliveryParts: false }, [rossko]);
+  assert.match(envelope, /<ros:stock>fixture-stock<\/ros:stock>/);
+  const xml = `<Envelope><Body><CheckoutResult><success>true</success><ItemsList><Item><partnumber>A1</partnumber><brand>TEST</brand>
+    <stock>fixture-stock</stock><count>2</count><order_id>77</order_id></Item></ItemsList></CheckoutResult></Body></Envelope>`;
+  assert.equal(parseRosskoOrderResult(xml, [rossko]).confirmed[0].orderIds[0], "77");
+  assert.throws(() => parseRosskoOrderResult(xml.replace("fixture-stock", "wrong-stock"), [rossko]));
 });

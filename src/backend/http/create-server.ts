@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
-import { classifyOperationalError, SupplierIntegrationError, type OperationalErrorCategory } from "../errors.ts";
+import { classifyOperationalError, SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError, type OperationalErrorCategory } from "../errors.ts";
 import type {
   ArmtekCredentials,
   ForumAutoCredentials,
@@ -36,12 +36,13 @@ import { serveStatic } from "./static-files.ts";
 import { createHttpGarageApplication } from "../garage/http-garage-application.ts";
 import { GarageConflictError, GarageNotFoundError, GarageOfferExpiredError, GarageValidationError } from "../garage/garage-application-service.ts";
 import { getGarageDatabasePath } from "../config.ts";
-import { CartApplicationService, CartError } from "../purchasing/cart-application-service.ts";
+import { CartApplicationService, CartError, type RealOrderGateway } from "../purchasing/cart-application-service.ts";
 import { SqliteCartRepository } from "../purchasing/sqlite-cart-repository.ts";
 import type { TestOrder } from "../purchasing/purchase-offer.ts";
 
 export interface AggregatorApplication {
   testCartOrder?: TestOrder;
+  realCartOrder?: RealOrderGateway;
   listSupplierSessions(): SupplierSessionState[];
   validateSupplierSessions(
     article: string,
@@ -217,7 +218,7 @@ export function createAggregatorServer({
   const cart = new CartApplicationService(new SqliteCartRepository(getGarageDatabasePath()), (lines, signal) => {
     if (!application.testCartOrder) throw new CartError("Тестовая проверка заказов не настроена.", 503);
     return application.testCartOrder(lines, signal);
-  });
+  }, application.realCartOrder ?? null);
 
   const server = createServer(async (request, response) => {
     if (!request.url) {
@@ -228,7 +229,8 @@ export function createAggregatorServer({
     const url = new URL(request.url, "http://127.0.0.1");
 
     const cartItemMatch = /^\/api\/cart\/items\/([0-9a-f-]{36})$/.exec(url.pathname);
-    if (url.pathname === "/api/cart" || url.pathname === "/api/cart/items" || url.pathname === "/api/cart/test-order" || cartItemMatch) {
+    if (url.pathname === "/api/cart" || url.pathname === "/api/cart/items" || url.pathname === "/api/cart/test-order"
+      || url.pathname === "/api/cart/order-options" || url.pathname === "/api/cart/order" || cartItemMatch) {
       response.setHeader("Cache-Control", "no-store");
       const controller = new AbortController();
       const abort = () => { if (!response.writableEnded) controller.abort(new Error("Client disconnected")); };
@@ -236,13 +238,23 @@ export function createAggregatorServer({
       try {
         if (url.pathname === "/api/cart" && request.method === "GET") {
           serveJson(response, 200, cart.view());
+        } else if (url.pathname === "/api/cart/order-options" && request.method === "GET") {
+          const revisionText = url.searchParams.get("revision");
+          if (!revisionText || !/^\d{1,15}$/.test(revisionText)) throw new CartError("Неверная версия корзины.");
+          const choices = await cart.orderChoices(Number(revisionText), url.searchParams.get("supplier"), controller.signal);
+          if (!controller.signal.aborted) serveJson(response, 200, choices);
         } else if (url.pathname === "/api/cart/items" && (request.method === "POST" || request.method === "DELETE")
           || cartItemMatch && (request.method === "PATCH" || request.method === "DELETE")
-          || url.pathname === "/api/cart/test-order" && request.method === "POST") {
+          || (url.pathname === "/api/cart/test-order" || url.pathname === "/api/cart/order") && request.method === "POST") {
           const payload = await readJsonBody(request);
           if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new CartError("Неверные параметры корзины.");
           const fields = payload as Record<string, unknown>;
-          if (url.pathname === "/api/cart/test-order") {
+          if (url.pathname === "/api/cart/order") {
+            const details = fields.details;
+            if (!details || typeof details !== "object" || Array.isArray(details)) throw new CartError("Неверные параметры заказа.");
+            const result = await cart.order(fields.revision, fields.supplier, details, controller.signal);
+            if (!controller.signal.aborted) serveJson(response, 200, result);
+          } else if (url.pathname === "/api/cart/test-order") {
             const result = await cart.test(fields.revision, controller.signal, fields.supplier);
             if (!controller.signal.aborted) serveJson(response, 200, result);
           } else if (url.pathname === "/api/cart/items" && request.method === "DELETE") {
@@ -255,6 +267,9 @@ export function createAggregatorServer({
       } catch (error) {
         if (!controller.signal.aborted) {
           if (error instanceof CartError || error instanceof RequestBodyError) serveJson(response, error.statusCode, { message: error.message });
+          else if (error instanceof SupplierAuthError) serveJson(response, 401, { message: "Авторизация поставщика недоступна." });
+          else if (error instanceof SupplierTimeoutError) serveJson(response, 504, { message: "Поставщик не ответил вовремя." });
+          else if (error instanceof SupplierIntegrationError) serveJson(response, 502, { message: "Не удалось получить параметры заказа у поставщика." });
           else {
             reportError({ operation: "cart", category: classifyOperationalError(error) });
             serveJson(response, 500, { message: "Не удалось выполнить действие в корзине." });
