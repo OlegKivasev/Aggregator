@@ -93,7 +93,7 @@ function partKomHistoryStatus(row: PartKomHistoryMovement, quantity: number): Pi
   if (/^(?:заказ )?(?:передан в службу доставки|передан водителю|доставляется|в пути|отгружен)(?:\s|$|[.])/u.test(text)) {
     return { status, fulfillment: "in_transit" };
   }
-  if (/^(?:в работе|заказан|принят в работу|заказ принят|ожидает подтверждения)(?:\s|$|[.])/u.test(text)) {
+  if (/^(?:в работе|заказан|принят в работу|заказ принят|заказ передан поставщику|ожидает подтверждения)(?:\s|$|[.])/u.test(text)) {
     return { status, fulfillment: "processing" };
   }
   return { status, fulfillment: "unknown" };

@@ -66,6 +66,20 @@ test("PartKOM history uses issued, cancelled and stock quantities before stale d
   assert.equal(item({ stateTxt: null, expectedDate: "2020-01-01" }).fulfillment, "unknown");
 });
 
+test("PartKOM supplier handoff remains processing and preserves the supplier description", () => {
+  const row = { orderNumber: "FIXTURE-SUPPLIER", detailNum: "A1", quantity: 2 };
+  const item = (fields) => parsePartKomOrderHistory([{ ...row, ...fields }]).orders[0].items[0];
+  for (const stateTxt of ["Заказ передан поставщику. Поставщик подтвердил наличие товара.",
+    "Заказан у поставщика (Доставка водителем)"]) {
+    assert.equal(item({ stateTxt }).fulfillment, "processing");
+    assert.equal(item({ stateTxt, releaseCount: 0, refusalCount: 0, storeCount: 0 }).fulfillment, "processing");
+    assert.equal(item({ stateTxt }).status, stateTxt);
+    assert.equal(item({ stateTxt, releaseCount: 2 }).fulfillment, "delivered");
+    assert.equal(item({ stateTxt, refusalCount: 2 }).fulfillment, "cancelled");
+  }
+  assert.equal(item({ stateTxt: "Заказ не передан поставщику." }).fulfillment, "unknown");
+});
+
 const armtekRow = { ORDER: "0000000001", ORDER_DATE: "20261015123000", PIN: "A1", BRAND: "TEST", NAME: "Деталь",
   KWMENG: "2.000", PRICE: "100.50", CURRENCY: "RUB", STATUS: "позиция частично поставлена", DLVRD: "20261020120000" };
 const forumRow = { did: 123, nr: null, dtc: "15.10.2026 12:30:00", status: "Подтвержден", mdt: "20.10.2026 00:00:00",
