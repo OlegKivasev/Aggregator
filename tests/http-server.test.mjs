@@ -23,7 +23,7 @@ test("PartKOM history HTTP forwards archive selection and hides supplier errors"
   const application = createApplication({ partKomOrderHistory: async (archive) => {
     calls.push(archive);
     return { orders: [{ number: "ORDER-1", date: "2026-10-15", items: [{ article: "A1", brand: "TEST", title: "Фильтр",
-      quantity: 1, price: 100, status: "В работе", expectedDate: null, guaranteedDate: null, warehouse: null }] }], limited: false };
+      quantity: 1, price: 100, status: "В работе", fulfillment: "processing", expectedDate: null, guaranteedDate: null, warehouse: null }] }], limited: false };
   } });
   const { baseUrl } = await listen(application);
   const current = await fetch(`${baseUrl}/api/order-history/part-kom`);

@@ -16,7 +16,7 @@ import type { SupplierAdapter } from "../supplier-adapter.ts";
 import { attachPurchaseReference } from "../../purchasing/purchase-offer.ts";
 import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
 import type { ForumAutoOrderReceipt, OrderGroupResult } from "../../purchasing/order-contract.ts";
-import type { OrderHistory } from "../../purchasing/order-history-contract.ts";
+import type { OrderFulfillment, OrderHistory } from "../../purchasing/order-history-contract.ts";
 import { finishOrderHistory, historyDate, historyNumber, historyText } from "../../purchasing/order-history-values.ts";
 
 interface ForumAutoOffer {
@@ -326,6 +326,19 @@ async function forumAutoApiRequest(
   return parseForumAutoApiResponse(response, method);
 }
 
+function forumAutoHistoryFulfillment(row: { statusId?: unknown; status?: unknown }): OrderFulfillment {
+  const code = historyNumber(row.statusId);
+  const states: Record<number, OrderFulfillment> = { 0: "cancelled", 10: "processing", 20: "processing", 30: "processing",
+    50: "processing", 90: "ready", 100: "delivered" };
+  if (code !== null) return states[code] ?? "unknown";
+  const status = historyText(row.status)?.toLocaleLowerCase().replaceAll("ё", "е");
+  if (status === "выдан") return "delivered";
+  if (status === "аннулирован") return "cancelled";
+  if (status === "можно забрать") return "ready";
+  if (["отправлен на бронирование", "забронирован менеджером", "забронирован", "подтвержден", "на комплектации"].includes(status ?? "")) return "processing";
+  return "unknown";
+}
+
 export function parseForumAutoOrderHistory(payload: unknown): OrderHistory {
   const orders = apiItems(payload, "order history").map((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new SupplierIntegrationError("Forum-Auto history order is invalid");
@@ -340,8 +353,13 @@ export function parseForumAutoOrderHistory(payload: unknown): OrderHistory {
       const article = historyText(item.nr, 128);
       const quantity = historyNumber(item.k1);
       if (!article || quantity === null || quantity <= 0) throw new SupplierIntegrationError("Forum-Auto history item is incomplete");
+      const fulfillment = forumAutoHistoryFulfillment(row);
+      const confirmed = historyNumber(item.k3);
+      const issued = fulfillment === "delivered" && confirmed !== null && confirmed <= quantity ? confirmed : null;
       return { article, brand: historyText(item.brand, 200), title: historyText(item.tovname), quantity,
-        price: historyNumber(item.price), status: historyText(row.status, 300), expectedDate: historyDate(row.mdt, "russian"),
+        price: historyNumber(item.price), status: issued === null ? historyText(row.status, 300) : `Выдано ${issued} из ${quantity} шт.`,
+        expectedDate: historyDate(row.mdt, "russian"),
+        fulfillment: issued !== null && issued < quantity ? issued === 0 ? "attention" : "partial" : fulfillment,
         guaranteedDate: null, warehouse: null };
     }) };
   });

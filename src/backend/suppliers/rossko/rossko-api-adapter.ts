@@ -16,7 +16,7 @@ import type { SupplierAdapter } from "../supplier-adapter.ts";
 import { attachPurchaseReference } from "../../purchasing/purchase-offer.ts";
 import type { CheckoutDetails, OrderGroupResult, RosskoOrderChoices, RosskoOrderReceipt } from "../../purchasing/order-contract.ts";
 import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
-import type { OrderHistory } from "../../purchasing/order-history-contract.ts";
+import type { OrderFulfillment, OrderHistory } from "../../purchasing/order-history-contract.ts";
 import { finishOrderHistory, historyDate, historyNumber, historyText } from "../../purchasing/order-history-values.ts";
 
 const rosskoApiOrigin = "https://api.rossko.ru";
@@ -27,6 +27,11 @@ const orderStatuses: Record<number, string> = {
   5: "Ожидаем поступление", 6: "На складе филиала", 7: "Нет в наличии", 8: "Отменён клиентом", 9: "Просрочен",
   31: "Ожидаем товар на складе", 32: "Возврат на согласовании", 33: "Товар на экспертизе",
   34: "Возврат отклонён", 35: "Возврат частично отклонён", 36: "Товар возвращён",
+};
+const historyFulfillment: Record<number, OrderFulfillment> = {
+  0: "processing", 1: "processing", 2: "in_transit", 3: "ready", 5: "processing", 6: "ready",
+  7: "attention", 8: "cancelled", 9: "attention", 31: "processing", 32: "attention", 33: "attention",
+  34: "attention", 35: "attention", 36: "returned",
 };
 
 interface XmlElement {
@@ -441,6 +446,7 @@ export function parseRosskoOrderHistory(xml: string): OrderHistory {
       const code = parseNonNegativeInteger(elementText(item, "status"));
       return { article, brand: historyText(elementText(item, "brand"), 200), title: historyText(elementText(item, "name")), quantity,
         price: historyNumber(elementText(item, "price")), status: code === null ? null : orderStatuses[code] ?? `Код статуса: ${code}`,
+        fulfillment: code === null ? "unknown" : historyFulfillment[code] ?? "unknown",
         expectedDate: historyDate(elementText(row, "delivery_date"), "russian"), guaranteedDate: null,
         warehouse: historyText(elementText(row, "stock_address"), 200) };
     }) };

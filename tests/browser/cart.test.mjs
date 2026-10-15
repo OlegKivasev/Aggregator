@@ -9,6 +9,7 @@ import { attachPurchaseReference } from "../../src/backend/purchasing/purchase-o
 import { formatDeliveryDate } from "../../src/frontend/supplier-search-summary.js";
 import { testPurchaseOrder } from "../../src/backend/application/test-order-application-service.ts";
 import { CartError } from "../../src/backend/purchasing/cart-application-service.ts";
+import { parsePartKomOrderHistory } from "../../src/backend/suppliers/part-kom/part-kom-order.ts";
 
 // The browser uses a real local cart server; supplier searches and checks are fictional fixtures.
 const supplierOrigins = { armtek: "https://etp.armtek.ru/", "part-kom": "https://www.part-kom.ru/",
@@ -829,7 +830,7 @@ test("checkout blocks duplicate submission and Escape while the real request is 
   } finally { release(); }
 });
 
-test("order history shows PartKOM cards, archive and supplier tabs without rendering supplier HTML", async () => {
+test("order history shows one PartKOM list and supplier tabs without rendering supplier HTML", async () => {
   const calls = [];
   await withCartPage(async (page) => {
     await page.locator("#history-toggle").click();
@@ -838,23 +839,23 @@ test("order history shows PartKOM cards, archive and supplier tabs without rende
     assert.match(await page.locator(".history-card").innerText(), /В работе/);
     assert.equal(await page.locator(".history-card img").count(), 0);
     assert.equal(await page.evaluate(() => window.historyXss), undefined);
-    await page.locator("#history-archive").click();
-    await page.waitForFunction(() => document.querySelector("#history-results").textContent.includes("В архиве PartKOM заказов нет"));
+    assert.equal(await page.locator("#history-archive, #history-current").count(), 0);
+    await page.locator("#history-reload").click();
+    await page.locator(".history-card").waitFor();
     await page.locator("#history-tab-rossko").click();
     await page.waitForFunction(() => document.querySelector("#history-results").textContent.includes("В выбранной истории Rossko заказов нет"));
     assert.equal(await page.locator("#history-toolbar").isVisible(), true);
-    assert.equal(await page.locator("#history-archive").isVisible(), false);
+    assert.equal(await page.locator("#history-archive").count(), 0);
     await page.locator("#history-tab-part-kom").click();
-    await page.locator("#history-current").click();
     await page.locator(".history-card").waitFor();
     await page.locator("#history-close").click();
     assert.equal(await page.locator("#history-toggle").evaluate((node) => node === document.activeElement), true);
-    assert.deepEqual(calls, [false, true, true, false]);
+    assert.deepEqual(calls, [false, false, false]);
   }, { partKomOrderHistory: async (archive) => {
     calls.push(archive);
     return { orders: archive ? [] : [{ number: "ORDER-1", date: "2026-10-15 12:30:00", items: [{ article: "A1",
       brand: "TEST", title: "<img src=x onerror=window.historyXss=1>", quantity: 2, price: 100,
-      status: "В работе", expectedDate: "2026-10-20", guaranteedDate: null, warehouse: "Склад" }] }], limited: false };
+      status: "В работе", fulfillment: "processing", expectedDate: "2026-10-20", guaranteedDate: null, warehouse: "Склад" }] }], limited: false };
   } });
 });
 
@@ -865,8 +866,7 @@ test("history supplier tabs show real response cards, scope and Armtek date sele
     for (const [supplier, name] of [["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"]]) {
       await page.locator(`#history-tab-${supplier}`).click();
       await page.waitForFunction((name) => document.querySelector(".history-card__header small")?.textContent === name, name);
-      assert.equal(await page.locator("#history-current").isVisible(), false);
-      assert.equal(await page.locator("#history-archive").isVisible(), false);
+      assert.equal(await page.locator("#history-current, #history-archive").count(), 0);
       assert.equal(await page.locator("#history-period").isVisible(), supplier === "armtek");
       assert.match(await page.locator(".history-card").innerText(), new RegExp(`Заказ № ${supplier}-1`));
       assert.equal(await page.locator(".history-card img").count(), 0);
@@ -897,9 +897,61 @@ test("history supplier tabs show real response cards, scope and Armtek date sele
   }, { supplierOrderHistory: async (query) => {
     calls.push(query);
     return { orders: [{ number: `${query.supplier}-1`, date: "2026-10-15 12:30:00", items: [{ article: "A1", brand: "TEST",
-      title: "<img src=x onerror=window.historyXss=1>", quantity: 1.5, price: 100, status: "В работе",
+      title: "<img src=x onerror=window.historyXss=1>", quantity: 1.5, price: 100, status: "В работе", fulfillment: "processing",
       expectedDate: "2026-10-20", guaranteedDate: null, warehouse: null }] }], limited: query.supplier === "rossko" };
   } });
+});
+
+test("history highlights fulfillment in every supplier and preserves mixed and partial orders", async () => {
+  const row = { detailNum: "A1", maker: "TEST", description: "Тестовая деталь", quantity: 1, price: 100,
+    orderDate: "2026-10-15 12:30:00", stateTxt: "Заказ передан в службу доставки. Сопроводительные документы подготовлены." };
+  const history = parsePartKomOrderHistory([
+    { ...row, orderNumber: "RECEIVED", releaseCount: 1, refusalCount: 0 },
+    { ...row, orderNumber: "CANCELLED", refusalCount: 1 },
+    { ...row, orderNumber: "MOVING", releaseCount: 0 },
+    { ...row, orderNumber: "READY", storeCount: 1 },
+    { ...row, orderNumber: "PARTIAL", quantity: 2, releaseCount: 1, refusalCount: 1 },
+    { ...row, orderNumber: "MIXED", releaseCount: 1 },
+    { ...row, orderNumber: "MIXED", detailNum: "B1", releaseCount: 0 },
+    { ...row, orderNumber: "UNKNOWN", stateTxt: "Новый неизвестный статус", expectedDate: "2020-01-01" },
+  ]);
+  await withCartPage(async (page) => {
+    const historyRequests = [];
+    page.on("request", (request) => { if (request.url().includes("/api/order-history/part-kom")) historyRequests.push(request.url()); });
+    await page.locator("#history-toggle").click();
+    await page.locator('.history-card[data-fulfillment="delivered"]').waitFor();
+    const received = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: /^Заказ № RECEIVED$/ }) });
+    assert.match(await received.locator(".history-card__states").innerText(), /✓\s*Получен/);
+    assert.match(await received.locator(".history-item-status").innerText(), /Получен.*Выдано 1 из 1/s);
+    assert.doesNotMatch(await received.innerText(), /передан в службу доставки/);
+    assert.equal(await received.evaluate((node) => getComputedStyle(node).borderLeftColor), "rgb(35, 131, 77)");
+    const cancelled = page.locator('.history-card[data-fulfillment="cancelled"]');
+    assert.match(await cancelled.locator(".history-card__states").innerText(), /Отменён/);
+    assert.notEqual(await cancelled.locator(".history-status").first().evaluate((node) => getComputedStyle(node).color),
+      await received.locator(".history-status").first().evaluate((node) => getComputedStyle(node).color));
+    assert.match(await page.locator('.history-card[data-fulfillment="in_transit"] .history-card__states').innerText(), /В пути/);
+    assert.match(await page.locator('.history-card[data-fulfillment="ready"] .history-card__states').innerText(), /На складе/);
+    assert.match(await page.locator('.history-card[data-fulfillment="partial"] .history-card__states').innerText(), /Частично выполнен/);
+    assert.match(await page.locator('.history-card[data-fulfillment="unknown"] .history-card__states').innerText(), /Статус не уточнён/);
+    const mixed = page.locator('.history-card[data-fulfillment="mixed"] .history-card__states');
+    assert.equal(await mixed.locator(".history-status").count(), 2);
+    assert.match(await mixed.innerText(), /Получен · 1/);
+    assert.match(await mixed.innerText(), /В пути · 1/);
+    assert.equal(historyRequests.length, 1);
+    assert.equal(new URL(historyRequests[0]).search, "");
+    for (const supplier of ["armtek", "forum-auto", "rossko"]) {
+      await page.locator(`#history-tab-${supplier}`).click();
+      await page.waitForFunction((supplier) => document.querySelector(".history-card h3")?.textContent === `Заказ № ${supplier}`, supplier);
+      assert.match(await page.locator(".history-card__states").innerText(), /В пути/);
+      assert.match(await page.locator(".history-item-status").innerText(), /В пути/);
+    }
+    await page.locator("#history-tab-part-kom").click();
+    await page.locator('.history-card[data-fulfillment="mixed"]').waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.locator("#history-modal").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+  }, { partKomOrderHistory: async () => history, supplierOrderHistory: async (query) => ({ orders: [{ number: query.supplier,
+    date: null, items: [{ article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 100,
+      status: "Отгружено", fulfillment: "in_transit", expectedDate: null, guaranteedDate: null, warehouse: null }] }], limited: false }) });
 });
 
 test("history cancels stale supplier results and shows safe errors and malformed payloads", async () => {

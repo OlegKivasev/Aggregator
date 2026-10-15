@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { CheckoutDetails, OrderGroupResult, PartKomOrderChoices, PartKomOrderReceipt } from "../../purchasing/order-contract.ts";
 import type { OrderHistoryItem, OrderHistory } from "../../purchasing/order-history-contract.ts";
+import { historyNumber } from "../../purchasing/order-history-values.ts";
 import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
 import type { PartKomCredentials } from "../../types.ts";
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
@@ -57,6 +58,47 @@ function historyPrice(value: unknown): number | null {
   return Number.isFinite(raw) && raw >= 0 ? raw : null;
 }
 
+interface PartKomHistoryMovement {
+  stateTxt?: unknown;
+  releaseCount?: unknown;
+  refusalCount?: unknown;
+  storeCount?: unknown;
+}
+
+function partKomHistoryStatus(row: PartKomHistoryMovement, quantity: number): Pick<OrderHistoryItem, "status" | "fulfillment"> {
+  const count = (value: unknown) => {
+    const parsed = historyNumber(value);
+    return parsed !== null && Number.isSafeInteger(parsed) && parsed <= quantity ? parsed : null;
+  };
+  const released = count(row.releaseCount);
+  const refused = count(row.refusalCount);
+  const stored = count(row.storeCount);
+  const status = historyText(row.stateTxt, 300);
+  if (released !== null && refused !== null && released + refused > quantity) {
+    return { status, fulfillment: "unknown" };
+  }
+  if (released === quantity) return { status: `Выдано ${released} из ${quantity} шт.`, fulfillment: "delivered" };
+  if (refused === quantity) return { status: `Отменено ${refused} из ${quantity} шт.`, fulfillment: "cancelled" };
+  if (released !== null && released > 0 || refused !== null && refused > 0) {
+    const details = [released ? `Выдано ${released} из ${quantity} шт.` : null,
+      refused ? `Отменено ${refused} из ${quantity} шт.` : null, stored ? `На складе: ${stored} шт.` : null].filter(Boolean);
+    return { status: details.join("; "), fulfillment: "partial" };
+  }
+  if (stored === quantity) return { status: `На складе ${stored} из ${quantity} шт.`, fulfillment: "ready" };
+  if (stored !== null && stored > 0) return { status: `На складе ${stored} из ${quantity} шт.`, fulfillment: "partial" };
+  const text = status?.toLocaleLowerCase().replaceAll("ё", "е") ?? "";
+  if (/^выдан(?:о)?(?:\s|$|\()/u.test(text)) return { status, fulfillment: "delivered" };
+  if (/^(?:заказ )?(?:отменен|аннулирован|отклонен)(?:\s|$|[.])/u.test(text)) return { status, fulfillment: "cancelled" };
+  if (/^(?:на складе|готов к выдаче|готов к отгрузке)(?:\s|$|[.])/u.test(text)) return { status, fulfillment: "ready" };
+  if (/^(?:заказ )?(?:передан в службу доставки|передан водителю|доставляется|в пути|отгружен)(?:\s|$|[.])/u.test(text)) {
+    return { status, fulfillment: "in_transit" };
+  }
+  if (/^(?:в работе|заказан|принят в работу|заказ принят|ожидает подтверждения)(?:\s|$|[.])/u.test(text)) {
+    return { status, fulfillment: "processing" };
+  }
+  return { status, fulfillment: "unknown" };
+}
+
 export function parsePartKomOrderHistory(payload: unknown): OrderHistory {
   if (!Array.isArray(payload) || payload.length > historyLimit) throw new SupplierIntegrationError("PartKOM order history is invalid");
   const orders = new Map<string, OrderHistory["orders"][number]>();
@@ -72,7 +114,7 @@ export function parsePartKomOrderHistory(payload: unknown): OrderHistory {
     }
     const item: OrderHistoryItem = {
       article, brand: historyText(row.maker, 200), title: historyText(row.description, 500), quantity,
-      price: historyPrice(row.price), status: historyText(row.stateTxt, 300),
+      price: historyPrice(row.price), ...partKomHistoryStatus(row, quantity),
       expectedDate: historyDate(row.expectedDate), guaranteedDate: historyDate(row.guaranteedDate),
       warehouse: historyText(row.placement, 200),
     };
@@ -86,7 +128,8 @@ export function parsePartKomOrderHistory(payload: unknown): OrderHistory {
 }
 
 export async function listPartKomOrderHistory(credentials: PartKomCredentials, archive: boolean, signal: AbortSignal): Promise<OrderHistory> {
-  const params = new URLSearchParams({ limit: String(historyLimit), archive: archive ? "1" : "0" });
+  const params = new URLSearchParams({ limit: String(historyLimit) });
+  if (archive) params.set("archive", "1");
   return parsePartKomOrderHistory(await request(`basket/motion?${params}`, credentials, signal));
 }
 

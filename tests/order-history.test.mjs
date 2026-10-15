@@ -42,6 +42,30 @@ test("PartKOM history rejects malformed supplier positions", () => {
   assert.throws(() => parsePartKomOrderHistory([{ orderNumber: "O1", detailNum: "A1", quantity: 1.5 }]), /incomplete/);
 });
 
+test("PartKOM history uses issued, cancelled and stock quantities before stale descriptive status", () => {
+  const row = { orderNumber: "FIXTURE-1", detailNum: "A1", quantity: 2, price: 100,
+    stateTxt: "Заказ передан в службу доставки. Сопроводительные документы подготовлены." };
+  const item = (fields) => parsePartKomOrderHistory([{ ...row, ...fields }]).orders[0].items[0];
+  assert.equal(item({ releaseCount: 2, refusalCount: 0, storeCount: 0 }).fulfillment, "delivered");
+  assert.equal(item({ releaseCount: 2 }).status, "Выдано 2 из 2 шт.");
+  assert.equal(item({ releaseCount: "2", refusalCount: "0" }).fulfillment, "delivered");
+  assert.equal(item({ refusalCount: 2 }).fulfillment, "cancelled");
+  assert.equal(item({ releaseCount: 1, refusalCount: 1 }).fulfillment, "partial");
+  assert.equal(item({ releaseCount: 1, storeCount: 1 }).fulfillment, "partial");
+  assert.match(item({ releaseCount: 1, storeCount: 1 }).status, /Выдано 1 из 2.*На складе: 1/);
+  assert.equal(item({ storeCount: 2 }).fulfillment, "ready");
+  assert.equal(item({ storeCount: 1 }).fulfillment, "partial");
+  assert.equal(item({}).fulfillment, "in_transit");
+  for (const releaseCount of [true, -1, 3, Infinity, "2 units"]) {
+    assert.equal(item({ releaseCount }).fulfillment, "in_transit");
+  }
+  assert.equal(item({ releaseCount: 2, refusalCount: 2 }).fulfillment, "unknown");
+  for (const [stateTxt, fulfillment] of [["Выдан (Доставка водителем)", "delivered"], ["Отменён", "cancelled"],
+    ["На складе", "ready"], ["В работе", "processing"], ["Не выдан", "unknown"], ["Не отгружен", "unknown"],
+    ["Статус не известен", "unknown"]]) assert.equal(item({ stateTxt }).fulfillment, fulfillment);
+  assert.equal(item({ stateTxt: null, expectedDate: "2020-01-01" }).fulfillment, "unknown");
+});
+
 const armtekRow = { ORDER: "0000000001", ORDER_DATE: "20261015123000", PIN: "A1", BRAND: "TEST", NAME: "Деталь",
   KWMENG: "2.000", PRICE: "100.50", CURRENCY: "RUB", STATUS: "позиция частично поставлена", DLVRD: "20261020120000" };
 const forumRow = { did: 123, nr: null, dtc: "15.10.2026 12:30:00", status: "Подтвержден", mdt: "20.10.2026 00:00:00",
@@ -52,6 +76,38 @@ const rosskoXml = (orders, success = "true", message = "") => `<Envelope><Body><
 const rosskoRow = `<Order><id>123</id><created_date>15.10.2026 12:30:00</created_date><delivery_date>20.10.2026</delivery_date>
   <stock_address>Склад</stock_address><parts><part><partnumber>A1</partnumber><brand>TEST</brand><name>Деталь</name>
   <count>2</count><price>100.50</price><status>1</status></part></parts></Order>`;
+
+test("all supplier histories classify documented fulfillment without treating shipment or a closed order as receipt", () => {
+  const armtek = (fields) => parseArmtekOrderHistory({ DATA: [{ ...armtekRow, ...fields }] }).orders[0].items[0].fulfillment;
+  assert.equal(armtek({ STATUS: "позиция полностью поставлена" }), "delivered");
+  assert.equal(armtek({ STATUS: "позиция полностью отклонена" }), "cancelled");
+  assert.equal(armtek({ STATUS: "позиция частично поставлена" }), "partial");
+  assert.equal(armtek({ STATUS: "позиция частично отклонена" }), "partial");
+  assert.equal(armtek({ STATUS: "", ORDER_STATUS: "Закрыт", KWMENG_R: "2" }), "in_transit");
+  assert.equal(armtek({ STATUS: "", ORDER_STATUS: "Закрыт" }), "unknown");
+  assert.equal(armtek({ STATUS: "", KWMENG_P: "2" }), "ready");
+  assert.equal(armtek({ STATUS: "", KWMENG_P: "1" }), "partial");
+  assert.equal(armtek({ STATUS: "", KWMENG_REJ: "2" }), "cancelled");
+  assert.equal(armtek({ STATUS: "", KWMENG_WAYIN: "2" }), "in_transit");
+  assert.equal(armtek({ STATUS: "", ORDER_STATUS: "В работе" }), "processing");
+  for (const [statusId, fulfillment] of [[0, "cancelled"], [10, "processing"], [20, "processing"], [30, "processing"],
+    [50, "processing"], [90, "ready"], [100, "delivered"], [999, "unknown"]]) {
+    assert.equal(parseForumAutoOrderHistory([{ ...forumRow, statusId,
+      arTovs: [{ ...forumRow.arTovs[0], k3: 2 }] }]).orders[0].items[0].fulfillment, fulfillment);
+  }
+  assert.equal(parseForumAutoOrderHistory([{ ...forumRow, status: "Выдан",
+    arTovs: [{ ...forumRow.arTovs[0], k3: 2 }] }]).orders[0].items[0].fulfillment, "delivered");
+  const partialForum = parseForumAutoOrderHistory([{ ...forumRow, statusId: 100,
+    arTovs: [{ ...forumRow.arTovs[0], k3: 1 }] }]).orders[0].items[0];
+  assert.equal(partialForum.fulfillment, "partial");
+  assert.equal(partialForum.status, "Выдано 1 из 2 шт.");
+  assert.equal(parseForumAutoOrderHistory([{ ...forumRow, statusId: 100 }]).orders[0].items[0].fulfillment, "attention");
+  for (const [code, fulfillment] of [[0, "processing"], [1, "processing"], [2, "in_transit"], [3, "ready"], [6, "ready"],
+    [7, "attention"], [8, "cancelled"], [9, "attention"], [32, "attention"], [35, "attention"], [36, "returned"], [999, "unknown"]]) {
+    const xml = rosskoXml(rosskoRow.replace("<status>1</status>", `<status>${code}</status>`));
+    assert.equal(parseRosskoOrderHistory(xml).orders[0].items[0].fulfillment, fulfillment);
+  }
+});
 
 test("supplier histories normalize their documented dates, fields and ordered quantities", () => {
   const armtek = parseArmtekOrderHistory({ DATA: [armtekRow, { ...armtekRow, PIN: "B1", DLVRD: "20260230120000" }] });

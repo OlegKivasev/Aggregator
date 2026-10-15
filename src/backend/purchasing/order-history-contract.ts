@@ -1,3 +1,5 @@
+export type OrderFulfillment = "processing" | "in_transit" | "ready" | "delivered" | "cancelled" | "partial" | "returned" | "attention" | "unknown";
+
 export interface OrderHistoryItem {
   article: string;
   brand: string | null;
@@ -5,6 +7,7 @@ export interface OrderHistoryItem {
   quantity: number;
   price: number | null;
   status: string | null;
+  fulfillment: OrderFulfillment;
   expectedDate: string | null;
   guaranteedDate: string | null;
   warehouse: string | null;

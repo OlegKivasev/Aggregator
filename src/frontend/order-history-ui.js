@@ -2,6 +2,13 @@ const suppliers = [
   ["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"],
 ];
 const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
+const fulfillmentLabels = new Map([
+  ["processing", ["В обработке", "◷"]], ["in_transit", ["В пути", "→"]],
+  ["ready", ["На складе", "▣"]], ["delivered", ["Получен", "✓"]],
+  ["cancelled", ["Отменён", "×"]], ["partial", ["Частично выполнен", "◐"]],
+  ["returned", ["Возвращён", "↶"]], ["attention", ["Требует внимания", "!"]],
+  ["unknown", ["Статус не уточнён", "?"]],
+]);
 
 function element(tag, className, value) {
   const node = document.createElement(tag);
@@ -21,6 +28,7 @@ function validHistory(value) {
     && typeof value.limited === "boolean" && value.orders.every((order) => order && typeof order.number === "string"
       && (order.date === null || typeof order.date === "string") && Array.isArray(order.items) && order.items.length > 0
       && order.items.every((item) => item && typeof item.article === "string" && Number.isFinite(item.quantity)
+        && fulfillmentLabels.has(item.fulfillment)
         && item.quantity > 0 && item.quantity <= Number.MAX_SAFE_INTEGER
         && (item.price === null || Number.isFinite(item.price) && item.price >= 0 && item.price <= Number.MAX_SAFE_INTEGER)
         && [item.brand, item.title, item.status, item.expectedDate, item.guaranteedDate, item.warehouse]
@@ -33,11 +41,27 @@ function appendMeta(parent, label, value) {
   parent.append(meta);
 }
 
+function fulfillmentBadge(fulfillment, count) {
+  const [label, symbol] = fulfillmentLabels.get(fulfillment);
+  const badge = element("span", `history-status history-status--${fulfillment}`);
+  const icon = element("b", "history-status__icon", symbol);
+  icon.setAttribute("aria-hidden", "true");
+  badge.append(icon, document.createTextNode(count === undefined ? label : `${label} · ${count}`));
+  return badge;
+}
+
 function renderOrder(order, limited, supplierName) {
   const card = element("article", "history-card");
   const header = element("header", "history-card__header");
   const heading = element("div");
   heading.append(element("small", "", supplierName), element("h3", "", `Заказ № ${order.number}`));
+  const states = new Map();
+  for (const item of order.items) states.set(item.fulfillment, (states.get(item.fulfillment) ?? 0) + 1);
+  card.dataset.fulfillment = states.size === 1 ? states.keys().next().value : "mixed";
+  const summary = element("div", "history-card__states");
+  summary.setAttribute("aria-label", limited ? "Состояние показанных позиций" : "Состояние позиций заказа");
+  for (const [state, count] of states) summary.append(fulfillmentBadge(state, states.size > 1 ? count : undefined));
+  heading.append(summary);
   header.append(heading);
   appendMeta(header, "Заказано", formatDate(order.date));
   appendMeta(header, limited ? "Показано позиций / штук" : "Позиций / штук", `${order.items.length} / ${order.items.reduce((sum, item) => sum + item.quantity, 0)}`);
@@ -65,7 +89,9 @@ function renderOrder(order, limited, supplierName) {
       delivery.append(element("span", "", `Гарантировано: ${formatDate(item.guaranteedDate)}`));
     }
     if (item.warehouse) delivery.append(element("span", "", item.warehouse));
-    const status = element("td", "", item.status ?? "Не указан");
+    const status = element("td", "history-item-status");
+    status.append(fulfillmentBadge(item.fulfillment));
+    if (item.status) status.append(element("span", "history-status-detail", item.status));
     const price = element("td", "history-number", item.price === null ? `— × ${item.quantity} шт.` : `${money.format(item.price)} × ${item.quantity} шт.`);
     const sum = element("td", "history-number", item.price === null ? "—" : money.format(item.price * item.quantity));
     row.append(part, delivery, status, price, sum);
@@ -87,8 +113,6 @@ export function bootstrapOrderHistory() {
     <button type="button" class="btn btn-light analogs-modal__close" id="history-close" aria-label="Закрыть историю заказов">×</button></header>
     <div class="cart-tabs" id="history-tabs" role="tablist" aria-label="Поставщики"></div>
     <div class="cart-content history-content"><div class="history-toolbar" id="history-toolbar">
-      <button type="button" id="history-current" aria-pressed="true">Текущие</button>
-      <button type="button" id="history-archive" aria-pressed="false">Архив</button>
       <div class="history-period" id="history-period" hidden>
         <label>С <input type="date" id="history-from" required></label>
         <label>По <input type="date" id="history-to" required></label></div>
@@ -97,8 +121,6 @@ export function bootstrapOrderHistory() {
       <div id="history-results" role="status" aria-live="polite"></div></div>`;
   const tabs = dialog.querySelector("#history-tabs");
   const results = dialog.querySelector("#history-results");
-  const current = dialog.querySelector("#history-current");
-  const archived = dialog.querySelector("#history-archive");
   const period = dialog.querySelector("#history-period");
   const from = dialog.querySelector("#history-from");
   const to = dialog.querySelector("#history-to");
@@ -110,7 +132,6 @@ export function bootstrapOrderHistory() {
   today.setDate(today.getDate() - 29);
   from.value = dateValue(today);
   let selected = "part-kom";
-  let archive = false;
   let pending = null;
 
   const message = (value, error = false) => {
@@ -120,7 +141,6 @@ export function bootstrapOrderHistory() {
     pending?.abort();
     const supplier = selected;
     const name = suppliers.find(([id]) => id === supplier)[1];
-    current.hidden = archived.hidden = supplier !== "part-kom";
     period.hidden = supplier !== "armtek";
     reload.textContent = supplier === "armtek" ? "Показать" : "Обновить";
     scope.textContent = supplier === "armtek" ? "Заказы за выбранный период, не более 93 дней. По умолчанию — последние 30 дней."
@@ -131,7 +151,6 @@ export function bootstrapOrderHistory() {
     pending = controller;
     try {
       const params = new URLSearchParams();
-      if (supplier === "part-kom") params.set("archive", archive ? "1" : "0");
       if (supplier === "armtek") {
         if (!from.value || !to.value || !from.checkValidity() || !to.checkValidity() || from.value > to.value
           || Date.parse(to.value) - Date.parse(from.value) > 92 * 86400000) {
@@ -147,8 +166,7 @@ export function bootstrapOrderHistory() {
       if (!validHistory(payload)) throw new Error(`${name} вернул некорректную историю заказов.`);
       if (controller.signal.aborted || !dialog.open) return;
       if (!payload.orders.length) {
-        message(supplier === "part-kom" ? archive ? "В архиве PartKOM заказов нет." : "Текущих заказов PartKOM нет."
-          : `В выбранной истории ${name} заказов нет.`);
+        message(`В выбранной истории ${name} заказов нет.`);
         return;
       }
       const fragment = document.createDocumentFragment();
@@ -176,11 +194,5 @@ export function bootstrapOrderHistory() {
   toggle.addEventListener("click", () => { updateTabs(); document.body.append(dialog); dialog.showModal(); void load(); });
   dialog.querySelector("#history-close").addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => { pending?.abort(); dialog.remove(); toggle.focus(); });
-  current.addEventListener("click", () => {
-    if (archive) { archive = false; current.setAttribute("aria-pressed", "true"); archived.setAttribute("aria-pressed", "false"); void load(); }
-  });
-  archived.addEventListener("click", () => {
-    if (!archive) { archive = true; archived.setAttribute("aria-pressed", "true"); current.setAttribute("aria-pressed", "false"); void load(); }
-  });
   reload.addEventListener("click", () => void load());
 }
