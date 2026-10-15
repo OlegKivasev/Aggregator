@@ -194,7 +194,12 @@ test("cart toolbar hides an empty cart, uses a separate circle and keeps the lar
       const badge = page.locator("#cart-badge");
       const toolbar = page.locator(".search-toolbar");
       const badgeBounds = await badge.boundingBox();
+      const cartBounds = await toggle.boundingBox();
+      const garageBounds = await page.locator("#garage-toggle").boundingBox();
       const toolbarBounds = await toolbar.boundingBox();
+      assert.ok(garageBounds.y >= cartBounds.y + cartBounds.height + 4);
+      assert.ok(Math.abs(garageBounds.x + garageBounds.width / 2 - (cartBounds.x + cartBounds.width / 2)) <= 1);
+      assert.ok(garageBounds.x + garageBounds.width <= width);
       assert.ok(badgeBounds.x >= toolbarBounds.x && badgeBounds.y >= toolbarBounds.y);
       assert.ok(badgeBounds.x + badgeBounds.width <= width && badgeBounds.y + badgeBounds.height <= toolbarBounds.y + toolbarBounds.height);
       assert.equal(await badge.evaluate((node) => getComputedStyle(node).fontSize), "11px");
@@ -210,12 +215,19 @@ test("cart toolbar hides an empty cart, uses a separate circle and keeps the lar
       if (process.env.CART_TOOLBAR_SCREENSHOT_DIR) await toolbar.screenshot({ path: join(process.env.CART_TOOLBAR_SCREENSHOT_DIR, `cart-toolbar-${width}.png`) });
       assert.ok(unobscured.every((point) => point.visible), JSON.stringify({ width, unobscured }));
     }
+    await page.setViewportSize({ width: 1366, height: 850 });
+    const workspaceBounds = await page.locator(".workspace").boundingBox();
+    const searchBounds = await page.locator(".search-shell").boundingBox();
+    assert.ok(Math.abs(searchBounds.x + searchBounds.width - (workspaceBounds.x + workspaceBounds.width)) <= 1);
+    await page.locator("#garage-toggle").click();
+    assert.equal(await page.locator("#garage-sidebar").isVisible(), true);
     await toggle.click();
     await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 1);
     await page.locator("#cart-items .cart-remove").click();
     await page.waitForFunction(() => document.querySelector("#cart-toggle").hidden);
     await page.keyboard.press("Escape");
     assert.equal(await toggle.isVisible(), false);
+    assert.equal(await page.locator(".search-toolbar__actions").isVisible(), false);
   }, { stock: 10000, reducedMotion: "reduce" });
 });
 
