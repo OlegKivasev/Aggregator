@@ -14,7 +14,7 @@ import type {
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
 import { attachPurchaseReference } from "../../purchasing/purchase-offer.ts";
-import type { CheckoutDetails, OrderGroupResult, RosskoOrderChoices } from "../../purchasing/order-contract.ts";
+import type { CheckoutDetails, OrderGroupResult, RosskoOrderChoices, RosskoOrderReceipt } from "../../purchasing/order-contract.ts";
 import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
 
 const rosskoApiOrigin = "https://api.rossko.ru";
@@ -335,22 +335,84 @@ export function parseRosskoOrderResult(xml: string, lines: PurchaseLine[]): Orde
     const failed = errors.filter(matches);
     let acceptedQuantity = 0;
     const orderIds: string[] = [];
+    const rosskoOrders: RosskoOrderReceipt[] = [];
     for (const item of accepted) {
       const count = parseNonNegativeInteger(elementText(item, "count"));
       const orderId = elementText(item, "order_id");
       if (count === null || count < 1 || !orderId || !/^\d+$/.test(orderId)) throw new SupplierIntegrationError("Rossko order item is incomplete");
       acceptedQuantity += count;
       if (!orderIds.includes(orderId)) orderIds.push(orderId);
+      const price = parsePositiveNumber(elementText(item, "price"));
+      const total = parsePositiveNumber(elementText(item, "total_price"));
+      const optional = (name: string, limit = 200) => {
+        const value = elementText(item, name);
+        return value && value.length <= limit ? value : undefined;
+      };
+      rosskoOrders.push({ orderId, quantity: count,
+        ...(price !== null ? { price } : {}), ...(total !== null ? { total } : {}),
+        ...(optional("deliveryStart", 40) ? { deliveryStart: optional("deliveryStart", 40) } : {}),
+        ...(optional("deliveryEnd", 40) ? { deliveryEnd: optional("deliveryEnd", 40) } : {}),
+        ...(optional("description") ? { warehouse: optional("description") } : {}) });
     }
     if (acceptedQuantity > line.quantity || acceptedQuantity + failed.reduce((sum, entry) => sum + (parseNonNegativeInteger(elementText(entry, "count")) ?? 0), 0) > line.quantity) {
       throw new SupplierIntegrationError("Rossko order quantities do not match request");
     }
-    if (acceptedQuantity > 0) confirmed.push({ id: line.id, acceptedQuantity, orderIds,
+    if (acceptedQuantity > 0) confirmed.push({ id: line.id, acceptedQuantity, orderIds, rosskoOrders,
       ...(acceptedQuantity < line.quantity ? { message: "Rossko подтвердил только часть количества." } : {}) });
     else if (failed.length) rejected.push({ id: line.id, message: "Rossko не принял позицию." });
     else throw new SupplierIntegrationError("Rossko did not report an order line");
   }
   return { confirmed, rejected };
+}
+
+function rosskoOrdersEnvelope(credentials: RosskoApiCredentials, ids: string[]): string {
+  const orderIds = ids.map((id) => `<ros:id>${escapeXml(id)}</ros:id>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ros="${rosskoApiOrigin}/">`
+    + `<soapenv:Body><ros:GetOrders><ros:KEY1>${escapeXml(credentials.key1)}</ros:KEY1><ros:KEY2>${escapeXml(credentials.key2)}</ros:KEY2>`
+    + `<ros:order_ids>${orderIds}</ros:order_ids></ros:GetOrders></soapenv:Body></soapenv:Envelope>`;
+}
+
+export function parseRosskoOrdersDetails(xml: string, result: OrderGroupResult, lines: PurchaseLine[]): void {
+  const root = findDescendant(parseRosskoXml(xml), "OrdersResult");
+  if (!root || !parseSuccess(root)) return;
+  const lineById = new Map(lines.map((line) => [line.id, line]));
+  const orders = children(child(root, "OrdersList") || { name: "", text: "", children: [] }, "Order");
+  for (const confirmed of result.confirmed) {
+    const line = lineById.get(confirmed.id);
+    if (!line || line.reference.supplier !== "rossko") continue;
+    const partGuid = line.reference.partGuid;
+    for (const receipt of confirmed.rosskoOrders ?? []) {
+      const order = orders.find((entry) => elementText(entry, "id") === receipt.orderId);
+      if (!order) continue;
+      const parts = children(child(order, "parts") || { name: "", text: "", children: [] }, "part");
+      const matching = parts.find((part) => elementText(part, "partnumber") === line.result.article
+        && elementText(part, "brand") === line.result.brand
+        && elementText(part, "guid") === partGuid
+        && parseNonNegativeInteger(elementText(part, "count")) === receipt.quantity);
+      if (!matching) continue;
+      const detail = child(order, "detail");
+      const optional = (node: XmlElement | null, name: string, limit = 200) => {
+        const value = node ? elementText(node, name) : null;
+        return value && value.length <= limit ? value : undefined;
+      };
+      const statusCode = parseNonNegativeInteger(elementText(matching, "status"));
+      const orderTotal = parsePositiveNumber(elementText(order, "total_price"));
+      const status = statusCode === null ? undefined : ({ 0: "Ждёт подтверждения", 1: "Комплектуется", 2: "Отгружено",
+        3: "Готово к отгрузке", 5: "Ожидаем поступление", 6: "На складе филиала", 7: "Нет в наличии",
+        8: "Отменён клиентом", 9: "Просрочен", 31: "Ожидаем товар на складе", 32: "Возврат на согласовании",
+        33: "Товар на экспертизе", 34: "Возврат отклонён", 35: "Возврат частично отклонён",
+        36: "Товар возвращён" } as Record<number, string>)[statusCode];
+      Object.assign(receipt, {
+        ...(optional(order, "created_date", 40) ? { createdAt: optional(order, "created_date", 40) } : {}),
+        ...(optional(order, "delivery_date", 40) ? { deliveryAt: optional(order, "delivery_date", 40) } : {}),
+        ...(status ? { status } : {}),
+        ...(orderTotal !== null ? { orderTotal } : {}),
+        ...(optional(detail, "delivery_type") ? { deliveryType: optional(detail, "delivery_type") } : {}),
+        ...(optional(detail, "delivery_address") ? { deliveryAddress: optional(detail, "delivery_address") } : {}),
+        ...(optional(detail, "payment_type") ? { paymentType: optional(detail, "payment_type") } : {}),
+      });
+    }
+  }
 }
 
 export async function placeRosskoOrder(lines: PurchaseLine[], credentials: RosskoApiCredentials, details: CheckoutDetails,
@@ -361,7 +423,18 @@ export async function placeRosskoOrder(lines: PurchaseLine[], credentials: Rossk
     || typeof options.phone !== "string" || !/^[+\d()\s-]{6,40}$/.test(options.phone)
     || typeof options.deliveryParts !== "boolean") throw new SupplierIntegrationError("Rossko order details are invalid");
   const xml = await callRosskoApi("GetCheckout", {}, signal, buildRosskoOrderEnvelope(credentials, options, lines));
-  return parseRosskoOrderResult(xml, lines);
+  const result = parseRosskoOrderResult(xml, lines);
+  const ids = [...new Set(result.confirmed.flatMap((line) => line.orderIds))];
+  if (ids.length) {
+    const detailSignal = createBoundedAbortSignal(signal, 5_000, "Rossko order details timed out");
+    try {
+      const detailsXml = await callRosskoApi("GetOrders", {}, detailSignal.signal, rosskoOrdersEnvelope(credentials, ids));
+      parseRosskoOrdersDetails(detailsXml, result, lines);
+    } catch {
+      // Checkout has already been confirmed; optional read-only details may be unavailable immediately.
+    } finally { detailSignal.dispose(); }
+  }
+  return result;
 }
 
 function parseRosskoStock(stock: XmlElement): RosskoStock | null {
@@ -559,7 +632,7 @@ async function readBoundedXmlResponse(response: Response): Promise<string> {
 }
 
 async function callRosskoApi(
-  method: "GetCheckoutDetails" | "GetSearch" | "GetCheckout",
+  method: "GetCheckoutDetails" | "GetSearch" | "GetCheckout" | "GetOrders",
   fields: Record<string, string | undefined>,
   signal: AbortSignal,
   envelope?: string,

@@ -71,7 +71,11 @@ async function withCartPage(check, options = {}) {
             ...(line.reference.supplier === "part-kom" && options.partKomReceipt ? { partKomOrders: [{ orderNumber: "fixture-part-kom",
               quantity: line.quantity, ...options.partKomReceipt }] } : {}),
             ...(line.reference.supplier === "forum-auto" && options.forumAutoReceipt ? { forumAutoOrder: {
-              orderId: "fixture-forum-auto", orderedQuantity: line.quantity, ...options.forumAutoReceipt } } : {}) })), rejected: [] };
+              orderId: "fixture-forum-auto", orderedQuantity: line.quantity, ...options.forumAutoReceipt } } : {}),
+            ...(line.reference.supplier === "rossko" && options.rosskoReceipt ? { rosskoOrders: [{
+              orderId: "fixture-rossko", quantity: line.quantity, ...options.rosskoReceipt }] } : {}),
+            ...(line.reference.supplier === "armtek" && options.armtekReceipt ? { armtekOrders: [{
+              orderId: "fixture-armtek", quantity: line.quantity, ...options.armtekReceipt }] } : {}) })), rejected: [] };
         },
       },
     };
@@ -245,6 +249,34 @@ test("successful Forum Auto checkout displays the supplier order details", async
     article: "A1", brand: "TEST", title: "Деталь <img src=x onerror=window.cartXss=1>", reservedQuantity: 1,
     confirmedQuantity: 0, price: 120, total: 120 } });
 });
+
+for (const supplier of ["rossko", "armtek"]) {
+  test(`successful ${supplier} checkout displays the confirmed supplier order`, async () => {
+    await withCartPage(async (page) => {
+      await page.locator("#results-body .cart-offer-button").nth(supplier === "rossko" ? 3 : 0).click();
+      await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+      await page.locator("#cart-toggle").click();
+      await openCheckout(page);
+      await page.locator("#cart-order-accept").click();
+      await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+      const receipt = page.locator(`.cart-${supplier}-receipt`);
+      assert.equal(await receipt.count(), 1);
+      assert.match(await receipt.textContent(), new RegExp(`fixture-${supplier}`));
+      assert.match(await receipt.textContent(), /Создан|Комплектуется/);
+      assert.match(await receipt.textContent(), /120,00|100,00/);
+      assert.equal(await receipt.locator("img").count(), 0);
+      assert.equal(await page.evaluate(() => window.cartXss), undefined);
+      assert.equal(await page.locator("#cart-badge").isVisible(), false);
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert.equal(await receipt.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+    }, { allSuppliers: true, reducedMotion: "reduce",
+      ...(supplier === "rossko" ? { rosskoReceipt: { status: "Комплектуется", createdAt: "15.10.2026 13:33:00",
+        deliveryAt: "16.10.2026", price: 120, total: 120, deliveryType: "Курьерская доставка",
+        deliveryAddress: "Тестовый адрес <img src=x onerror=window.cartXss=1>", paymentType: "Банковский платёж" } }
+        : { armtekReceipt: { status: "Создан", createdAt: "15.10.2026 13:46", price: 100, total: 100,
+          deliveryType: "Доставка до клиента", deliveryAddress: "Тестовый адрес <img src=x onerror=window.cartXss=1>" } }) });
+  });
+}
 
 test("a verified absent Forum Auto order can be unlocked without sending another order", async () => {
   await withCartPage(async (page, { orderCalls }) => {

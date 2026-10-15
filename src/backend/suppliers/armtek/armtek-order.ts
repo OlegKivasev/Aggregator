@@ -1,6 +1,7 @@
 import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
-import type { OrderGroupResult } from "../../purchasing/order-contract.ts";
+import type { ArmtekOrderReceipt, OrderGroupResult } from "../../purchasing/order-contract.ts";
 import type { ArmtekCredentials } from "../../types.ts";
+import { createBoundedAbortSignal } from "../../abort.ts";
 import { SupplierIntegrationError } from "../errors.ts";
 import { requestArmtek, resolveArmtekConfig } from "./armtek-api-adapter.ts";
 
@@ -8,6 +9,8 @@ interface ArmtekOrderAllocation {
   KWMENG?: unknown;
   VBELN?: unknown;
   KEYZAK?: unknown;
+  PRICE?: unknown;
+  DLVDT?: unknown;
 }
 
 interface ArmtekOrderItem {
@@ -30,6 +33,45 @@ function nonNegativeInteger(value: unknown): number | null {
   return typeof number === "number" && Number.isSafeInteger(number) && number >= 0 ? number : null;
 }
 
+function positivePrice(value: unknown): number | undefined {
+  const number = typeof value === "string" && /^\d+(?:[.,]\d{1,2})?$/.test(value.trim())
+    ? Number(value.trim().replace(",", ".")) : value;
+  return typeof number === "number" && Number.isFinite(number) && number > 0 ? number : undefined;
+}
+
+function shortText(value: unknown, max = 100): string | undefined {
+  return typeof value === "string" && value.trim() && value.length <= max ? value.trim() : undefined;
+}
+
+function armtekDate(value: unknown): string | undefined {
+  if (typeof value !== "string" || !/^\d{14}$/.test(value)) return undefined;
+  const [year, month, day, hour, minute, second] = [value.slice(0, 4), value.slice(4, 6), value.slice(6, 8),
+    value.slice(8, 10), value.slice(10, 12), value.slice(12, 14)].map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day
+    || date.getUTCHours() !== hour || date.getUTCMinutes() !== minute || date.getUTCSeconds() !== second) return undefined;
+  return `${value.slice(6, 8)}.${value.slice(4, 6)}.${value.slice(0, 4)} ${value.slice(8, 10)}:${value.slice(10, 12)}`;
+}
+
+export function parseArmtekOrderDetails(payload: unknown, receipt: ArmtekOrderReceipt, line: PurchaseLine): ArmtekOrderReceipt {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return receipt;
+  const response = payload as { HEADER?: unknown; ITEMS?: unknown };
+  const header = array(response.HEADER).find((value) => value && typeof value === "object" && !Array.isArray(value)
+    && (value as { ORDER?: unknown }).ORDER === receipt.orderId) as Record<string, unknown> | undefined;
+  if (!header) return receipt;
+  const item = array(response.ITEMS).find((value) => value && typeof value === "object" && !Array.isArray(value)
+    && (value as { PIN?: unknown; BRAND?: unknown }).PIN === line.result.article
+    && (value as { PIN?: unknown; BRAND?: unknown }).BRAND === line.result.brand) as Record<string, unknown> | undefined;
+  return { ...receipt,
+    ...(shortText(header.ORDER_STATUS) ? { status: shortText(header.ORDER_STATUS) } : {}),
+    ...(armtekDate(header.ORDER_DATE) ? { createdAt: armtekDate(header.ORDER_DATE) } : {}),
+    ...(shortText(header.INCOTERMS_TXT) ? { deliveryType: shortText(header.INCOTERMS_TXT) } : {}),
+    ...(shortText(header.ADDRZA) ? { deliveryAddress: shortText(header.ADDRZA) } : {}),
+    ...(positivePrice(header.ORDER_SUM) ? { total: positivePrice(header.ORDER_SUM) } : {}),
+    ...(item && shortText(item.STATUS) ? { itemStatus: shortText(item.STATUS) } : {}),
+  };
+}
+
 export function parseArmtekOrderResult(payload: unknown, lines: PurchaseLine[]): OrderGroupResult {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new SupplierIntegrationError("Armtek order response is invalid");
   const items = (payload as { ITEMS?: unknown }).ITEMS;
@@ -49,6 +91,7 @@ export function parseArmtekOrderResult(payload: unknown, lines: PurchaseLine[]):
     if (acceptedQuantity > 0) {
       let allocated = 0;
       const orderIds: string[] = [];
+      const armtekOrders: ArmtekOrderReceipt[] = [];
       for (const raw of allocations) {
         const allocation = raw as ArmtekOrderAllocation | null;
         const quantity = nonNegativeInteger(allocation?.KWMENG);
@@ -58,9 +101,13 @@ export function parseArmtekOrderResult(payload: unknown, lines: PurchaseLine[]):
         }
         allocated += quantity;
         if (!orderIds.includes(orderId)) orderIds.push(orderId);
+        const price = positivePrice(allocation?.PRICE);
+        armtekOrders.push({ orderId, quantity,
+          ...(price ? { price } : {}),
+          ...(armtekDate(allocation?.DLVDT) ? { deliveryAt: armtekDate(allocation?.DLVDT) } : {}) });
       }
       if (allocated !== acceptedQuantity) throw new SupplierIntegrationError("Armtek order allocation quantity does not match");
-      confirmed.push({ id: line.id, acceptedQuantity, orderIds,
+      confirmed.push({ id: line.id, acceptedQuantity, orderIds, armtekOrders,
         ...(remain > 0 ? { message: "Armtek подтвердил только часть запрошенного количества." } : {}) });
     }
     if (remain > 0 && acceptedQuantity === 0) rejected.push({ id: line.id, message: "Armtek не подтвердил запрошенное количество." });
@@ -84,5 +131,29 @@ export async function placeArmtekOrder(lines: PurchaseLine[], credentials: Armte
     params.set(`${prefix}[PRICEMAX]`, String(line.result.price));
   }
   const result = await requestArmtek<unknown>("ws_order/createOrder", credentials, { method: "POST", params, signal });
-  return parseArmtekOrderResult(result, lines);
+  const parsed = parseArmtekOrderResult(result, lines);
+  const byId = new Map(lines.map((line) => [line.id, line]));
+  const detailsByOrder = new Map<string, unknown>();
+  const detailSignal = createBoundedAbortSignal(signal, 5_000, "Armtek order details timed out");
+  try {
+    for (const confirmed of parsed.confirmed) {
+      const line = byId.get(confirmed.id);
+      if (!line) continue;
+      for (const receipt of confirmed.armtekOrders ?? []) {
+        try {
+          let order = detailsByOrder.get(receipt.orderId);
+          if (!order) {
+            order = await requestArmtek<unknown>("ws_order/getOrder", credentials, { method: "GET",
+              params: new URLSearchParams({ VKORG: resolved.vkorg, KUNRG: resolved.kunnrRg, ORDER: receipt.orderId }),
+              signal: detailSignal.signal });
+            detailsByOrder.set(receipt.orderId, order);
+          }
+          Object.assign(receipt, parseArmtekOrderDetails(order, receipt, line));
+        } catch {
+          // Creation has already been confirmed; optional read-only details must not turn it into a failed order.
+        }
+      }
+    }
+  } finally { detailSignal.dispose(); }
+  return parsed;
 }

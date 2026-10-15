@@ -9,6 +9,38 @@ export interface ConfirmedOrderLine {
   message?: string;
   partKomOrders?: PartKomOrderReceipt[];
   forumAutoOrder?: ForumAutoOrderReceipt;
+  rosskoOrders?: RosskoOrderReceipt[];
+  armtekOrders?: ArmtekOrderReceipt[];
+}
+
+export interface RosskoOrderReceipt {
+  orderId: string;
+  quantity: number;
+  price?: number;
+  total?: number;
+  orderTotal?: number;
+  deliveryStart?: string;
+  deliveryEnd?: string;
+  warehouse?: string;
+  createdAt?: string;
+  deliveryAt?: string;
+  status?: string;
+  deliveryType?: string;
+  deliveryAddress?: string;
+  paymentType?: string;
+}
+
+export interface ArmtekOrderReceipt {
+  orderId: string;
+  quantity: number;
+  price?: number;
+  deliveryAt?: string;
+  createdAt?: string;
+  status?: string;
+  deliveryType?: string;
+  deliveryAddress?: string;
+  total?: number;
+  itemStatus?: string;
 }
 
 export interface ForumAutoOrderReceipt {

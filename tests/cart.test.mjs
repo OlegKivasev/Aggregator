@@ -12,9 +12,9 @@ import { parsePartKomApiResults } from "../src/backend/suppliers/part-kom/part-k
 import { parseForumAutoApiResults, parseForumAutoApiAnalogResults, parseForumAutoApiResponse } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { normalizeRosskoApiSearchResults, normalizeRosskoApiAnalogResults } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { testPurchaseOrder } from "../src/backend/application/test-order-application-service.ts";
-import { parseArmtekOrderResult } from "../src/backend/suppliers/armtek/armtek-order.ts";
+import { parseArmtekOrderDetails, parseArmtekOrderResult } from "../src/backend/suppliers/armtek/armtek-order.ts";
 import { parseForumAutoOrderResult, placeForumAutoOrder } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
-import { buildRosskoOrderEnvelope, parseRosskoOrderResult } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
+import { buildRosskoOrderEnvelope, parseRosskoOrderResult, parseRosskoOrdersDetails } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { getPartKomOrderChoices, parsePartKomMotion } from "../src/backend/suppliers/part-kom/part-kom-order.ts";
 import { allowedRosskoOrderChoices, RealOrderApplicationService, resolveRosskoOrderDefaults } from "../src/backend/application/real-order-application-service.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
@@ -526,6 +526,14 @@ test("supplier order parsers require matching real confirmations", () => {
   const armtek = line("armtek");
   assert.deepEqual(parseArmtekOrderResult({ ITEMS: [{ PIN: "A1", BRAND: "TEST", KEYZAK: "TEST01", REMAIN: "0",
     RESULT: [{ KWMENG: "2", KEYZAK: "TEST01", VBELN: "A-1" }] }] }, [armtek]).confirmed[0].acceptedQuantity, 2);
+  assert.deepEqual(parseArmtekOrderResult({ ITEMS: [{ PIN: "A1", BRAND: "TEST", KEYZAK: "TEST01", REMAIN: "0",
+    RESULT: [{ KWMENG: "2", KEYZAK: "TEST01", VBELN: "A-1", PRICE: "100.50", DLVDT: "20261016090000" }] }] }, [armtek])
+    .confirmed[0].armtekOrders, [{ orderId: "A-1", quantity: 2, price: 100.5, deliveryAt: "16.10.2026 09:00" }]);
+  assert.deepEqual(parseArmtekOrderDetails({ HEADER: [{ ORDER: "A-1", ORDER_STATUS: "Создан",
+    ORDER_DATE: "20261015134654", ORDER_SUM: "201.00", INCOTERMS_TXT: "Доставка до клиента" }],
+  ITEMS: [{ PIN: "A1", BRAND: "TEST", STATUS: "В работе" }] }, { orderId: "A-1", quantity: 2 }, armtek),
+  { orderId: "A-1", quantity: 2, status: "Создан", createdAt: "15.10.2026 13:46", total: 201,
+    deliveryType: "Доставка до клиента", itemStatus: "В работе" });
   assert.throws(() => parseArmtekOrderResult({ ITEMS: [{ PIN: "A1", BRAND: "TEST", KEYZAK: "TEST01", REMAIN: "0", RESULT: [] }] }, [armtek]));
   const forum = line("forum-auto");
   assert.equal(parseForumAutoOrderResult([{ did: 42, arTovs: [{ gid: "fixture-gid", k1: 2 }] }], forum).confirmed[0].orderIds[0], "42");
@@ -570,6 +578,16 @@ test("supplier order parsers require matching real confirmations", () => {
   const xml = `<Envelope><Body><CheckoutResult><success>true</success><ItemsList><Item><partnumber>A1</partnumber><brand>TEST</brand>
     <stock>fixture-stock</stock><count>2</count><order_id>77</order_id></Item></ItemsList></CheckoutResult></Body></Envelope>`;
   assert.equal(parseRosskoOrderResult(xml, [rossko]).confirmed[0].orderIds[0], "77");
+  const detailed = parseRosskoOrderResult(xml.replace("<count>2</count>", "<count>2</count><price>120.50</price><total_price>241.00</total_price>"), [rossko]);
+  assert.deepEqual(detailed.confirmed[0].rosskoOrders, [{ orderId: "77", quantity: 2, price: 120.5, total: 241 }]);
+  parseRosskoOrdersDetails(`<Envelope><Body><OrdersResult><success>true</success><OrdersList><Order><id>77</id><total_price>241.00</total_price>
+    <created_date>15.10.2026 13:33:00</created_date><delivery_date>16.10.2026</delivery_date>
+    <detail><delivery_type>Курьерская доставка</delivery_type><delivery_address>Тестовый адрес</delivery_address>
+    <payment_type>Банковский платёж</payment_type></detail><parts><part><partnumber>A1</partnumber><brand>TEST</brand>
+    <guid>fixture-guid</guid><count>2</count><status>1</status></part></parts></Order></OrdersList></OrdersResult></Body></Envelope>`, detailed, [rossko]);
+  assert.equal(detailed.confirmed[0].rosskoOrders[0].status, "Комплектуется");
+  assert.equal(detailed.confirmed[0].rosskoOrders[0].deliveryAddress, "Тестовый адрес");
+  assert.equal(detailed.confirmed[0].rosskoOrders[0].orderTotal, 241);
   assert.throws(() => parseRosskoOrderResult(xml.replace("fixture-stock", "wrong-stock"), [rossko]));
 });
 

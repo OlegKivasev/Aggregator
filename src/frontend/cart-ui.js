@@ -81,6 +81,44 @@ const forumAutoReceiptNode = (receipt, orderIds, acceptedQuantity) => {
   return card;
 };
 
+const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity, item) => {
+  if (!receipt || typeof receipt !== "object" || typeof receipt.orderId !== "string"
+    || !receipt.orderId || receipt.orderId.length > 100 || !orderIds.includes(receipt.orderId)
+    || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1 || receipt.quantity > acceptedQuantity) return null;
+  const card = document.createElement("section");
+  card.className = supplier === "rossko" ? "cart-rossko-receipt" : "cart-armtek-receipt";
+  const heading = document.createElement("h4");
+  heading.textContent = `${supplierNames[supplier]} · заказ № ${receipt.orderId}`;
+  card.append(heading);
+  const details = document.createElement("dl");
+  const add = (label, value, status = false) => {
+    if (typeof value !== "string" && typeof value !== "number") return;
+    if (typeof value === "string" && (!value || value.length > 500)
+      || typeof value === "number" && !Number.isFinite(value)) return;
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = String(value);
+    if (status) description.className = "cart-supplier-receipt__state";
+    details.append(term, description);
+  };
+  add("Создан", receipt.createdAt);
+  add(supplier === "armtek" ? "Статус заказа" : "Статус позиции", receipt.status, true);
+  if (supplier === "armtek") add("Статус позиции", receipt.itemStatus, true);
+  add("Товар", [item.result.article, item.result.brand, item.result.title].filter((value) => typeof value === "string" && value.length <= 500).join(" · "));
+  add("Заказано", `${receipt.quantity} шт.`);
+  if (Number.isFinite(receipt.price) && receipt.price > 0) add("Цена", formatPrice(receipt.price));
+  if (Number.isFinite(receipt.total) && receipt.total > 0) add(supplier === "armtek" ? "Сумма заказа" : "Сумма позиции", formatPrice(receipt.total));
+  if (supplier === "rossko" && Number.isFinite(receipt.orderTotal) && receipt.orderTotal > 0) add("Сумма заказа", formatPrice(receipt.orderTotal));
+  add("Срок доставки", receipt.deliveryAt ?? receipt.deliveryEnd ?? receipt.deliveryStart);
+  add("Склад", receipt.warehouse);
+  add("Доставка", receipt.deliveryType);
+  add("Адрес доставки", receipt.deliveryAddress);
+  add("Оплата", receipt.paymentType);
+  card.append(details);
+  return card;
+};
+
 export const formatCartLatestDeliveryDate = (items) => {
   if (!items.length) return "Не указана";
   let latest = null;
@@ -628,9 +666,16 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
             ? line.partKomOrders.map((receipt) => partKomReceiptNode(receipt, line.orderIds, line.acceptedQuantity)).filter(Boolean) : [];
           const forumAutoOrder = group.supplier === "forum-auto"
             ? forumAutoReceiptNode(line.forumAutoOrder, line.orderIds, line.acceptedQuantity) : null;
-          if (partKomOrders.length || forumAutoOrder) {
+          const selectedItem = items.find((item) => item.id === line.id);
+          const supplierOrders = selectedItem && (group.supplier === "rossko" || group.supplier === "armtek")
+            ? (group.supplier === "rossko" ? line.rosskoOrders : line.armtekOrders)
+            : null;
+          const supplierReceipts = Array.isArray(supplierOrders)
+            ? supplierOrders.map((receipt) => supplierOrderReceiptNode(group.supplier, receipt, line.orderIds, line.acceptedQuantity, selectedItem)).filter(Boolean) : [];
+          if (partKomOrders.length || forumAutoOrder || supplierReceipts.length) {
             receipts.push(...partKomOrders);
             if (forumAutoOrder) receipts.push(forumAutoOrder);
+            receipts.push(...supplierReceipts);
             if (typeof line.message === "string" && line.message) {
               const note = document.createElement("p");
               note.textContent = line.message;
