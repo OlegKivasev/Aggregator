@@ -14,7 +14,7 @@ import { siteHttpRequest, type SiteHttpResponse } from "../site-http.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
 import { attachPurchaseReference } from "../../purchasing/purchase-offer.ts";
 import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
-import type { OrderGroupResult } from "../../purchasing/order-contract.ts";
+import type { ForumAutoOrderReceipt, OrderGroupResult } from "../../purchasing/order-contract.ts";
 
 interface ForumAutoOffer {
   gid?: unknown;
@@ -298,18 +298,43 @@ export function parseForumAutoOrderResult(payload: unknown, line: PurchaseLine):
     .flatMap((order) => {
       const id = order.did;
       const items = order.arTovs;
-      return (typeof id === "number" && Number.isSafeInteger(id) && id > 0 || typeof id === "string" && /^\d+$/.test(id))
-        && Array.isArray(items) ? items.map((item) => ({ id: String(id), item })) : [];
+      return (typeof id === "number" && Number.isSafeInteger(id) && id > 0 || typeof id === "string" && /^[1-9]\d*$/.test(id))
+        && Array.isArray(items) ? items.map((item) => ({ id: String(id), order, item })) : [];
     }).filter(({ item }) => item && typeof item === "object" && !Array.isArray(item)
       && (item as Record<string, unknown>).gid === gid);
   if (matches.length !== 1) throw new SupplierIntegrationError("Forum-Auto order confirmation is incomplete");
-  const { id, item } = matches[0];
-  const quantity = (item as Record<string, unknown>).k1;
+  const { id, order, item } = matches[0];
+  const product = item as Record<string, unknown>;
+  const quantity = product.k1;
   const acceptedQuantity = typeof quantity === "number" ? quantity : typeof quantity === "string" && /^\d+$/.test(quantity) ? Number(quantity) : Number.NaN;
   if (!Number.isSafeInteger(acceptedQuantity) || acceptedQuantity < 1 || acceptedQuantity > line.quantity) {
     throw new SupplierIntegrationError("Forum-Auto confirmed an invalid quantity");
   }
-  return { confirmed: [{ id: line.id, acceptedQuantity, orderIds: [id],
+  const optionalText = (value: unknown): string | undefined => typeof value === "string" && value.trim() && value.length <= 500
+    ? value.trim() : undefined;
+  const optionalCount = (value: unknown): number | undefined => {
+    const parsed = parseQuantity(value);
+    return parsed !== null && parsed <= acceptedQuantity ? parsed : undefined;
+  };
+  const optionalMoney = (value: unknown): number | undefined => {
+    const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value.trim().replace(",", ".")) : Number.NaN;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+  };
+  const receipt: ForumAutoOrderReceipt = {
+    orderId: id, orderedQuantity: acceptedQuantity,
+    ...(optionalText(order.nr) ? { documentNumber: optionalText(order.nr) } : {}),
+    ...(optionalText(order.status) ? { status: optionalText(order.status) } : {}),
+    ...(optionalText(order.dtc) ? { createdAt: optionalText(order.dtc) } : {}),
+    ...(optionalText(order.mdt) ? { deliveryAt: optionalText(order.mdt) } : {}),
+    ...(optionalText(product.brand) ? { brand: optionalText(product.brand) } : {}),
+    ...(optionalText(product.nr) ? { article: optionalText(product.nr) } : {}),
+    ...(optionalText(product.tovname) ? { title: optionalText(product.tovname) } : {}),
+    ...(optionalCount(product.k2) !== undefined ? { reservedQuantity: optionalCount(product.k2) } : {}),
+    ...(optionalCount(product.k3) !== undefined ? { confirmedQuantity: optionalCount(product.k3) } : {}),
+    ...(optionalMoney(product.price) !== undefined ? { price: optionalMoney(product.price) } : {}),
+    ...(optionalMoney(product.sum) !== undefined ? { total: optionalMoney(product.sum) } : {}),
+  };
+  return { confirmed: [{ id: line.id, acceptedQuantity, orderIds: [id], forumAutoOrder: receipt,
     ...(acceptedQuantity < line.quantity ? { message: "Forum Auto подтвердил только часть количества." } : {}) }], rejected: [] };
 }
 

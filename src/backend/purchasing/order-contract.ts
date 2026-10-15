@@ -8,6 +8,23 @@ export interface ConfirmedOrderLine {
   orderIds: string[];
   message?: string;
   partKomOrders?: PartKomOrderReceipt[];
+  forumAutoOrder?: ForumAutoOrderReceipt;
+}
+
+export interface ForumAutoOrderReceipt {
+  orderId: string;
+  documentNumber?: string;
+  status?: string;
+  createdAt?: string;
+  deliveryAt?: string;
+  brand?: string;
+  article?: string;
+  title?: string;
+  orderedQuantity: number;
+  reservedQuantity?: number;
+  confirmedQuantity?: number;
+  price?: number;
+  total?: number;
 }
 
 export interface PartKomOrderReceipt {

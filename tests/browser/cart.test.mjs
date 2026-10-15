@@ -66,7 +66,9 @@ async function withCartPage(check, options = {}) {
           await options.testGate?.(signal);
           return { confirmed: lines.map((line) => ({ id: line.id, acceptedQuantity: line.quantity, orderIds: [`fixture-${line.reference.supplier}`],
             ...(line.reference.supplier === "part-kom" && options.partKomReceipt ? { partKomOrders: [{ orderNumber: "fixture-part-kom",
-              quantity: line.quantity, ...options.partKomReceipt }] } : {}) })), rejected: [] };
+              quantity: line.quantity, ...options.partKomReceipt }] } : {}),
+            ...(line.reference.supplier === "forum-auto" && options.forumAutoReceipt ? { forumAutoOrder: {
+              orderId: "fixture-forum-auto", orderedQuantity: line.quantity, ...options.forumAutoReceipt } } : {}) })), rejected: [] };
         },
       },
     };
@@ -214,6 +216,31 @@ test("successful PartKOM checkout displays the confirmed order motion without a 
     description: "Деталь <img src=x onerror=window.cartXss=1>", price: 120, expectedDate: "2026-10-17",
     guaranteedDate: "2026-10-20", stateTxt: "Принят в работу", refusalCount: 0, storeCount: 0,
     releaseCount: 0, comment: "Проверено" } });
+});
+
+test("successful Forum Auto checkout displays the supplier order details", async () => {
+  await withCartPage(async (page) => {
+    await page.locator("#results-body .cart-offer-button").nth(2).click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-success"));
+    const receipt = page.locator(".cart-forum-receipt");
+    assert.equal(await receipt.count(), 1);
+    assert.match(await receipt.textContent(), /fixture-forum-auto/);
+    assert.match(await receipt.textContent(), /Отправлен на бронирование/);
+    assert.match(await receipt.textContent(), /17\.10\.2026/);
+    assert.match(await receipt.textContent(), /Забронировано1/);
+    assert.equal(await receipt.locator("img").count(), 0);
+    assert.equal(await page.evaluate(() => window.cartXss), undefined);
+    assert.equal(await page.locator("#cart-badge").isVisible(), false);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await receipt.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+  }, { allSuppliers: true, reducedMotion: "reduce", forumAutoReceipt: {
+    status: "Отправлен на бронирование", createdAt: "15.10.2026 12:30:00", deliveryAt: "17.10.2026 09:00:00",
+    article: "A1", brand: "TEST", title: "Деталь <img src=x onerror=window.cartXss=1>", reservedQuantity: 1,
+    confirmedQuantity: 0, price: 120, total: 120 } });
 });
 
 test("cart honors reduced motion, constrains focus and fits mobile viewport", async () => {

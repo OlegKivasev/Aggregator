@@ -45,6 +45,42 @@ const partKomReceiptNode = (receipt, orderIds, acceptedQuantity) => {
   return card;
 };
 
+const forumAutoReceiptNode = (receipt, orderIds, acceptedQuantity) => {
+  if (!receipt || typeof receipt !== "object" || typeof receipt.orderId !== "string"
+    || receipt.orderId.length > 100 || !orderIds.includes(receipt.orderId)
+    || !Number.isSafeInteger(receipt.orderedQuantity) || receipt.orderedQuantity !== acceptedQuantity) return null;
+  const card = document.createElement("section");
+  card.className = "cart-forum-receipt";
+  const heading = document.createElement("h4");
+  heading.textContent = `Forum Auto · заказ № ${receipt.orderId}`;
+  card.append(heading);
+  const details = document.createElement("dl");
+  const add = (label, value, status = false) => {
+    if (typeof value !== "string" && typeof value !== "number") return;
+    if (typeof value === "string" && (!value || value.length > 500)
+      || typeof value === "number" && !Number.isFinite(value)) return;
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = String(value);
+    if (status) description.className = "cart-forum-receipt__state";
+    details.append(term, description);
+  };
+  add("Номер документа", receipt.documentNumber);
+  add("Статус", receipt.status, true);
+  add("Создан", receipt.createdAt);
+  add("Доставка", receipt.deliveryAt);
+  add("Товар", [receipt.article, receipt.brand, receipt.title].filter((value) => typeof value === "string" && value.length <= 500 && value).join(" · "));
+  add("Заказано", `${receipt.orderedQuantity} шт.`);
+  for (const [label, value] of [["Забронировано", receipt.reservedQuantity], ["Подтверждено", receipt.confirmedQuantity]]) {
+    if (Number.isSafeInteger(value) && value >= 0 && value <= acceptedQuantity) add(label, value);
+  }
+  if (Number.isFinite(receipt.price) && receipt.price >= 0) add("Цена", formatPrice(receipt.price));
+  if (Number.isFinite(receipt.total) && receipt.total >= 0) add("Сумма", formatPrice(receipt.total));
+  card.append(details);
+  return card;
+};
+
 export const formatCartLatestDeliveryDate = (items) => {
   if (!items.length) return "Не указана";
   let latest = null;
@@ -536,8 +572,11 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
           accepted++;
           const partKomOrders = group.supplier === "part-kom" && Array.isArray(line.partKomOrders)
             ? line.partKomOrders.map((receipt) => partKomReceiptNode(receipt, line.orderIds, line.acceptedQuantity)).filter(Boolean) : [];
-          if (partKomOrders.length) {
+          const forumAutoOrder = group.supplier === "forum-auto"
+            ? forumAutoReceiptNode(line.forumAutoOrder, line.orderIds, line.acceptedQuantity) : null;
+          if (partKomOrders.length || forumAutoOrder) {
             receipts.push(...partKomOrders);
+            if (forumAutoOrder) receipts.push(forumAutoOrder);
             if (typeof line.message === "string" && line.message) {
               const note = document.createElement("p");
               note.textContent = line.message;

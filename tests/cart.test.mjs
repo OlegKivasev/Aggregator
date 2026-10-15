@@ -465,6 +465,15 @@ test("supplier order parsers require matching real confirmations", () => {
   assert.throws(() => parseArmtekOrderResult({ ITEMS: [{ PIN: "A1", BRAND: "TEST", KEYZAK: "TEST01", REMAIN: "0", RESULT: [] }] }, [armtek]));
   const forum = line("forum-auto");
   assert.equal(parseForumAutoOrderResult([{ did: 42, arTovs: [{ gid: "fixture-gid", k1: 2 }] }], forum).confirmed[0].orderIds[0], "42");
+  assert.deepEqual(parseForumAutoOrderResult([{ did: 42, dtc: "15.10.2026 12:30:00", status: "Отправлен на бронирование",
+    mdt: "17.10.2026 09:00:00", arTovs: [{ gid: "fixture-gid", k1: 2, k2: 1, k3: 0, brand: "TEST",
+      nr: "A1", tovname: "Деталь", price: 120, sum: 240 }] }], forum).confirmed[0].forumAutoOrder,
+  { orderId: "42", orderedQuantity: 2, status: "Отправлен на бронирование", createdAt: "15.10.2026 12:30:00",
+    deliveryAt: "17.10.2026 09:00:00", brand: "TEST", article: "A1", title: "Деталь",
+    reservedQuantity: 1, confirmedQuantity: 0, price: 120, total: 240 });
+  assert.deepEqual(parseForumAutoOrderResult([{ did: 42, status: { invalid: true }, arTovs: [{ gid: "fixture-gid", k1: 2,
+    k2: -1, k3: 3, price: "bad", sum: Infinity }] }], forum).confirmed[0].forumAutoOrder,
+  { orderId: "42", orderedQuantity: 2 });
   assert.throws(() => parseForumAutoOrderResult([{ did: 42, arTovs: [] }], forum));
   const partKom = line("part-kom");
   assert.equal(parsePartKomMotion([{ orderNumber: "P-1", detailNum: "A1", providerId: 202, quantity: 2 }], partKom).confirmed[0].acceptedQuantity, 2);

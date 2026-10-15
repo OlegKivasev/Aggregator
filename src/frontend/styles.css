@@ -195,14 +195,14 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-order-receipt { margin-top: 18px; padding: 14px; border: 1px solid #b5dac5; border-radius: 10px; background: #f0faf4; }
 .cart-order-receipt p { margin: 0 0 7px; overflow-wrap: anywhere; }
 .cart-order-receipt p:last-child { margin-bottom: 0; }
-.cart-partkom-receipt { padding: 14px 0; border-top: 1px solid #b5dac5; }
-.cart-partkom-receipt:first-child { padding-top: 0; border-top: 0; }
-.cart-partkom-receipt:last-child { padding-bottom: 0; }
-.cart-partkom-receipt h4 { margin: 0 0 10px; overflow-wrap: anywhere; font-size: 15px; }
-.cart-partkom-receipt dl { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 7px 12px; margin: 0; font-size: 13px; }
-.cart-partkom-receipt dt { color: var(--muted); }
-.cart-partkom-receipt dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
-.cart-partkom-receipt__state { color: #b42318; font-weight: 700; }
+:is(.cart-partkom-receipt, .cart-forum-receipt) { padding: 14px 0; border-top: 1px solid #b5dac5; }
+:is(.cart-partkom-receipt, .cart-forum-receipt):first-child { padding-top: 0; border-top: 0; }
+:is(.cart-partkom-receipt, .cart-forum-receipt):last-child { padding-bottom: 0; }
+:is(.cart-partkom-receipt, .cart-forum-receipt) h4 { margin: 0 0 10px; overflow-wrap: anywhere; font-size: 15px; }
+:is(.cart-partkom-receipt, .cart-forum-receipt) dl { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 7px 12px; margin: 0; font-size: 13px; }
+:is(.cart-partkom-receipt, .cart-forum-receipt) dt { color: var(--muted); }
+:is(.cart-partkom-receipt, .cart-forum-receipt) dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+:is(.cart-partkom-receipt__state, .cart-forum-receipt__state) { color: #b42318; font-weight: 700; }
 .cart-order-status { margin: 16px 0 0; font-size: 14px; }
 .cart-order-status:empty { display: none; }
 .cart-order-status.is-success { color: #147548; }
@@ -217,7 +217,7 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-flying-icon { position: fixed; display: grid; place-items: center; width: 36px; height: 36px; z-index: 1600; pointer-events: none; border: 1px solid var(--accent); border-radius: 50%; background: #fff3ed; box-shadow: 0 4px 14px #ff4b0b30; }
 .cart-flying-icon img { width: 20px; height: 20px; }
 @media (max-width: 600px) {
-  .cart-partkom-receipt dl { grid-template-columns: minmax(100px, 120px) minmax(0, 1fr); }
+  :is(.cart-partkom-receipt, .cart-forum-receipt) dl { grid-template-columns: minmax(100px, 120px) minmax(0, 1fr); }
   .cart-modal .analogs-modal__header, .cart-tabs, .cart-content, .cart-footer { padding-right: 14px; padding-left: 14px; }
   .cart-footer__summary { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px; }
   .cart-footer > .btn { margin-left: auto; }
