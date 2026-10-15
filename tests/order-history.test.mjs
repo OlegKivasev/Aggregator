@@ -66,16 +66,18 @@ test("PartKOM history uses issued, cancelled and stock quantities before stale d
   assert.equal(item({ stateTxt: null, expectedDate: "2020-01-01" }).fulfillment, "unknown");
 });
 
-test("PartKOM supplier handoff remains processing and preserves the supplier description", () => {
+test("PartKOM accepted and supplier handoff stages are in transit and preserve the supplier description", () => {
   const row = { orderNumber: "FIXTURE-SUPPLIER", detailNum: "A1", quantity: 2 };
   const item = (fields) => parsePartKomOrderHistory([{ ...row, ...fields }]).orders[0].items[0];
-  for (const stateTxt of ["Заказ передан поставщику. Поставщик подтвердил наличие товара.",
-    "Заказан у поставщика (Доставка водителем)"]) {
-    assert.equal(item({ stateTxt }).fulfillment, "processing");
-    assert.equal(item({ stateTxt, releaseCount: 0, refusalCount: 0, storeCount: 0 }).fulfillment, "processing");
+  for (const stateTxt of ["Принят в работу", "Принят в работу (Доставка водителем)",
+    "Заказ передан поставщику. Поставщик подтвердил наличие товара.",
+    "Заказан у поставщика (Доставка водителем)", "Заказанный артикул в пути на склад ПартКом."]) {
+    assert.equal(item({ stateTxt }).fulfillment, "in_transit");
+    assert.equal(item({ stateTxt, releaseCount: 0, refusalCount: 0, storeCount: 0 }).fulfillment, "in_transit");
     assert.equal(item({ stateTxt }).status, stateTxt);
     assert.equal(item({ stateTxt, releaseCount: 2 }).fulfillment, "delivered");
     assert.equal(item({ stateTxt, refusalCount: 2 }).fulfillment, "cancelled");
+    assert.equal(item({ stateTxt, storeCount: 2 }).fulfillment, "ready");
   }
   assert.equal(item({ stateTxt: "Заказ не передан поставщику." }).fulfillment, "unknown");
 });
@@ -86,7 +88,7 @@ test("PartKOM state zero identifies accepted orders with no description without 
   const item = (fields = {}) => parsePartKomOrderHistory([{ ...row, ...fields }]).orders[0].items[0];
   for (const state of [0, "0"]) {
     for (const stateTxt of ["", "  ", null, undefined]) {
-      assert.equal(item({ state, stateTxt }).fulfillment, "processing");
+      assert.equal(item({ state, stateTxt }).fulfillment, "in_transit");
       assert.equal(item({ state, stateTxt }).status, "Принят в работу");
     }
   }

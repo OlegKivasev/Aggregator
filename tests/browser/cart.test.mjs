@@ -910,9 +910,10 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
     { ...row, orderNumber: "RECEIVED", releaseCount: 1, refusalCount: 0 },
     { ...row, orderNumber: "CANCELLED", refusalCount: 1 },
     { ...row, orderNumber: "MOVING", releaseCount: 0 },
-    { ...row, orderNumber: "PROCESSING", quantity: 2, releaseCount: 0, refusalCount: 0, storeCount: 0,
+    { ...row, orderNumber: "SUPPLIER", quantity: 2, releaseCount: 0, refusalCount: 0, storeCount: 0,
       stateTxt: "Заказ передан поставщику. Поставщик подтвердил наличие товара." },
     { ...row, orderNumber: "INITIAL", state: 0, stateTxt: "", releaseCount: 0, refusalCount: 0, storeCount: 0 },
+    { ...row, orderNumber: "INBOUND", stateTxt: "Заказанный артикул в пути на склад ПартКом." },
     { ...row, orderNumber: "READY", storeCount: 1 },
     { ...row, orderNumber: "PARTIAL", quantity: 2, releaseCount: 1, refusalCount: 1 },
     { ...row, orderNumber: "MIXED", releaseCount: 1 },
@@ -933,23 +934,34 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
     assert.match(await cancelled.locator(".history-card__states").innerText(), /Отменён/);
     assert.notEqual(await cancelled.locator(".history-status").first().evaluate((node) => getComputedStyle(node).color),
       await received.locator(".history-status").first().evaluate((node) => getComputedStyle(node).color));
-    assert.match(await page.locator('.history-card[data-fulfillment="in_transit"] .history-card__states').innerText(), /В пути/);
-    const processing = page.locator('.history-card[data-fulfillment="processing"]').filter({
-      has: page.locator("h3", { hasText: /^Заказ № PROCESSING$/ }),
+    assert.match(await page.locator('.history-card[data-fulfillment="in_transit"]').first().locator(".history-card__states").innerText(), /В пути/);
+    const supplierOrder = page.locator('.history-card[data-fulfillment="in_transit"]').filter({
+      has: page.locator("h3", { hasText: /^Заказ № SUPPLIER$/ }),
     });
-    assert.match(await processing.locator(".history-card__states").innerText(), /В обработке/);
-    assert.equal(await processing.locator(".history-item-status .history-status--processing").count(), 1);
-    assert.equal(await processing.locator(".history-status-detail").innerText(),
+    assert.match(await supplierOrder.locator(".history-card__states").innerText(), /В пути/);
+    assert.equal(await supplierOrder.locator(".history-item-status .history-status--in_transit").count(), 1);
+    assert.equal(await supplierOrder.locator(".history-status-detail").innerText(),
       "Заказ передан поставщику. Поставщик подтвердил наличие товара.");
-    assert.doesNotMatch(await processing.innerText(), /Статус не уточнён|В пути|Получен/);
+    assert.doesNotMatch(await supplierOrder.innerText(), /Статус не уточнён|В обработке|Получен/);
     const initial = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: /^Заказ № INITIAL$/ }) });
-    assert.equal(await initial.getAttribute("data-fulfillment"), "processing");
-    assert.match(await initial.locator(".history-card__states").innerText(), /В обработке/);
-    assert.equal(await initial.locator(".history-item-status .history-status--processing").count(), 1);
+    assert.equal(await initial.getAttribute("data-fulfillment"), "in_transit");
+    assert.match(await initial.locator(".history-card__states").innerText(), /В пути/);
+    assert.equal(await initial.locator(".history-item-status .history-status--in_transit").count(), 1);
     assert.equal(await initial.locator(".history-status-detail").innerText(), "Принят в работу");
-    assert.doesNotMatch(await initial.innerText(), /Статус не уточнён|В пути|Получен/);
+    assert.doesNotMatch(await initial.innerText(), /Статус не уточнён|В обработке|Получен/);
+    const inbound = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: /^Заказ № INBOUND$/ }) });
+    assert.equal(await inbound.getAttribute("data-fulfillment"), "in_transit");
+    assert.match(await inbound.locator(".history-card__states").innerText(), /В пути/);
     assert.match(await page.locator('.history-card[data-fulfillment="ready"] .history-card__states').innerText(), /На складе/);
-    assert.match(await page.locator('.history-card[data-fulfillment="partial"] .history-card__states').innerText(), /Частично выполнен/);
+    assert.match(await page.locator('.history-card[data-fulfillment="partial"] .history-card__states').innerText(), /Частичная поставка/);
+    const ready = page.locator('.history-card[data-fulfillment="ready"]');
+    const moving = page.locator('.history-card[data-fulfillment="in_transit"]').first();
+    assert.equal(await ready.evaluate((node) => getComputedStyle(node).borderLeftColor), "rgb(40, 116, 187)");
+    assert.equal(await ready.locator(".history-status").first().evaluate((node) => getComputedStyle(node).color), "rgb(27, 95, 159)");
+    assert.equal(await ready.evaluate((node) => getComputedStyle(node).borderLeftColor),
+      await moving.evaluate((node) => getComputedStyle(node).borderLeftColor));
+    assert.equal(await ready.locator(".history-status").first().evaluate((node) => getComputedStyle(node).color),
+      await moving.locator(".history-status").first().evaluate((node) => getComputedStyle(node).color));
     assert.match(await page.locator('.history-card[data-fulfillment="unknown"] .history-card__states').innerText(), /Статус не уточнён/);
     const mixed = page.locator('.history-card[data-fulfillment="mixed"] .history-card__states');
     assert.equal(await mixed.locator(".history-status").count(), 2);
@@ -970,6 +982,72 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
   }, { partKomOrderHistory: async () => history, supplierOrderHistory: async (query) => ({ orders: [{ number: query.supplier,
     date: null, items: [{ article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 100,
       status: "Отгружено", fulfillment: "in_transit", expectedDate: null, guaranteedDate: null, warehouse: null }] }], limited: false }) });
+});
+
+test("history sorts every supplier by item priority and aligns columns across different card contents", async () => {
+  const order = (number, states, date = "2026-10-15 12:30:00", fields = {}) => ({ number, date,
+    items: states.map((fulfillment) => ({ article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 2, price: 343,
+      status: null, fulfillment, expectedDate: "2026-10-20", guaranteedDate: null, warehouse: null, ...fields })) });
+  const history = { orders: [
+    order("RECEIVED", ["delivered"]),
+    order("CANCELLED-MIXED", ["delivered", "cancelled"]),
+    order("PARTIAL-MIXED", ["cancelled", "partial"]),
+    order("MOVING-MIXED", ["partial", "in_transit"], "2026-10-13 12:30:00"),
+    order("READY", ["ready"], "2026-10-14 12:30:00"),
+    order("PROCESSING-OLD", ["processing"], "2026-10-11 12:30:00"),
+    order("PROCESSING-MIXED", ["cancelled", "processing"], "2026-10-12 12:30:00", {
+      title: "Тестовая деталь с длинным описанием для проверки переноса строк в колонке запчасти".repeat(3),
+      status: "Подробный статус поставщика с дополнительным пояснением", warehouse: "Тестовый склад выдачи",
+      guaranteedDate: "2026-10-22", price: 123456.78,
+    }),
+    order("PROCESSING-NEW", ["processing"]),
+    order("UNPRICED", ["in_transit"], null, { price: null }),
+    order("RETURNED", ["returned"]), order("ATTENTION", ["attention"]), order("UNKNOWN", ["unknown"]),
+  ], limited: false };
+  const expected = ["PROCESSING-NEW", "PROCESSING-MIXED", "PROCESSING-OLD", "READY", "MOVING-MIXED", "UNPRICED",
+    "PARTIAL-MIXED", "CANCELLED-MIXED", "RECEIVED", "RETURNED", "ATTENTION", "UNKNOWN"].map((number) => `Заказ № ${number}`);
+  const alignedColumns = async (page) => {
+    const cards = await page.locator(".history-card").evaluateAll((nodes) => nodes.map((node) => {
+      const rect = (element) => { const { x, width } = element.getBoundingClientRect(); return { x, width }; };
+      return { columns: [...node.querySelectorAll("thead th")].map(rect),
+        cells: [...node.querySelectorAll("tbody tr")].map((row) => [...row.children].map(rect)),
+        ordered: rect(node.querySelector(".history-card__ordered")), quantity: rect(node.querySelector(".history-card__quantity")),
+        overflows: node.scrollWidth > node.clientWidth,
+        tableOverflows: node.querySelector("table").scrollWidth > node.querySelector("table").clientWidth };
+    }));
+    for (const card of cards) {
+      for (const [index, column] of card.columns.entries()) {
+        assert.ok(Math.abs(column.x - cards[0].columns[index].x) < 1);
+        assert.ok(Math.abs(column.width - cards[0].columns[index].width) < 1);
+        for (const cells of card.cells) assert.ok(Math.abs(cells[index].x - column.x) < 1);
+      }
+      assert.ok(Math.abs(card.ordered.x - cards[0].ordered.x) < 1);
+      assert.ok(Math.abs(card.quantity.x - cards[0].quantity.x) < 1);
+      assert.equal(card.overflows, false);
+      assert.equal(card.tableOverflows, false);
+    }
+  };
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    for (const supplier of ["part-kom", "armtek", "forum-auto", "rossko"]) {
+      if (supplier !== "part-kom") await page.locator(`#history-tab-${supplier}`).click();
+      await page.locator(".history-card").first().waitFor();
+      assert.deepEqual(await page.locator(".history-card h3").allTextContents(), expected);
+      const mixed = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: "CANCELLED-MIXED" }) });
+      assert.match(await mixed.locator(".history-card__states").innerText(), /Отменён.*Получен/s);
+      await alignedColumns(page);
+    }
+    if (process.env.HISTORY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.HISTORY_SCREENSHOT_DIR, "history-desktop.png") });
+    await page.locator("#history-reload").click();
+    await page.locator(".history-card").first().waitFor();
+    assert.deepEqual(await page.locator(".history-card h3").allTextContents(), expected);
+    for (const width of [800, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await alignedColumns(page);
+      assert.equal(await page.locator("#history-modal").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+      if (process.env.HISTORY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.HISTORY_SCREENSHOT_DIR, `history-${width}.png`) });
+    }
+  }, { partKomOrderHistory: async () => history, supplierOrderHistory: async () => history });
 });
 
 test("Rossko completed order uses green received badges and handed-to-customer details, while mixed orders remain mixed", async () => {

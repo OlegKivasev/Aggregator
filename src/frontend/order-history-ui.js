@@ -5,10 +5,18 @@ const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB
 const fulfillmentLabels = new Map([
   ["processing", ["В обработке", "◷"]], ["in_transit", ["В пути", "→"]],
   ["ready", ["На складе", "▣"]], ["delivered", ["Получен", "✓"]],
-  ["cancelled", ["Отменён", "×"]], ["partial", ["Частично выполнен", "◐"]],
+  ["cancelled", ["Отменён", "×"]], ["partial", ["Частичная поставка", "◐"]],
   ["returned", ["Возвращён", "↶"]], ["attention", ["Требует внимания", "!"]],
   ["unknown", ["Статус не уточнён", "?"]],
 ]);
+const fulfillmentPriority = new Map([
+  ["processing", 0], ["in_transit", 1], ["ready", 1], ["partial", 2],
+  ["cancelled", 3], ["delivered", 4], ["returned", 5], ["attention", 6], ["unknown", 7],
+]);
+
+function orderPriority(order) {
+  return order.items.reduce((priority, item) => Math.min(priority, fulfillmentPriority.get(item.fulfillment)), Infinity);
+}
 
 function element(tag, className, value) {
   const node = document.createElement(tag);
@@ -35,8 +43,8 @@ function validHistory(value) {
           .every((field) => field === null || typeof field === "string")));
 }
 
-function appendMeta(parent, label, value) {
-  const meta = element("div", "history-card__meta");
+function appendMeta(parent, name, label, value) {
+  const meta = element("div", `history-card__meta history-card__${name}`);
   meta.append(element("span", "", label), element("strong", "", value));
   parent.append(meta);
 }
@@ -53,18 +61,20 @@ function fulfillmentBadge(fulfillment, count) {
 function renderOrder(order, limited, supplierName) {
   const card = element("article", "history-card");
   const header = element("header", "history-card__header");
-  const heading = element("div");
+  const heading = element("div", "history-card__identity");
   heading.append(element("small", "", supplierName), element("h3", "", `Заказ № ${order.number}`));
   const states = new Map();
   for (const item of order.items) states.set(item.fulfillment, (states.get(item.fulfillment) ?? 0) + 1);
   card.dataset.fulfillment = states.size === 1 ? states.keys().next().value : "mixed";
   const summary = element("div", "history-card__states");
   summary.setAttribute("aria-label", limited ? "Состояние показанных позиций" : "Состояние позиций заказа");
-  for (const [state, count] of states) summary.append(fulfillmentBadge(state, states.size > 1 ? count : undefined));
+  for (const [state, count] of [...states].sort(([a], [b]) => fulfillmentPriority.get(a) - fulfillmentPriority.get(b))) {
+    summary.append(fulfillmentBadge(state, states.size > 1 ? count : undefined));
+  }
   heading.append(summary);
   header.append(heading);
-  appendMeta(header, "Заказано", formatDate(order.date));
-  appendMeta(header, limited ? "Показано позиций / штук" : "Позиций / штук", `${order.items.length} / ${order.items.reduce((sum, item) => sum + item.quantity, 0)}`);
+  appendMeta(header, "ordered", "Заказано", formatDate(order.date));
+  appendMeta(header, "quantity", limited ? "Показано позиций / штук" : "Позиций / штук", `${order.items.length} / ${order.items.reduce((sum, item) => sum + item.quantity, 0)}`);
   const total = order.items.every((item) => item.price !== null)
     ? order.items.reduce((sum, item) => sum + item.price * item.quantity, 0) : null;
   if (!limited && total !== null && Number.isFinite(total)) header.append(element("strong", "history-card__total", money.format(total)));
@@ -72,9 +82,15 @@ function renderOrder(order, limited, supplierName) {
 
   const wrap = element("div", "history-card__table-wrap");
   const table = element("table");
+  const columns = element("colgroup");
+  for (const name of ["part", "delivery", "status", "price", "sum"]) columns.append(element("col", `history-column--${name}`));
   const thead = element("thead");
   const headRow = element("tr");
-  for (const title of ["Запчасть", "Доставка", "Статус", "Цена × кол-во", "Сумма"]) headRow.append(element("th", "", title));
+  for (const [index, title] of ["Запчасть", "Доставка", "Статус", "Цена × кол-во", "Сумма"].entries()) {
+    const th = element("th", index >= 3 ? "history-number" : "", title);
+    th.scope = "col";
+    headRow.append(th);
+  }
   thead.append(headRow);
   const tbody = element("tbody");
   for (const item of order.items) {
@@ -92,12 +108,13 @@ function renderOrder(order, limited, supplierName) {
     const status = element("td", "history-item-status");
     status.append(fulfillmentBadge(item.fulfillment));
     if (item.status) status.append(element("span", "history-status-detail", item.status));
-    const price = element("td", "history-number", item.price === null ? `— × ${item.quantity} шт.` : `${money.format(item.price)} × ${item.quantity} шт.`);
+    const price = element("td", "history-number");
+    price.append(element("strong", "", item.price === null ? "—" : money.format(item.price)), element("span", "", `${item.quantity} шт.`));
     const sum = element("td", "history-number", item.price === null ? "—" : money.format(item.price * item.quantity));
     row.append(part, delivery, status, price, sum);
     tbody.append(row);
   }
-  table.append(thead, tbody);
+  table.append(columns, thead, tbody);
   wrap.append(table);
   card.append(wrap);
   return card;
@@ -171,7 +188,9 @@ export function bootstrapOrderHistory() {
       }
       const fragment = document.createDocumentFragment();
       if (payload.limited) fragment.append(element("p", "history-limit", `Показана ограниченная выборка заказов и позиций. Для полной истории используйте кабинет ${name}.`));
-      for (const order of payload.orders) fragment.append(renderOrder(order, payload.limited, name));
+      const orders = [...payload.orders].sort((a, b) => orderPriority(a) - orderPriority(b)
+        || (b.date ?? "").localeCompare(a.date ?? ""));
+      for (const order of orders) fragment.append(renderOrder(order, payload.limited, name));
       results.replaceChildren(fragment);
     } catch (error) {
       if (!controller.signal.aborted && dialog.open) message(error.message || "Не удалось получить историю заказов.", true);
