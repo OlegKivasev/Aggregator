@@ -223,9 +223,9 @@ test("successful PartKOM checkout displays the confirmed order motion without a 
     assert.equal(await receipt.count(), 1);
     assert.match(await receipt.textContent(), /fixture-part-kom/);
     assert.match(await receipt.textContent(), /Принят в работу/);
-    assert.equal(await receipt.locator("dt", { hasText: "Дата заказа" }).evaluate((node) => node.nextElementSibling.textContent), "15-10-26 12:33");
-    assert.equal(await receipt.locator("dt", { hasText: "Ожидаемый срок" }).evaluate((node) => node.nextElementSibling.textContent), "18-10-26 02:41");
-    assert.equal(await receipt.locator("dt", { hasText: "Гарантированный срок" }).evaluate((node) => node.nextElementSibling.textContent), "21-10-26 07:01");
+    assert.equal(await receipt.locator("dt", { hasText: "Дата заказа" }).evaluate((node) => node.nextElementSibling.textContent), "15.10.2026 12:33");
+    assert.equal(await receipt.locator("dt", { hasText: "Ожидаемый срок" }).evaluate((node) => node.nextElementSibling.textContent), "18.10.2026 02:41");
+    assert.equal(await receipt.locator("dt", { hasText: "Гарантированный срок" }).evaluate((node) => node.nextElementSibling.textContent), "21.10.2026 07:01");
     assert.match(await receipt.textContent(), /120,00/);
     assert.equal(await receipt.locator("img").count(), 0);
     assert.equal(await page.evaluate(() => window.cartXss), undefined);
@@ -252,8 +252,8 @@ test("successful Forum Auto checkout displays the supplier order details", async
     assert.equal(await receipt.count(), 1);
     assert.match(await receipt.textContent(), /fixture-forum-auto/);
     assert.match(await receipt.textContent(), /Отправлен на бронирование/);
-    assert.equal(await receipt.locator("dt", { hasText: "Создан" }).evaluate((node) => node.nextElementSibling.textContent), "15-10-26 12:30");
-    assert.equal(await receipt.locator("dt", { hasText: "Доставка" }).evaluate((node) => node.nextElementSibling.textContent), "17-10-26 09:00");
+    assert.equal(await receipt.locator("dt", { hasText: "Создан" }).evaluate((node) => node.nextElementSibling.textContent), "15.10.2026 12:30");
+    assert.equal(await receipt.locator("dt", { hasText: "Доставка" }).evaluate((node) => node.nextElementSibling.textContent), "17.10.2026 09:00");
     assert.match(await receipt.textContent(), /Забронировано1/);
     assert.equal(await receipt.locator("img").count(), 0);
     assert.equal(await page.evaluate(() => window.cartXss), undefined);
@@ -279,8 +279,8 @@ for (const supplier of ["rossko", "armtek"]) {
       assert.equal(await receipt.count(), 1);
       assert.match(await receipt.textContent(), new RegExp(`fixture-${supplier}`));
       assert.match(await receipt.textContent(), /Создан|Комплектуется/);
-      assert.equal(await receipt.locator("dt", { hasText: "Создан" }).evaluate((node) => node.nextElementSibling.textContent), supplier === "rossko" ? "15-10-26 13:33" : "15-10-26 13:46");
-      assert.equal(await receipt.locator("dt", { hasText: "Срок доставки" }).evaluate((node) => node.nextElementSibling.textContent), "16-10-26");
+      assert.equal(await receipt.locator("dt", { hasText: "Создан" }).evaluate((node) => node.nextElementSibling.textContent), supplier === "rossko" ? "15.10.2026 13:33" : "15.10.2026 13:46");
+      assert.equal(await receipt.locator("dt", { hasText: "Срок доставки" }).evaluate((node) => node.nextElementSibling.textContent), "16.10.2026");
       assert.match(await receipt.textContent(), /120,00|100,00/);
       assert.equal(await receipt.locator("img").count(), 0);
       assert.equal(await page.evaluate(() => window.cartXss), undefined);
@@ -858,8 +858,8 @@ test("order history shows one PartKOM list and supplier tabs without rendering s
     await page.locator(".history-card").waitFor();
     assert.match(await page.locator(".history-card__header").innerText(), /Заказ № ORDER-1/);
     assert.match(await page.locator(".history-card").innerText(), /В работе/);
-    assert.equal(await page.locator(".history-card__ordered strong").innerText(), "15-10-26 12:30");
-    assert.equal(await page.locator(".history-card tbody td").nth(1).locator("strong").innerText(), "20-10-26");
+    assert.equal(await page.locator(".history-card__ordered strong").innerText(), "15.10.2026 12:30");
+    assert.equal(await page.locator(".history-card tbody td").nth(1).locator("strong").innerText(), "20.10.2026");
     assert.equal(await page.locator(".history-card img").count(), 0);
     assert.equal(await page.evaluate(() => window.historyXss), undefined);
     assert.equal(await page.locator("#history-archive, #history-current").count(), 0);
@@ -896,8 +896,8 @@ test("history supplier tabs show common filters without explanatory notes and qu
       assert.equal(await page.locator("#history-status, #history-toolbar [type=submit]").count(), 0);
       assert.equal(await page.locator("#history-scope, .history-limit").count(), 0);
       assert.match(await page.locator(".history-card").innerText(), new RegExp(`Заказ № ${supplier}-1`));
-      assert.equal(await page.locator(".history-card__ordered strong").innerText(), "15-10-26 12:30");
-      assert.equal(await page.locator(".history-card tbody td").nth(1).locator("strong").innerText(), "20-10-26");
+      assert.equal(await page.locator(".history-card__ordered strong").innerText(), "15.10.2026 12:30");
+      assert.equal(await page.locator(".history-card tbody td").nth(1).locator("strong").innerText(), "20.10.2026");
       assert.doesNotMatch(await page.locator(".history-card").innerText(), /Желаемая дата/);
       assert.equal(await page.locator(".history-card img").count(), 0);
       assert.equal(await page.evaluate(() => window.historyXss), undefined);

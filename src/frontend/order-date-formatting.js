@@ -8,5 +8,5 @@ export function formatOrderDate(value) {
   const timestamp = `${year}-${month}-${day}T${match[4] ?? "00"}:${match[5] ?? "00"}:${match[6] ?? "00"}`;
   const date = new Date(`${timestamp}Z`);
   if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 19) !== timestamp) return text;
-  return `${day}-${month}-${year.slice(-2)}${match[4] ? ` ${match[4]}:${match[5]}` : ""}`;
+  return `${day}.${month}.${year}${match[4] ? ` ${match[4]}:${match[5]}` : ""}`;
 }
