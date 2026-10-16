@@ -1,4 +1,4 @@
-export type OrderFulfillment = "processing" | "in_transit" | "ready" | "delivered" | "cancelled" | "partial" | "returned" | "unknown";
+export type OrderFulfillment = "processing" | "in_transit" | "ready" | "delivered" | "cancelled" | "partially_cancelled" | "partial" | "returned" | "unknown";
 
 export interface OrderHistoryItem {
   positionId?: string;

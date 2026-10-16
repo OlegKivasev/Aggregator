@@ -9,20 +9,21 @@ const fulfillmentLabels = new Map([
   ["processing", ["В обработке", "◷"]], ["in_transit", ["В пути", "→"]],
   ["ready", ["На складе", "▣"]], ["delivered", ["Получен", "✓"]],
   ["cancelled", ["Отменён", "×"]], ["partial", ["Частичная поставка", "◐"]],
+  ["partially_cancelled", ["Частично отменён", "×"]],
   ["returned", ["Возвращён", "↶"]],
   ["unknown", ["Статус не уточнён", "?"]],
 ]);
 const fulfillmentPriority = new Map([
   ["processing", 0], ["in_transit", 1], ["ready", 1], ["partial", 2],
-  ["cancelled", 3], ["delivered", 4], ["returned", 5], ["unknown", 6],
+  ["cancelled", 3], ["partially_cancelled", 3], ["delivered", 4], ["returned", 5], ["unknown", 6],
 ]);
 const statusGroups = new Map([
   ["", { label: "Все заказы", states: [] }],
   ["active", { label: "В работе", states: ["processing", "in_transit", "ready"] }],
   ["today", { label: "Придут сегодня", states: [] }],
   ["partial", { label: "Частичная поставка", states: ["partial"] }],
-  ["cancelled", { label: "Отменено", states: ["cancelled"] }],
-  ["delivered", { label: "Получено", states: ["delivered"] }],
+  ["cancelled", { label: "Отменено", states: ["cancelled", "partially_cancelled"] }],
+  ["delivered", { label: "Получено", states: ["delivered", "partially_cancelled"] }],
   ["returned", { label: "Возвращено", states: ["returned"] }],
 ]);
 
@@ -32,7 +33,7 @@ function orderMatchesFilters(order, values, today) {
   const states = statusGroups.get(values.status).states;
   if (states.length && !order.items.some((item) => states.includes(item.fulfillment))) return false;
   if (values.status === "today" && !order.items.some((item) => {
-    if (["delivered", "cancelled", "returned"].includes(item.fulfillment)) return false;
+    if (["delivered", "cancelled", "partially_cancelled", "returned"].includes(item.fulfillment)) return false;
     const date = /^(\d{4}-\d{2}-\d{2})(?:[ T](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)?$/.exec(item.expectedDate ?? "")?.[1];
     return date === today;
   })) return false;
@@ -118,7 +119,7 @@ function renderOrder(order, limited, supplierName, supplier) {
     part.append(element("strong", "", [item.brand, item.article].filter(Boolean).join(" ")));
     if (item.title) part.append(element("span", "", item.title));
     const delivery = element("td");
-    const active = !["delivered", "cancelled", "returned"].includes(item.fulfillment);
+    const active = !["delivered", "cancelled", "partially_cancelled", "returned"].includes(item.fulfillment);
     const highlightDelivery = active && hasPartKomWeekendDelivery(supplier, item.expectedDate, item.guaranteedDate);
     delivery.append(element("strong", highlightDelivery && item.expectedDate ? "delivery-date--warning" : "", formatOrderDate(item.expectedDate) ?? "Не указана"));
     if (item.guaranteedDate && item.guaranteedDate !== item.expectedDate) {

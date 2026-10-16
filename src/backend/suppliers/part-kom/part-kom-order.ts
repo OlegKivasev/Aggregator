@@ -83,7 +83,8 @@ function partKomHistoryStatus(row: PartKomHistoryMovement, quantity: number): Pi
   if (released !== null && released > 0 || refused !== null && refused > 0) {
     const details = [released ? `Выдано ${released} из ${quantity} шт.` : null,
       refused ? `Отменено ${refused} из ${quantity} шт.` : null, stored ? `На складе: ${stored} шт.` : null].filter(Boolean);
-    return { status: details.join("; "), fulfillment: "partial" };
+    const settled = released !== null && refused !== null && released + refused === quantity;
+    return { status: details.join("; "), fulfillment: settled ? "partially_cancelled" : "partial" };
   }
   if (stored === quantity) return { status: `На складе ${stored} из ${quantity} шт.`, fulfillment: "ready" };
   if (stored !== null && stored > 0) return { status: `На складе ${stored} из ${quantity} шт.`, fulfillment: "partial" };

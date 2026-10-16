@@ -1368,7 +1368,7 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
     { ...row, orderNumber: "INITIAL", state: 0, stateTxt: "", releaseCount: 0, refusalCount: 0, storeCount: 0 },
     { ...row, orderNumber: "INBOUND", stateTxt: "Заказанный артикул в пути на склад ПартКом." },
     { ...row, orderNumber: "READY", storeCount: 1 },
-    { ...row, orderNumber: "PARTIAL", quantity: 2, releaseCount: 1, refusalCount: 1 },
+    { ...row, orderNumber: "PARTIAL", quantity: 2, releaseCount: 1, refusalCount: 0 },
     { ...row, orderNumber: "MIXED", releaseCount: 1 },
     { ...row, orderNumber: "MIXED", detailNum: "B1", releaseCount: 0 },
     { ...row, orderNumber: "UNKNOWN", stateTxt: "Новый неизвестный статус", expectedDate: "2020-01-01" },
@@ -1435,6 +1435,50 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
   }, { fixedTime: "2026-10-15T12:00:00Z", partKomOrderHistory: async () => history, supplierOrderHistory: async (query) => ({ orders: [{ number: query.supplier,
     date: "2026-10-15", items: [{ article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 100,
       status: "Отгружено", fulfillment: "in_transit", expectedDate: null, guaranteedDate: null, warehouse: null }] }], limited: false }) });
+});
+
+test("PartKOM settled partial cancellations show cancellation badges, terminal filters and no delivery warning", async () => {
+  const cases = [[10, 4, 6], [4, 2, 2], [20, 17, 3]];
+  const history = parsePartKomOrderHistory([...cases, [10, 3, 6]].map(([quantity, releaseCount, refusalCount], index) => ({
+    orderNumber: `CANCELLATION-FIXTURE-${index + 1}`, detailNum: `A${index + 1}`, maker: "TEST", description: "Тестовая деталь",
+    quantity, releaseCount, refusalCount, price: 100, orderDate: "2026-10-16 12:30:00",
+    expectedDate: "2026-10-17 09:00:00", guaranteedDate: "2026-10-17 12:00:00",
+    stateTxt: "Заказ передан в службу доставки. Сопроводительные документы подготовлены.",
+  })));
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.waitForFunction(() => document.querySelectorAll('.history-card[data-fulfillment="partially_cancelled"]').length === 3);
+    const settled = page.locator('.history-card[data-fulfillment="partially_cancelled"]');
+    for (const [index, [quantity, released, refused]] of cases.entries()) {
+      const card = settled.nth(index);
+      assert.equal(await card.locator(".history-status--partially_cancelled").count(), 2);
+      assert.match(await card.locator(".history-card__states").innerText(), /Частично отменён/);
+      assert.equal(await card.locator(".history-status-detail").innerText(), `Выдано ${released} из ${quantity} шт.; Отменено ${refused} из ${quantity} шт.`);
+      assert.equal(await card.locator(".delivery-date--warning").count(), 0);
+      assert.equal(await card.evaluate((node) => getComputedStyle(node).borderLeftColor), "rgb(184, 60, 60)");
+      assert.doesNotMatch(await card.innerText(), /Частичная поставка|передан в службу доставки/);
+    }
+    assert.equal(await page.locator('.history-card[data-fulfillment="partial"]').count(), 1);
+    for (const status of ["cancelled", "delivered"]) {
+      await page.locator(`#history-status-${status}`).click();
+      assert.equal(await page.locator(".history-card").count(), 3);
+      assert.equal(await settled.count(), 3);
+    }
+    await page.locator("#history-status-partial").click();
+    assert.equal(await page.locator(".history-card").count(), 1);
+    assert.equal(await settled.count(), 0);
+    await page.locator("#history-status-today").click();
+    assert.equal(await page.locator(".history-card").count(), 1);
+    assert.equal(await settled.count(), 0);
+    await page.locator("#history-status-active").click();
+    assert.equal(await page.locator(".history-card").count(), 0);
+    await page.locator("#history-tab-all").click();
+    await page.waitForFunction(() => !document.querySelector(".history-loading") && document.querySelectorAll(".history-card").length === 4);
+    await page.locator("#history-status-cancelled").click();
+    assert.equal(await settled.count(), 3);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.locator("#history-modal").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+  }, { fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => history });
 });
 
 test("history sorts every supplier newest first regardless of item status and aligns columns across different card contents", async () => {

@@ -50,7 +50,7 @@ test("PartKOM history uses issued, cancelled and stock quantities before stale d
   assert.equal(item({ releaseCount: 2 }).status, "Выдано 2 из 2 шт.");
   assert.equal(item({ releaseCount: "2", refusalCount: "0" }).fulfillment, "delivered");
   assert.equal(item({ refusalCount: 2 }).fulfillment, "cancelled");
-  assert.equal(item({ releaseCount: 1, refusalCount: 1 }).fulfillment, "partial");
+  assert.equal(item({ releaseCount: 1, refusalCount: 1 }).fulfillment, "partially_cancelled");
   assert.equal(item({ releaseCount: 1, storeCount: 1 }).fulfillment, "partial");
   assert.match(item({ releaseCount: 1, storeCount: 1 }).status, /Выдано 1 из 2.*На складе: 1/);
   assert.equal(item({ storeCount: 2 }).fulfillment, "ready");
@@ -64,6 +64,28 @@ test("PartKOM history uses issued, cancelled and stock quantities before stale d
     ["На складе", "ready"], ["В работе", "processing"], ["Не выдан", "unknown"], ["Не отгружен", "unknown"],
     ["Статус не известен", "unknown"]]) assert.equal(item({ stateTxt }).fulfillment, fulfillment);
   assert.equal(item({ stateTxt: null, expectedDate: "2020-01-01" }).fulfillment, "unknown");
+});
+
+test("PartKOM distinguishes settled partial cancellations from quantities still awaiting fulfillment", () => {
+  const item = (quantity, releaseCount, refusalCount) => parsePartKomOrderHistory([{
+    orderNumber: "PARTIAL-CANCELLATION-FIXTURE", detailNum: "A1", quantity, releaseCount, refusalCount,
+    stateTxt: "Заказ передан в службу доставки. Сопроводительные документы подготовлены.",
+  }]).orders[0].items[0];
+  for (const [quantity, released, refused] of [[10, 4, 6], [4, 2, 2], [20, 17, 3]]) {
+    for (const stringify of [false, true]) {
+      const result = item(quantity, stringify ? String(released) : released, stringify ? String(refused) : refused);
+      assert.equal(result.fulfillment, "partially_cancelled");
+      assert.equal(result.status, `Выдано ${released} из ${quantity} шт.; Отменено ${refused} из ${quantity} шт.`);
+      assert.equal(result.quantity, quantity);
+    }
+  }
+  assert.equal(item(10, 3, 6).fulfillment, "partial");
+  assert.equal(item(10, 0, 6).fulfillment, "partial");
+  assert.equal(item(10, 4, 0).fulfillment, "partial");
+  assert.equal(item(10, 4, 7).fulfillment, "unknown");
+  for (const invalid of [undefined, null, true, -1, 6.5, "6 units", Infinity]) {
+    assert.equal(item(10, 4, invalid).fulfillment, "partial");
+  }
 });
 
 test("PartKOM accepted and supplier handoff stages are in transit and preserve the supplier description", () => {
