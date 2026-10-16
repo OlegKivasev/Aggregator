@@ -41,6 +41,9 @@ import { SqliteCartRepository } from "../purchasing/sqlite-cart-repository.ts";
 import type { TestOrder } from "../purchasing/purchase-offer.ts";
 import type { OrderHistory, SupplierOrderHistoryQuery } from "../purchasing/order-history-contract.ts";
 import { historyDate } from "../purchasing/order-history-values.ts";
+import { OrderCancellationService, CancellationInputError } from "../purchasing/order-cancellation-service.ts";
+import { SqliteOrderCancellationRepository } from "../purchasing/sqlite-order-cancellation-repository.ts";
+import type { OrderHistorySupplier } from "../purchasing/order-cancellation-contract.ts";
 
 export interface AggregatorApplication {
   testCartOrder?: TestOrder;
@@ -223,6 +226,7 @@ export function createAggregatorServer({
     if (!application.testCartOrder) throw new CartError("Тестовая проверка заказов не настроена.", 503);
     return application.testCartOrder(lines, signal);
   }, application.realCartOrder ?? null);
+  const cancellations = new OrderCancellationService(new SqliteOrderCancellationRepository(getGarageDatabasePath()));
 
   const server = createServer(async (request, response) => {
     if (!request.url) {
@@ -232,9 +236,28 @@ export function createAggregatorServer({
 
     const url = new URL(request.url, "http://127.0.0.1");
 
+    if (url.pathname === "/api/order-cancellations" || url.pathname === "/api/order-cancellations/seen") {
+      response.setHeader("Cache-Control", "no-store");
+      const expectedMethod = url.pathname.endsWith("/seen") ? "POST" : "GET";
+      if (request.method !== expectedMethod) { serveJson(response, 405, { message: "Method not allowed" }); return; }
+      if (url.search) { serveJson(response, 400, { message: "Неверный запрос уведомлений об отменах." }); return; }
+      try {
+        const result = expectedMethod === "GET" ? cancellations.unread() : cancellations.acknowledge(await readJsonBody(request));
+        if (!response.destroyed) serveJson(response, 200, result);
+      } catch (error) {
+        if (error instanceof RequestBodyError || error instanceof CancellationInputError) {
+          serveJson(response, error instanceof RequestBodyError ? error.statusCode : 400, { message: "Неверный запрос уведомлений об отменах." });
+        } else {
+          reportError({ operation: "order-cancellations", category: classifyOperationalError(error) });
+          serveJson(response, 500, { message: "Не удалось сохранить или прочитать уведомления об отменах." });
+        }
+      }
+      return;
+    }
+
     const historyMatch = /^\/api\/order-history\/(part-kom|armtek|forum-auto|rossko)$/.exec(url.pathname);
     if (historyMatch) {
-      const supplier = historyMatch[1];
+      const supplier = historyMatch[1] as OrderHistorySupplier;
       const name = ({ "part-kom": "PartKOM", armtek: "Armtek", "forum-auto": "Forum Auto", rossko: "Rossko" } as Record<string, string>)[supplier];
       response.setHeader("Cache-Control", "no-store");
       if (request.method !== "GET") {
@@ -270,7 +293,11 @@ export function createAggregatorServer({
           serveJson(response, 503, { message: `История заказов ${name} недоступна.` });
         } else {
           const history = await loadHistory(controller.signal);
-          if (!controller.signal.aborted) serveJson(response, 200, supplier === "armtek" ? cart.withArmtekReturnDays(history) : history);
+          if (!controller.signal.aborted) {
+            const result = supplier === "armtek" ? cart.withArmtekReturnDays(history) : history;
+            cancellations.observe(supplier, result);
+            serveJson(response, 200, result);
+          }
         }
       } catch (error) {
         if (!controller.signal.aborted) {
@@ -756,6 +783,6 @@ export function createAggregatorServer({
 
     serveJson(response, 405, { message: "Method not allowed" });
   });
-  server.once("close", () => { garage.close(); cart.close(); });
+  server.once("close", () => { garage.close(); cart.close(); cancellations.close(); });
   return server;
 }

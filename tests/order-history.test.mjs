@@ -82,6 +82,7 @@ test("PartKOM distinguishes settled partial cancellations from quantities still 
   }
   assert.equal(item(10, 3, 6).fulfillment, "partial");
   assert.equal(item(10, 3, 6).fulfillmentQuantities, undefined);
+  assert.equal(item(10, 3, 6).cancelledQuantity, 6);
   assert.equal(item(10, 0, 6).fulfillment, "partial");
   assert.equal(item(10, 4, 0).fulfillment, "partial");
   assert.equal(item(10, 4, 7).fulfillment, "unknown");
@@ -171,6 +172,7 @@ test("Armtek report v2 preserves original quantities and separates issued parts 
   }
   assert.equal(item({ Issued: "3" }).fulfillment, "partial");
   assert.equal(item({ Issued: "3" }).fulfillmentQuantities, undefined);
+  assert.equal(item({ Issued: "3" }).cancelledQuantity, 6);
   assert.equal(item({ Issued: undefined, KWMENG_R: "4" }).fulfillment, "partial");
   assert.equal(item({ Issued: "0", REJECTED: "10" }).fulfillment, "cancelled");
   assert.equal(item({ Issued: "5" }).fulfillment, "unknown");

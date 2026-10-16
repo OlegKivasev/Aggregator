@@ -66,7 +66,7 @@ interface PartKomHistoryMovement {
   storeCount?: unknown;
 }
 
-function partKomHistoryStatus(row: PartKomHistoryMovement, quantity: number): Pick<OrderHistoryItem, "status" | "fulfillment" | "fulfillmentQuantities"> {
+function partKomHistoryStatus(row: PartKomHistoryMovement, quantity: number): Pick<OrderHistoryItem, "status" | "fulfillment" | "fulfillmentQuantities" | "cancelledQuantity"> {
   const count = (value: unknown) => {
     const parsed = historyNumber(value);
     return parsed !== null && Number.isSafeInteger(parsed) && parsed <= quantity ? parsed : null;
@@ -85,6 +85,7 @@ function partKomHistoryStatus(row: PartKomHistoryMovement, quantity: number): Pi
       refused ? `Отменено ${refused} из ${quantity} шт.` : null, stored ? `На складе: ${stored} шт.` : null].filter(Boolean);
     const settled = released !== null && refused !== null && released + refused === quantity;
     return { status: details.join("; "), fulfillment: settled ? "partially_cancelled" : "partial",
+      ...(refused ? { cancelledQuantity: refused } : {}),
       ...(settled ? { fulfillmentQuantities: { delivered: released, cancelled: refused } } : {}) };
   }
   if (stored === quantity) return { status: `На складе ${stored} из ${quantity} шт.`, fulfillment: "ready" };

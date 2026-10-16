@@ -155,6 +155,20 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 #cart-summary { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
 .cart-tabs { display: flex; flex: 0 0 auto; gap: 6px; padding: 0 24px; border-bottom: 1px solid var(--line); overflow-x: auto; background: var(--surface); }
 .history-modal { min-height: min(520px, calc(100dvh - 32px)); }
+.history-modal [hidden] { display: none; }
+.history-cancellation-notice { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; padding: 14px 16px; border: 1px solid #ecc1c4; border-left: 4px solid #b83c3c; border-radius: 6px; color: #a12e35; background: #fff5f5; }
+.history-cancellation-notice strong { font-size: 15px; }
+.history-cancellation-notice p { max-width: 70ch; margin: 5px 0 0; font-size: 13px; line-height: 1.45; }
+.history-cancellation-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; }
+.history-cancellation-actions button { min-height: 38px; padding: 8px 12px; border: 1px solid #a12e35; border-radius: 6px; color: #a12e35; background: var(--surface); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.history-cancellation-actions button:hover { background: #fdebec; }
+.history-cancellation-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.history-cancellation-actions button:disabled { opacity: .6; cursor: default; }
+.history-card__identity .history-cancellation-time { margin-top: 8px; }
+@media (max-width: 900px) {
+  .history-cancellation-notice { align-items: stretch; flex-direction: column; }
+  .history-cancellation-actions { flex: 0 1 auto; }
+}
 #history-tabs { flex-wrap: wrap; }
 .history-status-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
 .history-status-tab { --tab-ink: #536274; --tab-bg: #edf1f5; min-height: 36px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--surface); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }

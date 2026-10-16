@@ -19,7 +19,7 @@ interface ArmtekHistoryMovement {
   REJ_MENGE?: unknown;
 }
 
-function armtekHistoryStatus(row: ArmtekHistoryMovement, quantity: number): Pick<OrderHistoryItem, "status" | "fulfillment" | "fulfillmentQuantities"> {
+function armtekHistoryStatus(row: ArmtekHistoryMovement, quantity: number): Pick<OrderHistoryItem, "status" | "fulfillment" | "fulfillmentQuantities" | "cancelledQuantity"> {
   const count = (value: unknown) => {
     const parsed = historyNumber(value);
     return parsed !== null && parsed <= quantity ? parsed : null;
@@ -43,6 +43,7 @@ function armtekHistoryStatus(row: ArmtekHistoryMovement, quantity: number): Pick
       cancelled ? `Отменено ${cancelled} из ${quantity} шт.` : null].filter(Boolean);
     const settled = issued !== null && cancelled !== null && issued + cancelled === quantity;
     return { status: details.join("; "), fulfillment: settled ? "partially_cancelled" : "partial",
+      ...(cancelled ? { cancelledQuantity: cancelled } : {}),
       ...(settled ? { fulfillmentQuantities: { delivered: issued, cancelled } } : {}) };
   }
   const text = historyText(row.STATUS)?.toLocaleLowerCase().replaceAll("ё", "е");

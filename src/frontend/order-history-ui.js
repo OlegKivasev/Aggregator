@@ -5,6 +5,7 @@ const suppliers = [
   ["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"],
 ];
 const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
+const cancellationDate = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const fulfillmentLabels = new Map([
   ["processing", ["В обработке", "◷"]], ["in_transit", ["В пути", "→"]],
   ["ready", ["На складе", "▣"]], ["delivered", ["Получен", "✓"]],
@@ -58,6 +59,8 @@ function validHistory(value) {
       && order.items.every((item) => item && typeof item.article === "string" && Number.isFinite(item.quantity)
         && fulfillmentLabels.has(item.fulfillment)
         && item.quantity > 0 && item.quantity <= Number.MAX_SAFE_INTEGER
+        && (item.cancelledQuantity === undefined || Number.isFinite(item.cancelledQuantity)
+          && item.cancelledQuantity >= 0 && item.cancelledQuantity <= item.quantity)
         && (item.fulfillmentQuantities === undefined || item.fulfillment === "partially_cancelled"
           && item.fulfillmentQuantities && typeof item.fulfillmentQuantities === "object" && !Array.isArray(item.fulfillmentQuantities)
           && Number.isFinite(item.fulfillmentQuantities.delivered) && item.fulfillmentQuantities.delivered > 0
@@ -66,6 +69,17 @@ function validHistory(value) {
         && (item.price === null || Number.isFinite(item.price) && item.price >= 0 && item.price <= Number.MAX_SAFE_INTEGER)
         && [item.brand, item.title, item.status, item.expectedDate, item.guaranteedDate, item.warehouse]
           .every((field) => field === null || typeof field === "string")));
+}
+
+function validCancellationPage(value) {
+  return value && typeof value === "object" && Number.isSafeInteger(value.total) && value.total >= 0
+    && Array.isArray(value.notices) && value.notices.length === Math.min(value.total, 100)
+    && new Set(value.notices.map((notice) => notice?.id)).size === value.notices.length
+    && value.notices.every((notice) => notice && typeof notice.id === "string"
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(notice.id) && Number.isSafeInteger(notice.revision) && notice.revision > 0
+      && suppliers.some(([id]) => id === notice.supplier) && typeof notice.detectedAt === "string"
+      && Number.isFinite(Date.parse(notice.detectedAt)) && validHistory({ orders: [notice.order], limited: false })
+      && notice.order.items.every((item) => item.fulfillment === "cancelled"));
 }
 
 function appendMeta(parent, name, label, value) {
@@ -175,6 +189,15 @@ export function bootstrapOrderHistory() {
     <button type="button" class="btn btn-light analogs-modal__close" id="history-close" aria-label="Закрыть историю заказов">×</button></header>
     <div class="cart-tabs" id="history-tabs" role="tablist" aria-label="Поставщики"></div>
     <div class="cart-content history-content">
+      <section class="history-cancellation-notice" id="history-cancellation-notice" aria-labelledby="history-cancellation-title" hidden>
+        <div aria-live="polite"><strong id="history-cancellation-title"></strong><p id="history-cancellation-description"></p></div>
+        <div class="history-cancellation-actions">
+          <button type="button" id="history-cancellation-view">Посмотреть</button>
+          <button type="button" id="history-cancellation-done" hidden>Просмотрено, к истории</button>
+          <button type="button" id="history-cancellation-back" hidden>К истории</button>
+          <button type="button" id="history-cancellation-retry" hidden>Повторить проверку</button>
+        </div>
+      </section>
       <div class="history-status-tabs" id="history-status-tabs" role="tablist" aria-label="Статус заказа"></div>
       <form class="history-toolbar" id="history-toolbar" aria-label="Фильтры заказов" novalidate>
       <div class="history-period" id="history-period">
@@ -202,6 +225,46 @@ export function bootstrapOrderHistory() {
   const filters = new Map([...defaults].map(([supplier, values]) => [supplier, { ...values }]));
   let selected = "part-kom";
   let histories = new Map();
+  let cancellationPage = { notices: [], total: 0 };
+  let cancellationController = null;
+  let cancellationEpoch = 0;
+  let cancellationRead = 0;
+  let cancellationMutation = 0;
+  let checkingCancellations = false;
+  let cancellationError = "";
+  let uncheckedSuppliers = [];
+  let cancellationReview = null;
+  let acknowledgingCancellations = false;
+  let acknowledgmentController = null;
+  const sharedHistoryRequests = new Map();
+  const cancellationNotice = dialog.querySelector("#history-cancellation-notice");
+  const cancellationView = dialog.querySelector("#history-cancellation-view");
+  const cancellationDone = dialog.querySelector("#history-cancellation-done");
+  const cancellationBack = dialog.querySelector("#history-cancellation-back");
+  const cancellationRetry = dialog.querySelector("#history-cancellation-retry");
+  const paintCancellations = () => {
+    cancellationNotice.hidden = !checkingCancellations && !cancellationPage.total && !cancellationError && !uncheckedSuppliers.length && !cancellationReview;
+    dialog.querySelector("#history-cancellation-title").textContent = cancellationPage.total
+      ? `Новые отмены: ${cancellationPage.total}` : checkingCancellations ? "Проверяем отмены" : cancellationReview ? "Новые отмены" : "Не удалось проверить все отмены";
+    const details = [];
+    if (checkingCancellations) details.push("Проверяем историю всех поставщиков…");
+    if (cancellationError) details.push(cancellationError);
+    if (uncheckedSuppliers.length) details.push(`Не удалось проверить: ${uncheckedSuppliers.join(", ")}.`);
+    if (cancellationReview && cancellationPage.total > cancellationReview.length) {
+      details.push(`Показано ${cancellationReview.length} из ${cancellationPage.total}. Следующие отмены останутся непросмотренными.`);
+    }
+    if (!details.length && cancellationPage.total) details.push("Проверьте отменённые позиции и отметьте их просмотренными.");
+    dialog.querySelector("#history-cancellation-description").textContent = details.join(" ");
+    cancellationView.hidden = Boolean(cancellationReview) || !cancellationPage.notices.length;
+    cancellationDone.hidden = !cancellationReview;
+    cancellationBack.hidden = !cancellationReview;
+    cancellationRetry.hidden = !cancellationError && !uncheckedSuppliers.length;
+    cancellationRetry.disabled = checkingCancellations || acknowledgingCancellations;
+    cancellationDone.disabled = cancellationBack.disabled = acknowledgingCancellations;
+    cancellationDone.textContent = acknowledgingCancellations ? "Сохраняем…" : "Просмотрено, к истории";
+    tabs.hidden = statusTabs.hidden = dialog.querySelector("#history-toolbar").hidden = Boolean(cancellationReview);
+    dialog.querySelector("#history-title").textContent = cancellationReview ? "Новые отмены заказов" : "История заказов";
+  };
   const saveFilters = () => {
     const values = filters.get(selected);
     filters.set(selected, { ...values, from: from.value, to: to.value });
@@ -235,6 +298,24 @@ export function bootstrapOrderHistory() {
   };
   const render = () => {
     if (!dialog.open) return;
+    paintCancellations();
+    if (cancellationReview) {
+      const fragment = document.createDocumentFragment();
+      for (const notice of cancellationReview) {
+        const name = suppliers.find(([id]) => id === notice.supplier)[1];
+        const card = renderOrder(notice.order, false, name, notice.supplier);
+        card.dataset.cancellationId = notice.id;
+        card.querySelector(".history-card__quantity > span").textContent = "Отменено позиций / штук";
+        const total = card.querySelector(".history-card__total");
+        if (total) total.title = "Сумма отменённых позиций";
+        card.querySelector(".history-card__identity").append(element("small", "history-cancellation-time", `Обнаружено: ${cancellationDate.format(new Date(notice.detectedAt))}`));
+        fragment.append(card);
+      }
+      results.setAttribute("aria-labelledby", "history-title");
+      results.replaceChildren(fragment);
+      return;
+    }
+    results.setAttribute("aria-labelledby", `history-tab-${selected} history-status-${filters.get(selected).status || "all"}`);
     const error = filterError();
     if (error) { message(error, true); return; }
     const values = filters.get(selected);
@@ -264,8 +345,55 @@ export function bootstrapOrderHistory() {
     }
     results.replaceChildren(fragment);
   };
+  const fetchHistory = async (supplier, params, signal) => {
+    const response = await fetch(`/api/order-history/${supplier}${params.size ? `?${params}` : ""}`, { signal });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось получить историю заказов.");
+    if (!validHistory(payload)) throw new Error(`${suppliers.find(([id]) => id === supplier)[1]} вернул некорректную историю заказов.`);
+    return payload;
+  };
+  const readCancellations = async (signal) => {
+    const epoch = cancellationEpoch;
+    const read = ++cancellationRead;
+    const mutation = cancellationMutation;
+    try {
+      const response = await fetch("/api/order-cancellations", { signal });
+      const page = await response.json();
+      if (!response.ok || !validCancellationPage(page)) throw new Error("Не удалось загрузить уведомления об отменах.");
+      if (signal.aborted || !dialog.open || epoch !== cancellationEpoch || read !== cancellationRead || mutation !== cancellationMutation || acknowledgingCancellations) return;
+      cancellationPage = page;
+      cancellationError = "";
+    } catch {
+      if (signal.aborted || !dialog.open || epoch !== cancellationEpoch || read !== cancellationRead || mutation !== cancellationMutation) return;
+      cancellationError = "Не удалось загрузить уведомления об отменах. Повторите проверку.";
+    }
+    if (dialog.open) paintCancellations();
+  };
+  const scanCancellations = () => {
+    cancellationController?.abort();
+    cancellationController = new AbortController();
+    const { signal } = cancellationController;
+    const epoch = ++cancellationEpoch;
+    checkingCancellations = true;
+    uncheckedSuppliers = [];
+    sharedHistoryRequests.clear();
+    void readCancellations(signal);
+    const loads = suppliers.map(([supplier, name]) => {
+      const params = new URLSearchParams(supplier === "armtek" ? defaultPeriod() : {});
+      const promise = fetchHistory(supplier, params, signal);
+      sharedHistoryRequests.set(`${supplier}?${params}`, promise);
+      return promise.then(() => null, () => name);
+    });
+    void Promise.all(loads).then(async (failures) => {
+      if (signal.aborted || epoch !== cancellationEpoch || !dialog.open) return;
+      uncheckedSuppliers = failures.filter(Boolean);
+      checkingCancellations = false;
+      await readCancellations(signal);
+      if (!signal.aborted && epoch === cancellationEpoch && dialog.open) paintCancellations();
+    });
+    paintCancellations();
+  };
   const requestSource = async (supplier, force = false) => {
-    const name = suppliers.find(([id]) => id === supplier)[1];
     const params = new URLSearchParams();
     let queryError = null;
     if (supplier === "armtek") {
@@ -289,12 +417,10 @@ export function bootstrapOrderHistory() {
     render();
     if (queryError) return;
     try {
-      const response = await fetch(`/api/order-history/${supplier}${params.size ? `?${params}` : ""}`, { signal: controller.signal });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось получить историю заказов.");
-      if (!validHistory(payload)) throw new Error(`${name} вернул некорректную историю заказов.`);
+      const payload = await (sharedHistoryRequests.get(`${supplier}?${params}`) ?? fetchHistory(supplier, params, controller.signal));
       if (controller.signal.aborted || histories.get(supplier) !== history || !dialog.open) return;
       history.payload = payload;
+      if (!checkingCancellations && cancellationController) void readCancellations(cancellationController.signal);
     } catch (error) {
       if (!controller.signal.aborted) history.error = error.message || "Не удалось получить историю заказов.";
     } finally {
@@ -342,12 +468,55 @@ export function bootstrapOrderHistory() {
     button.addEventListener("click", () => { filters.get(selected).status = id; updateControls(); render(); });
     statusTabs.append(button);
   }
-  toggle.addEventListener("click", () => { showFilters(); document.body.append(dialog); dialog.showModal(); load(); });
+  toggle.addEventListener("click", () => {
+    cancellationReview = null;
+    showFilters(); document.body.append(dialog); dialog.showModal();
+    scanCancellations(); load(); sharedHistoryRequests.clear();
+  });
   dialog.querySelector("#history-close").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("close", () => { abortLoads(); histories.clear(); dialog.remove(); toggle.focus(); });
+  dialog.addEventListener("close", () => {
+    abortLoads(); cancellationController?.abort(); acknowledgmentController?.abort();
+    cancellationEpoch++; cancellationRead++;
+    histories.clear(); sharedHistoryRequests.clear(); dialog.remove(); toggle.focus();
+  });
   dialog.querySelector("#history-toolbar").addEventListener("submit", (event) => { event.preventDefault(); applyFilters(); });
   for (const input of [from, to]) input.addEventListener("change", applyFilters);
-  dialog.querySelector("#history-reload").addEventListener("click", load);
+  dialog.querySelector("#history-reload").addEventListener("click", () => { scanCancellations(); load(); sharedHistoryRequests.clear(); });
+  cancellationRetry.addEventListener("click", () => { scanCancellations(); sharedHistoryRequests.clear(); });
+  cancellationView.addEventListener("click", () => {
+    cancellationReview = cancellationPage.notices.slice();
+    render(); cancellationDone.focus();
+  });
+  cancellationBack.addEventListener("click", () => { cancellationReview = null; render(); cancellationView.focus(); });
+  cancellationDone.addEventListener("click", async () => {
+    if (acknowledgingCancellations || !cancellationReview?.length) return;
+    acknowledgmentController = new AbortController();
+    const { signal } = acknowledgmentController;
+    const epoch = cancellationEpoch;
+    acknowledgingCancellations = true;
+    cancellationMutation++;
+    paintCancellations();
+    try {
+      const response = await fetch("/api/order-cancellations/seen", { method: "POST", signal, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notices: cancellationReview.map(({ id, revision }) => ({ id, revision })) }) });
+      const page = await response.json();
+      if (!response.ok || !validCancellationPage(page)) throw new Error("Не удалось сохранить просмотр отмен.");
+      if (signal.aborted || epoch !== cancellationEpoch || !dialog.open) return;
+      cancellationPage = page;
+      cancellationError = "";
+      cancellationReview = null;
+    } catch {
+      if (!signal.aborted && epoch === cancellationEpoch && dialog.open) cancellationError = "Не удалось сохранить просмотр отмен. Повторите попытку.";
+    } finally {
+      acknowledgingCancellations = false;
+      cancellationMutation++;
+      if (!signal.aborted && epoch === cancellationEpoch && dialog.open) {
+        render();
+        if (cancellationReview) cancellationDone.focus(); else dialog.querySelector("#history-close").focus();
+        if (!cancellationReview && cancellationController) void readCancellations(cancellationController.signal);
+      }
+    }
+  });
   reset.addEventListener("click", () => {
     const values = defaultFilters(selected);
     defaults.set(selected, values);

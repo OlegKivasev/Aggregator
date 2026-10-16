@@ -9,6 +9,7 @@ import { attachPurchaseReference } from "../../src/backend/purchasing/purchase-o
 import { formatDeliveryDate } from "../../src/frontend/supplier-search-summary.js";
 import { testPurchaseOrder } from "../../src/backend/application/test-order-application-service.ts";
 import { CartError } from "../../src/backend/purchasing/cart-application-service.ts";
+import { SupplierAuthError } from "../../src/backend/errors.ts";
 import { parsePartKomOrderHistory } from "../../src/backend/suppliers/part-kom/part-kom-order.ts";
 import { parseArmtekOrderHistory } from "../../src/backend/suppliers/armtek/armtek-order.ts";
 import { parseRosskoOrderHistory } from "../../src/backend/suppliers/rossko/rossko-api-adapter.ts";
@@ -1085,8 +1086,9 @@ test("history filters all suppliers by inclusive order dates and any item status
       await shown(["END", "START-MIXED"]);
       assert.equal(await page.locator(".history-card").filter({ has: page.locator("h3", { hasText: "START-MIXED" }) }).locator("tbody tr").count(), 3);
       assert.equal(await page.locator(".history-card__total").count(), 0);
-      if (supplier === "armtek") assert.deepEqual(calls.at(-1), { supplier, from: "2026-10-15", to: "2026-10-16" });
-      else assert.deepEqual(calls.at(-1), { supplier });
+      const supplierCall = calls.findLast((call) => call.supplier === supplier);
+      if (supplier === "armtek") assert.deepEqual(supplierCall, { supplier, from: "2026-10-15", to: "2026-10-16" });
+      else assert.deepEqual(supplierCall, { supplier });
       const beforeStatus = calls.length;
       await page.locator("#history-status-active").click();
       await shown(["READY", "START-MIXED", "TRANSIT"]);
@@ -1560,6 +1562,155 @@ test("history rejects malformed receipt and cancellation quantities instead of i
   }, { partKomOrderHistory: async () => ({ orders: [{ number: "INVALID-SPLIT", date: "2026-10-16", items: [{ article: "A1",
     brand: "TEST", title: "Тестовая деталь", quantity: 2, price: 100, status: null, fulfillment: "partially_cancelled",
     fulfillmentQuantities: quantities, expectedDate: null, guaranteedDate: null, warehouse: null }] }], limited: false }) });
+});
+
+test("new cancellations share one history form across suppliers and stay unread until confirmed, including across browsers", async () => {
+  let refused = 2;
+  const partKomHistory = () => parsePartKomOrderHistory([{ orderNumber: "NEW-PARTKOM", orderDate: "2026-10-16 12:00:00",
+    detailNum: "A1", maker: "TEST", description: "Тестовая частичная отмена", quantity: 10, price: 100, releaseCount: 3, refusalCount: refused }]);
+  const supplierHistory = (supplier) => ({ limited: false, orders: [{ number: `NEW-${supplier}`, date: "2026-10-16", items: [{
+    article: "B1", brand: "TEST", title: "Тестовая отмена <img src=x onerror=window.noticeXss=1>", quantity: 10, price: 100,
+    status: "Отмена", fulfillment: supplier === "armtek" ? "partially_cancelled" : "cancelled",
+    ...(supplier === "armtek" ? { fulfillmentQuantities: { delivered: 4, cancelled: 6 } } : {}),
+    expectedDate: null, guaranteedDate: null, warehouse: null }, ...(supplier === "rossko" ? [{ article: "RETURNED", brand: "TEST",
+      title: "Возврат", quantity: 1, price: 100, status: null, fulfillment: "returned", expectedDate: null, guaranteedDate: null, warehouse: null }] : [])] }] });
+  await withCartPage(async (page, { origin }) => {
+    const open = async () => {
+      await page.locator("#history-toggle").click();
+      await page.waitForFunction(() => document.querySelector("#history-cancellation-title")?.textContent === "Новые отмены: 4"
+        && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
+    };
+    await open();
+    assert.equal(await page.locator(".history-card").count(), 1);
+    await page.locator("#history-status-partial").click();
+    await page.locator("#history-cancellation-view").click();
+    assert.equal(await page.locator("dialog[open]").count(), 1);
+    assert.equal(await page.locator("#history-tabs").isVisible(), false);
+    assert.equal(await page.locator(".history-card").count(), 4);
+    assert.deepEqual((await page.locator(".history-card__identity > small:first-child").allTextContents()).sort(), ["Armtek", "Forum Auto", "PartKOM", "Rossko"]);
+    assert.equal(await page.locator(".history-card tbody tr").count(), 4);
+    assert.match(await page.locator(".history-cancellation-time").first().innerText(), /^Обнаружено: \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/);
+    const partKom = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: "Заказ № NEW-PARTKOM" }) });
+    assert.equal(await partKom.locator(".history-status-detail").innerText(), "Отменено 2 шт.");
+    assert.equal(await partKom.locator(".history-card__quantity > span").innerText(), "Отменено позиций / штук");
+    assert.equal(await partKom.locator(".history-card__total").innerText(), new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" }).format(200));
+    assert.equal(await page.locator(".history-card img").count(), 0);
+    assert.equal(await page.evaluate(() => window.noticeXss), undefined);
+    assert.doesNotMatch(await page.locator("#history-results").innerText(), /RETURNED|Получено|Получен|Частичная поставка/);
+    if (process.env.TEST_CAPTURE_DIR) await page.locator("#history-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "new-cancellations-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.locator("#history-modal").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+    if (process.env.TEST_CAPTURE_DIR) await page.locator("#history-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "new-cancellations-mobile.png") });
+    await page.locator("#history-cancellation-back").click();
+    assert.equal(await page.locator("#history-status-partial").getAttribute("aria-selected"), "true");
+    await page.locator("#history-close").click();
+    await page.reload();
+    await open();
+    await page.locator("#history-cancellation-view").click();
+    await page.keyboard.press("Escape");
+    await open();
+    await page.locator("#history-cancellation-view").click();
+    await page.locator("#history-cancellation-done").click();
+    await page.waitForFunction(() => document.querySelector("#history-title").textContent === "История заказов"
+      && document.querySelector("#history-cancellation-notice").hidden);
+    const other = await page.context().browser().newContext();
+    try {
+      const second = await other.newPage();
+      await second.clock.setFixedTime(new Date("2026-10-17T12:00:00Z"));
+      await second.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+      await second.goto(origin);
+      await second.locator("#history-toggle").click();
+      await second.waitForFunction(() => document.querySelector("#history-cancellation-notice").hidden);
+    } finally { await other.close(); }
+    refused = 3;
+    await page.locator("#history-reload").click();
+    await page.waitForFunction(() => document.querySelector("#history-cancellation-title").textContent === "Новые отмены: 1"
+      && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
+    await page.locator("#history-cancellation-view").click();
+    assert.equal(await page.locator(".history-card").count(), 1);
+    assert.equal(await page.locator(".history-status-detail").innerText(), "Отменено 3 шт.");
+  }, { allSuppliers: true, fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => partKomHistory(),
+    supplierOrderHistory: async ({ supplier }) => supplierHistory(supplier) });
+});
+
+test("acknowledging a cancellation view preserves a newer server revision discovered in another session", async () => {
+  let refused = 2;
+  await withCartPage(async (page, { origin }) => {
+    await page.locator("#history-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#history-cancellation-title").textContent === "Новые отмены: 1"
+      && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
+    await page.locator("#history-cancellation-view").click();
+    assert.equal(await page.locator(".history-status-detail").innerText(), "Отменено 2 шт.");
+    refused = 4;
+    await page.request.get(`${origin}/api/order-history/part-kom`);
+    await page.locator("#history-cancellation-done").click();
+    await page.waitForFunction(() => document.querySelector("#history-title").textContent === "История заказов"
+      && document.querySelector("#history-cancellation-title").textContent === "Новые отмены: 1");
+    await page.locator("#history-cancellation-view").click();
+    assert.equal(await page.locator(".history-status-detail").innerText(), "Отменено 4 шт.");
+  }, { fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => parsePartKomOrderHistory([{ orderNumber: "RACE",
+    orderDate: "2026-10-16", detailNum: "A1", quantity: 10, price: 100, refusalCount: refused, releaseCount: 0 }]) });
+});
+
+test("failed checks retain known cancellations and a failed acknowledgement remains visible without marking them read", async () => {
+  let failSupplier = false;
+  let failAcknowledgement = true;
+  const history = { limited: false, orders: [{ number: "SAVED", date: "2026-10-16", items: [{ article: "A1", brand: "TEST",
+    title: "Тестовая отмена", quantity: 1, price: 100, status: "Отменено", fulfillment: "cancelled",
+    expectedDate: null, guaranteedDate: null, warehouse: null }] }] };
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#history-cancellation-title").textContent === "Новые отмены: 1"
+      && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
+    await page.locator("#history-close").click();
+    failSupplier = true;
+    await page.locator("#history-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#history-cancellation-description").textContent.includes("Не удалось проверить: Armtek"));
+    await page.locator("#history-cancellation-view").click();
+    assert.equal(await page.locator(".history-card").count(), 1);
+    await page.route("**/api/order-cancellations/seen", (route) => failAcknowledgement
+      ? route.fulfill({ status: 500, json: { message: "Не удалось сохранить просмотр отмен." } }) : route.continue());
+    await page.locator("#history-cancellation-done").click();
+    await page.waitForFunction(() => document.querySelector("#history-cancellation-description").textContent.includes("Не удалось сохранить просмотр отмен"));
+    assert.equal(await page.locator("#history-title").innerText(), "Новые отмены заказов");
+    assert.equal(await page.locator("#history-cancellation-done").isEnabled(), true);
+    failSupplier = false;
+    await page.locator("#history-cancellation-retry").click();
+    await page.waitForFunction(() => !document.querySelector("#history-cancellation-description").textContent.includes("Не удалось проверить")
+      && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
+    failAcknowledgement = false;
+    await page.locator("#history-cancellation-done").click();
+    await page.waitForFunction(() => document.querySelector("#history-title").textContent === "История заказов"
+      && document.querySelector("#history-cancellation-notice").hidden);
+  }, { fixedTime: "2026-10-17T12:00:00Z", supplierOrderHistory: async ({ supplier }) => {
+    if (supplier !== "armtek") return { limited: false, orders: [] };
+    if (failSupplier) throw new SupplierAuthError();
+    return history;
+  } });
+});
+
+test("malformed cancellation notices do not replace ordinary history or allow acknowledging unrelated items", async () => {
+  let malformed = true;
+  const order = { number: "VALID-CANCELLATION", date: "2026-10-16", items: [{ article: "A1", brand: "TEST", title: "Тестовая отмена",
+    quantity: 1, price: 100, status: null, fulfillment: "cancelled", expectedDate: null, guaranteedDate: null, warehouse: null }] };
+  await withCartPage(async (page) => {
+    await page.route("**/api/order-cancellations", (route) => malformed ? route.fulfill({ json: { total: 1, notices: [{
+      id: "00000000-0000-0000-0000-000000000001", supplier: "part-kom", revision: 1, detectedAt: "2026-10-16T12:00:00Z",
+      order: { ...order, items: [{ ...order.items[0], fulfillment: "delivered" }] },
+    }] } }) : route.continue());
+    await page.locator("#history-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#history-cancellation-description").textContent.includes("Не удалось загрузить уведомления")
+      && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
+    assert.equal(await page.locator(".history-card h3").innerText(), "Заказ № VALID-CANCELLATION");
+    assert.equal(await page.locator("#history-cancellation-view").isVisible(), false);
+    assert.equal(await page.locator("#history-cancellation-done").isVisible(), false);
+    malformed = false;
+    await page.locator("#history-cancellation-retry").click();
+    await page.waitForFunction(() => document.querySelector("#history-cancellation-title").textContent === "Новые отмены: 1"
+      && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
+    await page.locator("#history-cancellation-view").click();
+    assert.equal(await page.locator(".history-status-detail").innerText(), "Отменено 1 шт.");
+  }, { fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => ({ orders: [order], limited: false }) });
 });
 
 test("history sorts every supplier newest first regardless of item status and aligns columns across different card contents", async () => {
