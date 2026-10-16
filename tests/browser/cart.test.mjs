@@ -352,11 +352,17 @@ test("PartKOM weekend delivery stays unchanged and shows an amber warning throug
     await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
     assert.match(await page.locator(".cart-partkom-receipt").innerText(), /17.10.2026/);
     assert.equal(await page.locator(".cart-partkom-receipt .delivery-date--warning").textContent(), "17.10.2026");
+    const guaranteedReceipt = page.locator(".cart-partkom-receipt dt", { hasText: "Гарантированный срок" });
+    assert.equal(await guaranteedReceipt.evaluate((node) => node.nextElementSibling.textContent), "17.10.2026 05:00");
+    assert.equal(await guaranteedReceipt.evaluate((node) => node.nextElementSibling.querySelector(".delivery-date--warning")), null);
     await page.locator("#cart-order-cancel").click();
     await page.locator("#cart-close").click();
     await page.locator("#history-toggle").click();
     await page.locator(".history-card").waitFor();
     assert.equal(await page.locator(".history-card .delivery-date--warning").textContent(), "17.10.2026");
+    const guaranteedHistory = page.locator(".history-card tbody tr").first().locator("time");
+    assert.equal(await guaranteedHistory.textContent(), "17.10.2026 05:00");
+    assert.equal(await guaranteedHistory.evaluate((node) => node.classList.contains("delivery-date--warning")), false);
     assert.match(await page.locator(".history-card tbody tr").first().innerText(), /17.10.2026/);
     assert.equal(await page.locator(".history-card tbody tr").nth(1).locator(".delivery-date--warning").count(), 0);
     await page.setViewportSize({ width: 390, height: 844 });
@@ -364,10 +370,10 @@ test("PartKOM weekend delivery stays unchanged and shows an amber warning throug
     assert.equal(await page.locator(".delivery-date--warning").last().evaluate((node) => node.scrollWidth <= node.clientWidth), true);
   }, { fixedTime: "2026-10-16T12:00:00Z", timezoneId: "Asia/Dubai",
     deliveries: { armtek: { deliveryDate: "2026-10-17T09:00:00Z" }, partkom: { deliveryDate: "2026-10-16T22:00:00Z" } },
-    partKomReceipt: { expectedDate: "2026-10-17", stateTxt: "В работе" },
+    partKomReceipt: { expectedDate: "2026-10-17", guaranteedDate: "2026-10-17 05:00:00", stateTxt: "В работе" },
     partKomOrderHistory: async () => ({ orders: [{ number: "WEEKEND-1", date: "2026-10-16", items: ["processing", "delivered"].map((fulfillment) => ({
       article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 120, status: "Статус позиции", fulfillment,
-      expectedDate: "2026-10-17", guaranteedDate: null, warehouse: null,
+      expectedDate: "2026-10-17", guaranteedDate: "2026-10-17 05:00:00", warehouse: null,
     })) }], limited: false }) });
 });
 

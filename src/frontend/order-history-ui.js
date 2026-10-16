@@ -123,7 +123,7 @@ function renderOrder(order, limited, supplierName, supplier) {
     delivery.append(element("strong", highlightDelivery && item.expectedDate ? "delivery-date--warning" : "", formatOrderDate(item.expectedDate) ?? "Не указана"));
     if (item.guaranteedDate && item.guaranteedDate !== item.expectedDate) {
       const guaranteed = element("span", "", "Гарантировано: ");
-      guaranteed.append(element("time", highlightDelivery ? "delivery-date--warning" : "", formatOrderDate(item.guaranteedDate)));
+      guaranteed.append(element("time", "", formatOrderDate(item.guaranteedDate)));
       delivery.append(guaranteed);
     }
     if (item.warehouse) delivery.append(element("span", "", item.warehouse));
