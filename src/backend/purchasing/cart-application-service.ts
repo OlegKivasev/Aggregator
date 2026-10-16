@@ -4,6 +4,7 @@ import type { NormalizedSearchResult } from "../types.ts";
 import { getPurchaseReference, purchaseOfferKey, type PurchaseLine, type PurchaseReference, type TestOrder } from "./purchase-offer.ts";
 import { SqliteCartRepository } from "./sqlite-cart-repository.ts";
 import type { CheckoutDetails, OrderChoices, OrderGroupResult, OrderSupplier } from "./order-contract.ts";
+import type { OrderHistory } from "./order-history-contract.ts";
 
 export interface RealOrderGateway {
   refresh(lines: PurchaseLine[], signal: AbortSignal): Promise<PurchaseLine[]>;
@@ -72,6 +73,8 @@ function validLine(line: PurchaseLine): boolean {
     && Number.isFinite(line.result.price * stock(line.result))
     && line.reference && line.reference.supplier === line.result.supplier
     && (line.reference.supplier === "armtek" && typeof line.reference.keyzak === "string" && /^[\w-]{1,10}$/.test(line.reference.keyzak)
+        && (line.reference.returnDays === undefined || Number.isInteger(line.reference.returnDays)
+          && line.reference.returnDays >= 0 && line.reference.returnDays <= 9999)
       || line.reference.supplier === "part-kom" && typeof line.reference.makerId === "string" && typeof line.reference.providerId === "string"
         && /^[1-9]\d{0,19}$/.test(line.reference.makerId) && /^[1-9]\d{0,19}$/.test(line.reference.providerId)
       || line.reference.supplier === "forum-auto" && nullableIdentifier(line.reference.warehouse) && line.reference.warehouse === line.result.warehouse
@@ -121,6 +124,14 @@ export class CartApplicationService {
       pendingIds: this.repository.pendingLineIds() };
   }
 
+  withArmtekReturnDays(history: OrderHistory): OrderHistory {
+    return { ...history, orders: history.orders.map((order) => ({ ...order, items: order.items.map((item) => {
+      const returnDays = item.positionId
+        ? this.repository.armtekReturnDays(order.number, item.positionId, item.article, item.brand) : null;
+      return returnDays === null ? item : { ...item, returnDays };
+    }) })) };
+  }
+
   mutate(action: "add" | "update" | "remove", payload: Record<string, unknown>) {
     if (this.testing) throw new CartError("Дождитесь завершения проверки заказа.", 409);
     const cart = this.load();
@@ -134,6 +145,7 @@ export class CartApplicationService {
         if (this.repository.pendingLineIds().includes(existing.id)) throw new CartError("Статус заказа этой позиции нужно сверить с поставщиком.", 409);
         existing.quantity = validateQuantity(existing.quantity + quantity, stock(offer.line.result));
         existing.result = structuredClone(offer.line.result);
+        existing.reference = structuredClone(offer.line.reference);
       } else {
         if (cart.lines.length >= 500) throw new CartError("В корзине может быть не больше 500 позиций.");
         cart.lines.push({ ...structuredClone(offer.line), id: randomUUID(), quantity });

@@ -2,7 +2,7 @@ import type { NormalizedSearchResult } from "../types.ts";
 
 export type PurchaseReference =
   | { supplier: "part-kom"; makerId: string; providerId: string }
-  | { supplier: "armtek"; keyzak: string }
+  | { supplier: "armtek"; keyzak: string; returnDays?: number }
   | { supplier: "forum-auto"; warehouse: string | null; gid?: string }
   | { supplier: "rossko"; partGuid: string | null; stockId: string | null };
 
@@ -36,7 +36,8 @@ export function getPurchaseReference(result: NormalizedSearchResult): PurchaseRe
 }
 
 export function purchaseOfferKey(result: NormalizedSearchResult, reference: PurchaseReference): string {
-  return JSON.stringify([reference, result.article, result.brand,
+  const identity = reference.supplier === "armtek" ? { supplier: reference.supplier, keyzak: reference.keyzak } : reference;
+  return JSON.stringify([identity, result.article, result.brand,
     ...(reference.supplier === "forum-auto" || reference.supplier === "rossko"
       ? [result.warehouse] : [])]);
 }

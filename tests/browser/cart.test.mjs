@@ -43,7 +43,8 @@ async function withCartPage(check, options = {}) {
       listApplicabilitySavedArticles: () => ({ articles: [], brandCounts: [], hasMore: false }),
       streamSearch: async (query, emit) => {
         emit({ type: "search_started", article: query.article, suppliers });
-        emit({ type: "result", result: offer("armtek", options.stock ?? 4, { supplier: "armtek", keyzak: "TEST01" }, options.deliveries?.armtek, options.title) });
+        emit({ type: "result", result: offer("armtek", options.stock ?? 4, { supplier: "armtek", keyzak: "TEST01",
+          ...(options.armtekReturnDays !== undefined ? { returnDays: options.armtekReturnDays } : {}) }, options.deliveries?.armtek, options.title) });
         emit({ type: "result", result: offer("part-kom", 3, { supplier: "part-kom", makerId: "101", providerId: "202" }, options.deliveries?.partkom, options.title) });
         if (options.allSuppliers) {
           emit({ type: "result", result: offer("forum-auto", 3, { supplier: "forum-auto", warehouse: "Тестовый склад", gid: "fixture-gid" }, options.deliveries?.forum, options.title) });
@@ -283,6 +284,8 @@ for (const supplier of ["rossko", "armtek"]) {
       assert.equal(await receipt.locator("dt", { hasText: "Срок доставки" }).evaluate((node) => node.nextElementSibling.textContent), "16.10.2026");
       assert.match(await receipt.textContent(), /120,00|100,00/);
       assert.equal(await receipt.locator("img").count(), 0);
+      if (supplier === "armtek") assert.match(await receipt.textContent(), /Срок возврата не указан/);
+      else assert.doesNotMatch(await receipt.textContent(), /Возврат/);
       assert.equal(await page.evaluate(() => window.cartXss), undefined);
       assert.equal(await page.locator("#cart-badge").isVisible(), false);
       await page.setViewportSize({ width: 390, height: 844 });
@@ -295,6 +298,76 @@ for (const supplier of ["rossko", "armtek"]) {
           deliveryType: "Доставка до клиента", deliveryAddress: "Тестовый адрес <img src=x onerror=window.cartXss=1>" } }) });
   });
 }
+
+for (const returnDays of [14, 0]) {
+  test(`Armtek return terms (${returnDays} days) appear in confirmation and the matching history position`, async () => {
+    const expected = returnDays === 0 ? "Возврат недоступен" : "Возврат: 14 дн.";
+    await withCartPage(async (page) => {
+      await page.locator("#results-body .cart-offer-button").first().click();
+      await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+      await page.locator("#cart-toggle").click();
+      await openCheckout(page);
+      await page.locator("#cart-order-accept").click();
+      await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+      assert.ok((await page.locator(".cart-armtek-receipt").innerText()).includes(expected));
+      assert.match(await page.locator(".cart-armtek-receipt").innerText(), /Условия предложения при оформлении заказа/);
+      await page.locator("#cart-order-cancel").click();
+      await page.locator("#cart-close").click();
+      await page.locator("#history-toggle").click();
+      await page.locator("#history-tab-armtek").click();
+      await page.locator(".order-return-terms").first().waitFor();
+      const terms = page.locator(".order-return-terms");
+      assert.ok((await terms.nth(0).innerText()).includes(expected));
+      assert.equal(await terms.nth(0).getAttribute("title"), "Условия предложения при оформлении заказа");
+      assert.equal(await terms.nth(1).innerText(), "Срок возврата не указан");
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert.equal(await page.locator(".history-card").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+    }, { fixedTime: "2026-10-16T12:00:00Z", armtekReturnDays: returnDays,
+      armtekReceipt: { positionId: "10", returnDays, status: "Создан" },
+      supplierOrderHistory: async () => ({ orders: [{ number: "fixture-armtek", date: "2026-10-16", items: ["10", "20"].map((positionId) => ({
+        positionId, article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 100, status: "В работе",
+        fulfillment: "processing", expectedDate: null, guaranteedDate: null, warehouse: null,
+      })) }], limited: false }) });
+  });
+}
+
+test("PartKOM weekend delivery stays unchanged and shows an amber warning throughout checkout and active history", async () => {
+  await withCartPage(async (page) => {
+    const partKomRow = page.locator("#results-body tr").nth(1);
+    assert.match(await partKomRow.locator('[data-column="deliveryDate"]').innerText(), /Завтра/);
+    const searchWarning = partKomRow.locator(".delivery-warning");
+    assert.equal(await searchWarning.textContent(), "!Выходной · уточните доставку");
+    assert.match(await searchWarning.getAttribute("title"), /В выходные доставки PartKOM нет/);
+    assert.equal(await page.locator("#results-body tr").first().locator(".delivery-warning").count(), 0);
+    assert.equal(await searchWarning.evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(255, 244, 204)");
+    await partKomRow.locator(".cart-offer-button").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    assert.equal(await page.locator("#cart-items .delivery-warning").count(), 1);
+    await openCheckout(page);
+    assert.equal(await page.locator("#cart-order-groups .delivery-warning").count(), 1);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+    assert.match(await page.locator(".cart-partkom-receipt").innerText(), /17.10.2026/);
+    assert.equal(await page.locator(".cart-partkom-receipt .delivery-warning").count(), 1);
+    await page.locator("#cart-order-cancel").click();
+    await page.locator("#cart-close").click();
+    await page.locator("#history-toggle").click();
+    await page.locator(".history-card").waitFor();
+    assert.equal(await page.locator(".history-card .delivery-warning").count(), 1);
+    assert.match(await page.locator(".history-card tbody tr").first().innerText(), /17.10.2026/);
+    assert.equal(await page.locator(".history-card tbody tr").nth(1).locator(".delivery-warning").count(), 0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.locator(".history-card").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+    assert.equal(await page.locator(".delivery-warning").last().evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+  }, { fixedTime: "2026-10-16T12:00:00Z", timezoneId: "Asia/Dubai",
+    deliveries: { armtek: { deliveryDate: "2026-10-17T09:00:00Z" }, partkom: { deliveryDate: "2026-10-16T22:00:00Z" } },
+    partKomReceipt: { expectedDate: "2026-10-17", stateTxt: "В работе" },
+    partKomOrderHistory: async () => ({ orders: [{ number: "WEEKEND-1", date: "2026-10-16", items: ["processing", "delivered"].map((fulfillment) => ({
+      article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 120, status: "Статус позиции", fulfillment,
+      expectedDate: "2026-10-17", guaranteedDate: null, warehouse: null,
+    })) }], limited: false }) });
+});
 
 test("a verified absent Forum Auto order can be unlocked without sending another order", async () => {
   await withCartPage(async (page, { orderCalls }) => {

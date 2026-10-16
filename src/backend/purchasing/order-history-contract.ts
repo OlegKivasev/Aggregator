@@ -1,6 +1,9 @@
 export type OrderFulfillment = "processing" | "in_transit" | "ready" | "delivered" | "cancelled" | "partial" | "returned" | "unknown";
 
 export interface OrderHistoryItem {
+  positionId?: string;
+  /** Armtek offer terms saved when this position was ordered through the aggregator. */
+  returnDays?: number;
   article: string;
   brand: string | null;
   title: string | null;

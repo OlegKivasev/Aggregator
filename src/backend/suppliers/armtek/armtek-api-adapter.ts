@@ -107,6 +107,11 @@ export function parseArmtekQuantity(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed <= Number.MAX_SAFE_INTEGER ? parsed : null;
 }
 
+export function parseArmtekReturnDays(value: unknown): number | null {
+  const days = typeof value === "string" && /^\d{1,4}$/.test(value.trim()) ? Number(value.trim()) : value;
+  return typeof days === "number" && Number.isInteger(days) && days >= 0 && days <= 9999 ? days : null;
+}
+
 export function isArmtekReturnImpossible(value: unknown): boolean {
   if (typeof value === "number") {
     return Number.isFinite(value) && value === 0;
@@ -463,7 +468,9 @@ function normalizeArmtekResult(
     ...(isAnalog ? { isAnalog: true } : {}),
   };
   if (typeof item.KEYZAK === "string" && /^[\w-]{1,10}$/.test(item.KEYZAK)) {
-    attachPurchaseReference(result, { supplier: "armtek", keyzak: item.KEYZAK });
+    const returnDays = parseArmtekReturnDays(item.RETDAYS);
+    attachPurchaseReference(result, { supplier: "armtek", keyzak: item.KEYZAK,
+      ...(returnDays !== null ? { returnDays } : {}) });
   }
   return result;
 }

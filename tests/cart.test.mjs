@@ -7,12 +7,13 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { CartApplicationService } from "../src/backend/purchasing/cart-application-service.ts";
 import { SqliteCartRepository } from "../src/backend/purchasing/sqlite-cart-repository.ts";
-import { attachPurchaseReference, getPurchaseReference } from "../src/backend/purchasing/purchase-offer.ts";
+import { attachPurchaseReference, getPurchaseReference, purchaseOfferKey } from "../src/backend/purchasing/purchase-offer.ts";
+import { parseArmtekReturnDays } from "../src/backend/suppliers/armtek/armtek-api-adapter.ts";
 import { parsePartKomApiResults } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { parseForumAutoApiResults, parseForumAutoApiAnalogResults, parseForumAutoApiResponse } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { normalizeRosskoApiSearchResults, normalizeRosskoApiAnalogResults } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { testPurchaseOrder } from "../src/backend/application/test-order-application-service.ts";
-import { parseArmtekOrderDetails, parseArmtekOrderResult } from "../src/backend/suppliers/armtek/armtek-order.ts";
+import { parseArmtekOrderDetails, parseArmtekOrderResult, parseArmtekOrderHistory } from "../src/backend/suppliers/armtek/armtek-order.ts";
 import { parseForumAutoOrderResult, placeForumAutoOrder } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { buildRosskoOrderEnvelope, parseRosskoOrderResult, parseRosskoOrdersDetails } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { getPartKomOrderChoices, parsePartKomMotion } from "../src/backend/suppliers/part-kom/part-kom-order.ts";
@@ -38,6 +39,82 @@ const withCart = async (check, testOrder = async () => [], realOrder = null) => 
   try { await check(service, () => { service.close(); service = new CartApplicationService(new SqliteCartRepository(path), testOrder, realOrder); return service; }, path); }
   finally { service.close(); rmSync(directory, { recursive: true, force: true }); }
 };
+
+test("Armtek return periods accept documented integers and do not change offer identity", async () => {
+  for (const [value, expected] of [[14, 14], [" 0014 ", 14], [0, 0], ["0000", 0], [9999, 9999]]) {
+    assert.equal(parseArmtekReturnDays(value), expected);
+  }
+  for (const value of [undefined, null, "", "  ", false, true, [], {}, -1, 1.5, Infinity, NaN, "14 days", "1e2", 10000]) {
+    assert.equal(parseArmtekReturnDays(value), null);
+  }
+  assert.equal(purchaseOfferKey(result(), reference()), purchaseOfferKey(result(), { ...reference(), returnDays: 14 }));
+  await withCart((cart) => {
+    const id = randomUUID();
+    cart.registerOffer(id, result());
+    cart.mutate("add", { offerId: id, quantity: 1, revision: 0 });
+    const newerId = randomUUID();
+    cart.registerOffer(newerId, attachPurchaseReference(result(), { ...reference(), returnDays: 14 }));
+    cart.mutate("add", { offerId: newerId, quantity: 1, revision: 1 });
+    assert.equal(cart.view().items.length, 1);
+    assert.equal(cart.view().count, 2);
+    assert.equal(JSON.stringify(cart.view()).includes("returnDays"), false);
+  });
+});
+
+const armtekReturnHistory = (positions = ["000010", "000020"]) => parseArmtekOrderHistory({ DATA: positions.map((POSNR) => ({
+  ORDER: "RETURN-1", POSNR, PIN: "A1", BRAND: "TEST", KWMENG: "1", ORDER_DATE: "20261016120000", RETDAYS: "9999",
+})) });
+
+test("Armtek stores refreshed return terms only for confirmed positions and restores them in history", async () => {
+  const gateway = {
+    refresh: async (lines) => lines.map((item) => ({ ...item, reference: { ...item.reference, returnDays: 14 } })),
+    choices: async () => ({}),
+    prepare: async (_supplier, lines) => async () => parseArmtekOrderResult({ ITEMS: [{
+      PIN: "A1", BRAND: "TEST", KEYZAK: "TEST01", REMAIN: "1",
+      RESULT: [{ KWMENG: "1", KEYZAK: "TEST01", VBELN: "RETURN-1", POSNR: "0000000010" }],
+    }] }, lines),
+  };
+  await withCart(async (cart, reopen) => {
+    const id = randomUUID();
+    cart.registerOffer(id, attachPurchaseReference(result(), { ...reference(), returnDays: 30 }));
+    cart.mutate("add", { offerId: id, quantity: 2, revision: 0 });
+    const refreshed = await cart.refreshForOrder(1, "armtek", new AbortController().signal);
+    const response = await cart.order(refreshed.revision, "armtek", [cart.view().items[0].id], {}, new AbortController().signal);
+    assert.equal(response.cart.count, 1);
+    assert.equal(response.results[0].result.confirmed[0].armtekOrders[0].returnDays, 14);
+    assert.equal(response.results[0].result.confirmed[0].armtekOrders[0].positionId, "10");
+    const restored = reopen();
+    assert.deepEqual(restored.withArmtekReturnDays(armtekReturnHistory()).orders[0].items.map((item) => item.returnDays), [14, undefined]);
+    for (const field of ["article", "brand"]) {
+      const history = armtekReturnHistory(["10"]);
+      history.orders[0].items[0][field] = "OTHER";
+      assert.equal(restored.withArmtekReturnDays(history).orders[0].items[0].returnDays, undefined);
+    }
+    const otherOrder = armtekReturnHistory(["10"]);
+    otherOrder.orders[0].number = "EXTERNAL-ORDER";
+    assert.equal(restored.withArmtekReturnDays(otherOrder).orders[0].items[0].returnDays, undefined);
+    assert.equal(restored.withArmtekReturnDays(armtekReturnHistory([null])).orders[0].items[0].returnDays, undefined);
+  }, undefined, gateway);
+});
+
+test("Armtek zero return days survive persistence, while a rolled back confirmation stores nothing", async () => {
+  await withCart((cart, _reopen, path) => {
+    const id = randomUUID();
+    cart.registerOffer(id, attachPurchaseReference(result(), { ...reference(), returnDays: 0 }));
+    cart.mutate("add", { offerId: id, quantity: 1, revision: 0 });
+    const repository = new SqliteCartRepository(path);
+    try {
+      const lineId = cart.view().items[0].id;
+      const attempt = repository.beginOrder("armtek", [lineId]);
+      const confirmed = [{ id: lineId, acceptedQuantity: 1, armtekOrders: [{ orderId: "RETURN-1", positionId: "10", returnDays: 0, quantity: 1 }] }];
+      assert.throws(() => repository.finishOrder("missing-attempt", confirmed), /attempt is missing/);
+      assert.equal(cart.view().count, 1);
+      assert.equal(cart.withArmtekReturnDays(armtekReturnHistory()).orders[0].items[0].returnDays, undefined);
+      repository.finishOrder(attempt, confirmed);
+      assert.equal(cart.withArmtekReturnDays(armtekReturnHistory()).orders[0].items[0].returnDays, 0);
+    } finally { repository.close(); }
+  });
+});
 
 test("PartKOM checkout uses documented regular delivery without requesting pickup points", async () => {
   const sessions = new SupplierSessionManager();

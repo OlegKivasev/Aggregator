@@ -270,7 +270,7 @@ export function createAggregatorServer({
           serveJson(response, 503, { message: `История заказов ${name} недоступна.` });
         } else {
           const history = await loadHistory(controller.signal);
-          if (!controller.signal.aborted) serveJson(response, 200, history);
+          if (!controller.signal.aborted) serveJson(response, 200, supplier === "armtek" ? cart.withArmtekReturnDays(history) : history);
         }
       } catch (error) {
         if (!controller.signal.aborted) {

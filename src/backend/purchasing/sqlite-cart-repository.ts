@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import type { PurchaseLine } from "./purchase-offer.ts";
+import type { ArmtekOrderReceipt } from "./order-contract.ts";
 
 export interface StoredCart {
   revision: number;
@@ -28,6 +29,12 @@ export class SqliteCartRepository {
       CREATE TABLE IF NOT EXISTS purchase_order_resolution (
         attempt_id TEXT PRIMARY KEY, resolved_at TEXT NOT NULL,
         resolution TEXT NOT NULL CHECK (resolution = 'customer_verified_missing')
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS purchase_armtek_return_terms (
+        order_number TEXT NOT NULL, position_id TEXT NOT NULL,
+        article TEXT NOT NULL, brand TEXT NOT NULL,
+        return_days INTEGER NOT NULL CHECK (return_days BETWEEN 0 AND 9999),
+        PRIMARY KEY (order_number, position_id)
       ) STRICT;
     `);
   }
@@ -64,7 +71,7 @@ export class SqliteCartRepository {
     return id;
   }
 
-  finishOrder(attemptId: string, confirmed: Array<{ id: string; acceptedQuantity: number }>): void {
+  finishOrder(attemptId: string, confirmed: Array<{ id: string; acceptedQuantity: number; armtekOrders?: ArmtekOrderReceipt[] }>): void {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const cart = this.load();
@@ -72,6 +79,15 @@ export class SqliteCartRepository {
         const line = cart.lines.find((candidate) => candidate.id === item.id);
         if (!line || !Number.isSafeInteger(item.acceptedQuantity) || item.acceptedQuantity < 1 || item.acceptedQuantity > line.quantity) {
           throw new Error("Confirmed order does not match cart");
+        }
+        if (line.reference.supplier === "armtek") {
+          for (const receipt of item.armtekOrders ?? []) {
+            if (!receipt.positionId || receipt.returnDays === undefined || !Number.isInteger(receipt.returnDays)
+              || receipt.returnDays < 0 || receipt.returnDays > 9999) continue;
+            this.database.prepare(`INSERT OR IGNORE INTO purchase_armtek_return_terms
+              (order_number, position_id, article, brand, return_days) VALUES (?, ?, ?, ?, ?)`)
+              .run(receipt.orderId, receipt.positionId, line.result.article, line.result.brand, receipt.returnDays);
+          }
         }
         line.quantity -= item.acceptedQuantity;
       }
@@ -89,6 +105,14 @@ export class SqliteCartRepository {
 
   markOrderUncertain(attemptId: string): void {
     this.database.prepare("UPDATE purchase_order_attempt SET state = 'uncertain' WHERE id = ?").run(attemptId);
+  }
+
+  armtekReturnDays(orderNumber: string, positionId: string, article: string, brand: string | null): number | null {
+    if (!brand) return null;
+    const row = this.database.prepare(`SELECT return_days FROM purchase_armtek_return_terms
+      WHERE order_number = ? AND position_id = ? AND article = ? AND brand = ?`)
+      .get(orderNumber, positionId, article, brand);
+    return typeof row?.return_days === "number" ? row.return_days : null;
   }
 
   resolveUncertainForumAutoLine(lineId: string, revision: number): boolean {

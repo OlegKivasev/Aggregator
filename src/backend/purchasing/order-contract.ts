@@ -32,6 +32,9 @@ export interface RosskoOrderReceipt {
 
 export interface ArmtekOrderReceipt {
   orderId: string;
+  positionId?: string;
+  /** RETDAYS from the refreshed offer used to place this order, not an order API field. */
+  returnDays?: number;
   quantity: number;
   price?: number;
   deliveryAt?: string;

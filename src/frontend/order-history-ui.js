@@ -1,4 +1,5 @@
 import { formatOrderDate } from "./order-date-formatting.js";
+import { armtekReturnSource, deliveryWarningNode, formatArmtekReturnDays } from "./order-notices.js";
 
 const suppliers = [
   ["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"],
@@ -76,7 +77,7 @@ function fulfillmentBadge(fulfillment, count) {
   return badge;
 }
 
-function renderOrder(order, limited, supplierName) {
+function renderOrder(order, limited, supplierName, supplier) {
   const card = element("article", "history-card");
   const header = element("header", "history-card__header");
   const heading = element("div", "history-card__identity");
@@ -122,9 +123,21 @@ function renderOrder(order, limited, supplierName) {
       delivery.append(element("span", "", `Гарантировано: ${formatOrderDate(item.guaranteedDate)}`));
     }
     if (item.warehouse) delivery.append(element("span", "", item.warehouse));
+    if (!["delivered", "cancelled", "returned"].includes(item.fulfillment)) {
+      const warning = deliveryWarningNode(supplier, item.expectedDate, item.guaranteedDate);
+      if (warning) delivery.append(warning);
+    }
     const status = element("td", "history-item-status");
     status.append(fulfillmentBadge(item.fulfillment));
     if (item.status) status.append(element("span", "history-status-detail", item.status));
+    if (supplier === "armtek") {
+      const terms = element("span", "order-return-terms", formatArmtekReturnDays(item.returnDays));
+      if (Number.isInteger(item.returnDays) && item.returnDays >= 0 && item.returnDays <= 9999) {
+        terms.title = armtekReturnSource;
+        terms.append(element("small", "order-return-source", "Условия при оформлении"));
+      }
+      status.append(terms);
+    }
     const price = element("td", "history-number");
     price.append(element("strong", "", item.price === null ? "—" : money.format(item.price)), element("span", "", `${item.quantity} шт.`));
     const sum = element("td", "history-number", item.price === null ? "—" : money.format(item.price * item.quantity));
@@ -223,12 +236,12 @@ export function bootstrapOrderHistory() {
       if (!history.payload) continue;
       total += history.payload.orders.length;
       for (const order of history.payload.orders) {
-        if (orderMatchesFilters(order, values, today)) orders.push({ order, name, limited: history.payload.limited });
+        if (orderMatchesFilters(order, values, today)) orders.push({ order, name, supplier, limited: history.payload.limited });
       }
     }
     if (loading.length) fragment.append(element("p", "history-loading", `Загружаем заказы: ${loading.join(", ")}…`));
     orders.sort((a, b) => (b.order.date ?? "").localeCompare(a.order.date ?? ""));
-    for (const { order, name, limited } of orders) fragment.append(renderOrder(order, limited, name));
+    for (const { order, name, supplier, limited } of orders) fragment.append(renderOrder(order, limited, name, supplier));
     if (!orders.length && !loading.length && !failures) {
       const empty = selected === "all" ? "В выбранной истории заказов нет."
         : `В выбранной истории ${suppliers.find(([id]) => id === selected)[1]} заказов нет.`;

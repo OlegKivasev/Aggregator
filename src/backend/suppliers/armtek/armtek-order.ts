@@ -39,6 +39,12 @@ function armtekHistoryFulfillment(row: ArmtekHistoryMovement, quantity: number):
   return "unknown";
 }
 
+function armtekPosition(value: unknown): string | undefined {
+  const text = typeof value === "number" && Number.isSafeInteger(value) ? String(value) : value;
+  return typeof text === "string" && /^\d{1,10}$/.test(text) && Number(text) > 0
+    ? text.replace(/^0+/, "") : undefined;
+}
+
 export function parseArmtekOrderHistory(payload: unknown): OrderHistory {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new SupplierIntegrationError("Armtek order history is invalid");
   const data = (payload as { DATA?: unknown }).DATA;
@@ -53,7 +59,9 @@ export function parseArmtekOrderHistory(payload: unknown): OrderHistory {
     if (!number || !article || quantity === null || quantity <= 0) throw new SupplierIntegrationError("Armtek order history item is incomplete");
     const currency = historyText(row.CURRENCY, 4);
     if (currency && currency !== "RUB" && currency !== "RUR") throw new SupplierIntegrationError("Armtek history currency is unsupported");
+    const positionId = armtekPosition(row.POSNR);
     const item = { article, brand: historyText(row.BRAND, 200), title: historyText(row.NAME), quantity,
+      ...(positionId ? { positionId } : {}),
       price: currency ? historyNumber(row.PRICE) : null, status: historyText(row.STATUS, 300) ?? historyText(row.ORDER_STATUS, 300),
       fulfillment: armtekHistoryFulfillment(row, quantity),
       expectedDate: historyDate(row.DLVRD, "compact"), guaranteedDate: historyDate(row.WRNTD, "compact"), warehouse: null };
@@ -74,6 +82,7 @@ export async function listArmtekOrderHistory(credentials: ArmtekCredentials, fro
 }
 
 interface ArmtekOrderAllocation {
+  POSNR?: unknown;
   KWMENG?: unknown;
   VBELN?: unknown;
   KEYZAK?: unknown;
@@ -129,7 +138,8 @@ export function parseArmtekOrderDetails(payload: unknown, receipt: ArmtekOrderRe
   if (!header) return receipt;
   const item = array(response.ITEMS).find((value) => value && typeof value === "object" && !Array.isArray(value)
     && (value as { PIN?: unknown; BRAND?: unknown }).PIN === line.result.article
-    && (value as { PIN?: unknown; BRAND?: unknown }).BRAND === line.result.brand) as Record<string, unknown> | undefined;
+    && (value as { PIN?: unknown; BRAND?: unknown }).BRAND === line.result.brand
+    && (!receipt.positionId || armtekPosition((value as { POSNR?: unknown }).POSNR) === receipt.positionId)) as Record<string, unknown> | undefined;
   return { ...receipt,
     ...(shortText(header.ORDER_STATUS) ? { status: shortText(header.ORDER_STATUS) } : {}),
     ...(armtekDate(header.ORDER_DATE) ? { createdAt: armtekDate(header.ORDER_DATE) } : {}),
@@ -170,7 +180,10 @@ export function parseArmtekOrderResult(payload: unknown, lines: PurchaseLine[]):
         allocated += quantity;
         if (!orderIds.includes(orderId)) orderIds.push(orderId);
         const price = positivePrice(allocation?.PRICE);
+        const positionId = armtekPosition(allocation?.POSNR);
         armtekOrders.push({ orderId, quantity,
+          ...(positionId ? { positionId } : {}),
+          ...(line.reference.returnDays !== undefined ? { returnDays: line.reference.returnDays } : {}),
           ...(price ? { price } : {}),
           ...(armtekDate(allocation?.DLVDT) ? { deliveryAt: armtekDate(allocation?.DLVDT) } : {}) });
       }
