@@ -1,5 +1,5 @@
 import { formatOrderDate } from "./order-date-formatting.js";
-import { armtekReturnSource, deliveryWarningNode, formatArmtekReturnDays } from "./order-notices.js";
+import { armtekReturnSource, formatArmtekReturnDays, hasPartKomWeekendDelivery } from "./order-notices.js";
 
 const suppliers = [
   ["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"],
@@ -118,15 +118,15 @@ function renderOrder(order, limited, supplierName, supplier) {
     part.append(element("strong", "", [item.brand, item.article].filter(Boolean).join(" ")));
     if (item.title) part.append(element("span", "", item.title));
     const delivery = element("td");
-    delivery.append(element("strong", "", formatOrderDate(item.expectedDate) ?? "Не указана"));
+    const active = !["delivered", "cancelled", "returned"].includes(item.fulfillment);
+    const highlightDelivery = active && hasPartKomWeekendDelivery(supplier, item.expectedDate, item.guaranteedDate);
+    delivery.append(element("strong", highlightDelivery && item.expectedDate ? "delivery-date--warning" : "", formatOrderDate(item.expectedDate) ?? "Не указана"));
     if (item.guaranteedDate && item.guaranteedDate !== item.expectedDate) {
-      delivery.append(element("span", "", `Гарантировано: ${formatOrderDate(item.guaranteedDate)}`));
+      const guaranteed = element("span", "", "Гарантировано: ");
+      guaranteed.append(element("time", highlightDelivery ? "delivery-date--warning" : "", formatOrderDate(item.guaranteedDate)));
+      delivery.append(guaranteed);
     }
     if (item.warehouse) delivery.append(element("span", "", item.warehouse));
-    if (!["delivered", "cancelled", "returned"].includes(item.fulfillment)) {
-      const warning = deliveryWarningNode(supplier, item.expectedDate, item.guaranteedDate);
-      if (warning) delivery.append(warning);
-    }
     const status = element("td", "history-item-status");
     status.append(fulfillmentBadge(item.fulfillment));
     if (item.status) status.append(element("span", "history-status-detail", item.status));

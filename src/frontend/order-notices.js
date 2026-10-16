@@ -1,7 +1,4 @@
-const weekendMessage = "Выходной · уточните доставку";
-const weekendExplanation = "В выходные доставки PartKOM нет. Дата поставщика сохранена — уточните фактическую дату доставки.";
-
-function deliveryWeekday(value) {
+function deliveryCalendarDay(value) {
   if (typeof value !== "string") return null;
   const match = /^(\d{4})-(\d{2})-(\d{2})(?:[ T]([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d)(?:\.\d{1,3})?)?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?)?$/.exec(value);
   if (!match) return null;
@@ -11,30 +8,22 @@ function deliveryWeekday(value) {
   // Search dates are instants displayed in browser time; order dates without a zone are supplier calendar dates.
   if (match[7]) {
     const instant = new Date(value);
-    return Number.isFinite(instant.getTime()) ? instant.getDay() : null;
+    return Number.isFinite(instant.getTime())
+      ? Date.UTC(instant.getFullYear(), instant.getMonth(), instant.getDate()) / 86_400_000 : null;
   }
-  return calendarDate.getUTCDay();
+  return calendarDate.getTime() / 86_400_000;
 }
 
-export function hasPartKomWeekendDelivery(supplier, ...dates) {
-  return supplier === "part-kom" && dates.some((value) => [0, 6].includes(deliveryWeekday(value)));
-}
-
-export function renderDeliveryWarning(supplier, ...dates) {
-  return hasPartKomWeekendDelivery(supplier, ...dates)
-    ? `<span class="delivery-warning" title="${weekendExplanation}"><b aria-hidden="true">!</b>${weekendMessage}</span>` : "";
-}
-
-export function deliveryWarningNode(supplier, ...dates) {
-  if (!hasPartKomWeekendDelivery(supplier, ...dates)) return null;
-  const notice = document.createElement("span");
-  notice.className = "delivery-warning";
-  notice.title = weekendExplanation;
-  const icon = document.createElement("b");
-  icon.textContent = "!";
-  icon.setAttribute("aria-hidden", "true");
-  notice.append(icon, document.createTextNode(weekendMessage));
-  return notice;
+export function hasPartKomWeekendDelivery(supplier, valueFrom, valueTo = null) {
+  if (supplier !== "part-kom") return false;
+  const from = deliveryCalendarDay(valueFrom ?? valueTo);
+  const to = deliveryCalendarDay(valueTo ?? valueFrom);
+  if (from === null || to === null || to < from) return false;
+  const firstWeekday = new Date(from * 86_400_000).getUTCDay();
+  const lastWeekday = new Date(to * 86_400_000).getUTCDay();
+  // Only this weekend, optionally preceded by Friday; later workdays remove the warning.
+  const maximumSpan = firstWeekday === 5 ? 2 : firstWeekday === 6 ? 1 : firstWeekday === 0 ? 0 : -1;
+  return [0, 6].includes(lastWeekday) && to - from <= maximumSpan;
 }
 
 export function formatArmtekReturnDays(value) {

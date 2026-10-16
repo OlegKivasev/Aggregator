@@ -15,7 +15,7 @@ import { openSearchStream } from "./search-stream.js";
 import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { bootstrapCart, renderCartOfferControls } from "./cart-ui.js";
 import { bootstrapOrderHistory } from "./order-history-ui.js";
-import { renderDeliveryWarning } from "./order-notices.js";
+import { hasPartKomWeekendDelivery } from "./order-notices.js";
 import {
   isStpartsWarehouseVisible,
   normalizeStpartsWarehouseColors,
@@ -1245,7 +1245,7 @@ const renderResults = () => {
         <td data-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
         <td data-column="title"><div class="result-title-cell">${renderOfferLink(result, result.title)}</div></td>
-        <td data-column="deliveryDate"><span class="delivery-date">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo)}${renderDeliveryWarehouse(result)}</td>
+        <td data-column="deliveryDate"><span class="delivery-date${hasPartKomWeekendDelivery(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</span><span class="main-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         ${renderCartOfferControls(result)}
@@ -2217,7 +2217,7 @@ const renderAnalogRows = () => {
         <td data-analog-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-analog-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
         <td class="analogs-result-title" data-analog-column="title">${renderOfferLink(result, result.title)}</td>
-        <td data-analog-column="deliveryDate"><span class="delivery-date">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo)}${renderDeliveryWarehouse(result)}</td>
+        <td data-analog-column="deliveryDate"><span class="delivery-date${hasPartKomWeekendDelivery(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span><span class="analogs-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
         <td class="garage-add-cell"><button type="button" class="garage-offer-button" draggable="${Boolean(result.offerId)}" data-garage-offer-id="${escapeHtml(result.offerId ?? "")}" data-garage-offer-quantity="${Number.isFinite(result.quantity) && result.quantity >= 0 ? result.quantity : ""}" aria-disabled="${!result.offerId}" aria-label="Добавить в гараж" title="Добавить в гараж"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5.1 9.75 1.25-3.2A2.25 2.25 0 0 1 8.45 5h7.1a2.25 2.25 0 0 1 2.1 1.55l1.25 3.2"/><path d="M4.5 10.25h15a1.5 1.5 0 0 1 1.5 1.5v4.75h-2.25V19H16.5v-2.5h-9V19H5.25v-2.5H3v-4.75a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="7.25" cy="13.5" r="1"/><circle cx="16.75" cy="13.5" r="1"/></svg></button></td>

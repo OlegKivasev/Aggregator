@@ -335,31 +335,33 @@ test("PartKOM weekend delivery stays unchanged and shows an amber warning throug
   await withCartPage(async (page) => {
     const partKomRow = page.locator("#results-body tr").nth(1);
     assert.match(await partKomRow.locator('[data-column="deliveryDate"]').innerText(), /Завтра/);
-    const searchWarning = partKomRow.locator(".delivery-warning");
-    assert.equal(await searchWarning.textContent(), "!Выходной · уточните доставку");
-    assert.match(await searchWarning.getAttribute("title"), /В выходные доставки PartKOM нет/);
-    assert.equal(await page.locator("#results-body tr").first().locator(".delivery-warning").count(), 0);
+    const searchWarning = partKomRow.locator(".delivery-date--warning");
+    assert.equal(await searchWarning.textContent(), "Завтра");
+    assert.equal(await partKomRow.locator('[data-column="deliveryDate"] b').count(), 0);
+    assert.doesNotMatch(await partKomRow.innerText(), /Выходной|уточните доставку/);
+    assert.equal(await page.locator("#results-body tr").first().locator(".delivery-date--warning").count(), 0);
     assert.equal(await searchWarning.evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(255, 244, 204)");
+    assert.equal(await searchWarning.evaluate((node) => getComputedStyle(node).borderRadius), "7px");
     await partKomRow.locator(".cart-offer-button").click();
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
     await page.locator("#cart-toggle").click();
-    assert.equal(await page.locator("#cart-items .delivery-warning").count(), 1);
+    assert.equal(await page.locator("#cart-items .delivery-date--warning").textContent(), "Завтра");
     await openCheckout(page);
-    assert.equal(await page.locator("#cart-order-groups .delivery-warning").count(), 1);
+    assert.equal(await page.locator("#cart-order-groups .delivery-date--warning").textContent(), "Завтра");
     await page.locator("#cart-order-accept").click();
     await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
     assert.match(await page.locator(".cart-partkom-receipt").innerText(), /17.10.2026/);
-    assert.equal(await page.locator(".cart-partkom-receipt .delivery-warning").count(), 1);
+    assert.equal(await page.locator(".cart-partkom-receipt .delivery-date--warning").textContent(), "17.10.2026");
     await page.locator("#cart-order-cancel").click();
     await page.locator("#cart-close").click();
     await page.locator("#history-toggle").click();
     await page.locator(".history-card").waitFor();
-    assert.equal(await page.locator(".history-card .delivery-warning").count(), 1);
+    assert.equal(await page.locator(".history-card .delivery-date--warning").textContent(), "17.10.2026");
     assert.match(await page.locator(".history-card tbody tr").first().innerText(), /17.10.2026/);
-    assert.equal(await page.locator(".history-card tbody tr").nth(1).locator(".delivery-warning").count(), 0);
+    assert.equal(await page.locator(".history-card tbody tr").nth(1).locator(".delivery-date--warning").count(), 0);
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator(".history-card").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
-    assert.equal(await page.locator(".delivery-warning").last().evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+    assert.equal(await page.locator(".delivery-date--warning").last().evaluate((node) => node.scrollWidth <= node.clientWidth), true);
   }, { fixedTime: "2026-10-16T12:00:00Z", timezoneId: "Asia/Dubai",
     deliveries: { armtek: { deliveryDate: "2026-10-17T09:00:00Z" }, partkom: { deliveryDate: "2026-10-16T22:00:00Z" } },
     partKomReceipt: { expectedDate: "2026-10-17", stateTxt: "В работе" },
@@ -367,6 +369,47 @@ test("PartKOM weekend delivery stays unchanged and shows an amber warning throug
       article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 120, status: "Статус позиции", fulfillment,
       expectedDate: "2026-10-17", guaranteedDate: null, warehouse: null,
     })) }], limited: false }) });
+});
+
+test("PartKOM Friday to Sunday range highlights only the unchanged date range on one line", async () => {
+  await withCartPage(async (page) => {
+    const row = page.locator("#results-body tr").nth(1);
+    const date = row.locator(".delivery-date--warning");
+    assert.equal(await date.textContent(), "16.10.2026 - 18.10.2026");
+    assert.equal(await date.evaluate((node) => getComputedStyle(node).whiteSpace), "nowrap");
+    assert.doesNotMatch(await row.innerText(), /Выходной|уточните доставку/);
+    assert.equal(await row.locator('[data-column="deliveryDate"] b').count(), 0);
+  }, { fixedTime: "2026-10-16T12:00:00Z", deliveries: { partkom: {
+    deliveryDate: "2026-10-16T09:00:00Z", deliveryDateTo: "2026-10-18T09:00:00Z",
+  } } });
+});
+
+test("PartKOM ranges extending into workdays have no highlight in search, checkout or history", async () => {
+  await withCartPage(async (page) => {
+    const row = page.locator("#results-body tr").nth(1);
+    assert.equal(await row.locator(".delivery-date").textContent(), "17.10.2026 - 20.10.2026");
+    assert.equal(await row.locator(".delivery-date--warning").count(), 0);
+    await row.locator(".cart-offer-button").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    assert.equal(await page.locator("#cart-items .delivery-date--warning").count(), 0);
+    await openCheckout(page);
+    assert.equal(await page.locator("#cart-order-groups .delivery-date--warning").count(), 0);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+    assert.equal(await page.locator(".cart-partkom-receipt .delivery-date--warning").count(), 0);
+    await page.locator("#cart-order-cancel").click();
+    await page.locator("#cart-close").click();
+    await page.locator("#history-toggle").click();
+    await page.locator(".history-card").waitFor();
+    assert.equal(await page.locator(".history-card .delivery-date--warning").count(), 0);
+  }, { fixedTime: "2026-10-16T12:00:00Z", deliveries: { partkom: {
+    deliveryDate: "2026-10-17T09:00:00Z", deliveryDateTo: "2026-10-20T09:00:00Z",
+  } }, partKomReceipt: { expectedDate: "2026-10-17", guaranteedDate: "2026-10-20" },
+    partKomOrderHistory: async () => ({ orders: [{ number: "WORKDAYS-1", date: "2026-10-16", items: [{
+      article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 120, status: "В работе", fulfillment: "processing",
+      expectedDate: "2026-10-17", guaranteedDate: "2026-10-20", warehouse: null,
+    }] }], limited: false }) });
 });
 
 test("a verified absent Forum Auto order can be unlocked without sending another order", async () => {

@@ -1961,36 +1961,20 @@ table tbody tr:hover td {
   color: #ffb400;
 }
 
-.delivery-warning,
-.history-card td .delivery-warning {
-  display: inline-flex;
-  align-items: flex-start;
-  gap: 6px;
+.delivery-date.delivery-date--warning,
+.delivery-date--warning,
+.history-card td .delivery-date--warning {
+  display: inline-block;
   max-width: 100%;
   width: fit-content;
-  margin-top: 6px;
   padding: 5px 8px;
   border: 1px solid #e9c454;
   border-radius: 7px;
   background: #fff4cc;
   color: #765000;
-  font-size: 11px;
-  font-weight: 700;
   line-height: 1.4;
-  white-space: normal;
+  white-space: nowrap;
   text-align: left;
-}
-
-.delivery-warning b {
-  flex: 0 0 14px;
-  width: 14px;
-  height: 14px;
-  margin-top: 1px;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  font-size: 10px;
-  line-height: 12px;
-  text-align: center;
 }
 
 .history-card td .order-return-terms { margin-top: 8px; color: #374151; font-weight: 600; }
