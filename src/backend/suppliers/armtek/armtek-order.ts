@@ -4,7 +4,7 @@ import type { ArmtekCredentials } from "../../types.ts";
 import { createBoundedAbortSignal } from "../../abort.ts";
 import { SupplierIntegrationError } from "../errors.ts";
 import { requestArmtek, resolveArmtekConfig } from "./armtek-api-adapter.ts";
-import type { OrderFulfillment, OrderHistory, OrderHistoryOrder } from "../../purchasing/order-history-contract.ts";
+import type { OrderHistory, OrderHistoryItem, OrderHistoryOrder } from "../../purchasing/order-history-contract.ts";
 import { finishOrderHistory, historyDate, historyNumber, historyText } from "../../purchasing/order-history-values.ts";
 
 interface ArmtekHistoryMovement {
@@ -14,29 +14,52 @@ interface ArmtekHistoryMovement {
   KWMENG_R?: unknown;
   KWMENG_P?: unknown;
   KWMENG_WAYIN?: unknown;
+  Issued?: unknown;
+  REJECTED?: unknown;
+  REJ_MENGE?: unknown;
 }
 
-function armtekHistoryFulfillment(row: ArmtekHistoryMovement, quantity: number): OrderFulfillment {
+function armtekHistoryStatus(row: ArmtekHistoryMovement, quantity: number): Pick<OrderHistoryItem, "status" | "fulfillment" | "fulfillmentQuantities"> {
   const count = (value: unknown) => {
     const parsed = historyNumber(value);
     return parsed !== null && parsed <= quantity ? parsed : null;
   };
-  const rejected = count(row.KWMENG_REJ);
+  const rejected = count(row.REJECTED ?? row.KWMENG_REJ);
+  const refused = count(row.REJ_MENGE);
+  const cancelled = rejected === null && refused === null ? null : (rejected ?? 0) + (refused ?? 0);
+  const issued = count(row.Issued);
   const shipped = count(row.KWMENG_R);
-  if (rejected !== null && shipped !== null && rejected + shipped > quantity) return "unknown";
-  const status = historyText(row.STATUS)?.toLocaleLowerCase().replaceAll("ё", "е");
-  if (rejected === quantity || status === "позиция полностью отклонена") return "cancelled";
-  if (status === "позиция полностью поставлена") return "delivered";
-  if (status === "позиция частично поставлена" || status === "позиция частично отклонена"
-    || rejected !== null && rejected > 0 || shipped !== null && shipped > 0 && shipped < quantity) return "partial";
+  const status = historyText(row.STATUS, 300) ?? historyText(row.ORDER_STATUS, 300);
+  const invalidCount = [[row.Issued, issued], [row.REJECTED ?? row.KWMENG_REJ, rejected], [row.REJ_MENGE, refused]]
+    .some(([value, parsed]) => value !== undefined && value !== null && parsed === null);
+  if (invalidCount || cancelled !== null && (cancelled > quantity || issued !== null && issued + cancelled > quantity)
+    || issued === null && rejected !== null && shipped !== null && rejected + shipped > quantity) {
+    return { status, fulfillment: "unknown" };
+  }
+  if (issued === quantity) return { status: `Получено ${issued} из ${quantity} шт.`, fulfillment: "delivered" };
+  if (cancelled === quantity) return { status: `Отменено ${cancelled} из ${quantity} шт.`, fulfillment: "cancelled" };
+  if (issued !== null && issued > 0 || cancelled !== null && cancelled > 0) {
+    const details = [issued ? `Получено ${issued} из ${quantity} шт.` : null,
+      cancelled ? `Отменено ${cancelled} из ${quantity} шт.` : null].filter(Boolean);
+    const settled = issued !== null && cancelled !== null && issued + cancelled === quantity;
+    return { status: details.join("; "), fulfillment: settled ? "partially_cancelled" : "partial",
+      ...(settled ? { fulfillmentQuantities: { delivered: issued, cancelled } } : {}) };
+  }
+  const text = historyText(row.STATUS)?.toLocaleLowerCase().replaceAll("ё", "е");
+  if (text === "позиция полностью отклонена") return { status, fulfillment: "cancelled" };
+  if (issued === null && (text === "позиция полностью поставлена" || text === "позиция поставлена")) {
+    return { status, fulfillment: "delivered" };
+  }
+  if (text === "позиция частично поставлена" || text === "позиция частично отклонена"
+    || shipped !== null && shipped > 0 && shipped < quantity) return { status, fulfillment: "partial" };
   // Shipped to the client is not proof that the client has received the goods.
-  if (shipped !== null && shipped > 0 || (count(row.KWMENG_WAYIN) ?? 0) > 0) return "in_transit";
+  if (shipped !== null && shipped > 0 || (count(row.KWMENG_WAYIN) ?? 0) > 0) return { status, fulfillment: "in_transit" };
   const ready = count(row.KWMENG_P);
-  if (ready !== null && ready > 0) return ready === quantity ? "ready" : "partial";
+  if (ready !== null && ready > 0) return { status, fulfillment: ready === quantity ? "ready" : "partial" };
   const orderStatus = historyText(row.ORDER_STATUS)?.toLocaleLowerCase().replaceAll("ё", "е");
-  if (orderStatus === "отклонен") return "cancelled";
-  if (orderStatus === "создан" || orderStatus === "в работе") return "processing";
-  return "unknown";
+  if (orderStatus === "отклонен") return { status, fulfillment: "cancelled" };
+  if (orderStatus === "создан" || orderStatus === "в работе") return { status, fulfillment: "processing" };
+  return { status, fulfillment: "unknown" };
 }
 
 function armtekPosition(value: unknown): string | undefined {
@@ -55,15 +78,14 @@ export function parseArmtekOrderHistory(payload: unknown): OrderHistory {
     const row = entry as Record<string, unknown>;
     const number = historyText(row.ORDER, 100);
     const article = historyText(row.PIN, 128);
-    const quantity = historyNumber(row.KWMENG);
+    const quantity = historyNumber(row.ZZKWMENG ?? row.KWMENG);
     if (!number || !article || quantity === null || quantity <= 0) throw new SupplierIntegrationError("Armtek order history item is incomplete");
     const currency = historyText(row.CURRENCY, 4);
     if (currency && currency !== "RUB" && currency !== "RUR") throw new SupplierIntegrationError("Armtek history currency is unsupported");
     const positionId = armtekPosition(row.POSNR);
     const item = { article, brand: historyText(row.BRAND, 200), title: historyText(row.NAME), quantity,
       ...(positionId ? { positionId } : {}),
-      price: currency ? historyNumber(row.PRICE) : null, status: historyText(row.STATUS, 300) ?? historyText(row.ORDER_STATUS, 300),
-      fulfillment: armtekHistoryFulfillment(row, quantity),
+      price: currency ? historyNumber(row.PRICE) : null, ...armtekHistoryStatus(row, quantity),
       expectedDate: historyDate(row.DLVRD, "compact"), guaranteedDate: historyDate(row.WRNTD, "compact"), warehouse: null };
     const order = orders.get(number);
     if (order) order.items.push(item);
@@ -75,7 +97,7 @@ export function parseArmtekOrderHistory(payload: unknown): OrderHistory {
 export async function listArmtekOrderHistory(credentials: ArmtekCredentials, from: string, to: string, signal: AbortSignal): Promise<OrderHistory> {
   signal.throwIfAborted();
   const resolved = await resolveArmtekConfig(credentials, signal);
-  const payload = await requestArmtek<unknown>("ws_reports/getOrderPositionsReportByDate", credentials, { method: "POST", signal,
+  const payload = await requestArmtek<unknown>("ws_reports/getOrderPositionsReportByDate2", credentials, { method: "POST", signal,
     params: new URLSearchParams({ VKORG: resolved.vkorg, KUNNR_RG: resolved.kunnrRg,
       SCRDATE: from.replaceAll("-", ""), ECRDATE: to.replaceAll("-", ""), TYPEZK_SALE: "1", TYPEZK_RETN: "0", KURR_LOGIN: "1" }) });
   return parseArmtekOrderHistory(payload);

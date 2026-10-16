@@ -58,6 +58,11 @@ function validHistory(value) {
       && order.items.every((item) => item && typeof item.article === "string" && Number.isFinite(item.quantity)
         && fulfillmentLabels.has(item.fulfillment)
         && item.quantity > 0 && item.quantity <= Number.MAX_SAFE_INTEGER
+        && (item.fulfillmentQuantities === undefined || item.fulfillment === "partially_cancelled"
+          && item.fulfillmentQuantities && typeof item.fulfillmentQuantities === "object" && !Array.isArray(item.fulfillmentQuantities)
+          && Number.isFinite(item.fulfillmentQuantities.delivered) && item.fulfillmentQuantities.delivered > 0
+          && Number.isFinite(item.fulfillmentQuantities.cancelled) && item.fulfillmentQuantities.cancelled > 0
+          && item.fulfillmentQuantities.delivered + item.fulfillmentQuantities.cancelled === item.quantity)
         && (item.price === null || Number.isFinite(item.price) && item.price >= 0 && item.price <= Number.MAX_SAFE_INTEGER)
         && [item.brand, item.title, item.status, item.expectedDate, item.guaranteedDate, item.warehouse]
           .every((field) => field === null || typeof field === "string")));
@@ -76,6 +81,15 @@ function fulfillmentBadge(fulfillment, count) {
   icon.setAttribute("aria-hidden", "true");
   badge.append(icon, document.createTextNode(count === undefined ? label : `${label} · ${count}`));
   return badge;
+}
+
+function historyItemRows(item) {
+  if (item.fulfillment !== "partially_cancelled" || !item.fulfillmentQuantities) return [item];
+  const { delivered, cancelled } = item.fulfillmentQuantities;
+  return [
+    { ...item, quantity: cancelled, fulfillment: "cancelled", status: `Отменено ${cancelled} шт.` },
+    { ...item, quantity: delivered, fulfillment: "delivered", status: `Получено ${delivered} шт.` },
+  ];
 }
 
 function renderOrder(order, limited, supplierName, supplier) {
@@ -113,7 +127,7 @@ function renderOrder(order, limited, supplierName, supplier) {
   }
   thead.append(headRow);
   const tbody = element("tbody");
-  for (const item of order.items) {
+  for (const item of order.items.flatMap(historyItemRows)) {
     const row = element("tr");
     const part = element("td");
     part.append(element("strong", "", [item.brand, item.article].filter(Boolean).join(" ")));

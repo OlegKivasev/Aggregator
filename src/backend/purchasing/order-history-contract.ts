@@ -11,6 +11,8 @@ export interface OrderHistoryItem {
   price: number | null;
   status: string | null;
   fulfillment: OrderFulfillment;
+  /** Confirmed quantities of a settled position with both receipt and cancellation. */
+  fulfillmentQuantities?: { delivered: number; cancelled: number };
   expectedDate: string | null;
   guaranteedDate: string | null;
   warehouse: string | null;

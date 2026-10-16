@@ -75,11 +75,13 @@ test("PartKOM distinguishes settled partial cancellations from quantities still 
     for (const stringify of [false, true]) {
       const result = item(quantity, stringify ? String(released) : released, stringify ? String(refused) : refused);
       assert.equal(result.fulfillment, "partially_cancelled");
+      assert.deepEqual(result.fulfillmentQuantities, { delivered: released, cancelled: refused });
       assert.equal(result.status, `Выдано ${released} из ${quantity} шт.; Отменено ${refused} из ${quantity} шт.`);
       assert.equal(result.quantity, quantity);
     }
   }
   assert.equal(item(10, 3, 6).fulfillment, "partial");
+  assert.equal(item(10, 3, 6).fulfillmentQuantities, undefined);
   assert.equal(item(10, 0, 6).fulfillment, "partial");
   assert.equal(item(10, 4, 0).fulfillment, "partial");
   assert.equal(item(10, 4, 7).fulfillment, "unknown");
@@ -138,6 +140,46 @@ const rosskoXml = (orders, success = "true", message = "") => `<Envelope><Body><
 const rosskoRow = `<Order><id>123</id><created_date>15.10.2026 12:30:00</created_date><delivery_date>20.10.2026</delivery_date>
   <stock_address>Склад</stock_address><parts><part><partnumber>A1</partnumber><brand>TEST</brand><name>Деталь</name>
   <count>2</count><price>100.50</price><status>1</status></part></parts></Order>`;
+
+test("Armtek report v2 uses actual issued quantities before stale partial or closed status", () => {
+  const item = (fields) => parseArmtekOrderHistory({ DATA: [{ ...armtekRow, ...fields }] }).orders[0].items[0];
+  for (const Issued of [1, "1.000"]) {
+    const result = item({ KWMENG: "1", ZZKWMENG: "1.000", Issued, REJECTED: "0", REJ_MENGE: "0" });
+    assert.equal(result.fulfillment, "delivered");
+    assert.equal(result.status, "Получено 1 из 1 шт.");
+    assert.equal(result.quantity, 1);
+  }
+  assert.equal(item({ STATUS: "позиция поставлена" }).fulfillment, "delivered");
+  assert.equal(item({ Issued: "0", KWMENG_R: "2", STATUS: "позиция полностью поставлена" }).fulfillment, "in_transit");
+  assert.equal(item({ Issued: "0", KWMENG_R: "2", STATUS: "", ORDER_STATUS: "Закрыт" }).fulfillment, "in_transit");
+  assert.equal(item({ Issued: "1", STATUS: "позиция полностью поставлена" }).fulfillment, "partial");
+  for (const Issued of [true, -1, 3, Infinity, "1 шт."]) {
+    assert.equal(item({ Issued, STATUS: "позиция полностью поставлена" }).fulfillment, "unknown");
+  }
+});
+
+test("Armtek report v2 preserves original quantities and separates issued parts from rejections and client refusals", () => {
+  const item = (fields = {}) => parseArmtekOrderHistory({ DATA: [{ ...armtekRow, KWMENG: "4", ZZKWMENG: "10",
+    Issued: "4", REJECTED: "6", REJ_MENGE: "0", ...fields }] }).orders[0].items[0];
+  for (const fields of [{}, { REJECTED: "4", REJ_MENGE: "2" }, { REJECTED: "0", REJ_MENGE: "6" },
+    { REJECTED: undefined, KWMENG_REJ: "6" }]) {
+    const result = item(fields);
+    assert.equal(result.fulfillment, "partially_cancelled");
+    assert.deepEqual(result.fulfillmentQuantities, { delivered: 4, cancelled: 6 });
+    assert.equal(result.quantity, 10);
+    assert.equal(result.status, "Получено 4 из 10 шт.; Отменено 6 из 10 шт.");
+  }
+  assert.equal(item({ Issued: "3" }).fulfillment, "partial");
+  assert.equal(item({ Issued: "3" }).fulfillmentQuantities, undefined);
+  assert.equal(item({ Issued: undefined, KWMENG_R: "4" }).fulfillment, "partial");
+  assert.equal(item({ Issued: "0", REJECTED: "10" }).fulfillment, "cancelled");
+  assert.equal(item({ Issued: "5" }).fulfillment, "unknown");
+  assert.equal(item({ REJ_MENGE: "5" }).fulfillment, "unknown");
+  for (const value of [true, -1, 11, Infinity, "6 шт."]) {
+    for (const field of ["REJECTED", "REJ_MENGE"]) assert.equal(item({ [field]: value }).fulfillment, "unknown");
+  }
+  assert.throws(() => item({ ZZKWMENG: "bad" }), SupplierIntegrationError);
+});
 
 test("supplier histories classify fulfillment without treating a closed Armtek order as receipt", () => {
   const armtek = (fields) => parseArmtekOrderHistory({ DATA: [{ ...armtekRow, ...fields }] }).orders[0].items[0].fulfillment;
@@ -276,7 +318,7 @@ test("Armtek and Rossko histories use fixed read-only methods and honor abort", 
   });
   const signal = new AbortController().signal;
   await listArmtekOrderHistory({ login: "fixture", password: "fixture" }, "2026-10-01", "2026-10-15", signal);
-  assert.equal(new URL(calls[0].url).pathname, "/api/ws_reports/getOrderPositionsReportByDate");
+  assert.equal(new URL(calls[0].url).pathname, "/api/ws_reports/getOrderPositionsReportByDate2");
   assert.equal(calls[0].options.method, "POST");
   assert.equal(calls[0].options.body.get("SCRDATE"), "20261001");
   assert.equal(calls[0].options.body.get("ECRDATE"), "20261015");

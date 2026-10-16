@@ -10,6 +10,7 @@ import { formatDeliveryDate } from "../../src/frontend/supplier-search-summary.j
 import { testPurchaseOrder } from "../../src/backend/application/test-order-application-service.ts";
 import { CartError } from "../../src/backend/purchasing/cart-application-service.ts";
 import { parsePartKomOrderHistory } from "../../src/backend/suppliers/part-kom/part-kom-order.ts";
+import { parseArmtekOrderHistory } from "../../src/backend/suppliers/armtek/armtek-order.ts";
 import { parseRosskoOrderHistory } from "../../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 
 // The browser uses a real local cart server; supplier searches and checks are fictional fixtures.
@@ -1437,7 +1438,7 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
       status: "Отгружено", fulfillment: "in_transit", expectedDate: null, guaranteedDate: null, warehouse: null }] }], limited: false }) });
 });
 
-test("PartKOM settled partial cancellations show cancellation badges, terminal filters and no delivery warning", async () => {
+test("PartKOM settled partial cancellations split into cancelled and received rows with terminal filters and no delivery warning", async () => {
   const cases = [[10, 4, 6], [4, 2, 2], [20, 17, 3]];
   const history = parsePartKomOrderHistory([...cases, [10, 3, 6]].map(([quantity, releaseCount, refusalCount], index) => ({
     orderNumber: `CANCELLATION-FIXTURE-${index + 1}`, detailNum: `A${index + 1}`, maker: "TEST", description: "Тестовая деталь",
@@ -1451,9 +1452,19 @@ test("PartKOM settled partial cancellations show cancellation badges, terminal f
     const settled = page.locator('.history-card[data-fulfillment="partially_cancelled"]');
     for (const [index, [quantity, released, refused]] of cases.entries()) {
       const card = settled.nth(index);
-      assert.equal(await card.locator(".history-status--partially_cancelled").count(), 2);
+      assert.equal(await card.locator(".history-status--partially_cancelled").count(), 1);
       assert.match(await card.locator(".history-card__states").innerText(), /Частично отменён/);
-      assert.equal(await card.locator(".history-status-detail").innerText(), `Выдано ${released} из ${quantity} шт.; Отменено ${refused} из ${quantity} шт.`);
+      assert.equal(await card.locator("tbody tr").count(), 2);
+      for (const [rowIndex, [state, label, count]] of [["cancelled", "Отменено", refused], ["delivered", "Получено", released]].entries()) {
+        const row = card.locator("tbody tr").nth(rowIndex);
+        assert.equal(await row.locator(`.history-status--${state}`).count(), 1);
+        assert.equal(await row.locator(".history-status-detail").innerText(), `${label} ${count} шт.`);
+        assert.equal(await row.locator("td").nth(3).locator("span").innerText(), `${count} шт.`);
+        assert.equal(await row.locator("td").nth(4).innerText(), new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" }).format(100 * count));
+        assert.equal(await row.locator("td").first().locator("strong").innerText(), `TEST A${index + 1}`);
+      }
+      assert.equal(await card.locator(".history-card__quantity strong").innerText(), `1 / ${quantity}`);
+      assert.equal(await card.locator(".history-card__total").innerText(), new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" }).format(100 * quantity));
       assert.equal(await card.locator(".delivery-date--warning").count(), 0);
       assert.equal(await card.evaluate((node) => getComputedStyle(node).borderLeftColor), "rgb(184, 60, 60)");
       assert.doesNotMatch(await card.innerText(), /Частичная поставка|передан в службу доставки/);
@@ -1479,6 +1490,76 @@ test("PartKOM settled partial cancellations show cancellation badges, terminal f
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator("#history-modal").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
   }, { fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => history });
+});
+
+test("Armtek actual issue overrides stale status and splits settled cancellation without duplicating totals", async () => {
+  const base = { PIN: "A1", BRAND: "TEST", NAME: "Тестовая деталь", POSNR: "10", ORDER_DATE: "20261016120000",
+    KWMENG: "1", ZZKWMENG: "1", Issued: "1", REJECTED: "0", REJ_MENGE: "0", PRICE: "100.50", CURRENCY: "RUB",
+    STATUS: "позиция частично поставлена", DLVRD: "20261017090000", WRNTD: "20261017120000" };
+  const history = parseArmtekOrderHistory({ DATA: [
+    { ...base, ORDER: "ISSUED" },
+    { ...base, ORDER: "SPLIT", ZZKWMENG: "10", KWMENG: "4", Issued: "4", REJECTED: "6" },
+    { ...base, ORDER: "PENDING", ZZKWMENG: "10", KWMENG: "4", Issued: "3", REJECTED: "6" },
+    { ...base, ORDER: "SHIPPED", Issued: "0", KWMENG_R: "1", STATUS: "", ORDER_STATUS: "Закрыт" },
+  ] });
+  history.orders.find(({ number }) => number === "SPLIT").items[0].returnDays = 14;
+  const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.locator("#history-tab-armtek").click();
+    await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 4);
+    const card = (number) => page.locator(".history-card").filter({ has: page.locator("h3", { hasText: `Заказ № ${number}` }) });
+    const issued = card("ISSUED");
+    assert.equal(await issued.getAttribute("data-fulfillment"), "delivered");
+    assert.equal(await issued.locator("tbody tr").count(), 1);
+    assert.match(await issued.locator(".history-item-status").innerText(), /Получен.*Получено 1 из 1 шт\./s);
+    assert.doesNotMatch(await issued.innerText(), /Частичная поставка|частично поставлена/);
+    const split = card("SPLIT");
+    assert.equal(await split.getAttribute("data-fulfillment"), "partially_cancelled");
+    assert.equal(await split.locator("tbody tr").count(), 2);
+    assert.equal(await split.locator(".history-card__quantity strong").innerText(), "1 / 10");
+    assert.equal(await split.locator(".history-card__total").innerText(), money.format(1005));
+    for (const [index, [state, label, quantity]] of [["cancelled", "Отменено", 6], ["delivered", "Получено", 4]].entries()) {
+      const row = split.locator("tbody tr").nth(index);
+      assert.equal(await row.locator(`.history-status--${state}`).count(), 1);
+      assert.equal(await row.locator(".history-status-detail").innerText(), `${label} ${quantity} шт.`);
+      assert.equal(await row.locator("td").nth(3).locator("span").innerText(), `${quantity} шт.`);
+      assert.equal(await row.locator("td").nth(4).innerText(), money.format(100.5 * quantity));
+      assert.match(await row.locator(".order-return-terms").innerText(), /Возврат: 14 дн\./);
+    }
+    assert.equal(await split.locator(".history-status--cancelled").evaluate((node) => getComputedStyle(node).color), "rgb(161, 46, 53)");
+    assert.equal(await split.locator(".history-status--delivered").evaluate((node) => getComputedStyle(node).color),
+      await issued.locator(".history-item-status .history-status--delivered").evaluate((node) => getComputedStyle(node).color));
+    assert.equal(await card("PENDING").getAttribute("data-fulfillment"), "partial");
+    assert.equal(await card("PENDING").locator("tbody tr").count(), 1);
+    assert.equal(await card("SHIPPED").getAttribute("data-fulfillment"), "in_transit");
+    for (const [status, expected] of [["delivered", 2], ["cancelled", 1], ["partial", 1], ["today", 2], ["active", 1]]) {
+      await page.locator(`#history-status-${status}`).click();
+      assert.equal(await page.locator(".history-card").count(), expected);
+    }
+    await page.locator("#history-status-all").click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.locator("#history-modal").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+  }, { fixedTime: "2026-10-17T12:00:00Z", supplierOrderHistory: async () => history });
+});
+
+test("history rejects malformed receipt and cancellation quantities instead of inventing split rows", async () => {
+  let quantities = null;
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#history-results").textContent.includes("PartKOM вернул некорректную историю"));
+    for (const invalid of [[], {}, { delivered: "1", cancelled: 1 }, { delivered: 1, cancelled: 0 },
+      { delivered: -1, cancelled: 3 }, { delivered: 1, cancelled: 2 }, { delivered: Infinity, cancelled: 1 }]) {
+      quantities = invalid;
+      const response = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/order-history/part-kom");
+      await page.locator("#history-reload").click();
+      await response;
+      await page.waitForFunction(() => document.querySelector("#history-results").textContent.includes("PartKOM вернул некорректную историю"));
+      assert.equal(await page.locator(".history-card").count(), 0);
+    }
+  }, { partKomOrderHistory: async () => ({ orders: [{ number: "INVALID-SPLIT", date: "2026-10-16", items: [{ article: "A1",
+    brand: "TEST", title: "Тестовая деталь", quantity: 2, price: 100, status: null, fulfillment: "partially_cancelled",
+    fulfillmentQuantities: quantities, expectedDate: null, guaranteedDate: null, warehouse: null }] }], limited: false }) });
 });
 
 test("history sorts every supplier newest first regardless of item status and aligns columns across different card contents", async () => {
