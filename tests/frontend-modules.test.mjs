@@ -22,7 +22,7 @@ import {
 import { isPartKomReturnableVisible } from "../src/frontend/partkom-return-settings.js";
 import { isForumAutoReturnableVisible } from "../src/frontend/forum-auto-return-settings.js";
 import { isArmtekReturnableVisible } from "../src/frontend/armtek-return-settings.js";
-import { applySavedColumnWidths, applySavedColumnAlignments } from "../src/frontend/table-column-widths.js";
+import { applySavedColumnWidths, applySavedColumnAlignments, fitOfferColumnWidths } from "../src/frontend/table-column-widths.js";
 import { formatDeliveryDate } from "../src/frontend/supplier-search-summary.js";
 import { formatCartLatestDeliveryDate } from "../src/frontend/cart-ui.js";
 
@@ -68,6 +68,22 @@ test("table column widths accept only bounded integer preferences", () => {
   assert.deepEqual(applySavedColumnWidths(defaults, { supplier: 23, title: 801 }), defaults);
   assert.deepEqual(applySavedColumnWidths(defaults, { supplier: 24, title: 79 }), { supplier: 24, title: 79 });
   assert.deepEqual(applySavedColumnAlignments({ supplier: "left", title: "center" }, { supplier: "right", title: "justify" }), { supplier: "right", title: "center" });
+});
+
+test("offer layout fills spare space without changing saved widths or the action column", () => {
+  const widths = { supplier: 100, brand: 160, article: 120, title: 800, deliveryDate: 160, quantity: 90, markupPrice: 80 };
+  const columns = Object.keys(widths);
+  const original = { ...widths };
+  const wide = fitOfferColumnWidths(widths, columns, 1900, 104);
+  assert.equal(wide.totalWidth, 1900);
+  assert.deepEqual(wide.widths, { ...widths, title: 1086 });
+  for (const availableWidth of [0, 390, 1614]) {
+    assert.deepEqual(fitOfferColumnWidths(widths, columns, availableWidth, 104), { widths, totalWidth: 1614 });
+  }
+  const hiddenTitle = fitOfferColumnWidths(widths, columns.filter((column) => column !== "title"), 1900, 104);
+  assert.deepEqual(hiddenTitle, { widths: { supplier: 100, brand: 1246, article: 120, deliveryDate: 160, quantity: 90, markupPrice: 80 }, totalWidth: 1900 });
+  assert.deepEqual(fitOfferColumnWidths(widths, [], 1900, 104), { widths: {}, totalWidth: 104 });
+  assert.deepEqual(widths, original, "rendered surplus must not be persisted as the configured width");
 });
 
 test("brand and article formatting normalizes case consistently", () => {
@@ -790,7 +806,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(app, /main-best-price/);
   assert.match(app, /const tableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+deliveryDate: 180,\s+quantity: 120,\s+markupPrice: 120,/s);
   assert.match(app, /--results-table-min-width/);
-  assert.match(app, /\$\{tableColumnWidths\[header\.dataset\.column\]\}px/);
+  assert.match(app, /\$\{layout\.widths\[header\.dataset\.column\]\}px/);
   assert.match(app, /const analogTableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+deliveryDate: 180,\s+quantity: 120,\s+markupPrice: 120,/s);
   assert.match(app, /const applyAnalogTableColumns = \(\) =>/);
   assert.match(app, /--analogs-results-table-min-width/);

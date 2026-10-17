@@ -31,6 +31,7 @@ import { setupTableColumnSettings } from "./table-column-settings-ui.js";
 import {
   applySavedColumnWidths,
   applyColumnAlignment,
+  fitOfferColumnWidths,
   loadSharedColumnWidths,
   restoreLocalColumnAlignments,
   restoreLocalColumnWidths,
@@ -934,11 +935,11 @@ const saveTableColumns = () => {
 
 const applyTableColumns = () => {
   const visibleColumns = getVisibleTableColumns();
-  const minimumWidth = visibleColumns.reduce((width, column) => width + tableColumnWidths[column], cartActionColumnWidth);
-  resultsTable.style.setProperty("--results-table-min-width", `${minimumWidth}px`);
+  const layout = fitOfferColumnWidths(tableColumnWidths, visibleColumns, resultsTable.clientWidth, cartActionColumnWidth);
+  resultsTable.style.setProperty("--results-table-min-width", `${layout.totalWidth}px`);
   resultsTable.querySelectorAll("th[data-column]").forEach((header) => {
     header.style.width = visibleColumns.includes(header.dataset.column)
-      ? `${tableColumnWidths[header.dataset.column]}px`
+      ? `${layout.widths[header.dataset.column]}px`
       : "";
   });
   tableColumnsReset.hidden = visibleTableColumns.size === tableColumnIds.length;
@@ -2174,12 +2175,12 @@ const getVisibleAnalogTableColumns = () => analogTableColumnIds;
 
 const applyAnalogTableColumns = () => {
   const visibleColumns = getVisibleAnalogTableColumns();
-  const minimumWidth = visibleColumns.reduce((width, column) => width + analogTableColumnWidths[column], cartActionColumnWidth);
+  const layout = fitOfferColumnWidths(analogTableColumnWidths, visibleColumns, analogsResults.clientWidth, cartActionColumnWidth);
   const analogsTable = analogsResultsBody.closest("table");
-  analogsTable.style.setProperty("--analogs-results-table-min-width", `${minimumWidth}px`);
+  analogsTable.style.setProperty("--analogs-results-table-min-width", `${layout.totalWidth}px`);
   analogsTable.querySelectorAll("th[data-analog-column]").forEach((header) => {
     header.style.width = visibleColumns.includes(header.dataset.analogColumn)
-      ? `${analogTableColumnWidths[header.dataset.analogColumn]}px`
+      ? `${layout.widths[header.dataset.analogColumn]}px`
       : "";
   });
   analogsTable.querySelectorAll("[data-analog-column]").forEach((element) => {
@@ -3011,6 +3012,15 @@ setupTableColumnSettings({ table: resultsTable, columnAttribute: "data-column", 
   name: "main", title: "Столбцы проценки", apply: applyTableColumns, save: () => saveColumnWidths("main", tableColumnWidths, tableColumnAlignments) });
 setupTableColumnSettings({ table: analogsResults, columnAttribute: "data-analog-column", widths: analogTableColumnWidths, alignments: analogTableColumnAlignments,
   name: "analogs", title: "Столбцы аналогов", apply: applyAnalogTableColumns, save: () => saveColumnWidths("analogs", analogTableColumnWidths, analogTableColumnAlignments) });
+
+const offerTableResizeObserver = new ResizeObserver((entries) => {
+  for (const entry of entries) {
+    if (entry.target === resultsTable) applyTableColumns();
+    else applyAnalogTableColumns();
+  }
+});
+offerTableResizeObserver.observe(resultsTable);
+offerTableResizeObserver.observe(analogsResults);
 
 loadSharedColumnWidths().then((savedWidths) => {
   Object.assign(tableColumnWidths, applySavedColumnWidths(tableColumnWidths, savedWidths.main));

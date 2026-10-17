@@ -299,15 +299,34 @@ test("main and analog action columns stay compact on wide screens, after resizin
   });
 });
 
-test("offer columns use exact pixels without mouse resize handles or automatic stretching", async () => {
-  await withCartPage(async (page) => {
+test("offer tables fill the viewport through the title while other pixels and compact actions stay fixed", async () => {
+  const extraOffers = Array.from({ length: 24 }, (_, index) => offer("armtek", 4,
+    { supplier: "armtek", keyzak: `WIDTH${index}` }, { warehouse: `Тестовый склад ${index}` }, `Тестовая позиция ${index + 1}`));
+  await withCartPage(async (page, { searchCalls }) => {
     const check = async (table, attribute) => {
+      await page.waitForFunction((table) => {
+        const viewport = document.querySelector(table);
+        return Math.abs(viewport.querySelector("table").getBoundingClientRect().width - Math.max(1212, viewport.clientWidth)) <= 1;
+      }, table);
       assert.equal(await page.locator(`${table} .table-column-resize`).count(), 0);
-      for (const [column, width] of [["supplier", 100], ["brand", 125], ["title", 323], ["markupPrice", 120]]) {
+      const availableWidth = await page.locator(table).evaluate((viewport) => viewport.clientWidth);
+      for (const [column, width] of [["supplier", 100], ["brand", 125], ["article", 140], ["title", Math.max(323, availableWidth - 889)], ["deliveryDate", 180], ["quantity", 120], ["markupPrice", 120]]) {
         const header = await page.locator(`${table} th[${attribute}="${column}"]`).boundingBox();
         const cell = await page.locator(`${table} tbody tr`).first().locator(`[${attribute}="${column}"]`).boundingBox();
         assert.ok(Math.abs(header.width - width) <= 1, `${table} ${column}: ${header.width} instead of ${width}`);
         assert.ok(Math.abs(cell.width - width) <= 1);
+      }
+      const geometry = await page.locator(table).evaluate((viewport) => {
+        const bounds = viewport.querySelector("table").getBoundingClientRect();
+        const action = viewport.querySelector("tbody .cart-add-cell").getBoundingClientRect();
+        return { actionWidth: action.width, endGap: bounds.right - action.right, overflow: viewport.scrollWidth - viewport.clientWidth,
+          verticalScroll: viewport.scrollHeight > viewport.clientHeight };
+      });
+      assert.ok(Math.abs(geometry.actionWidth - 104) <= 1, JSON.stringify(geometry));
+      assert.ok(Math.abs(geometry.endGap) <= 1, JSON.stringify(geometry));
+      if (availableWidth >= 1212) {
+        assert.ok(geometry.overflow <= 1, "filling the viewport must exclude the vertical scrollbar");
+        assert.equal(geometry.verticalScroll, true);
       }
     };
     for (const width of [2504, 1990, 1366, 390]) {
@@ -315,12 +334,23 @@ test("offer columns use exact pixels without mouse resize handles or automatic s
       await check("#results-table", "data-column");
     }
     await page.setViewportSize({ width: 1990, height: 1000 });
+    await page.locator("#filters-resize").focus();
+    await page.keyboard.press("ArrowRight");
+    await check("#results-table", "data-column");
+    await page.keyboard.press("ArrowLeft");
+    await check("#results-table", "data-column");
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "table-fills-main.png") });
     await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
+    await page.waitForFunction(() => document.querySelectorAll("#analogs-results-body .cart-add-cell").length === 26);
     for (const width of [2504, 1990, 1366, 390]) {
       await page.setViewportSize({ width, height: 1000 });
       await check("#analogs-results", "data-analog-column");
     }
-  });
+    await page.setViewportSize({ width: 1990, height: 1000 });
+    await check("#analogs-results", "data-analog-column");
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "table-fills-analogs.png") });
+    assert.equal(searchCalls.length, 2, "layout changes must not repeat supplier searches");
+  }, { extraOffers, title: "Тестовый фильтр" });
 });
 
 test("table header settings validate, apply and persist separate main and analog column widths", async () => {
@@ -353,7 +383,7 @@ test("table header settings validate, apply and persist separate main and analog
     assert.equal((await savedMain).status(), 200);
     assert.equal(await main.isVisible(), false);
     assert.ok(Math.abs((await page.locator('#results-table th[data-column="supplier"]').boundingBox()).width - 70) <= 1);
-    assert.ok(Math.abs((await page.locator('#results-table th[data-column="title"]').boundingBox()).width - 480) <= 1);
+    assert.ok((await page.locator('#results-table th[data-column="title"]').boundingBox()).width >= 479);
     assert.equal(await page.locator('#results-body [data-column="supplier"]').first().evaluate((node) => getComputedStyle(node).textAlign), "right");
     assert.equal(await page.locator('#results-body [data-column="brand"]').first().evaluate((node) => getComputedStyle(node).textAlign), "center");
     assert.equal(await page.locator('#results-body [data-column="title"]').first().evaluate((node) => getComputedStyle(node).textAlign), "left");

@@ -17,7 +17,7 @@ export const setupTableColumnSettings = ({ table, columnAttribute, widths, align
   dialog.id = `table-column-settings-${name}`;
   dialog.setAttribute("aria-labelledby", `${dialog.id}-title`);
   dialog.innerHTML = `<form novalidate><header><h2></h2><button type="button" data-column-settings-cancel aria-label="Закрыть настройки столбцов">×</button></header>
-    <p class="table-column-settings-dialog__hint">Задайте точную ширину столбцов в пикселях и выберите выравнивание. Ширина — от 24 до 800 px.</p>
+    <p class="table-column-settings-dialog__hint">Задайте ширину от 24 до 800 px и выберите выравнивание. Свободное место занимает «Наименование», а если оно скрыто — самый широкий видимый столбец. Для него заданная ширина — минимальная.</p>
     <div class="table-column-settings-dialog__fields"></div><p class="table-column-settings-dialog__error" role="alert" hidden></p>
     <footer><button type="button" class="btn btn-light" data-column-settings-cancel>Отмена</button><button type="submit" class="btn btn-primary">Применить</button></footer></form>`;
   const heading = dialog.querySelector("h2");

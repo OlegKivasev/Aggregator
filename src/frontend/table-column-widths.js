@@ -39,6 +39,17 @@ export const applySavedColumnWidths = (defaults, savedWidths) => {
 
 export const restoreLocalColumnWidths = (table, defaults) => applySavedColumnWidths(defaults, readStoredWidths()[table]);
 
+export const fitOfferColumnWidths = (widths, visibleColumns, availableWidth, actionWidth) => {
+  const fittedWidths = Object.fromEntries(visibleColumns.map((column) => [column, widths[column]]));
+  const configuredWidth = visibleColumns.reduce((total, column) => total + widths[column], actionWidth);
+  const expandingColumn = visibleColumns.includes("title") ? "title" : visibleColumns.reduce(
+    (widest, column) => widest === null || widths[column] > widths[widest] ? column : widest, null,
+  );
+  const extraWidth = expandingColumn === null ? 0 : Math.max(0, availableWidth - configuredWidth);
+  if (expandingColumn !== null) fittedWidths[expandingColumn] += extraWidth;
+  return { widths: fittedWidths, totalWidth: configuredWidth + extraWidth };
+};
+
 const readStoredAlignments = () => {
   try { const value = JSON.parse(localStorage.getItem(alignmentStorageKey)); return isRecord(value) ? value : {}; }
   catch { return {}; } // Corrupted optional preferences fall back to each table's defaults.
