@@ -44,6 +44,8 @@ import { historyDate } from "../purchasing/order-history-values.ts";
 import { OrderCancellationService, CancellationInputError } from "../purchasing/order-cancellation-service.ts";
 import { SqliteOrderCancellationRepository } from "../purchasing/sqlite-order-cancellation-repository.ts";
 import type { OrderHistorySupplier } from "../purchasing/order-cancellation-contract.ts";
+import type { OrderNotificationService } from "../notifications/order-notification-service.ts";
+import { serveVkNotifications } from "./vk-notifications.ts";
 
 export interface AggregatorApplication {
   testCartOrder?: TestOrder;
@@ -90,6 +92,7 @@ export interface AggregatorApplication {
 interface CreateAggregatorServerOptions {
   application: AggregatorApplication;
   publicDir: string;
+  notifications?: OrderNotificationService;
   reportError?: (event: OperationalErrorEvent) => void;
 }
 
@@ -216,6 +219,7 @@ function serveGarageError(response: ServerResponse, error: unknown, reportError:
 export function createAggregatorServer({
   application,
   publicDir,
+  notifications,
   reportError = ({ operation, category, diagnosticCode }) => console.error(
     `[aggregator] ${operation} failed (${category})${diagnosticCode ? ` [${diagnosticCode}]` : ""}`,
   ),
@@ -235,6 +239,12 @@ export function createAggregatorServer({
     }
 
     const url = new URL(request.url, "http://127.0.0.1");
+
+    if (await serveVkNotifications(request, response, url, notifications)) return;
+    if (/^\/api\/(?:search|cart|order-history|suppliers)(?:\/|$)/.test(url.pathname)) {
+      const release = notifications?.beginForegroundOperation();
+      if (release) response.once("close", release);
+    }
 
     if (url.pathname === "/api/order-cancellations" || url.pathname === "/api/order-cancellations/seen") {
       response.setHeader("Cache-Control", "no-store");

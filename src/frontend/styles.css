@@ -3488,3 +3488,12 @@ th[aria-sort="descending"] .analogs-sort span::after {
     position: static;
   }
 }
+.vk-notifications-settings { margin: 12px 0; padding: 14px; border: 1px solid #dce4ef; border-radius: 12px; background: #f8fbff; }
+.vk-notifications-settings summary { cursor: pointer; font-weight: 600; }
+.vk-notifications-settings p, .vk-notifications-settings li { font-size: 12px; color: #617089; margin: 10px 0; }
+.vk-notifications-settings form { display: grid; gap: 8px; margin: 12px 0; }
+.vk-notifications-settings label { display: block; font-size: 13px; margin: 10px 0; }
+.vk-notifications-settings [hidden] { display: none !important; }
+.vk-notifications-settings .vk-notifications-enabled { display: flex; align-items: flex-start; gap: 8px; }
+.vk-notifications-settings [data-error="true"] { color: #b42318; }
+.vk-notifications-settings > button { margin: 5px 4px 0 0; }

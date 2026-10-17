@@ -15,6 +15,8 @@ export interface OrderHistoryItem {
   fulfillmentQuantities?: { delivered: number; cancelled: number };
   /** Confirmed cancellation count, including a position that is still partly pending. */
   cancelledQuantity?: number;
+  /** Confirmed received quantity, including a position still partly pending. */
+  deliveredQuantity?: number;
   expectedDate: string | null;
   guaranteedDate: string | null;
   warehouse: string | null;

@@ -360,6 +360,7 @@ export function parseForumAutoOrderHistory(payload: unknown): OrderHistory {
         price: historyNumber(item.price), status: issued === null ? historyText(row.status, 300) : `Выдано ${issued} из ${quantity} шт.`,
         expectedDate: historyDate(row.mdt, "russian"),
         fulfillment: issued !== null && issued < quantity ? issued === 0 ? "unknown" : "partial" : fulfillment,
+        ...(issued !== null && issued > 0 ? { deliveredQuantity: issued } : {}),
         guaranteedDate: null, warehouse: null };
     }) };
   });

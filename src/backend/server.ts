@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readPort } from "./config.ts";
 import { createAggregatorServer, type AggregatorApplication } from "./http/create-server.ts";
+import { createOrderNotifications } from "./notifications/create-order-notifications.ts";
 import {
   authorizeArmtek,
   authorizeForumAuto,
@@ -83,15 +84,18 @@ const application: AggregatorApplication = {
   validateSupplierSessions,
 };
 
-const server = createAggregatorServer({ application, publicDir });
+const notifications = createOrderNotifications(application);
+const server = createAggregatorServer({ application, publicDir, notifications: notifications.service });
 
 server.listen(port, host, () => {
+  notifications.service.start();
   console.log(`Aggregator server started at http://${host}:${port}`);
 });
 
 function shutdown(): void {
+  notifications.service.stop();
   server.close(() => {
-    shutdownSearchService().then(
+    notifications.close().then(() => shutdownSearchService()).then(
       () => process.exit(0),
       () => process.exit(1),
     );
