@@ -47,6 +47,11 @@ async function withCartPage(check, options = {}) {
       streamSearch: async (query, emit) => {
         searchCalls.push(structuredClone(query));
         emit({ type: "search_started", article: query.article, suppliers });
+        if (query.mode === "analogs" && options.analogOffers) {
+          for (const result of options.analogOffers) emit({ type: "result", result });
+          for (const supplier of suppliers) emit({ type: "supplier_status", supplier, status: "completed" });
+          emit({ type: "search_completed", article: query.article }); return;
+        }
         emit({ type: "result", result: offer("armtek", options.stock ?? 4, { supplier: "armtek", keyzak: "TEST01",
           ...(options.armtekReturnDays !== undefined ? { returnDays: options.armtekReturnDays } : {}) }, options.deliveries?.armtek, options.title) });
         emit({ type: "result", result: offer("part-kom", 3, { supplier: "part-kom", makerId: "101", providerId: "202" }, options.deliveries?.partkom, options.title) });
@@ -445,6 +450,109 @@ test("PartKOM weekday day-after-tomorrow highlights in search, analogs, cart and
   }, { fixedTime: "2026-10-12T12:00:00Z", deliveries: {
     armtek: { deliveryDate: "2026-10-14T09:00:00Z" }, partkom: { deliveryDate: "2026-10-14T09:00:00Z" },
   } });
+});
+
+test("near-term tabs sort tomorrow before the following day and restore each table's previous sorting", async () => {
+  const date = (day) => `2026-10-${day}T09:00:00Z`;
+  const extra = (brand, price, from, to = null) => ({ supplier: "armtek", brand, article: "A1", title: brand, quantity: 2,
+    price, warehouse: "Склад", deliveryDate: from, deliveryDateTo: to, deliveryDateApproximate: false, link: supplierOrigins.armtek });
+  await withCartPage(async (page) => {
+    const exercise = async (scope, rowSelector, sortAttribute, columnAttribute) => {
+      const rows = page.locator(rowSelector);
+      const soon = page.locator(`#${scope}-delivery-tabs [data-delivery-window="soon"]`);
+      const all = page.locator(`#${scope}-delivery-tabs [data-delivery-window="all"]`);
+      const brand = page.locator(`[${sortAttribute}="brand"]`);
+      const price = page.locator(`[${sortAttribute}="markupPrice"]`);
+      const delivery = page.locator(`[${sortAttribute}="deliveryDate"]`);
+      const assertChronological = async () => {
+        assert.equal(await delivery.locator("..").getAttribute("aria-sort"), "ascending");
+        const dates = await rows.locator(`[${columnAttribute}="deliveryDate"] .delivery-date`).allTextContents();
+        assert.deepEqual(dates.map((value) => /^(Завтра|13\.10\.2026)/.test(value) ? 1 : 2), [1, 1, 1, 2, 2]);
+      };
+      await brand.click(); await brand.click(); const previous = await rows.allTextContents();
+      assert.equal(await brand.locator("..").getAttribute("aria-sort"), "descending");
+      await soon.click(); await assertChronological();
+      await soon.click(); await assertChronological();
+      await price.click(); await all.click();
+      assert.equal(await brand.locator("..").getAttribute("aria-sort"), "descending");
+      assert.deepEqual(await rows.allTextContents(), previous);
+      await delivery.click(); await delivery.click(); const previousDates = await rows.allTextContents();
+      await soon.click(); await assertChronological(); await all.click();
+      assert.equal(await delivery.locator("..").getAttribute("aria-sort"), "descending");
+      assert.deepEqual(await rows.allTextContents(), previousDates);
+    };
+    await exercise("results", "#results-body .main-result-row", "data-sort-key", "data-column");
+    await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
+    await page.waitForFunction(() => document.querySelectorAll("#analogs-results-body tr").length === 6);
+    await exercise("analogs", "#analogs-results-body tr", "data-analog-sort-key", "data-analog-column");
+    await page.locator("button[data-close-analogs-modal]").click();
+    assert.equal(await page.locator('[data-sort-key="deliveryDate"]').locator("..").getAttribute("aria-sort"), "descending");
+  }, { fixedTime: "2026-10-12T12:00:00Z", deliveries: {
+    armtek: { deliveryDate: date(14) }, partkom: { deliveryDate: date(13) },
+  }, extraOffers: [extra("RANGE", 5, date(13), date(14)), extra("TOMORROW", 300, date(13)),
+    extra("CHEAP_LATER", 1, date(14)), extra("FUTURE", 2000, date(16))] });
+});
+
+test("analog cart controls use shared quantities, merge additions and order the actual analogs for all suppliers", async () => {
+  const analogs = [
+    offer("armtek", 4, { supplier: "armtek", keyzak: "ANALOG01" }, { article: "AN-ARM" }),
+    offer("part-kom", 3, { supplier: "part-kom", makerId: "303", providerId: "404" }, { article: "AN-PK" }),
+    offer("forum-auto", 3, { supplier: "forum-auto", warehouse: "Тестовый склад", gid: "analog-gid" }, { article: "AN-FA" }),
+    offer("rossko", 3, { supplier: "rossko", partGuid: "analog-guid", stockId: "analog-stock" }, { article: "AN-RO" }),
+  ];
+  await withCartPage(async (page, { orderCalls }) => {
+    await openOfferAnalogs(page, page.locator("#results-body tr").first());
+    await page.waitForFunction(() => document.querySelectorAll("#analogs-results-body .cart-offer-button").length === 4);
+    const armtek = page.locator("#analogs-results-body tr").filter({ hasText: "AN-ARM" });
+    const cartBounds = await armtek.locator(".cart-offer-button").boundingBox();
+    const garageBounds = await armtek.locator(".garage-offer-button").boundingBox();
+    assert.ok(Math.abs(cartBounds.x - garageBounds.x) <= 1); assert.ok(garageBounds.y >= cartBounds.y + cartBounds.height + 2);
+    assert.equal(await armtek.locator(".garage-offer-button").getAttribute("aria-disabled"), "false");
+    assert.equal(await armtek.locator(".garage-offer-button").getAttribute("data-garage-offer-id"), await armtek.locator(".cart-offer-button").getAttribute("data-cart-offer-id"));
+    if (process.env.TEST_CAPTURE_DIR) await armtek.locator(".cart-offer-controls").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "analog-cart-controls-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 850 });
+    await armtek.locator(".cart-offer-controls").scrollIntoViewIfNeeded();
+    assert.equal(await armtek.locator(".cart-offer-controls").evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true);
+    if (process.env.TEST_CAPTURE_DIR) await armtek.locator(".cart-offer-controls").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "analog-cart-controls-mobile.png") });
+    await page.setViewportSize({ width: 1366, height: 850 });
+    await armtek.locator(".cart-quantity").fill("99"); assert.equal(await armtek.locator(".cart-quantity").inputValue(), "4");
+    await armtek.locator(".cart-quantity").fill("2"); await armtek.locator(".cart-offer-button").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
+    await armtek.locator(".cart-quantity").fill("1"); await armtek.locator(".cart-offer-button").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "3");
+    let total = 3;
+    for (const [article, quantity] of [["AN-PK", 2], ["AN-FA", 1], ["AN-RO", 1]]) {
+      const row = page.locator("#analogs-results-body tr").filter({ hasText: article });
+      await row.locator(".cart-quantity").fill(String(quantity)); await row.locator(".cart-offer-button").click(); total += quantity;
+      await page.waitForFunction((value) => document.querySelector("#cart-badge").textContent === String(value), total);
+    }
+    await page.locator("button[data-close-analogs-modal]").click();
+    await page.locator("#results-body .cart-offer-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "8");
+    await page.locator("#cart-toggle").click();
+    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 5);
+    assert.equal(await page.locator("#cart-items tr").filter({ hasText: "AN-ARM" }).locator(".cart-quantity").inputValue(), "3");
+    await openCheckout(page); await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+    const lines = orderCalls.flat(); assert.equal(lines.length, 5);
+    assert.equal(lines.find((line) => line.result.article === "AN-ARM").reference.keyzak, "ANALOG01");
+    assert.equal(lines.find((line) => line.result.article === "AN-PK").reference.providerId, "404");
+    assert.equal(lines.find((line) => line.result.article === "AN-FA").reference.gid, "analog-gid");
+    assert.equal(lines.find((line) => line.result.article === "AN-RO").reference.stockId, "analog-stock");
+  }, { allSuppliers: true, analogOffers: analogs });
+});
+
+test("analog cart controls reject zero or unknown stock just like the main table", async () => {
+  await withCartPage(async (page) => {
+    await openOfferAnalogs(page, page.locator("#results-body tr").first());
+    const rows = page.locator("#analogs-results-body tr");
+    for (let index = 0; index < 2; index++) {
+      assert.equal(await rows.nth(index).locator(".cart-quantity").isDisabled(), true);
+      assert.equal(await rows.nth(index).locator(".cart-offer-button").isDisabled(), true);
+    }
+    assert.equal(await page.locator("#cart-toggle").isVisible(), false);
+  }, { analogOffers: [offer("armtek", 0, { supplier: "armtek", keyzak: "EMPTY" }),
+    offer("part-kom", null, { supplier: "part-kom", makerId: "303", providerId: "404" })] });
 });
 
 test("near-term tabs filter both tables and dynamically recalculate sidebar facets, averages and counts", async () => {

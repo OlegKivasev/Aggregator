@@ -92,7 +92,6 @@
 .garage-item-remove { display: inline-grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
 .garage-item-remove svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; }
 .garage-item-remove:hover, .garage-item-remove:focus-visible { color: #b42318; background: #fff0ee; outline: 0; }
-.garage-add-column, .garage-add-cell { width: 52px; min-width: 52px; padding-right: 8px !important; padding-left: 8px !important; text-align: center; }
 .garage-offer-button { display: inline-grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
 .garage-offer-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; }
 .garage-offer-button[draggable="true"] { cursor: grab; }
@@ -113,6 +112,7 @@
 .cart-offer-controls { display: flex; align-items: center; gap: 5px; }
 .cart-offer-actions { display: grid; flex: 0 0 28px; gap: 2px; justify-items: center; }
 .cart-quantity { width: 54px; min-height: 30px; padding: 3px 4px; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 12px; }
+.cart-offer-controls > .cart-quantity { min-width: 0; }
 .cart-quantity:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .cart-quantity:disabled { color: var(--muted); background: #f3f5f8; }
 .cart-offer-button { display: grid; width: 28px; height: 28px; padding: 5px; place-items: center; border: 0; border-radius: 7px; background: transparent; }

@@ -16,7 +16,7 @@ import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { bootstrapCart, renderCartOfferControls } from "./cart-ui.js";
 import { bootstrapOrderHistory } from "./order-history-ui.js";
 import { hasPartKomOfferDeliveryWarning } from "./order-notices.js";
-import { isOfferDueSoon } from "./delivery-dates.js";
+import { deliveryCalendarDay, isOfferDueSoon } from "./delivery-dates.js";
 import {
   isStpartsWarehouseVisible,
   normalizeStpartsWarehouseColors,
@@ -185,6 +185,8 @@ let markupPercent = 35;
 let tableSearchTerm = "";
 let mainDeliverySoon = false;
 let analogDeliverySoon = false;
+let mainSortBeforeSoon = null;
+let analogSortBeforeSoon = null;
 let contextMenuResult = null;
 let contextMenuAnchor = null;
 let contextMenuTabId = null;
@@ -247,7 +249,6 @@ const tableColumnWidths = {
   markupPrice: 120,
 };
 Object.assign(tableColumnWidths, restoreLocalColumnWidths("main", tableColumnWidths));
-const garageActionColumnWidth = 52;
 const cartActionColumnWidth = 98;
 let visibleTableColumns = new Set(tableColumnIds);
 let visibleStpartsWarehouses = new Set(["green"]);
@@ -877,10 +878,16 @@ const compareSortValues = (leftValue, rightValue) => {
     : resultCollator.compare(String(leftValue), String(rightValue));
 };
 
-const compareResults = (left, right, state = sortState, percent = markupPercent) => {
-  const comparison = state.key === "deliveryDate"
+const compareResults = (left, right, state = sortState, percent = markupPercent, nearTerm = false) => {
+  let dayComparison = 0;
+  if (nearTerm && state.key === "deliveryDate") {
+    const leftDay = deliveryCalendarDay(left.deliveryDate);
+    const rightDay = deliveryCalendarDay(right.deliveryDate);
+    if (leftDay !== null && rightDay !== null) dayComparison = leftDay - rightDay;
+  }
+  const comparison = dayComparison || (state.key === "deliveryDate"
     ? compareDeliveryDatesThenPrice(left, right)
-    : compareSortValues(getSortValue(left, state.key, percent), getSortValue(right, state.key, percent));
+    : compareSortValues(getSortValue(left, state.key, percent), getSortValue(right, state.key, percent)));
 
   if (state.key === "markupPrice" && comparison === 0) {
     return compareDeliveryDates(left, right);
@@ -1231,7 +1238,7 @@ const renderResults = () => {
 
   const { exactResults, filteredResults } = getMainTableResults(results);
   const sortedResults = [...filteredResults].sort((left, right) =>
-    compareResults(left, right, sortState, markupPercent));
+    compareResults(left, right, sortState, markupPercent, mainDeliverySoon));
   const bestPrice = filteredResults
     .filter((result) => getMarkupPrice(result, markupPercent) !== null)
     .reduce((best, result) => !best || getMarkupPrice(result, markupPercent) < getMarkupPrice(best, markupPercent) ? result : best, null);
@@ -2165,7 +2172,7 @@ const getVisibleAnalogTableColumns = () => analogTableColumnIds;
 
 const applyAnalogTableColumns = () => {
   const visibleColumns = getVisibleAnalogTableColumns();
-  const minimumWidth = visibleColumns.reduce((width, column) => width + analogTableColumnWidths[column], garageActionColumnWidth);
+  const minimumWidth = visibleColumns.reduce((width, column) => width + analogTableColumnWidths[column], cartActionColumnWidth);
   const analogsTable = analogsResultsBody.closest("table");
   analogsTable.style.setProperty("--analogs-results-table-min-width", `${minimumWidth}px`);
   analogsTable.querySelectorAll("th[data-analog-column]").forEach((header) => {
@@ -2189,7 +2196,7 @@ const renderAnalogRows = () => {
   const normalizedTerm = analogSearchTerm.trim().toLocaleLowerCase();
   const visibleResults = getVisibleAnalogResults(analogSearchResults);
   const filteredResults = getFilteredAnalogResults(visibleResults);
-  const rows = [...filteredResults].sort((left, right) => compareResults(left, right, analogSortState));
+  const rows = [...filteredResults].sort((left, right) => compareResults(left, right, analogSortState, markupPercent, analogDeliverySoon));
   const bestPrice = filteredResults
     .filter((result) => Number.isFinite(result.price) && result.price > 0)
     .reduce((best, result) => !best || result.price < best.price ? result : best, null);
@@ -2227,7 +2234,7 @@ const renderAnalogRows = () => {
         <td data-analog-column="deliveryDate"><span class="delivery-date${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span><span class="analogs-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
-        <td class="garage-add-cell"><button type="button" class="garage-offer-button" draggable="${Boolean(result.offerId)}" data-garage-offer-id="${escapeHtml(result.offerId ?? "")}" data-garage-offer-quantity="${Number.isFinite(result.quantity) && result.quantity >= 0 ? result.quantity : ""}" aria-disabled="${!result.offerId}" aria-label="Добавить в гараж" title="Добавить в гараж"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5.1 9.75 1.25-3.2A2.25 2.25 0 0 1 8.45 5h7.1a2.25 2.25 0 0 1 2.1 1.55l1.25 3.2"/><path d="M4.5 10.25h15a1.5 1.5 0 0 1 1.5 1.5v4.75h-2.25V19H16.5v-2.5h-9V19H5.25v-2.5H3v-4.75a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="7.25" cy="13.5" r="1"/><circle cx="16.75" cy="13.5" r="1"/></svg></button></td>
+        ${renderCartOfferControls(result)}
       </tr>`;
   }).join("");
   applyAnalogTableColumns();
@@ -2277,6 +2284,7 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
   analogFilterRangesByColumn.clear();
   analogSearchTerm = "";
   analogDeliverySoon = false;
+  analogSortBeforeSoon = null;
   analogDeliveryTabs.forEach((button) => {
     const selected = button.dataset.deliveryWindow === "all";
     button.setAttribute("aria-selected", String(selected)); button.tabIndex = selected ? 0 : -1;
@@ -2317,7 +2325,7 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
           return;
         }
         analogSearchResultKeys.add(resultKey);
-        analogSearchResults.push(payload.result);
+        analogSearchResults.push({ ...payload.result, offerId: typeof payload.offerId === "string" ? payload.offerId : "" });
         scheduleAnalogRowsRender();
         return;
       }
@@ -2970,8 +2978,18 @@ tableSearchInput.addEventListener("input", () => {
   renderResults();
 });
 for (const [buttons, update] of [
-  [mainDeliveryTabs, (soon) => { mainDeliverySoon = soon; renderResults(); }],
-  [analogDeliveryTabs, (soon) => { analogDeliverySoon = soon; analogVisibleLimit = 200; renderAnalogRowsNow(); }],
+  [mainDeliveryTabs, (soon) => {
+    if (soon === mainDeliverySoon) return;
+    if (soon) { mainSortBeforeSoon = { ...sortState }; sortState = { key: "deliveryDate", direction: "ascending" }; }
+    else { sortState = mainSortBeforeSoon; mainSortBeforeSoon = null; }
+    mainDeliverySoon = soon; renderResults();
+  }],
+  [analogDeliveryTabs, (soon) => {
+    if (soon === analogDeliverySoon) return;
+    if (soon) { analogSortBeforeSoon = { ...analogSortState }; analogSortState = { key: "deliveryDate", direction: "ascending" }; }
+    else { analogSortState = analogSortBeforeSoon; analogSortBeforeSoon = null; }
+    analogDeliverySoon = soon; analogVisibleLimit = 200; renderAnalogRowsNow();
+  }],
 ]) {
   buttons.forEach((button, index) => {
     button.addEventListener("click", () => {

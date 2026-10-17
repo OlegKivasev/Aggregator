@@ -443,6 +443,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
   const garage = await readFile(new URL("../src/frontend/garage-ui.js", import.meta.url), "utf8");
+  const cart = await readFile(new URL("../src/frontend/cart-ui.js", import.meta.url), "utf8");
 
   assert.match(html, /class="filters-toggle garage-toggle" id="garage-toggle" aria-controls="garage-sidebar" aria-expanded="false" aria-label="Открыть гараж"/);
   assert.match(html, /id="garage-toggle"[\s\S]*?<svg[^>]*viewBox="0 0 24 24"/);
@@ -477,7 +478,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(styles, /\.garage-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
   assert.match(styles, /\.garage-sidebar\s*\{[^}]*--garage-sidebar-width: 260px;[^}]*min-width: 180px;[^}]*max-width: 420px;/s);
   assert.match(styles, /\.garage-search-form\s*\{[^}]*min-height: 40px;/s);
-  assert.match(styles, /\.garage-add-column, \.garage-add-cell\s*\{[^}]*width: 52px;/s);
+  assert.match(styles, /\.cart-add-column, \.cart-add-cell\s*\{[^}]*width: 98px;/s);
   assert.match(styles, /\.garage-offer-button svg\s*\{[^}]*stroke: currentColor;/s);
   assert.match(garage, /const workspace = document\.querySelector\("\.workspace"\);/);
   assert.match(garage, /workspace\.hidden = true;/);
@@ -558,10 +559,10 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /formatDeliveryDate\(latest\.deliveryDate, latest\.deliveryDateApproximate, latest\.deliveryDateTo\)/);
   assert.doesNotMatch(garage, /Сохранить", "btn btn-light"|confirmRemove|cancelRemove/);
   assert.match(garage, /sidebar\.addEventListener\("drop"/);
-  assert.match(app, /const garageActionColumnWidth = 52;/);
+  assert.match(app, /const cartActionColumnWidth = 98;/);
   assert.match(app, /const startSearchForArticle = \(value\) =>/);
   assert.match(app, /bootstrapGarage\(\{ getMarkupPercent: \(\) => markupPercent, startSearch: startSearchForArticle \}\)/);
-  assert.match(app, /garage-offer-button" draggable="\$\{Boolean\(result\.offerId\)\}"/);
+  assert.match(app, /renderCartOfferControls\(result\)/);
   assert.match(app, /const withoutOfferId = \(result\) =>/);
   assert.match(app, /results: tab\.results\.map\(withoutOfferId\)/);
   assert.match(garage, /modal\.dataset\.vehicleSelected = String\(hasSelectedVehicle\);/);
@@ -578,7 +579,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /required\.max = String\(maximumQuantity\);/);
   assert.match(garage, /const remainingQuantity = Math\.max\(0, supplierQuantity - result\.payload\.duplicate\.requiredQuantity\);/);
   assert.match(garage, /application\/x-garage-offer-quantity/);
-  assert.match(app, /data-garage-offer-quantity="\$\{Number\.isFinite\(result\.quantity\)/);
+  assert.match(cart, /data-garage-offer-quantity="\$\{Number\.isFinite\(result\.quantity\)/);
   assert.match(app, /const renderOfferLink = \(result, text, title = text\) =>/);
   assert.match(app, /class="result-offer-link" href="\$\{escapeHtml\(link\)\}" target="_blank" rel="noreferrer"/);
   assert.match(styles, /\.result-offer-link\s*\{[^}]*color: #0666d6;/s);
