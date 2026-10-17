@@ -374,7 +374,7 @@
         <details class="vk-notifications-settings suppliers-panel" id="vk-notifications-settings">
           <summary class="suppliers-panel__summary">Уведомления ВКонтакте</summary>
           <div class="vk-notifications-settings__content">
-            <p class="settings-drawer__hint">Новые заказы, отмены и получение: проверка каждые 10 минут с 07:00 до 23:00 по самарскому времени (UTC+4), даже при закрытом браузере. Ночью проверка и уведомления о заказах приостановлены.</p>
+            <p class="settings-drawer__hint">Новые заказы, отмены и получение: автоматическая проверка каждые 10 минут, даже при закрытом браузере. Время расписания — самарское (UTC+4).</p>
             <form id="vk-notifications-form" class="auth-form">
               <label class="field" for="vk-notifications-token">
                 <span>Ключ доступа сообщества</span>
@@ -407,14 +407,26 @@
             <div class="supplier-options__list supplier-options__list--single vk-notifications-settings__toggle">
               <label><input type="checkbox" id="vk-notifications-enabled" disabled><span>Отправлять уведомления в выбранную беседу</span></label>
             </div>
+            <form id="vk-notifications-schedule-form" class="auth-form" hidden>
+              <div class="supplier-options__list supplier-options__list--single vk-notifications-settings__toggle">
+                <label><input type="checkbox" id="vk-notifications-quiet-enabled"><span>Приостанавливать автоматические проверки и отправку ночью</span></label>
+              </div>
+              <div class="vk-notifications-settings__quiet-times">
+                <label class="field" for="vk-notifications-quiet-from"><span>Начало паузы</span><input id="vk-notifications-quiet-from" type="time" step="60" required></label>
+                <label class="field" for="vk-notifications-quiet-to"><span>Окончание паузы</span><input id="vk-notifications-quiet-to" type="time" step="60" required></label>
+              </div>
+              <p class="settings-drawer__hint" id="vk-notifications-quiet-summary"></p>
+              <div class="auth-actions"><button class="btn btn-primary" type="submit" id="vk-notifications-schedule-save">Сохранить расписание</button></div>
+            </form>
             <p class="settings-drawer__hint">После подключения в выбранную беседу придёт тестовое сообщение. Уведомления о заказах включаются отдельно. Первый запуск запоминает текущую историю; далее сообщает о новых изменениях.</p>
             <p class="vk-notifications-settings__status" id="vk-notifications-status" role="status" aria-live="polite"></p>
             <ul class="vk-notifications-settings__suppliers" id="vk-notifications-suppliers" hidden></ul>
             <p class="settings-drawer__hint">Если заказ Forum Auto исчезнет из полного списка активных, бот сообщит об этом отдельно. Причину нужно проверить у поставщика: заказ мог быть получен или отменён.</p>
             <div class="auth-actions">
-              <button class="button-secondary btn btn-light" type="button" id="vk-notifications-refresh">Обновить состояние</button>
+              <button class="button-secondary btn btn-light" type="button" id="vk-notifications-refresh" disabled>Проверить сейчас</button>
               <button class="button-secondary btn btn-light" type="button" id="vk-notifications-disconnect" disabled>Отключить ВК</button>
             </div>
+            <p class="settings-drawer__hint">«Проверить сейчас» проверяет заказы и отправляет новые изменения в ВК, даже ночью и при выключенной автоматической рассылке. Время автоматических проверок не сдвигается. Если изменений нет, сообщение не отправляется.</p>
           </div>
         </details>
 

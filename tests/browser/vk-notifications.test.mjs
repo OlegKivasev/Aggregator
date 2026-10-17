@@ -13,6 +13,10 @@ import { OrderNotificationService } from "../../src/backend/notifications/order-
 import { VkClient } from "../../src/backend/notifications/vk-client.ts";
 
 const fixtureToken = "vk1.a.fixture_not_a_real_key";
+const fixtureHistory = (fulfillment = "processing") => ({ limited: false, orders: [{ number: "BROWSER-ORDER", date: "2026-10-17", items: [{
+  article: "A1", brand: "TEST", title: "Фильтр", quantity: 2, price: 100, status: null, fulfillment,
+  expectedDate: null, guaranteedDate: null, warehouse: null,
+}] }] });
 async function withSettings(check, options = {}) {
   const directory = await mkdtemp(join(tmpdir(), "aggregator-vk-browser-"));
   let server; let browser; let service;
@@ -47,8 +51,12 @@ async function withSettings(check, options = {}) {
       } else throw new Error("Unexpected fixture request");
       return new Response(JSON.stringify({ response: value }), { headers: { "Content-Type": "application/json" } });
     });
-    service = new OrderNotificationService(settings, repository, client, { available: () => false,
-      load: async () => { throw new Error("Supplier API must not be called by this test"); }, observe: () => {} },
+    let currentHistory = fixtureHistory(); const loads = [];
+    service = new OrderNotificationService(settings, repository, client, { available: (supplier) => !!options.monitor && supplier === "armtek",
+      load: async (supplier) => {
+        if (!options.monitor) throw new Error("Supplier API must not be called by this test");
+        loads.push(supplier); await options.checkGate?.(); return [currentHistory];
+      }, observe: () => {} },
     () => options.now ?? Date.parse("2026-10-17T12:00:00Z"));
     const html = await readFile("src/frontend/index.html", "utf8");
     const markup = /<details class="vk-notifications-settings[^"]*"[\s\S]*?<\/details>/.exec(html)?.[0];
@@ -74,7 +82,8 @@ async function withSettings(check, options = {}) {
     await page.goto(origin); await page.waitForLoadState("networkidle");
     await page.locator("#vk-notifications-settings summary").click();
     await page.waitForFunction(() => document.querySelector("#vk-notifications-connection").textContent.length > 0);
-    await check(page, { sends, directory, settings, service, deliver: (text) => { assert.ok(deliverPoll); deliverPoll(text); } });
+    await check(page, { sends, directory, settings, service, loads, setHistory: (value) => { currentHistory = value; },
+      deliver: (text) => { assert.ok(deliverPoll); deliverPoll(text); } });
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
@@ -99,7 +108,7 @@ test("VK UI saves only a token, renders supplier text safely, remains paused and
     assert.equal(sends.length, 1);
     assert.match(sends[0].get("message"), /Агрегатор автозапчастей подключён/);
     assert.match(await page.locator("#vk-notifications-status").textContent(), /Тестовое сообщение отправлено[\s\S]*Уведомления о заказах выключены/);
-    await page.getByRole("button", { name: "Обновить состояние" }).click();
+    await page.getByRole("button", { name: "Проверить сейчас" }).click();
     await page.waitForFunction(() => !document.querySelector("#vk-notifications-refresh").disabled);
     assert.equal(sends.length, 1);
     await page.locator("#vk-notifications-enabled").check();
@@ -283,7 +292,7 @@ test("VK UI pairs a chat missing from the lookup by its command ID and accuratel
 test("VK UI explains the nightly pause and Forum Auto review alerts and shows 07:00 in Samara even for a UTC browser", async () => {
   await withSettings(async (page, { service, sends }) => {
     const text = await page.locator("#vk-notifications-settings").textContent();
-    assert.match(text, /с 07:00 до 23:00 по самарскому времени \(UTC\+4\)/);
+    assert.match(text, /автоматическая проверка каждые 10 минут[\s\S]*самарское \(UTC\+4\)/);
     assert.match(text, /Если заказ Forum Auto исчезнет[\s\S]*мог быть получен или отменён/);
     await page.locator("#vk-notifications-token").fill(fixtureToken);
     await page.getByRole("button", { name: "Сохранить ключ" }).click();
@@ -294,4 +303,53 @@ test("VK UI explains the nightly pause and Forum Auto review alerts and shows 07
     assert.equal(service.state().nextCheckAt, "2026-10-18T03:00:00.000Z");
     await service.runOnce(); assert.equal(sends.length, 1);
   }, { now: Date.parse("2026-10-17T23:05:00+04:00") });
+});
+
+test("VK UI manually checks and sends changes without shifting the next automatic check", async () => {
+  let release; const waiting = new Promise((resolve) => { release = resolve; }); let block = false;
+  await withSettings(async (page, { service, sends, loads, setHistory }) => {
+    await page.locator("#vk-notifications-token").fill(fixtureToken); await page.getByRole("button", { name: "Сохранить ключ", exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector("#vk-notifications-enabled").disabled);
+    await page.locator("#vk-notifications-enabled").check();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Уведомления включены"));
+    await service.runOnce(); const next = service.state().nextCheckAt;
+    setHistory(fixtureHistory("cancelled")); block = true;
+    await page.getByRole("button", { name: "Проверить сейчас", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Проверяем заказы"));
+    assert.equal(await page.locator("#vk-notifications-refresh").isDisabled(), true);
+    release();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Ручная проверка завершена"));
+    assert.equal(loads.length, 2); assert.equal(sends.length, 2); assert.match(sends[1].get("message"), /ОТМЕНЕНО · Armtek/);
+    assert.equal(service.state().nextCheckAt, next);
+    await page.getByRole("button", { name: "Проверить сейчас", exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector("#vk-notifications-refresh").disabled);
+    assert.equal(loads.length, 3); assert.equal(sends.length, 2);
+  }, { monitor: true, checkGate: () => block ? waiting : undefined });
+});
+
+test("VK UI saves editable quiet hours, disables the pause, preserves them on reload and manually sends at night", async () => {
+  await withSettings(async (page, { service, sends, settings, setHistory }) => {
+    await page.locator("#vk-notifications-token").fill(fixtureToken); await page.getByRole("button", { name: "Сохранить ключ", exact: true }).click();
+    await page.locator("#vk-notifications-schedule-form").waitFor({ state: "visible" });
+    await service.checkNow(); setHistory(fixtureHistory("cancelled"));
+    await page.getByRole("button", { name: "Проверить сейчас", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Ручная проверка завершена"));
+    assert.equal(sends.length, 2); assert.equal(settings.get().enabled, false);
+    await page.locator("#vk-notifications-quiet-from").fill("22:30"); await page.locator("#vk-notifications-quiet-to").fill("06:15");
+    await page.getByRole("button", { name: "Сохранить расписание" }).click();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-quiet-summary").textContent.includes("22:30 до 06:15"));
+    assert.deepEqual(settings.get().quietHours, { enabled: true, from: "22:30", to: "06:15" });
+    await page.reload(); await page.locator("#vk-notifications-settings summary").click();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-quiet-from").value === "22:30");
+    assert.equal(await page.locator("#vk-notifications-quiet-to").inputValue(), "06:15");
+    if (process.env.TEST_CAPTURE_DIR) await page.locator("#vk-notifications-settings").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "vk-schedule-desktop.png") });
+    await page.setViewportSize({ width: 320, height: 1200 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    if (process.env.TEST_CAPTURE_DIR) await page.locator("#vk-notifications-settings").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "vk-schedule-mobile.png") });
+    await page.locator("#vk-notifications-quiet-enabled").uncheck();
+    assert.equal(await page.locator("#vk-notifications-quiet-from").isDisabled(), true);
+    await page.getByRole("button", { name: "Сохранить расписание" }).click();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-quiet-summary").textContent.includes("Ночная пауза отключена"));
+    assert.equal(settings.get().quietHours.enabled, false); assert.equal(sends.length, 2);
+  }, { monitor: true, now: Date.parse("2026-10-17T23:05:00+04:00") });
 });

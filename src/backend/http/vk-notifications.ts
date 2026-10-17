@@ -6,7 +6,7 @@ import { readJsonBody, RequestBodyError } from "./request-body.ts";
 import { serveJson } from "./responses.ts";
 
 export async function serveVkNotifications(request: IncomingMessage, response: ServerResponse, url: URL, service?: OrderNotificationService): Promise<boolean> {
-  if (!["/api/notifications/vk", "/api/notifications/vk/state", "/api/notifications/vk/pairing"].includes(url.pathname)) return false;
+  if (!["/api/notifications/vk", "/api/notifications/vk/state", "/api/notifications/vk/pairing", "/api/notifications/vk/check", "/api/notifications/vk/schedule"].includes(url.pathname)) return false;
   response.setHeader("Cache-Control", "no-store");
   if (!service) { serveJson(response, 503, { message: "Уведомления ВК не подключены на сервере." }); return true; }
   if (url.search) { serveJson(response, 400, { message: "Неверный запрос уведомлений ВК." }); return true; }
@@ -27,6 +27,16 @@ export async function serveVkNotifications(request: IncomingMessage, response: S
     } else if (url.pathname === "/api/notifications/vk" && request.method === "DELETE") serveJson(response, 200, service.disconnect());
     else if (url.pathname === "/api/notifications/vk/state" && request.method === "PUT") {
       const state = await service.configure(await readJsonBody(request), controller.signal);
+      if (!controller.signal.aborted) serveJson(response, 200, state);
+    }
+    else if (url.pathname === "/api/notifications/vk/schedule" && request.method === "PUT") {
+      const state = await service.configureSchedule(await readJsonBody(request), controller.signal);
+      if (!controller.signal.aborted) serveJson(response, 200, state);
+    }
+    else if (url.pathname === "/api/notifications/vk/check" && request.method === "POST") {
+      const payload = await readJsonBody(request);
+      if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).length) throw new NotificationSettingsError("Неверный запрос ручной проверки.");
+      const state = await service.checkNow(controller.signal);
       if (!controller.signal.aborted) serveJson(response, 200, state);
     }
     else if (url.pathname === "/api/notifications/vk/pairing" && request.method === "POST") {

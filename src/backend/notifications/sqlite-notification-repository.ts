@@ -125,13 +125,13 @@ export class SqliteNotificationRepository {
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
   }
 
-  pending(target: string, now: number, welcomeOnly = false): { id: number; randomId: number; text: string; attempts: number } | null {
+  pending(target: string, now: number, welcomeOnly = false, force = false): { id: number; randomId: number; text: string; attempts: number } | null {
     // Preserve order even while the oldest message is waiting for its retry.
     const row = welcomeOnly
       ? this.database.prepare(`SELECT id,random_id,text,attempts,next_attempt FROM vk_order_notification_outbox
         WHERE target=? AND state='pending' AND id=(SELECT message_id FROM vk_order_notification_welcome WHERE target=?)`).get(target, target)
       : this.database.prepare("SELECT id,random_id,text,attempts,next_attempt FROM vk_order_notification_outbox WHERE target=? AND state='pending' ORDER BY id LIMIT 1").get(target);
-    if (!row || Number(row.next_attempt) > now) return null;
+    if (!row || !force && Number(row.next_attempt) > now) return null;
     const id = Number(row.id);
     if (!Number.isSafeInteger(id) || id < 1) throw new Error("Notification identifier limit reached");
     return { id, randomId: Number(row.random_id), text: String(row.text), attempts: Number(row.attempts) };

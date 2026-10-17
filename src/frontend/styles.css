@@ -3501,6 +3501,8 @@ th[aria-sort="descending"] .analogs-sort span::after {
 .vk-notifications-settings__pairing input { min-width: 0; color: var(--ink); background: var(--page); }
 .vk-notifications-settings__pairing p:empty { display: none; }
 .vk-notifications-settings__toggle { margin: 0; }
+.vk-notifications-settings__quiet-times { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.vk-notifications-settings__quiet-times input { width: 100%; min-width: 0; font: inherit; }
 .vk-notifications-settings__toggle label { align-items: flex-start; padding: 10px 12px; line-height: 1.5; }
 .vk-notifications-settings__toggle input { margin-top: 1px; }
 .vk-notifications-settings__toggle label:has(input:checked) { border-color: #ffc3b0; background: #fff8f4; }

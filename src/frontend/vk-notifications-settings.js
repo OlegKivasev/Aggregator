@@ -8,6 +8,12 @@ const chatLabel = document.querySelector("#vk-notifications-chat-label");
 const enabled = document.querySelector("#vk-notifications-enabled");
 const supplierList = document.querySelector("#vk-notifications-suppliers");
 const refresh = document.querySelector("#vk-notifications-refresh");
+const scheduleForm = document.querySelector("#vk-notifications-schedule-form");
+const quietEnabled = document.querySelector("#vk-notifications-quiet-enabled");
+const quietFrom = document.querySelector("#vk-notifications-quiet-from");
+const quietTo = document.querySelector("#vk-notifications-quiet-to");
+const scheduleSave = document.querySelector("#vk-notifications-schedule-save");
+const quietSummary = document.querySelector("#vk-notifications-quiet-summary");
 const disconnect = document.querySelector("#vk-notifications-disconnect");
 const pairing = document.querySelector("#vk-notifications-pairing");
 const pairStart = document.querySelector("#vk-notifications-pair-start");
@@ -19,13 +25,17 @@ const pairStatus = document.querySelector("#vk-notifications-pair-status");
 const names = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
 let state = null;
 let busy = false;
+let checkingNow = false;
 let pairingPoll = null;
 const date = (value) => value ? new Date(value).toLocaleString("ru-RU", { timeZone: "Europe/Samara" }) : "ещё не было";
 const validDate = (value) => value === null || typeof value === "string" && Number.isFinite(Date.parse(value));
+const validQuietHours = (value) => value && typeof value === "object" && typeof value.enabled === "boolean"
+  && [value.from, value.to].every((time) => typeof time === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) && value.from !== value.to;
 
 const validate = (value) => {
   if (!value || typeof value !== "object" || ["configured", "persistent", "enabled", "checking"].some((key) => typeof value[key] !== "boolean")
     || value.intervalMinutes !== 10 || !validDate(value.lastCheckAt) || !validDate(value.nextCheckAt)
+    || !validQuietHours(value.quietHours)
     || ![null, "pending", "sent", "failed"].includes(value.testMessage)
     || value.pairing !== null && (!value.pairing || typeof value.pairing !== "object"
       || typeof value.pairing.command !== "string" || !/^\/aggregator [a-f0-9]{32}$/.test(value.pairing.command)
@@ -46,11 +56,18 @@ const validate = (value) => {
 const paint = () => {
   form.querySelector("button").disabled = busy || state?.persistent === false;
   token.disabled = busy || state?.persistent === false;
-  refresh.disabled = busy;
+  refresh.disabled = busy || !state?.configured || state.peerId === null;
   disconnect.disabled = busy || !state?.configured;
   chat.disabled = busy || !state?.configured;
   enabled.disabled = busy || !state?.configured || state.peerId === null;
   if (!state) return;
+  scheduleForm.hidden = !state.configured;
+  if (!scheduleForm.contains(document.activeElement)) {
+    quietEnabled.checked = state.quietHours.enabled; quietFrom.value = state.quietHours.from; quietTo.value = state.quietHours.to;
+  }
+  quietSummary.textContent = state.quietHours.enabled
+    ? `Автоматические проверки и отправка приостановлены с ${state.quietHours.from} до ${state.quietHours.to} по Самаре (UTC+4). Ручная проверка доступна в любое время.`
+    : "Ночная пауза отключена. Автоматические проверки работают круглосуточно. Время — Самара (UTC+4).";
   const selectedChat = state.chats.find((item) => item.id === state.peerId);
   connection.textContent = !state.persistent ? "Для сохранения ключа администратору нужно настроить серверное шифрование."
     : state.configured ? `Сообщество: ${state.groupName}. ${selectedChat ? `Беседа: ${selectedChat.title}.` : state.chats.length ? "Выберите беседу для уведомлений или подключите её по сообщению." : "ВК не показал доступные беседы. Подключите нужную беседу по сообщению ниже."}` : "ВК пока не подключён.";
@@ -84,15 +101,17 @@ const request = async (path, options) => {
   if (busy) return;
   clearTimeout(pairingPoll); pairingPoll = null;
   busy = true; paintControls();
+  if (checkingNow) { status.textContent = "Проверяем заказы у поставщиков и отправляем новые изменения в ВК…"; status.dataset.error = "false"; }
   try {
     const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
     const payload = await response.json();
     if (!response.ok) throw new Error(typeof payload?.message === "string" ? payload.message : "Не удалось изменить настройки ВК.");
     state = validate(payload);
     paint();
+    if (checkingNow && !state.error) status.textContent = `Ручная проверка завершена. ${status.textContent}`;
   } catch (error) { status.textContent = error.message; status.dataset.error = "true"; }
   finally {
-    busy = false; token.value = ""; paintControls();
+    busy = false; checkingNow = false; token.value = ""; paintControls();
     if (section.open && state?.pairing && !state.pairing.error) pairingPoll = setTimeout(() => {
       if (section.getClientRects().length) void request("/api/notifications/vk");
     }, 2_000);
@@ -101,7 +120,11 @@ const request = async (path, options) => {
 const paintControls = () => {
   form.querySelector("button").disabled = busy || state?.persistent === false;
   token.disabled = busy || state?.persistent === false;
-  refresh.disabled = busy;
+  refresh.disabled = busy || !state?.configured || state.peerId === null;
+  refresh.textContent = checkingNow ? "Проверяем…" : "Проверить сейчас";
+  scheduleSave.disabled = busy || !state?.configured;
+  quietEnabled.disabled = busy || !state?.configured;
+  quietFrom.disabled = quietTo.disabled = busy || !state?.configured || !quietEnabled.checked;
   disconnect.disabled = busy || !state?.configured;
   chat.disabled = busy || !state?.configured;
   enabled.disabled = busy || !state?.configured || state.peerId === null;
@@ -116,7 +139,12 @@ if (drawer) new MutationObserver(() => {
   if (!drawer.hidden && section.open) void request("/api/notifications/vk");
 }).observe(drawer, { attributes: true, attributeFilter: ["hidden"] });
 form.addEventListener("submit", (event) => { event.preventDefault(); const value = token.value.trim(); token.value = ""; void request("/api/notifications/vk", { method: "PUT", body: JSON.stringify({ token: value }) }); });
-refresh.addEventListener("click", () => { void request("/api/notifications/vk"); });
+refresh.addEventListener("click", () => { if (!busy) { checkingNow = true; void request("/api/notifications/vk/check", { method: "POST", body: "{}" }); } });
+quietEnabled.addEventListener("change", paintControls);
+scheduleForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void request("/api/notifications/vk/schedule", { method: "PUT", body: JSON.stringify({ enabled: quietEnabled.checked, from: quietFrom.value, to: quietTo.value }) });
+});
 disconnect.addEventListener("click", () => { void request("/api/notifications/vk", { method: "DELETE" }); });
 enabled.addEventListener("change", () => { void request("/api/notifications/vk/state", { method: "PUT", body: JSON.stringify({ enabled: enabled.checked }) }); });
 chat.addEventListener("change", () => { void request("/api/notifications/vk/state", { method: "PUT", body: JSON.stringify({ enabled: false, peerId: Number(chat.value) }) }); });

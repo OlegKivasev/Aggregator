@@ -1,9 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { writeJsonStateFileAtomic } from "../session/state-file.ts";
+import { defaultOrderQuietHours, validOrderQuietHours, type OrderQuietHours } from "./order-check-schedule.ts";
 
 export interface VkChat { id: number; title: string }
-export interface VkSettings { token: string; groupId: number; groupName: string; chats: VkChat[]; peerId: number | null; enabled: boolean }
+export interface VkSettings { token: string; groupId: number; groupName: string; chats: VkChat[]; peerId: number | null; enabled: boolean; quietHours: OrderQuietHours }
 const context = Buffer.from("autoservice-aggregator:vk-order-notifications:v1");
 export const validVkToken = (token: unknown): token is string => typeof token === "string" && /^[a-zA-Z0-9_.-]{16,512}$/.test(token);
 export const validPeerId = (id: unknown): id is number => typeof id === "number" && Number.isSafeInteger(id) && id > 2_000_000_000;
@@ -18,7 +19,10 @@ function validate(value: unknown): VkSettings {
     || new Set(settings.chats.map((chat) => chat.id)).size !== settings.chats.length
     || settings.peerId !== null && !settings.chats.some((chat) => chat.id === settings.peerId)
     || settings.enabled && settings.peerId === null) throw new Error("Invalid encrypted VK settings");
-  return structuredClone(settings);
+  // Existing encrypted settings predate editable quiet hours; retain the previously agreed schedule on upgrade.
+  const quietHours = settings.quietHours === undefined ? defaultOrderQuietHours : settings.quietHours;
+  if (!validOrderQuietHours(quietHours)) throw new Error("Invalid VK quiet hours");
+  return structuredClone({ ...settings, quietHours });
 }
 
 export class EncryptedVkSettings {

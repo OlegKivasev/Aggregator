@@ -8,12 +8,14 @@ import { SqliteNotificationRepository } from "./sqlite-notification-repository.t
 import { VkClient, VkError } from "./vk-client.ts";
 import { notificationSuppliers, supplierNames, monitoredOrders } from "./order-events.ts";
 import { SupplierAuthError, SupplierTimeoutError } from "../errors.ts";
-import { nextOrderCheckTime } from "./order-check-schedule.ts";
+import { defaultOrderQuietHours, nextOrderCheckTime, validOrderQuietHours, type OrderQuietHours } from "./order-check-schedule.ts";
 
 export const orderCheckIntervalMs = 10 * 60_000;
-const welcomeMessage = "Агрегатор автозапчастей подключён к этой беседе.\n\n"
+const welcomeMessage = (hours: OrderQuietHours): string => "Агрегатор автозапчастей подключён к этой беседе.\n\n"
   + "Здесь будут появляться уведомления о новых заказах у поставщиков, отменах и получении товаров. Товары будут перечислены отдельными строками.\n\n"
-  + "Проверка заказов — каждые 10 минут с 07:00 до 23:00 по самарскому времени (UTC+4) при включённых уведомлениях. Ночью проверка и уведомления о заказах приостановлены. Включить или приостановить уведомления можно в настройках агрегатора.\n\n"
+  + "Автоматическая проверка заказов — каждые 10 минут при включённых уведомлениях. "
+  + (hours.enabled ? `Пауза с ${hours.from} до ${hours.to} по самарскому времени (UTC+4). ` : "Ночная пауза отключена. ")
+  + "Расписание можно изменить в настройках агрегатора. Кнопка «Проверить сейчас» работает в любое время и не сдвигает автоматические проверки.\n\n"
   + "Это тестовое сообщение: отправка в беседу работает.";
 export class NotificationSettingsError extends Error {
   readonly status: number;
@@ -58,6 +60,7 @@ export class OrderNotificationService {
     const current = this.settings.get();
     return { configured: !!current, persistent: this.settings.persistent(), enabled: current?.enabled ?? false,
       groupName: current?.groupName ?? null, chats: current?.chats ?? [], peerId: current?.peerId ?? null,
+      quietHours: { ...(current?.quietHours ?? defaultOrderQuietHours) },
       intervalMinutes: 10, checking: this.work !== null, lastCheckAt: this.lastCheckAt, nextCheckAt: this.nextCheckAt,
       error: this.error, suppliers: structuredClone(this.checks),
       pairing: this.pairing ? { ...this.pairing } : null,
@@ -94,7 +97,7 @@ export class OrderNotificationService {
       if (retained && !connection.chats.some((chat) => chat.id === retained.id)) connection.chats = [...connection.chats.slice(0, 999), retained];
       const peerId = previous?.groupId === connection.groupId && connection.chats.some((chat) => chat.id === previous.peerId)
         ? previous.peerId : complete && connection.chats.length === 1 ? connection.chats[0].id : null;
-      this.settings.set({ token, ...connection, peerId, enabled: false });
+      this.settings.set({ token, ...connection, peerId, enabled: false, quietHours: previous?.quietHours ?? { ...defaultOrderQuietHours } });
       this.nextSupplierCheck.clear();
       this.error = null; this.nextCheckAt = null; this.deliveryBlocked = false;
       await this.welcome(bounded.signal);
@@ -157,18 +160,58 @@ export class OrderNotificationService {
       if (enabled) this.repository.retryFailed(`${current.groupId}:${selected}`);
       if (enabled) this.nextSupplierCheck.clear();
       this.error = null; this.deliveryBlocked = false;
-      this.nextCheckAt = enabled ? new Date(nextOrderCheckTime(this.now())).toISOString() : null;
+      this.nextCheckAt = enabled ? new Date(nextOrderCheckTime(this.now(), current.quietHours)).toISOString() : null;
       // Connection tests are allowed while regular order notifications are paused.
       await this.welcome(bounded.signal);
     } finally { bounded.dispose(); this.mutating = false; }
-    if (enabled && this.timer) { if (this.work) void this.work.then(() => this.runOnce()); else void this.runOnce(); }
+    if (enabled && this.timer) { this.armTimer(); void this.runOnce(); }
+    return this.state();
+  }
+  async configureSchedule(payload: unknown, signal: AbortSignal = new AbortController().signal) {
+    if (!validOrderQuietHours(payload)) throw new NotificationSettingsError("Укажите время паузы в формате ЧЧ:ММ. Начало и окончание должны различаться.");
+    if (this.stopped) throw new NotificationSettingsError("Сервер завершает работу.", 503);
+    if (this.mutating) throw new NotificationSettingsError("Дождитесь завершения обновления настроек ВК.", 409);
+    if (!this.settings.get()) throw new NotificationSettingsError("Сначала сохраните ключ сообщества ВК.");
+    this.mutating = true; this.controller.abort();
+    const bounded = createBoundedAbortSignal(AbortSignal.any([signal, this.mutationController.signal]), 15_000, "VK schedule update timed out");
+    try {
+      await this.work; bounded.signal.throwIfAborted();
+      const current = this.settings.get();
+      if (!current || this.stopped) throw new NotificationSettingsError("Подключение ВК изменено. Повторите настройку расписания.", 409);
+      const now = this.now();
+      const wasPaused = nextOrderCheckTime(now, current.quietHours) > now;
+      this.settings.set({ ...current, quietHours: { ...payload } });
+      const allowed = nextOrderCheckTime(now, payload);
+      const candidate = allowed > now ? allowed : wasPaused ? now : Math.max(now, this.nextCheckAt ? Date.parse(this.nextCheckAt) : now + orderCheckIntervalMs);
+      const next = nextOrderCheckTime(candidate, payload);
+      this.nextCheckAt = current.enabled ? new Date(next).toISOString() : null;
+      if (this.timer) this.armTimer(next);
+      return this.state();
+    } finally { bounded.dispose(); this.mutating = false; }
+  }
+  async checkNow(signal: AbortSignal = new AbortController().signal) {
+    if (this.stopped) throw new NotificationSettingsError("Сервер завершает работу.", 503);
+    if (this.work || this.mutating) throw new NotificationSettingsError("Проверка или обновление настроек уже выполняется. Дождитесь завершения.", 409);
+    const config = this.settings.get();
+    if (!config || config.peerId === null) throw new NotificationSettingsError("Сначала подключите беседу ВК.");
+    if (this.foregroundOperations > 0) throw new NotificationSettingsError("Поставщики заняты запросом пользователя. Повторите проверку после его завершения.", 409);
+    if (this.deliveryBlocked) throw new NotificationSettingsError("Отправка приостановлена. Проверьте ключ и права бота, затем обновите подключение.", 409);
+    this.controller = new AbortController(); const controller = this.controller;
+    const bounded = createBoundedAbortSignal(AbortSignal.any([signal, controller.signal]), 10 * 60_000, "Manual order monitoring timed out");
+    // Manual work shares the same snapshots/outbox, but never changes automatic deadlines or supplier due times.
+    this.work = this.cycle(config, config.peerId, bounded.signal, true).catch(() => {
+      if (!signal.aborted && !controller.signal.aborted) this.error = "Не удалось завершить ручную проверку заказов. Повторите попытку.";
+    }).finally(() => { bounded.dispose(); this.work = null; });
+    await this.work; signal.throwIfAborted();
+    if (controller.signal.aborted) throw new NotificationSettingsError("Ручная проверка прервана изменением настроек или остановкой сервера.", 409);
+    if (bounded.signal.aborted) throw new NotificationSettingsError("Время ручной проверки истекло. Повторите попытку.", 504);
     return this.state();
   }
   private async welcome(signal: AbortSignal): Promise<void> {
     const current = this.settings.get();
     if (!current || current.peerId === null) return;
     const target = `${current.groupId}:${current.peerId}`;
-    this.repository.ensureWelcome(target, welcomeMessage);
+    this.repository.ensureWelcome(target, welcomeMessage(current.quietHours));
     this.repository.retryWelcome(target);
     await this.sendPending(current, current.peerId, signal, true);
   }
@@ -189,8 +232,10 @@ export class OrderNotificationService {
   private armTimer(at = this.now() + orderCheckIntervalMs): void {
     if (this.timer) clearTimeout(this.timer);
     const now = this.now();
-    const allowed = nextOrderCheckTime(now);
-    const next = allowed > now ? allowed : nextOrderCheckTime(at);
+    const config = this.settings.get(); const hours = config?.quietHours ?? defaultOrderQuietHours;
+    const allowed = nextOrderCheckTime(now, hours);
+    const next = allowed > now ? allowed : nextOrderCheckTime(at, hours);
+    this.nextCheckAt = config?.enabled ? new Date(next).toISOString() : null;
     this.timer = setTimeout(() => { this.armTimer(); void this.runOnce(); }, Math.max(1, next - now)); this.timer.unref();
   }
   runOnce(): Promise<void> {
@@ -199,35 +244,34 @@ export class OrderNotificationService {
     if (this.stopped || this.mutating || !config || config.peerId === null) return Promise.resolve();
     if (!config.enabled && !this.repository.pending(`${config.groupId}:${config.peerId}`, this.now(), true)) return Promise.resolve();
     const now = this.now();
-    const allowed = nextOrderCheckTime(now);
+    const allowed = nextOrderCheckTime(now, config.quietHours);
     if (allowed > now) {
       this.nextCheckAt = config.enabled ? new Date(allowed).toISOString() : null;
       if (this.timer) this.armTimer(allowed);
       return Promise.resolve();
     }
-    if (this.timer) this.armTimer();
     this.deferred = false;
     this.controller = new AbortController();
     const signal = this.controller.signal;
-    this.nextCheckAt = config.enabled ? new Date(nextOrderCheckTime(now + orderCheckIntervalMs)).toISOString() : null;
+    if (!this.timer) this.nextCheckAt = config.enabled ? new Date(nextOrderCheckTime(now + orderCheckIntervalMs, config.quietHours)).toISOString() : null;
     const operation = config.enabled ? this.cycle(config, config.peerId, signal) : this.sendPending(config, config.peerId, signal, true);
     this.work = operation.catch(() => {
       if (!signal.aborted) this.error = "Не удалось завершить проверку уведомлений. Повторим через 10 минут.";
     }).finally(() => { this.work = null; });
     return this.work;
   }
-  private async cycle(config: VkSettings, peerId: number, signal: AbortSignal): Promise<void> {
+  private async cycle(config: VkSettings, peerId: number, signal: AbortSignal, manual = false): Promise<void> {
     const target = `${config.groupId}:${peerId}`;
     const observations: Array<{ supplier: OrderHistorySupplier; histories: OrderHistory[] }> = [];
     this.error = null;
     for (const check of this.checks) {
       signal.throwIfAborted();
       const now = this.now();
-      if (nextOrderCheckTime(now) > now) break;
+      if (!manual && nextOrderCheckTime(now, config.quietHours) > now) break;
       if (!this.source.available(check.supplier)) { check.error = "Поставщик не подключён."; continue; }
-      if ((this.nextSupplierCheck.get(check.supplier) ?? 0) > this.now()) continue;
-      if (this.foregroundOperations > 0) { this.deferred = true; check.error = "Проверка отложена: поставщик занят."; continue; }
-      this.nextSupplierCheck.set(check.supplier, this.now() + orderCheckIntervalMs);
+      if (!manual && (this.nextSupplierCheck.get(check.supplier) ?? 0) > this.now()) continue;
+      if (this.foregroundOperations > 0) { if (!manual) this.deferred = true; check.error = "Проверка отложена: поставщик занят."; continue; }
+      if (!manual) this.nextSupplierCheck.set(check.supplier, this.now() + orderCheckIntervalMs);
       const bounded = createBoundedAbortSignal(signal, 75_000, "Order monitoring timed out");
       try {
         const histories = await this.source.load(check.supplier, bounded.signal, this.now());
@@ -249,16 +293,16 @@ export class OrderNotificationService {
     signal.throwIfAborted();
     if (observations.length) this.repository.observe(target, observations, this.now());
     this.lastCheckAt = new Date(this.now()).toISOString();
-    await this.sendPending(config, peerId, signal);
+    await this.sendPending(config, peerId, signal, false, manual);
   }
-  private async sendPending(config: VkSettings, peerId: number, signal: AbortSignal, welcomeOnly = false): Promise<void> {
+  private async sendPending(config: VkSettings, peerId: number, signal: AbortSignal, welcomeOnly = false, manual = false): Promise<void> {
     const target = `${config.groupId}:${peerId}`;
     if (this.deliveryBlocked) { this.error = "Отправка приостановлена. Проверьте ключ и права бота, затем обновите подключение."; return; }
     for (let sent = 0; sent < (welcomeOnly ? 1 : 20); sent++) {
       signal.throwIfAborted();
       const now = this.now();
-      if (!welcomeOnly && nextOrderCheckTime(now) > now) break;
-      const pending = this.repository.pending(target, this.now(), welcomeOnly);
+      if (!welcomeOnly && !manual && nextOrderCheckTime(now, config.quietHours) > now) break;
+      const pending = this.repository.pending(target, this.now(), welcomeOnly, manual);
       if (!pending) break;
       try {
         // Persisted ID is reused on every retry, including after process restart.

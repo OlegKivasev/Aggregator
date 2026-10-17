@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createCipheriv } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -88,7 +89,7 @@ async function withCancellationHistoryServer(t, supplier, getHistory, options = 
     if (server?.listening) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
     cancellations?.close();
   });
-  const f = await fixture(t, { ...options, suppliers: [supplier], load: async () => [getHistory()],
+  const f = await fixture(t, { ...options, suppliers: [supplier], load: options.load ?? (async () => [getHistory()]),
     observe: (id, value) => cancellations.observe(id, value) });
   const databasePath = join(f.directory, "orders.sqlite");
   cancellations = new OrderCancellationService(new SqliteOrderCancellationRepository(databasePath));
@@ -348,6 +349,19 @@ test("VK settings are encrypted, fail closed on missing or wrong master key and 
   assert.throws(() => memoryOnly.set(settingsValue()), /шифрование/);
 });
 
+test("legacy encrypted VK settings without quiet hours keep the agreed 23:00–07:00 pause on upgrade", async (t) => {
+  const f = await fixture(t); const iv = Buffer.alloc(12, 9);
+  const cipher = createCipheriv("aes-256-gcm", Buffer.alloc(32, 17), iv);
+  cipher.setAAD(Buffer.from("autoservice-aggregator:vk-order-notifications:v1"));
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(settingsValue())), cipher.final()]);
+  const path = join(f.directory, "legacy-vk.enc.json");
+  await writeFile(path, JSON.stringify({ version: 1, algorithm: "aes-256-gcm", iv: iv.toString("base64"),
+    authTag: cipher.getAuthTag().toString("base64"), ciphertext: ciphertext.toString("base64") }));
+  const restored = new EncryptedVkSettings(path, Buffer.alloc(32, 17));
+  assert.deepEqual(restored.get().quietHours, { enabled: true, from: "23:00", to: "07:00" });
+  assert.equal(restored.get().peerId, chats[0].id); assert.equal(restored.get().token, token);
+});
+
 test("connecting sends one welcome but leaves supplier checks and order notifications disabled", async (t) => {
   const f = await fixture(t);
   const state = await f.service.connect(token, new AbortController().signal);
@@ -358,7 +372,8 @@ test("connecting sends one welcome but leaves supplier checks and order notifica
   const message = f.calls.at(-1).params.get("message");
   assert.match(message, /Агрегатор автозапчастей подключён к этой беседе/);
   assert.match(message, /новых заказах у поставщиков, отменах и получении товаров/);
-  assert.match(message, /каждые 10 минут с 07:00 до 23:00 по самарскому времени \(UTC\+4\) при включённых уведомлениях[\s\S]*в настройках агрегатора/);
+  assert.match(message, /каждые 10 минут при включённых уведомлениях[\s\S]*Пауза с 23:00 до 07:00 по самарскому времени \(UTC\+4\)/);
+  assert.match(message, /«Проверить сейчас» работает в любое время и не сдвигает автоматические проверки/);
   await f.service.connect(token, new AbortController().signal);
   assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 1);
   assert.equal(JSON.stringify(state).includes(token), false);
@@ -768,6 +783,103 @@ test("the Samara monitoring window excludes 23:00 and includes exactly 07:00 acr
   ]) assert.equal(nextOrderCheckTime(Date.parse(time)), Date.parse(next));
 });
 
+test("manual checks bypass due times without moving the automatic ten-minute cadence", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = await fixture(t); f.settings.set(settingsValue({ enabled: true }));
+  f.service.start(); await f.service.runOnce();
+  const next = f.service.state().nextCheckAt;
+  f.advance(120_000); t.mock.timers.tick(120_000); await f.service.checkNow();
+  assert.equal(f.loads.length, 2); assert.equal(f.service.state().nextCheckAt, next); assert.equal(f.calls.length, 0);
+  f.advance(479_999); t.mock.timers.tick(479_999); assert.equal(f.loads.length, 2);
+  f.advance(1); t.mock.timers.tick(1); await f.service.runOnce();
+  assert.equal(f.loads.length, 3); assert.equal(Date.parse(f.service.state().nextCheckAt), Date.parse(next) + orderCheckIntervalMs);
+});
+
+test("a scheduled tick overlapping a manual check keeps its next slot and never overlaps supplier requests", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let release; let loads = 0;
+  const waiting = new Promise((resolve) => { release = resolve; });
+  const f = await fixture(t, { load: async () => ++loads === 2 ? waiting : [history()] });
+  f.settings.set(settingsValue({ enabled: true })); f.service.start(); await f.service.runOnce();
+  f.advance(orderCheckIntervalMs - 1_000); t.mock.timers.tick(orderCheckIntervalMs - 1_000);
+  const manual = f.service.checkNow();
+  await assert.rejects(f.service.checkNow(), /уже выполняется/);
+  f.advance(1_000); t.mock.timers.tick(1_000); assert.equal(loads, 2);
+  assert.equal(Date.parse(f.service.state().nextCheckAt), now + 2 * orderCheckIntervalMs);
+  release([history()]); await manual;
+  assert.equal(Date.parse(f.service.state().nextCheckAt), now + 2 * orderCheckIntervalMs);
+  f.advance(); t.mock.timers.tick(orderCheckIntervalMs); await f.service.runOnce(); assert.equal(loads, 3);
+});
+
+test("manual checks send new cancellations at night with automation off and do not re-announce unchanged orders", async (t) => {
+  const f = await fixture(t); f.settings.set(settingsValue()); observe(f.repository, history());
+  f.setHistory(history([part({ fulfillment: "cancelled" })])); f.setTime(Date.parse("2026-10-17T23:05:00+04:00"));
+  const state = await f.service.checkNow();
+  assert.equal(state.enabled, false); assert.equal(state.nextCheckAt, null); assert.equal(state.checking, false);
+  assert.equal(f.loads.length, 1); assert.equal(f.calls.length, 1); assert.match(f.calls[0].params.get("message"), /ОТМЕНЕНО/);
+  await f.service.checkNow(); assert.equal(f.loads.length, 2); assert.equal(f.calls.length, 1);
+});
+
+test("manual retry bypasses temporary backoff but keeps the original VK delivery identifier", async (t) => {
+  let unavailable = true;
+  const f = await fixture(t, { send: async (params) => {
+    if (unavailable) throw new Error("Fixture temporary failure");
+    return response([{ peer_id: Number(params.get("peer_ids")), message_id: 0, conversation_message_id: 123 }]);
+  } });
+  f.settings.set(settingsValue()); observe(f.repository, history()); f.setHistory(history([part({ fulfillment: "cancelled" })]));
+  await f.service.checkNow(); assert.equal(f.repository.counts(target).pending, 1);
+  assert.equal(f.repository.pending(target, now), null);
+  unavailable = false; await f.service.checkNow();
+  assert.equal(f.calls.length, 2); assert.equal(f.calls[0].params.get("random_id"), f.calls[1].params.get("random_id"));
+  assert.equal(f.repository.counts(target).pending, 0);
+});
+
+test("manual checks reject missing setup and foreground work and abort supplier IO on client cancellation", async (t) => {
+  const f = await fixture(t); await assert.rejects(f.service.checkNow(), /подключите беседу/);
+  f.settings.set(settingsValue()); const release = f.service.beginForegroundOperation();
+  await assert.rejects(f.service.checkNow(), /Поставщики заняты/); release(); assert.equal(f.loads.length, 0);
+  let started; const ready = new Promise((resolve) => { started = resolve; });
+  const pending = await fixture(t, { load: async (_supplier, signal) => {
+    started(); await new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+  } });
+  pending.settings.set(settingsValue()); const controller = new AbortController();
+  const checking = pending.service.checkNow(controller.signal); const rejected = assert.rejects(checking, { name: "AbortError" });
+  await ready; controller.abort(); await rejected;
+  assert.equal(pending.service.state().checking, false); assert.equal(pending.calls.length, 0);
+});
+
+test("quiet hours accept custom overnight and daytime pauses or round-the-clock automatic checks", async (t) => {
+  const f = await fixture(t); f.settings.set(settingsValue({ enabled: true }));
+  f.setTime(Date.parse("2026-10-17T22:45:00+04:00"));
+  const hours = { enabled: true, from: "22:30", to: "06:15" };
+  await f.service.configureSchedule(hours); await f.service.runOnce();
+  assert.equal(f.loads.length, 0); assert.equal(f.service.state().nextCheckAt, "2026-10-18T02:15:00.000Z");
+  assert.deepEqual(new EncryptedVkSettings(join(f.directory, "vk.enc.json"), Buffer.alloc(32, 17)).get().quietHours, hours);
+  await f.service.connect(token, new AbortController().signal); assert.deepEqual(f.service.state().quietHours, hours);
+  f.settings.set({ ...f.settings.get(), enabled: true });
+  await f.service.configureSchedule({ ...hours, enabled: false }); await f.service.runOnce(); assert.equal(f.loads.length, 1);
+  assert.equal(nextOrderCheckTime(Date.parse("2026-10-17T12:45:00+04:00"), { enabled: true, from: "12:30", to: "13:30" }), Date.parse("2026-10-17T13:30:00+04:00"));
+  for (const value of [null, {}, { ...hours, from: "24:00" }, { ...hours, to: "07:60" }, { ...hours, to: "22:30" }, { ...hours, enabled: "true" }, { ...hours, extra: true }]) {
+    await assert.rejects(f.service.configureSchedule(value), /Укажите время паузы/);
+  }
+});
+
+test("schedule changes preserve an active automatic deadline and wake at a newly configured morning", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = await fixture(t); f.settings.set(settingsValue({ enabled: true }));
+  f.service.start(); await f.service.runOnce(); const next = f.service.state().nextCheckAt;
+  f.advance(120_000); t.mock.timers.tick(120_000);
+  await f.service.configureSchedule({ enabled: true, from: "22:00", to: "06:00" });
+  assert.equal(f.service.state().nextCheckAt, next);
+  f.service.stop();
+  const night = await fixture(t); night.setTime(Date.parse("2026-10-17T23:30:00+04:00")); night.settings.set(settingsValue({ enabled: true }));
+  night.service.start(); await night.service.runOnce();
+  await night.service.configureSchedule({ enabled: true, from: "22:00", to: "06:00" });
+  assert.equal(night.service.state().nextCheckAt, "2026-10-18T02:00:00.000Z");
+  night.advance(6.5 * 3_600_000); t.mock.timers.tick(6.5 * 3_600_000); await night.service.runOnce();
+  assert.equal(night.loads.length, 1);
+});
+
 test("a server started at night wakes at 07:00 instead of retaining its startup minute offset", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   for (const start of ["2026-10-17T23:03:00+04:00", "2026-10-18T06:55:00+04:00"]) {
@@ -974,4 +1086,38 @@ test("VK settings HTTP validates bodies, protects secrets and separates setup fr
   assert.equal((await fetch(`${url}/state`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: true, peerId: 2000000099 }) })).status, 400);
   assert.equal((await fetch(url, { method: "DELETE" })).status, 200);
   assert.equal((await (await fetch(url)).json()).configured, false);
+});
+
+test("manual-check and quiet-hours HTTP routes validate requests, preserve secrets and leave status reads side-effect free", async (t) => {
+  let current = history(); const f = await withCancellationHistoryServer(t, "armtek", () => current);
+  const post = (body, headers = {}) => fetch(`${f.origin}/api/notifications/vk/check`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body });
+  assert.equal((await post("{}")).status, 400);
+  f.settings.set(settingsValue()); observe(f.repository, current);
+  for (const body of ["bad-json", "null", "[]", '{"extra":true}']) assert.equal((await post(body)).status, 400);
+  assert.equal((await post("{}", { "Sec-Fetch-Site": "cross-site" })).status, 403);
+  assert.equal((await fetch(`${f.origin}/api/notifications/vk/check`)).status, 405);
+  await (await fetch(`${f.origin}/api/notifications/vk`)).json(); assert.equal(f.loads.length, 0); assert.equal(f.calls.length, 0);
+  current = history([part({ fulfillment: "cancelled" })]);
+  const checked = await post("{}"); assert.equal(checked.status, 200); assert.equal(checked.headers.get("cache-control"), "no-store");
+  const state = await checked.json(); assert.equal(state.enabled, false); assert.equal(JSON.stringify(state).includes(token), false);
+  assert.equal(f.loads.length, 1); assert.equal(f.calls.length, 1);
+  const schedule = (value, headers = {}) => fetch(`${f.origin}/api/notifications/vk/schedule`, { method: "PUT", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(value) });
+  assert.equal((await schedule({ enabled: true, from: "25:00", to: "06:00" })).status, 400);
+  const hours = { enabled: true, from: "22:30", to: "06:15" };
+  assert.equal((await schedule(hours, { "Sec-Fetch-Site": "cross-site" })).status, 403);
+  const saved = await schedule(hours); assert.equal(saved.status, 200); assert.deepEqual((await saved.json()).quietHours, hours);
+  assert.deepEqual((await (await fetch(`${f.origin}/api/notifications/vk`)).json()).quietHours, hours);
+  assert.equal(f.loads.length, 1); assert.equal(f.calls.length, 1);
+});
+
+test("closing a manual-check HTTP request aborts supplier work without sending messages", async (t) => {
+  let started; const ready = new Promise((resolve) => { started = resolve; }); let aborted = false;
+  const f = await withCancellationHistoryServer(t, "armtek", () => history(), { load: async (_supplier, signal) => {
+    started(); await new Promise((_resolve, reject) => signal.addEventListener("abort", () => { aborted = true; reject(signal.reason); }, { once: true }));
+  } });
+  f.settings.set(settingsValue()); const controller = new AbortController();
+  const request = fetch(`${f.origin}/api/notifications/vk/check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", signal: controller.signal });
+  const rejected = assert.rejects(request, { name: "AbortError" }); await ready; controller.abort(); await rejected;
+  await waitForState(f.service, () => aborted && !f.service.state().checking);
+  assert.equal(f.calls.length, 0); assert.equal(f.repository.counts(target).pending, 0);
 });
