@@ -459,17 +459,17 @@ test("near-term tabs filter both tables and dynamically recalculate sidebar face
     assert.match(await brand.innerText(), /Later/); assert.match(await supplier.innerText(), /PartKOM/);
     await page.locator('#results-delivery-tabs [data-delivery-window="all"]').press("ArrowRight");
     assert.equal(await mainTab.getAttribute("aria-selected"), "true");
-    assert.equal(await page.locator("#results-body .main-result-row").count(), 3);
-    assert.equal(await page.locator("#result-count").textContent(), "3");
+    assert.equal(await page.locator("#results-body .main-result-row").count(), 4);
+    assert.equal(await page.locator("#result-count").textContent(), "4");
     assert.deepEqual(await brand.locator("button").allTextContents(), ["Range", "Test"]);
-    assert.doesNotMatch(await supplier.innerText(), /PartKOM|Rossko/);
+    assert.doesNotMatch(await supplier.innerText(), /Rossko/);
     assert.doesNotMatch(await warehouse.textContent(), /Поздний/);
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "near-term-search-desktop.png") });
-    assert.match(await page.locator('[data-filter-values="markupPrice"] .filters-sidebar__averages').textContent(), /123,33/);
+    assert.match(await page.locator('[data-filter-values="markupPrice"] .filters-sidebar__averages').textContent(), /122,50/);
     await brand.getByRole("button", { name: "Range", exact: true }).click();
     assert.equal(await page.locator("#results-body .main-result-row").count(), 1);
     assert.match(await supplier.innerText(), /^Armtek$/); assert.deepEqual(await warehouse.locator("button").allTextContents(), ["Ближний склад"]);
-    await page.locator("#filters-reset").click(); assert.equal(await page.locator("#results-body .main-result-row").count(), 3);
+    await page.locator("#filters-reset").click(); assert.equal(await page.locator("#results-body .main-result-row").count(), 4);
     await page.locator('[data-filter-section="markupPrice"] summary').click();
     await page.locator('[data-filter-column="markupPrice"][data-filter-range="from"]').fill("200");
     await page.locator('[data-filter-column="markupPrice"][data-filter-range="from"]').press("Tab");
@@ -492,20 +492,20 @@ test("near-term tabs filter both tables and dynamically recalculate sidebar face
     await page.waitForFunction(() => document.querySelectorAll("#analogs-results-body tr").length === 9);
     const analogTab = page.locator('#analogs-delivery-tabs [data-delivery-window="soon"]');
     const analogBrand = page.locator('[data-analog-filter-values="brand"]');
-    await analogTab.click(); assert.equal(await page.locator("#analogs-results-body tr").count(), 3);
-    assert.equal(await page.locator("#analogs-count").textContent(), "3");
+    await analogTab.click(); assert.equal(await page.locator("#analogs-results-body tr").count(), 4);
+    assert.equal(await page.locator("#analogs-count").textContent(), "4");
     assert.deepEqual(await analogBrand.locator("button").allTextContents(), ["Range", "Test"]);
-    assert.doesNotMatch(await page.locator('[data-analog-filter-values="supplier"]').innerText(), /PartKOM|Rossko/);
+    assert.doesNotMatch(await page.locator('[data-analog-filter-values="supplier"]').innerText(), /Rossko/);
     assert.doesNotMatch(await page.locator('[data-analog-filter-values="warehouse"]').textContent(), /Поздний/);
-    assert.match(await page.locator('[data-analog-filter-values="markupPrice"] .filters-sidebar__averages').textContent(), /123,33/);
+    assert.match(await page.locator('[data-analog-filter-values="markupPrice"] .filters-sidebar__averages').textContent(), /122,50/);
     if (process.env.TEST_CAPTURE_DIR) await page.locator("#analogs-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "near-term-analogs-desktop.png") });
     await page.setViewportSize({ width: 390, height: 850 });
     assert.equal(await page.locator("#analogs-delivery-tabs").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
     if (process.env.TEST_CAPTURE_DIR) await page.locator("#analogs-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "near-term-analogs-mobile.png") });
     await page.setViewportSize({ width: 1366, height: 850 });
     await analogBrand.getByRole("button", { name: "Test", exact: true }).click();
-    assert.equal(await page.locator("#analogs-results-body tr").count(), 2);
-    await page.locator("#analogs-filters-reset").click(); assert.equal(await page.locator("#analogs-results-body tr").count(), 3);
+    assert.equal(await page.locator("#analogs-results-body tr").count(), 3);
+    await page.locator("#analogs-filters-reset").click(); assert.equal(await page.locator("#analogs-results-body tr").count(), 4);
     await page.locator('[data-analog-filter-section="markupPrice"] summary').click();
     await page.locator('[data-analog-filter-column="markupPrice"][data-analog-filter-range="from"]').fill("200");
     await page.locator('[data-analog-filter-column="markupPrice"][data-analog-filter-range="from"]').press("Tab");
@@ -543,8 +543,23 @@ test("an empty near-term tab stays a filter after refreshing and does not start 
     await page.locator('#results-delivery-tabs [data-delivery-window="all"]').click();
     assert.equal(await page.locator("#results-body .main-result-row").count(), 2);
   }, { fixedTime: "2026-10-12T12:00:00Z", deliveries: {
-    armtek: { deliveryDate: "2026-10-16T09:00:00Z" }, partkom: { deliveryDate: "2026-10-13T09:00:00Z" },
+    armtek: { deliveryDate: "2026-10-16T09:00:00Z" }, partkom: { deliveryDate: "2026-10-14T09:00:00Z" },
   } });
+});
+
+test("near-term tabs include PartKOM only for tomorrow on a weekday in both tables", async () => {
+  for (const [today, delivery, included] of [[12, 13, true], [12, 14, false], [16, 17, false], [17, 18, false], [18, 19, true]]) {
+    await withCartPage(async (page) => {
+      await page.locator('#results-delivery-tabs [data-delivery-window="soon"]').click();
+      assert.equal(await page.locator("#results-body .main-result-row").count(), Number(included));
+      assert.equal((await page.locator('[data-filter-values="supplier"]').textContent()).includes("PartKOM"), included);
+      await page.locator('#results-delivery-tabs [data-delivery-window="all"]').click();
+      await openOfferAnalogs(page, page.locator("#results-body .main-result-row").nth(1));
+      await page.locator('#analogs-delivery-tabs [data-delivery-window="soon"]').click();
+      assert.equal(await page.locator("#analogs-results-body tr").count(), Number(included));
+      assert.equal((await page.locator('[data-analog-filter-values="supplier"]').textContent()).includes("PartKOM"), included);
+    }, { fixedTime: `2026-10-${today}T12:00:00Z`, deliveries: { partkom: { deliveryDate: `2026-10-${delivery}T09:00:00Z` } } });
+  }
 });
 
 test("PartKOM ranges extending into workdays have no highlight in search, checkout or history", async () => {

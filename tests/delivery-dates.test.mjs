@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { deliveryCalendarDay, isOfferDueSoon } from "../src/frontend/delivery-dates.js";
 
-test("near-term offers include only tomorrow and the following day and always exclude PartKOM", () => {
+test("near-term offers include tomorrow and the following day with a weekday-tomorrow exception for PartKOM", () => {
   const now = new Date(2026, 9, 12, 23, 30).getTime();
   const date = (day) => new Date(2026, 9, day, 12).toISOString();
   const offer = (from, to = null, supplier = "armtek") => ({ supplier, deliveryDate: from, deliveryDateTo: to });
@@ -11,12 +11,20 @@ test("near-term offers include only tomorrow and the following day and always ex
   }
   assert.equal(isOfferDueSoon(offer(date(13), date(14)), now), true);
   assert.equal(isOfferDueSoon({ ...offer(date(14)), deliveryDateApproximate: true }, now), true);
+  assert.equal(isOfferDueSoon(offer(date(13), null, "part-kom"), now), true);
+  assert.equal(isOfferDueSoon(offer(date(13), date(13), "part-kom"), now), true);
   for (const value of [
     offer(date(12)), offer(date(15)), offer(date(11)), offer(date(12), date(14)), offer(date(13), date(15)),
-    offer(date(14), date(13)), offer(date(13), null, "part-kom"), offer(date(14), null, "part-kom"),
+    offer(date(14), date(13)), offer(date(13), date(14), "part-kom"), offer(date(14), null, "part-kom"),
     offer(null), offer("invalid"), offer("2026-02-30"), offer(date(13), "invalid"), null, {},
   ]) assert.equal(isOfferDueSoon(value, now), false, JSON.stringify(value));
   assert.equal(isOfferDueSoon(offer(date(13)), NaN), false);
+});
+
+test("PartKOM near-term delivery allows Friday and Monday but excludes Saturday and Sunday", () => {
+  for (const [today, tomorrow, expected] of [[15, 16, true], [16, 17, false], [17, 18, false], [18, 19, true]]) {
+    assert.equal(isOfferDueSoon({ supplier: "part-kom", deliveryDate: new Date(2026, 9, tomorrow, 12).toISOString() }, new Date(2026, 9, today, 12).getTime()), expected);
+  }
 });
 
 test("delivery calendar uses browser days for zoned instants and validates supplier calendar dates", () => {
