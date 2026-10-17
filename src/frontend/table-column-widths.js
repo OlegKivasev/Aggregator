@@ -1,6 +1,6 @@
 const storageKey = "autoservice.tableColumnWidths.v1";
-const minimumColumnWidth = 80;
-const maximumColumnWidth = 800;
+export const minimumColumnWidth = 80;
+export const maximumColumnWidth = 800;
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 

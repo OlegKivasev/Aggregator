@@ -54,6 +54,13 @@ Dependencies flow from HTTP transport through application services to supplier a
 
 The frontend uses native browser modules without a bundler. `src/frontend/app.js` owns DOM state and event wiring, while `result-formatting.js`, `search-stream.js`, and `supplier-search-summary.js` isolate result safety, SSE transport, and summary formatting respectively.
 
+В проценке и аналогах ПКМ по шапке таблицы → «Настройки» открывает базовую
+ширину каждого столбца: целое число от 80 до 800 px. Значения для двух таблиц
+сохраняются отдельно в браузере и на сервере, как при перетаскивании границ.
+«Применить» сохраняет все поля одновременно; «Отмена» и Escape отменяют правки.
+На широком экране свободная ширина распределяется между столбцами;
+кнопки корзины и гаража остаются в компактном столбце фиксированной ширины.
+
 Корзина открывается кнопкой справа от поиска. В строках основной таблицы
 кнопка гаража расположена под кнопкой добавления в корзину в одной колонке
 с полем количества. Добавление в корзину доступно для PartKOM, Armtek,

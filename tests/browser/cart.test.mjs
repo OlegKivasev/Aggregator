@@ -139,6 +139,7 @@ test("markup popup applies fixed, tiered and no markup consistently in offers, a
     const popup = page.locator("#markup-settings-dialog");
     const armtek = page.locator('#results-body tr[data-result-index="0"]');
     assert.equal(await page.locator("#markup-percent, #analogs-markup-percent").count(), 0);
+    assert.equal((await mainTrigger.boundingBox()).width, 27);
     await mainTrigger.click();
     assert.equal(await popup.locator('[data-markup-mode="fixed"]').getAttribute("aria-selected"), "true");
     assert.equal(await popup.locator("#markup-apply").evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(255, 75, 19)");
@@ -160,6 +161,7 @@ test("markup popup applies fixed, tiered and no markup consistently in offers, a
     assert.equal(await page.locator("#analogs-source-price").isVisible(), false);
     assert.equal(await page.locator("#analogs-source-markup-price").textContent(), "112,50 ₽");
     const analogTrigger = page.locator('#analogs-results [data-markup-settings]');
+    assert.equal((await analogTrigger.boundingBox()).width, 27);
     await analogTrigger.click();
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("#analogs-modal").isVisible(), true, "Escape only closes the markup popup above analogs");
@@ -254,6 +256,7 @@ test("markup restores legacy values, persists applied tiers and validates the dr
 test("main and analog action columns stay compact on wide screens, after resizing and on mobile", async () => {
   await withCartPage(async (page) => {
     const measure = async (selector) => {
+      await page.waitForFunction((selector) => Math.abs(document.querySelector(selector).querySelector(".cart-add-cell").getBoundingClientRect().width - 104) <= 1, selector);
       const dimensions = await page.locator(selector).first().evaluate((row) => {
         const cell = row.querySelector(".cart-add-cell").getBoundingClientRect();
         const button = row.querySelector(".cart-offer-button").getBoundingClientRect();
@@ -295,6 +298,107 @@ test("main and analog action columns stay compact on wide screens, after resizin
     assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390 && bounds.y >= 0 && bounds.y + bounds.height <= 850, JSON.stringify(bounds));
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "markup-mobile.png") });
   });
+});
+
+test("offer columns visibly resize by dragging and keyboard while cart controls stay compact", async () => {
+  await withCartPage(async (page) => {
+    await page.setViewportSize({ width: 1990, height: 1000 });
+    const resizeAndCheck = async (table, attribute, preferenceKey) => {
+      await page.waitForFunction((selector) => Math.abs(document.querySelector(`${selector} .cart-add-cell`).getBoundingClientRect().width - 104) < 1, table);
+      const header = page.locator(`${table} th[${attribute}="title"]`);
+      const handle = header.locator('[data-resize-column="title"]');
+      await handle.hover();
+      const before = await header.boundingBox();
+      const grip = await handle.boundingBox();
+      await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+      await page.mouse.down();
+      assert.equal(await page.locator("body").evaluate((node) => node.classList.contains("is-resizing-table-column")), true);
+      await page.mouse.move(grip.x + grip.width / 2 + 80, grip.y + grip.height / 2, { steps: 8 });
+      await page.mouse.up();
+      const after = await header.boundingBox();
+      const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem("autoservice.tableColumnWidths.v1"))[key].title, preferenceKey);
+      assert.equal(saved, 403);
+      assert.ok(after.width > before.width + 25, `drag must visibly widen ${preferenceKey}: ${before.width} -> ${after.width}`);
+      await handle.focus();
+      await page.keyboard.press("Shift+ArrowLeft");
+      const narrower = await header.boundingBox();
+      assert.ok(narrower.width < after.width - 10, `keyboard must visibly narrow ${preferenceKey}: ${after.width} -> ${narrower.width}`);
+      const cell = await page.locator(`${table} tbody tr`).first().locator(`[${attribute}="title"]`).boundingBox();
+      assert.ok(Math.abs(cell.width - narrower.width) < 1, "header and body must share the resized width");
+      const actionCell = await page.locator(`${table} .cart-add-cell`).first().boundingBox();
+      assert.ok(Math.abs(actionCell.width - 104) < 1, "resizing must not restore the empty band next to cart controls");
+    };
+    await resizeAndCheck("#results-table", "data-column", "main");
+    await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
+    await resizeAndCheck("#analogs-results", "data-analog-column", "analogs");
+  });
+});
+
+test("table header settings validate, apply and persist separate main and analog column widths", async () => {
+  await withCartPage(async (page) => {
+    await page.setViewportSize({ width: 1990, height: 1000 });
+    const openSettings = async (table, name) => {
+      await page.locator(`${table} thead th`).first().click({ button: "right" });
+      await page.locator(`#table-column-menu-${name}`).getByRole("menuitem", { name: "Настройки", exact: true }).click();
+      return page.locator(`#table-column-settings-${name}`);
+    };
+    const main = await openSettings("#results-table", "main");
+    assert.equal(await main.locator("input[data-width-column]").count(), 7);
+    assert.equal(await main.locator('[data-width-column="title"]').inputValue(), "323");
+    const storedBefore = await page.evaluate(() => localStorage.getItem("autoservice.tableColumnWidths.v1"));
+    await main.locator('[data-width-column="title"]').fill("480");
+    await main.locator('[data-width-column="supplier"]').fill("160");
+    for (const invalid of ["79", "801", "80.5", ""]) {
+      await main.locator('[data-width-column="quantity"]').fill(invalid);
+      await main.getByRole("button", { name: "Применить", exact: true }).click();
+      assert.equal(await main.isVisible(), true);
+      assert.match(await main.locator('[role="alert"]').textContent(), /от 80 до 800/);
+      assert.equal(await page.evaluate(() => localStorage.getItem("autoservice.tableColumnWidths.v1")), storedBefore, "an invalid draft must not partly save other widths");
+    }
+    await main.locator('[data-width-column="quantity"]').fill("150");
+    if (process.env.TEST_CAPTURE_DIR) await main.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "column-settings-main.png") });
+    const savedMain = page.waitForResponse((response) => response.url().endsWith("/api/ui-preferences/table-column-widths") && response.request().method() === "PUT");
+    await main.getByRole("button", { name: "Применить", exact: true }).click();
+    assert.equal((await savedMain).status(), 200);
+    assert.equal(await main.isVisible(), false);
+    await openSettings("#results-table", "main");
+    assert.equal(await main.locator('[data-width-column="title"]').inputValue(), "480");
+    await main.locator('[data-width-column="title"]').fill("300");
+    await page.keyboard.press("Escape");
+    await openSettings("#results-table", "main");
+    assert.equal(await main.locator('[data-width-column="title"]').inputValue(), "480", "Escape discards the draft");
+    await main.getByRole("button", { name: "Отмена", exact: true }).click();
+    await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
+    await page.locator('#analogs-results [data-analog-sort-key="brand"]').focus();
+    await page.keyboard.press("Shift+F10");
+    assert.equal(await page.locator("#table-column-menu-analogs").isVisible(), true);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#table-column-menu-analogs").isVisible(), false);
+    assert.equal(await page.locator("#analogs-modal").isVisible(), true);
+    const analogs = await openSettings("#analogs-results", "analogs");
+    assert.equal(await analogs.locator('[data-width-column="title"]').inputValue(), "323");
+    await analogs.locator('[data-width-column="title"]').fill("550");
+    await page.setViewportSize({ width: 390, height: 850 });
+    const bounds = await analogs.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390 && bounds.y >= 0 && bounds.y + bounds.height <= 850);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "column-settings-analogs-mobile.png") });
+    const savedAnalogs = page.waitForResponse((response) => response.url().endsWith("/api/ui-preferences/table-column-widths") && response.request().method() === "PUT");
+    await analogs.getByRole("button", { name: "Применить", exact: true }).click();
+    assert.equal((await savedAnalogs).status(), 200);
+    assert.equal(await page.locator("#analogs-modal").isVisible(), true);
+    const preferences = await page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.tableColumnWidths.v1")));
+    assert.deepEqual({ title: preferences.main.title, supplier: preferences.main.supplier, quantity: preferences.main.quantity }, { title: 480, supplier: 160, quantity: 150 });
+    assert.equal(preferences.analogs.title, 550);
+    await page.setViewportSize({ width: 1990, height: 1000 });
+    await page.reload();
+    await page.locator("#results-body .main-result-row").first().waitFor();
+    await openSettings("#results-table", "main");
+    assert.equal(await main.locator('[data-width-column="title"]').inputValue(), "480");
+    await page.keyboard.press("Escape");
+    await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
+    await openSettings("#analogs-results", "analogs");
+    assert.equal(await analogs.locator('[data-width-column="title"]').inputValue(), "550");
+  }, { preserveSearchState: true });
 });
 
 test("cart adds bounded quantities, persists, orders and removes confirmed items", async () => {

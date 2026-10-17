@@ -27,6 +27,7 @@ import { isArmtekReturnableVisible } from "./armtek-return-settings.js";
 import { bootstrapGarage } from "./garage-ui.js";
 import { calculateMarkupPrice, markupPercentForPrice, restoreMarkupSettings, showPurchasePrice } from "./markup-settings.js";
 import { bootstrapMarkupSettings } from "./markup-settings-ui.js";
+import { setupTableColumnSettings } from "./table-column-settings-ui.js";
 import {
   applySavedColumnWidths,
   loadSharedColumnWidths,
@@ -931,9 +932,10 @@ const applyTableColumns = () => {
   const visibleColumns = getVisibleTableColumns();
   const minimumWidth = visibleColumns.reduce((width, column) => width + tableColumnWidths[column], cartActionColumnWidth);
   resultsTable.style.setProperty("--results-table-min-width", `${minimumWidth}px`);
+  const availableWidth = Math.max(minimumWidth, resultsTable.clientWidth) - cartActionColumnWidth;
   resultsTable.querySelectorAll("th[data-column]").forEach((header) => {
     header.style.width = visibleColumns.includes(header.dataset.column)
-      ? `calc(${tableColumnWidths[header.dataset.column] / (minimumWidth - cartActionColumnWidth) * 100}% - ${tableColumnWidths[header.dataset.column] / (minimumWidth - cartActionColumnWidth) * cartActionColumnWidth}px)`
+      ? `${tableColumnWidths[header.dataset.column] / (minimumWidth - cartActionColumnWidth) * availableWidth}px`
       : "";
   });
   tableColumnsReset.hidden = visibleTableColumns.size === tableColumnIds.length;
@@ -2168,9 +2170,10 @@ const applyAnalogTableColumns = () => {
   const minimumWidth = visibleColumns.reduce((width, column) => width + analogTableColumnWidths[column], cartActionColumnWidth);
   const analogsTable = analogsResultsBody.closest("table");
   analogsTable.style.setProperty("--analogs-results-table-min-width", `${minimumWidth}px`);
+  const availableWidth = Math.max(minimumWidth, analogsResults.clientWidth) - cartActionColumnWidth;
   analogsTable.querySelectorAll("th[data-analog-column]").forEach((header) => {
     header.style.width = visibleColumns.includes(header.dataset.analogColumn)
-      ? `calc(${analogTableColumnWidths[header.dataset.analogColumn] / (minimumWidth - cartActionColumnWidth) * 100}% - ${analogTableColumnWidths[header.dataset.analogColumn] / (minimumWidth - cartActionColumnWidth) * cartActionColumnWidth}px)`
+      ? `${analogTableColumnWidths[header.dataset.analogColumn] / (minimumWidth - cartActionColumnWidth) * availableWidth}px`
       : "";
   });
   analogsTable.querySelectorAll("[data-analog-column]").forEach((element) => {
@@ -3010,6 +3013,20 @@ setupColumnResizing({
   apply: applyAnalogTableColumns,
   save: () => saveColumnWidths("analogs", analogTableColumnWidths),
 });
+
+const offerTableResizeObserver = new ResizeObserver((entries) => {
+  for (const entry of entries) {
+    if (entry.target === resultsTable) applyTableColumns();
+    else applyAnalogTableColumns();
+  }
+});
+offerTableResizeObserver.observe(resultsTable);
+offerTableResizeObserver.observe(analogsResults);
+
+setupTableColumnSettings({ table: resultsTable, columnAttribute: "data-column", widths: tableColumnWidths,
+  name: "main", title: "Столбцы проценки", apply: applyTableColumns, save: () => saveColumnWidths("main", tableColumnWidths) });
+setupTableColumnSettings({ table: analogsResults, columnAttribute: "data-analog-column", widths: analogTableColumnWidths,
+  name: "analogs", title: "Столбцы аналогов", apply: applyAnalogTableColumns, save: () => saveColumnWidths("analogs", analogTableColumnWidths) });
 
 loadSharedColumnWidths().then((savedWidths) => {
   Object.assign(tableColumnWidths, applySavedColumnWidths(tableColumnWidths, savedWidths.main));
