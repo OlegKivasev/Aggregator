@@ -231,6 +231,7 @@ export function bootstrapOrderHistory() {
   let cancellationRead = 0;
   let cancellationMutation = 0;
   let checkingCancellations = false;
+  let lastCancellationScan = -Infinity;
   let cancellationError = "";
   let uncheckedSuppliers = [];
   let cancellationReview = null;
@@ -243,6 +244,11 @@ export function bootstrapOrderHistory() {
   const cancellationBack = dialog.querySelector("#history-cancellation-back");
   const cancellationRetry = dialog.querySelector("#history-cancellation-retry");
   const paintCancellations = () => {
+    toggle.classList.toggle("has-cancellations", cancellationPage.total > 0);
+    toggle.title = cancellationPage.total ? `История заказов: новые отмены — ${cancellationPage.total}` : "История заказов";
+    toggle.setAttribute("aria-label", cancellationPage.total
+      ? `Открыть историю заказов. Новые отмены: ${cancellationPage.total}.` : "Открыть историю заказов");
+    if (!dialog.open) return;
     cancellationNotice.hidden = !checkingCancellations && !cancellationPage.total && !cancellationError && !uncheckedSuppliers.length && !cancellationReview;
     dialog.querySelector("#history-cancellation-title").textContent = cancellationPage.total
       ? `Новые отмены: ${cancellationPage.total}` : checkingCancellations ? "Проверяем отмены" : cancellationReview ? "Новые отмены" : "Не удалось проверить все отмены";
@@ -360,16 +366,17 @@ export function bootstrapOrderHistory() {
       const response = await fetch("/api/order-cancellations", { signal });
       const page = await response.json();
       if (!response.ok || !validCancellationPage(page)) throw new Error("Не удалось загрузить уведомления об отменах.");
-      if (signal.aborted || !dialog.open || epoch !== cancellationEpoch || read !== cancellationRead || mutation !== cancellationMutation || acknowledgingCancellations) return;
+      if (signal.aborted || epoch !== cancellationEpoch || read !== cancellationRead || mutation !== cancellationMutation || acknowledgingCancellations) return;
       cancellationPage = page;
       cancellationError = "";
     } catch {
-      if (signal.aborted || !dialog.open || epoch !== cancellationEpoch || read !== cancellationRead || mutation !== cancellationMutation) return;
+      if (signal.aborted || epoch !== cancellationEpoch || read !== cancellationRead || mutation !== cancellationMutation) return;
       cancellationError = "Не удалось загрузить уведомления об отменах. Повторите проверку.";
     }
-    if (dialog.open) paintCancellations();
+    paintCancellations();
   };
   const scanCancellations = () => {
+    lastCancellationScan = Date.now();
     cancellationController?.abort();
     cancellationController = new AbortController();
     const { signal } = cancellationController;
@@ -385,11 +392,11 @@ export function bootstrapOrderHistory() {
       return promise.then(() => null, () => name);
     });
     void Promise.all(loads).then(async (failures) => {
-      if (signal.aborted || epoch !== cancellationEpoch || !dialog.open) return;
+      if (signal.aborted || epoch !== cancellationEpoch) return;
       uncheckedSuppliers = failures.filter(Boolean);
       checkingCancellations = false;
       await readCancellations(signal);
-      if (!signal.aborted && epoch === cancellationEpoch && dialog.open) paintCancellations();
+      if (!signal.aborted && epoch === cancellationEpoch) paintCancellations();
     });
     paintCancellations();
   };
@@ -524,4 +531,12 @@ export function bootstrapOrderHistory() {
     showFilters();
     applyFilters();
   });
+  const checkBackgroundCancellations = () => {
+    if (dialog.open || document.hidden || Date.now() - lastCancellationScan < 60_000) return;
+    scanCancellations();
+    sharedHistoryRequests.clear();
+  };
+  window.addEventListener("focus", checkBackgroundCancellations);
+  document.addEventListener("visibilitychange", checkBackgroundCancellations);
+  checkBackgroundCancellations();
 }

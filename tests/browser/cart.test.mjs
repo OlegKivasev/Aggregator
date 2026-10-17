@@ -102,7 +102,7 @@ async function withCartPage(check, options = {}) {
       localStorage.setItem("autoservice.searchState", JSON.stringify({ activeTabId: "cart-test", tabs: [{ id: "cart-test", article: "A1", enabledSuppliers: suppliers, results: [] }] }));
     }, suppliers);
     await page.goto(origin);
-    await page.waitForLoadState("networkidle");
+    await page.locator('#armtek-auth-form[data-authorized="true"]').waitFor({ state: "attached" });
     await page.locator("#article-input").fill("A1");
     await page.locator("#submit-button").click();
     await page.waitForFunction((count) => document.querySelectorAll("#results-body .cart-offer-button").length === count, suppliers.length);
@@ -997,7 +997,8 @@ test("order history shows one PartKOM list and supplier tabs without rendering s
     await page.locator(".history-card").waitFor();
     await page.locator("#history-close").click();
     assert.equal(await page.locator("#history-toggle").evaluate((node) => node === document.activeElement), true);
-    assert.deepEqual(calls, [false, false, false]);
+    // Initial background check, opening, reload, and returning to PartKOM all use the current history.
+    assert.deepEqual(calls, [false, false, false, false]);
   }, { partKomOrderHistory: async (archive) => {
     calls.push(archive);
     return { orders: archive ? [] : [{ number: "ORDER-1", date: "2026-10-15 12:30:00", items: [{ article: "A1",
@@ -1689,11 +1690,12 @@ test("failed checks retain known cancellations and a failed acknowledgement rema
   } });
 });
 
-test("malformed cancellation notices do not replace ordinary history or allow acknowledging unrelated items", async () => {
+test("malformed cancellation notices preserve known alerts and do not allow acknowledging unrelated items", async () => {
   let malformed = true;
   const order = { number: "VALID-CANCELLATION", date: "2026-10-16", items: [{ article: "A1", brand: "TEST", title: "Тестовая отмена",
     quantity: 1, price: 100, status: null, fulfillment: "cancelled", expectedDate: null, guaranteedDate: null, warehouse: null }] };
   await withCartPage(async (page) => {
+    await page.locator("#history-toggle.has-cancellations").waitFor();
     await page.route("**/api/order-cancellations", (route) => malformed ? route.fulfill({ json: { total: 1, notices: [{
       id: "00000000-0000-0000-0000-000000000001", supplier: "part-kom", revision: 1, detectedAt: "2026-10-16T12:00:00Z",
       order: { ...order, items: [{ ...order.items[0], fulfillment: "delivered" }] },
@@ -1702,8 +1704,12 @@ test("malformed cancellation notices do not replace ordinary history or allow ac
     await page.waitForFunction(() => document.querySelector("#history-cancellation-description").textContent.includes("Не удалось загрузить уведомления")
       && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
     assert.equal(await page.locator(".history-card h3").innerText(), "Заказ № VALID-CANCELLATION");
-    assert.equal(await page.locator("#history-cancellation-view").isVisible(), false);
+    assert.equal(await page.locator("#history-cancellation-view").isVisible(), true);
     assert.equal(await page.locator("#history-cancellation-done").isVisible(), false);
+    await page.locator("#history-cancellation-view").click();
+    assert.notEqual(await page.locator(".history-card").getAttribute("data-cancellation-id"), "00000000-0000-0000-0000-000000000001");
+    assert.equal(await page.locator(".history-status--delivered").count(), 0);
+    await page.locator("#history-cancellation-back").click();
     malformed = false;
     await page.locator("#history-cancellation-retry").click();
     await page.waitForFunction(() => document.querySelector("#history-cancellation-title").textContent === "Новые отмены: 1"
@@ -1711,6 +1717,113 @@ test("malformed cancellation notices do not replace ordinary history or allow ac
     await page.locator("#history-cancellation-view").click();
     assert.equal(await page.locator(".history-status-detail").innerText(), "Отменено 1 шт.");
   }, { fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => ({ orders: [order], limited: false }) });
+});
+
+test("history button shows a red circular indicator before opening and clears it only after cancellations are acknowledged", async () => {
+  const history = { limited: false, orders: [{ number: "INDICATOR", date: "2026-10-16", items: [{ article: "A1", brand: "TEST",
+    title: "Тестовая отмена", quantity: 1, price: 100, status: null, fulfillment: "cancelled",
+    expectedDate: null, guaranteedDate: null, warehouse: null }] }] };
+  await withCartPage(async (page) => {
+    const toggle = page.locator("#history-toggle");
+    await page.locator("#history-toggle.has-cancellations").waitFor();
+    assert.equal(await page.locator("#history-modal").count(), 0);
+    assert.match(await toggle.getAttribute("title"), /новые отмены.*1/);
+    assert.match(await toggle.getAttribute("aria-label"), /Новые отмены: 1/);
+    await toggle.hover();
+    assert.deepEqual(await toggle.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return [style.borderColor, style.borderWidth, style.borderRadius];
+    }), ["rgb(220, 38, 38)", "2px", "50%"]);
+    const pulse = await toggle.evaluate((node) => {
+      const animation = node.getAnimations().find((animation) => animation.animationName === "history-cancellation-pulse");
+      if (!animation) return null;
+      animation.pause();
+      animation.currentTime = 0;
+      const first = getComputedStyle(node).boxShadow;
+      animation.currentTime = 1200;
+      const second = getComputedStyle(node).boxShadow;
+      animation.play();
+      return { first, second, iterations: getComputedStyle(node).animationIterationCount };
+    });
+    assert.ok(pulse);
+    assert.notEqual(pulse.first, pulse.second);
+    assert.equal(pulse.iterations, "infinite");
+    const box = await toggle.boundingBox();
+    assert.equal(box.width, 40);
+    assert.equal(box.height, 40);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "history-cancellation-indicator.png"),
+      clip: { x: Math.max(0, box.x - 12), y: Math.max(0, box.y - 12), width: 64, height: 64 } });
+    await toggle.click();
+    await page.locator("#history-close").click();
+    assert.equal(await toggle.evaluate((node) => node.classList.contains("has-cancellations")), true);
+    await toggle.click();
+    await page.locator("#history-cancellation-view").click();
+    await page.locator("#history-cancellation-done").click();
+    await page.waitForFunction(() => !document.querySelector("#history-toggle").classList.contains("has-cancellations"));
+    assert.equal(await toggle.getAttribute("title"), "История заказов");
+    assert.equal(await toggle.getAttribute("aria-label"), "Открыть историю заказов");
+    assert.equal(await toggle.evaluate((node) => getComputedStyle(node).borderWidth), "1px");
+    assert.equal(await toggle.evaluate((node) => getComputedStyle(node).animationName), "none");
+    await page.locator("#history-close").click();
+    await page.reload();
+    await page.locator('#armtek-auth-form[data-authorized="true"]').waitFor({ state: "attached" });
+    assert.equal(await toggle.evaluate((node) => node.classList.contains("has-cancellations")), false);
+  }, { fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => history });
+});
+
+test("history cancellation indicator stays red without pulsing when reduced motion is requested", async () => {
+  await withCartPage(async (page) => {
+    const toggle = page.locator("#history-toggle.has-cancellations");
+    await toggle.waitFor();
+    assert.deepEqual(await toggle.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return [style.animationName, style.borderColor, style.borderWidth];
+    }), ["none", "rgb(220, 38, 38)", "2px"]);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    assert.equal(await toggle.evaluate((node) => getComputedStyle(node).animationName), "history-cancellation-pulse");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    assert.equal(await toggle.evaluate((node) => getComputedStyle(node).animationName), "none");
+  }, { reducedMotion: "reduce", partKomOrderHistory: async () => ({ limited: false, orders: [{ number: "REDUCED-MOTION",
+    date: "2026-10-16", items: [{ article: "A1", brand: "TEST", title: "Тестовая отмена", quantity: 1, price: 100,
+      status: null, fulfillment: "cancelled", expectedDate: null, guaranteedDate: null, warehouse: null }] }] }) });
+});
+
+test("history indicator checks suppliers on returning to the page, throttles repeated focus and preserves alerts on errors", async () => {
+  let refused = 0;
+  let calls = 0;
+  let failedInbox = false;
+  await withCartPage(async (page, { origin }) => {
+    const toggle = page.locator("#history-toggle");
+    assert.equal(calls, 1);
+    assert.equal(await toggle.evaluate((node) => node.classList.contains("has-cancellations")), false);
+    refused = 2;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    assert.equal(calls, 1);
+    await page.clock.setFixedTime(new Date("2026-10-17T12:01:01Z"));
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.locator("#history-toggle.has-cancellations").waitFor();
+    assert.equal(calls, 2);
+    assert.equal(await page.locator("#history-modal").count(), 0);
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    assert.equal(calls, 2);
+    await page.route("**/api/order-cancellations", (route) => failedInbox ? route.fulfill({ status: 500, json: {} }) : route.continue());
+    failedInbox = true;
+    await page.clock.setFixedTime(new Date("2026-10-17T12:02:02Z"));
+    const failed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/order-cancellations" && response.status() === 500);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await failed;
+    assert.equal(await toggle.evaluate((node) => node.classList.contains("has-cancellations")), true);
+    failedInbox = false;
+    const pageOfNotices = await (await page.request.get(`${origin}/api/order-cancellations`)).json();
+    await page.request.post(`${origin}/api/order-cancellations/seen`, { data: { notices: pageOfNotices.notices.map(({ id, revision }) => ({ id, revision })) } });
+    await page.clock.setFixedTime(new Date("2026-10-17T12:03:03Z"));
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForFunction(() => !document.querySelector("#history-toggle").classList.contains("has-cancellations"));
+  }, { fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => {
+    calls++;
+    return parsePartKomOrderHistory([{ orderNumber: "FOCUS", orderDate: "2026-10-16", detailNum: "A1", quantity: 10,
+      price: 100, refusalCount: refused, releaseCount: 0, stateTxt: "В работе" }]);
+  } });
 });
 
 test("history sorts every supplier newest first regardless of item status and aligns columns across different card contents", async () => {

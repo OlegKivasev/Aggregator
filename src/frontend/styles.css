@@ -123,6 +123,13 @@
 .history-toggle { display: grid; width: 40px; height: 40px; flex: 0 0 40px; margin-bottom: 4px; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); box-shadow: 0 2px 8px #1118200d; }
 .history-toggle img { width: 21px; height: 21px; object-fit: contain; opacity: .72; }
 .history-toggle:hover { border-color: var(--accent); background: #fff3ed; }
+.history-toggle.has-cancellations, .history-toggle.has-cancellations:hover { border: 2px solid #dc2626; background: #fff5f5; box-shadow: 0 0 0 3px #dc26262e, 0 2px 8px #1118200d; animation: history-cancellation-pulse 1.8s ease-out infinite; }
+.history-toggle.has-cancellations img { opacity: 1; }
+@keyframes history-cancellation-pulse {
+  0% { box-shadow: 0 0 0 2px #dc26264d, 0 2px 8px #1118200d; }
+  75%, 100% { box-shadow: 0 0 0 10px #dc262600, 0 2px 8px #1118200d; }
+}
+@media (prefers-reduced-motion: reduce) { .history-toggle.has-cancellations { animation: none; } }
 .history-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .cart-modal { position: relative; width: min(1200px, calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 32px); padding: 0; border: 0; border-radius: 16px; color: var(--ink); background: #f8fafc; box-shadow: 0 20px 80px #11182038; }
 .cart-modal[open] { display: flex; flex-direction: column; }
