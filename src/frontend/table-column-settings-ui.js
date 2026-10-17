@@ -1,6 +1,6 @@
 import { minimumColumnWidth, maximumColumnWidth } from "./table-column-widths.js";
 
-export const setupTableColumnSettings = ({ table, columnAttribute, widths, name, title, apply, save }) => {
+export const setupTableColumnSettings = ({ table, columnAttribute, widths, alignments, name, title, apply, save }) => {
   const menu = document.createElement("div");
   menu.className = "result-context-menu table-column-context-menu";
   menu.id = `table-column-menu-${name}`;
@@ -17,7 +17,7 @@ export const setupTableColumnSettings = ({ table, columnAttribute, widths, name,
   dialog.id = `table-column-settings-${name}`;
   dialog.setAttribute("aria-labelledby", `${dialog.id}-title`);
   dialog.innerHTML = `<form novalidate><header><h2></h2><button type="button" data-column-settings-cancel aria-label="Закрыть настройки столбцов">×</button></header>
-    <p class="table-column-settings-dialog__hint">Задайте базовую ширину каждого столбца в пикселях. На широком экране свободное место распределяется между столбцами.</p>
+    <p class="table-column-settings-dialog__hint">Задайте точную ширину столбцов в пикселях и выберите выравнивание. Ширина — от 24 до 800 px.</p>
     <div class="table-column-settings-dialog__fields"></div><p class="table-column-settings-dialog__error" role="alert" hidden></p>
     <footer><button type="button" class="btn btn-light" data-column-settings-cancel>Отмена</button><button type="submit" class="btn btn-primary">Применить</button></footer></form>`;
   const heading = dialog.querySelector("h2");
@@ -65,8 +65,15 @@ export const setupTableColumnSettings = ({ table, columnAttribute, widths, name,
       const input = document.createElement("input");
       input.type = "number"; input.step = "1"; input.min = String(minimumColumnWidth); input.max = String(maximumColumnWidth);
       input.inputMode = "numeric"; input.value = String(width); input.dataset.widthColumn = column;
-      const unit = document.createElement("span"); unit.textContent = "px";
-      label.append(text, input, unit); fields.append(label);
+      input.setAttribute("aria-label", `Ширина: ${text.textContent}`);
+      const alignment = document.createElement("select");
+      alignment.dataset.alignmentColumn = column;
+      alignment.setAttribute("aria-label", `Выравнивание: ${text.textContent}`);
+      for (const [value, caption] of [["left", "Слева"], ["center", "По центру"], ["right", "Справа"]]) {
+        const option = document.createElement("option"); option.value = value; option.textContent = caption; alignment.append(option);
+      }
+      alignment.value = alignments[column];
+      label.append(text, input, alignment); fields.append(label);
     }
     dialog.showModal();
     fields.querySelector("input")?.focus();
@@ -74,6 +81,7 @@ export const setupTableColumnSettings = ({ table, columnAttribute, widths, name,
   dialog.querySelector("form").addEventListener("submit", (event) => {
     event.preventDefault();
     const nextWidths = {};
+    const nextAlignments = {};
     for (const input of fields.querySelectorAll("input")) {
       const width = Number(input.value);
       if (!input.value.trim() || !Number.isInteger(width) || width < minimumColumnWidth || width > maximumColumnWidth) {
@@ -82,7 +90,11 @@ export const setupTableColumnSettings = ({ table, columnAttribute, widths, name,
       }
       nextWidths[input.dataset.widthColumn] = width;
     }
-    Object.assign(widths, nextWidths); apply(); save(); dialog.close();
+    for (const select of fields.querySelectorAll("select")) {
+      if (!["left", "center", "right"].includes(select.value)) { error.textContent = "Выберите выравнивание каждого столбца."; error.hidden = false; return; }
+      nextAlignments[select.dataset.alignmentColumn] = select.value;
+    }
+    Object.assign(widths, nextWidths); Object.assign(alignments, nextAlignments); apply(); save(); dialog.close();
   });
   fields.addEventListener("input", () => { error.hidden = true; });
   dialog.querySelectorAll("[data-column-settings-cancel]").forEach((button) => button.addEventListener("click", () => dialog.close()));

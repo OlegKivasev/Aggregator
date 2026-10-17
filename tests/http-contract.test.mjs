@@ -223,32 +223,41 @@ test("garage creates persisted groups for a vehicle", async () => {
 test("table column width preferences persist safely across clients", async () => {
   const empty = await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`);
   assert.equal(empty.status, 200);
-  assert.deepEqual(await empty.json(), { widths: {} });
+  assert.deepEqual(await empty.json(), { widths: {}, alignments: {} });
 
   const invalid = await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ widths: { main: { supplier: 79 } } }),
+    body: JSON.stringify({ widths: { main: { supplier: 23 } } }),
   });
   assert.equal(invalid.status, 400);
   assert.deepEqual(await invalid.json(), { message: "Garage request is invalid" });
 
   const savedWidths = {
-    main: { supplier: 180, title: 420 },
+    main: { supplier: 24, title: 420 },
     analogs: { quantity: 140 },
     garage: { deliveryDate: 220, sum: 130 },
   };
   const save = await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ widths: savedWidths }),
+    body: JSON.stringify({ widths: savedWidths, alignments: { main: { supplier: "right" }, analogs: { quantity: "center" } } }),
   });
   assert.equal(save.status, 200);
-  assert.deepEqual(await save.json(), { widths: savedWidths });
+  const savedAlignments = { main: { supplier: "right" }, analogs: { quantity: "center" } };
+  assert.deepEqual(await save.json(), { widths: savedWidths, alignments: savedAlignments });
 
   const restored = await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`);
   assert.equal(restored.status, 200);
-  assert.deepEqual(await restored.json(), { widths: savedWidths });
+  assert.deepEqual(await restored.json(), { widths: savedWidths, alignments: savedAlignments });
+  for (const alignments of [{ main: { supplier: "justify" } }, { main: { supplier: 1 } }, { main: { unknown: "left" } }, [], { unknown: {} }]) {
+    const response = await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`, { method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ widths: { main: { title: 421 } }, alignments }) });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`)).json(), { widths: savedWidths, alignments: savedAlignments });
+  }
+  const legacySave = await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ widths: savedWidths }) });
+  assert.deepEqual(await legacySave.json(), { widths: savedWidths, alignments: savedAlignments });
 });
 
 test("search endpoint preserves validation and non-stream behavior", async () => {

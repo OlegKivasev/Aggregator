@@ -13,6 +13,26 @@ const offer = {
   link: "https://rossko.ru/product/123",
 };
 
+test("table preferences migrate legacy widths and persist validated alignments atomically", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autoservice-table-preferences-"));
+  const path = join(directory, "garage.sqlite");
+  let repository = new SqliteGarageRepository(path);
+  let service = new GarageApplicationService(repository, { findOffers: async () => ({ results: [], failed: false }) });
+  try {
+    repository.setUiPreference("table-column-widths-v1", JSON.stringify({ main: { supplier: 100 } }));
+    assert.deepEqual(service.getTablePreferences(), { widths: { main: { supplier: 100 } }, alignments: {} });
+    const saved = { widths: { main: { supplier: 24 }, analogs: { brand: 64 } }, alignments: { main: { supplier: "right" }, analogs: { brand: "center" } } };
+    assert.deepEqual(service.setTablePreferences(saved.widths, saved.alignments), saved);
+    assert.throws(() => service.setTablePreferences({ main: { supplier: 60 } }, { main: { supplier: "justify" } }), GarageValidationError);
+    assert.deepEqual(service.getTablePreferences(), saved);
+    service.close();
+    repository = new SqliteGarageRepository(path);
+    service = new GarageApplicationService(repository, { findOffers: async () => ({ results: [], failed: false }) });
+    assert.deepEqual(service.getTablePreferences(), saved);
+    assert.deepEqual(service.setTablePreferences(saved.widths, undefined), saved);
+  } finally { service.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test("garage persists vehicles, guards revisions, merges known duplicates, and refreshes a supplier snapshot", async () => {
   const directory = await mkdtemp(join(tmpdir(), "autoservice-garage-"));
   const repository = new SqliteGarageRepository(join(directory, "garage.sqlite"));

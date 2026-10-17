@@ -6,17 +6,19 @@ const maxNameLength = 120;
 const maxCommentLength = 1_000;
 const offerLifetimeMs = 5 * 60_000;
 const tableWidthPreferenceKey = "table-column-widths-v1";
+const tablePreferenceKey = "table-column-settings-v2";
 const tableColumns = {
   main: ["supplier", "brand", "article", "title", "deliveryDate", "quantity", "markupPrice"],
   analogs: ["supplier", "brand", "article", "title", "deliveryDate", "quantity", "markupPrice"],
   garage: ["supplier", "brand", "article", "title", "deliveryDate", "quantity", "price", "sum"],
 } as const;
-const minimumColumnWidth = 80;
+const minimumColumnWidth = 24;
 const maximumColumnWidth = 800;
 
 type TableName = keyof typeof tableColumns;
 type TableColumnWidths = Partial<Record<(typeof tableColumns)[TableName][number], number>>;
 type TableWidthPreferences = Partial<Record<TableName, TableColumnWidths>>;
+type TableAlignmentPreferences = Partial<Record<TableName, Partial<Record<(typeof tableColumns)[TableName][number], "left" | "center" | "right">>>>;
 
 export class GarageValidationError extends Error {}
 export class GarageConflictError extends Error {}
@@ -89,6 +91,26 @@ function normalizeTableColumnWidths(value: unknown): TableWidthPreferences {
     preferences[table] = widths;
   }
   if (Object.keys(value).some((table) => !(table in tableColumns))) throw new GarageValidationError("table column widths are invalid");
+  return preferences;
+}
+
+function normalizeTableAlignments(value: unknown): TableAlignmentPreferences {
+  if (!isRecord(value)) throw new GarageValidationError("table column alignments are invalid");
+  const preferences: TableAlignmentPreferences = {};
+  for (const [table, columns] of Object.entries(tableColumns) as [TableName, readonly string[]][]) {
+    const saved = value[table];
+    if (saved === undefined) continue;
+    if (!isRecord(saved)) throw new GarageValidationError("table column alignments are invalid");
+    const alignments: Partial<Record<(typeof tableColumns)[TableName][number], "left" | "center" | "right">> = {};
+    for (const [column, alignment] of Object.entries(saved)) {
+      if (!columns.includes(column) || alignment !== "left" && alignment !== "center" && alignment !== "right") {
+        throw new GarageValidationError("table column alignments are invalid");
+      }
+      alignments[column as (typeof tableColumns)[TableName][number]] = alignment;
+    }
+    preferences[table] = alignments;
+  }
+  if (Object.keys(value).some((table) => !Object.hasOwn(tableColumns, table))) throw new GarageValidationError("table column alignments are invalid");
   return preferences;
 }
 
@@ -228,20 +250,26 @@ export class GarageApplicationService {
     return this.getVehicle(id);
   }
 
-  getTableColumnWidths(): TableWidthPreferences {
-    const savedValue = this.repository.getUiPreference(tableWidthPreferenceKey);
-    if (savedValue === null) return {};
+  getTablePreferences(): { widths: TableWidthPreferences; alignments: TableAlignmentPreferences } {
+    const savedValue = this.repository.getUiPreference(tablePreferenceKey);
     try {
-      return normalizeTableColumnWidths(JSON.parse(savedValue));
+      if (savedValue !== null) {
+        const saved: unknown = JSON.parse(savedValue);
+        if (!isRecord(saved)) throw new GarageValidationError("table preferences are invalid");
+        return { widths: normalizeTableColumnWidths(saved.widths), alignments: normalizeTableAlignments(saved.alignments) };
+      }
+      const legacy = this.repository.getUiPreference(tableWidthPreferenceKey);
+      return { widths: legacy === null ? {} : normalizeTableColumnWidths(JSON.parse(legacy)), alignments: {} };
     } catch {
       // A corrupted optional preference must not block access to garage data.
-      return {};
+      return { widths: {}, alignments: {} };
     }
   }
 
-  setTableColumnWidths(value: unknown): TableWidthPreferences {
-    const preferences = normalizeTableColumnWidths(value);
-    this.repository.setUiPreference(tableWidthPreferenceKey, JSON.stringify(preferences));
+  setTablePreferences(widths: unknown, alignments: unknown): { widths: TableWidthPreferences; alignments: TableAlignmentPreferences } {
+    const preferences = { widths: normalizeTableColumnWidths(widths),
+      alignments: alignments === undefined ? this.getTablePreferences().alignments : normalizeTableAlignments(alignments) };
+    this.repository.setUiPreference(tablePreferenceKey, JSON.stringify(preferences));
     return preferences;
   }
 

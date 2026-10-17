@@ -1,5 +1,6 @@
 import { formatOrderDate } from "./order-date-formatting.js";
 import { armtekReturnSource, formatArmtekReturnDays, hasPartKomWeekendDelivery } from "./order-notices.js";
+import { historyItemRows } from "./order-history-presentation.js";
 
 const suppliers = [
   ["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"],
@@ -9,32 +10,32 @@ const cancellationDate = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", mont
 const fulfillmentLabels = new Map([
   ["processing", ["В обработке", "◷"]], ["in_transit", ["В пути", "→"]],
   ["ready", ["На складе", "▣"]], ["delivered", ["Получен", "✓"]],
-  ["cancelled", ["Отменён", "×"]], ["partial", ["Частичная поставка", "◐"]],
-  ["partially_cancelled", ["Частично отменён", "×"]],
+  ["cancelled", ["Отменён", "×"]],
   ["returned", ["Возвращён", "↶"]],
   ["unknown", ["Статус не уточнён", "?"]],
 ]);
 const fulfillmentPriority = new Map([
-  ["processing", 0], ["in_transit", 1], ["ready", 1], ["partial", 2],
-  ["cancelled", 3], ["partially_cancelled", 3], ["delivered", 4], ["returned", 5], ["unknown", 6],
+  ["processing", 0], ["in_transit", 1], ["ready", 1],
+  ["cancelled", 3], ["delivered", 4], ["returned", 5], ["unknown", 6],
 ]);
+const acceptedFulfillments = new Set([...fulfillmentLabels.keys(), "partial", "partially_cancelled"]);
 const statusGroups = new Map([
   ["", { label: "Все заказы", states: [] }],
   ["active", { label: "В работе", states: ["processing", "in_transit", "ready"] }],
   ["today", { label: "Придут сегодня", states: [] }],
-  ["partial", { label: "Частичная поставка", states: ["partial"] }],
-  ["cancelled", { label: "Отменено", states: ["cancelled", "partially_cancelled"] }],
-  ["delivered", { label: "Получено", states: ["delivered", "partially_cancelled"] }],
+  ["cancelled", { label: "Отменено", states: ["cancelled"] }],
+  ["delivered", { label: "Получено", states: ["delivered"] }],
   ["returned", { label: "Возвращено", states: ["returned"] }],
 ]);
 
 const dateValue = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
 function orderMatchesFilters(order, values, today) {
+  const rows = order.items.flatMap(historyItemRows);
   const states = statusGroups.get(values.status).states;
-  if (states.length && !order.items.some((item) => states.includes(item.fulfillment))) return false;
-  if (values.status === "today" && !order.items.some((item) => {
-    if (["delivered", "cancelled", "partially_cancelled", "returned"].includes(item.fulfillment)) return false;
+  if (states.length && !rows.some((item) => states.includes(item.fulfillment))) return false;
+  if (values.status === "today" && !rows.some((item) => {
+    if (["delivered", "cancelled", "returned"].includes(item.fulfillment)) return false;
     const date = /^(\d{4}-\d{2}-\d{2})(?:[ T](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)?$/.exec(item.expectedDate ?? "")?.[1];
     return date === today;
   })) return false;
@@ -57,10 +58,13 @@ function validHistory(value) {
     && typeof value.limited === "boolean" && value.orders.every((order) => order && typeof order.number === "string"
       && (order.date === null || typeof order.date === "string") && Array.isArray(order.items) && order.items.length > 0
       && order.items.every((item) => item && typeof item.article === "string" && Number.isFinite(item.quantity)
-        && fulfillmentLabels.has(item.fulfillment)
+        && acceptedFulfillments.has(item.fulfillment)
         && item.quantity > 0 && item.quantity <= Number.MAX_SAFE_INTEGER
         && (item.cancelledQuantity === undefined || Number.isFinite(item.cancelledQuantity)
           && item.cancelledQuantity >= 0 && item.cancelledQuantity <= item.quantity)
+        && (item.deliveredQuantity === undefined || Number.isFinite(item.deliveredQuantity)
+          && item.deliveredQuantity >= 0 && item.deliveredQuantity <= item.quantity)
+        && (item.cancelledQuantity ?? 0) + (item.deliveredQuantity ?? 0) <= item.quantity
         && (item.fulfillmentQuantities === undefined || item.fulfillment === "partially_cancelled"
           && item.fulfillmentQuantities && typeof item.fulfillmentQuantities === "object" && !Array.isArray(item.fulfillmentQuantities)
           && Number.isFinite(item.fulfillmentQuantities.delivered) && item.fulfillmentQuantities.delivered > 0
@@ -97,23 +101,16 @@ function fulfillmentBadge(fulfillment, count) {
   return badge;
 }
 
-function historyItemRows(item) {
-  if (item.fulfillment !== "partially_cancelled" || !item.fulfillmentQuantities) return [item];
-  const { delivered, cancelled } = item.fulfillmentQuantities;
-  return [
-    { ...item, quantity: cancelled, fulfillment: "cancelled", status: `Отменено ${cancelled} шт.` },
-    { ...item, quantity: delivered, fulfillment: "delivered", status: `Получено ${delivered} шт.` },
-  ];
-}
-
 function renderOrder(order, limited, supplierName, supplier) {
   const card = element("article", "history-card");
   const header = element("header", "history-card__header");
   const heading = element("div", "history-card__identity");
   heading.append(element("small", "", supplierName), element("h3", "", `Заказ № ${order.number}`));
   const states = new Map();
-  for (const item of order.items) states.set(item.fulfillment, (states.get(item.fulfillment) ?? 0) + 1);
+  const rows = order.items.flatMap(historyItemRows);
+  for (const item of rows) states.set(item.fulfillment, (states.get(item.fulfillment) ?? 0) + 1);
   card.dataset.fulfillment = states.size === 1 ? states.keys().next().value : "mixed";
+  card.classList.toggle("has-cancelled-items", states.has("cancelled"));
   const summary = element("div", "history-card__states");
   summary.setAttribute("aria-label", limited ? "Состояние показанных позиций" : "Состояние позиций заказа");
   for (const [state, count] of [...states].sort(([a], [b]) => fulfillmentPriority.get(a) - fulfillmentPriority.get(b))) {
@@ -125,7 +122,12 @@ function renderOrder(order, limited, supplierName, supplier) {
   appendMeta(header, "quantity", limited ? "Показано позиций / штук" : "Позиций / штук", `${order.items.length} / ${order.items.reduce((sum, item) => sum + item.quantity, 0)}`);
   const total = order.items.every((item) => item.price !== null)
     ? order.items.reduce((sum, item) => sum + item.price * item.quantity, 0) : null;
-  if (!limited && total !== null && Number.isFinite(total)) header.append(element("strong", "history-card__total", money.format(total)));
+  const totalWrap = element("div", "history-card__total-wrap");
+  const totalValue = element("strong", "history-card__total", total !== null && Number.isFinite(total) ? money.format(total) : "—");
+  totalValue.title = total === null ? "Поставщик не передал цену для всех позиций" : "Сумма показанных позиций";
+  totalWrap.append(totalValue);
+  if (limited && total !== null) totalWrap.append(element("small", "history-card__total-note", "По показанным позициям"));
+  header.append(totalWrap);
   card.append(header);
 
   const wrap = element("div", "history-card__table-wrap");
@@ -141,13 +143,13 @@ function renderOrder(order, limited, supplierName, supplier) {
   }
   thead.append(headRow);
   const tbody = element("tbody");
-  for (const item of order.items.flatMap(historyItemRows)) {
+  for (const item of rows) {
     const row = element("tr");
     const part = element("td");
     part.append(element("strong", "", [item.brand, item.article].filter(Boolean).join(" ")));
     if (item.title) part.append(element("span", "", item.title));
     const delivery = element("td");
-    const active = !["delivered", "cancelled", "partially_cancelled", "returned"].includes(item.fulfillment);
+    const active = !["delivered", "cancelled", "returned"].includes(item.fulfillment);
     const highlightDelivery = active && hasPartKomWeekendDelivery(supplier, item.expectedDate, item.guaranteedDate);
     delivery.append(element("strong", highlightDelivery && item.expectedDate ? "delivery-date--warning" : "", formatOrderDate(item.expectedDate) ?? "Не указана"));
     if (item.guaranteedDate && item.guaranteedDate !== item.expectedDate) {

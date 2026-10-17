@@ -22,7 +22,7 @@ import {
 import { isPartKomReturnableVisible } from "../src/frontend/partkom-return-settings.js";
 import { isForumAutoReturnableVisible } from "../src/frontend/forum-auto-return-settings.js";
 import { isArmtekReturnableVisible } from "../src/frontend/armtek-return-settings.js";
-import { applySavedColumnWidths } from "../src/frontend/table-column-widths.js";
+import { applySavedColumnWidths, applySavedColumnAlignments } from "../src/frontend/table-column-widths.js";
 import { formatDeliveryDate } from "../src/frontend/supplier-search-summary.js";
 import { formatCartLatestDeliveryDate } from "../src/frontend/cart-ui.js";
 
@@ -65,7 +65,9 @@ test("table column widths accept only bounded integer preferences", () => {
   const defaults = { supplier: 100, title: 320 };
 
   assert.deepEqual(applySavedColumnWidths(defaults, { supplier: 180, title: 700 }), { supplier: 180, title: 700 });
-  assert.deepEqual(applySavedColumnWidths(defaults, { supplier: 79, title: 801 }), defaults);
+  assert.deepEqual(applySavedColumnWidths(defaults, { supplier: 23, title: 801 }), defaults);
+  assert.deepEqual(applySavedColumnWidths(defaults, { supplier: 24, title: 79 }), { supplier: 24, title: 79 });
+  assert.deepEqual(applySavedColumnAlignments({ supplier: "left", title: "center" }, { supplier: "right", title: "justify" }), { supplier: "right", title: "center" });
 });
 
 test("brand and article formatting normalizes case consistently", () => {
@@ -788,14 +790,14 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(app, /main-best-price/);
   assert.match(app, /const tableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+deliveryDate: 180,\s+quantity: 120,\s+markupPrice: 120,/s);
   assert.match(app, /--results-table-min-width/);
-  assert.match(app, /tableColumnWidths\[header\.dataset\.column\] \/ \(minimumWidth - cartActionColumnWidth\) \* availableWidth/);
+  assert.match(app, /\$\{tableColumnWidths\[header\.dataset\.column\]\}px/);
   assert.match(app, /const analogTableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+deliveryDate: 180,\s+quantity: 120,\s+markupPrice: 120,/s);
   assert.match(app, /const applyAnalogTableColumns = \(\) =>/);
   assert.match(app, /--analogs-results-table-min-width/);
   assert.match(app, /analogFiltersResize\.addEventListener\("pointerdown"/);
   assert.match(app, /showWarehouseTooltip/);
   assert.match(styles, /\.results-data-table thead\s*\{[^}]*position: sticky;/s);
-  assert.match(styles, /\.results-data-table\s*\{[^}]*width: max\(100%, var\(--results-table-min-width,/s);
+  assert.match(styles, /\.results-data-table\s*\{[^}]*width: var\(--results-table-min-width,/s);
   assert.match(styles, /\.results-data-table tbody td\s*\{[^}]*font-size: 12px;/s);
   assert.match(styles, /\.analogs-results td\s*\{[^}]*font-size: 12px;/s);
   assert.match(styles, /\.main-result-purchase-price\s*\{[^}]*font-size: 12px;/s);
@@ -814,7 +816,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(styles, /\.analogs-workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\);/s);
   assert.match(styles, /\.analogs-workspace\s*\{[^}]*height: 100%;[^}]*overflow: hidden;/s);
   assert.match(styles, /\.analogs-filters-sidebar\s*\{[^}]*height: 100%;[^}]*overflow-y: auto;/s);
-  assert.match(styles, /\.analogs-results table\s*\{[^}]*width: max\(100%, var\(--analogs-results-table-min-width,/s);
+  assert.match(styles, /\.analogs-results table\s*\{[^}]*width: var\(--analogs-results-table-min-width,/s);
   assert.match(styles, /\.analogs-results \[data-analog-column="markupPrice"\]/);
   assert.match(styles, /\.delivery-warehouse\s*\{[^}]*color: var\(--muted\);/s);
   assert.match(styles, /\.delivery-warehouse\s*\{[^}]*justify-content: flex-start;/s);

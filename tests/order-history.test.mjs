@@ -195,8 +195,8 @@ test("supplier histories classify fulfillment without treating a closed Armtek o
   assert.equal(armtek({ STATUS: "", KWMENG_P: "1" }), "partial");
   assert.equal(armtek({ STATUS: "", KWMENG_REJ: "2" }), "cancelled");
   assert.equal(armtek({ STATUS: "", KWMENG_WAYIN: "2" }), "in_transit");
-  assert.equal(armtek({ STATUS: "", ORDER_STATUS: "В работе" }), "processing");
-  for (const [statusId, fulfillment] of [[0, "cancelled"], [10, "processing"], [20, "processing"], [30, "processing"],
+  assert.equal(armtek({ STATUS: "", ORDER_STATUS: "В работе" }), "in_transit");
+  for (const [statusId, fulfillment] of [[0, "cancelled"], [10, "processing"], [20, "processing"], [30, "in_transit"],
     [50, "processing"], [90, "ready"], [100, "delivered"], [999, "unknown"]]) {
     assert.equal(parseForumAutoOrderHistory([{ ...forumRow, statusId,
       arTovs: [{ ...forumRow.arTovs[0], k3: 2 }] }]).orders[0].items[0].fulfillment, fulfillment);
@@ -214,6 +214,24 @@ test("supplier histories classify fulfillment without treating a closed Armtek o
     const xml = rosskoXml(rosskoRow.replace("<status>1</status>", `<status>${code}</status>`));
     assert.equal(parseRosskoOrderHistory(xml).orders[0].items[0].fulfillment, fulfillment);
   }
+});
+
+test("owner-confirmed Armtek work and Forum Auto confirmed statuses mean transit without overriding terminal quantities", () => {
+  const armtek = (fields) => parseArmtekOrderHistory({ DATA: [{ ...armtekRow, STATUS: "В работе", ORDER_STATUS: "В работе", ...fields }] }).orders[0].items[0];
+  assert.equal(armtek({}).fulfillment, "in_transit");
+  assert.equal(armtek({ ORDER_STATUS: undefined }).fulfillment, "in_transit");
+  assert.equal(armtek({ STATUS: "", ORDER_STATUS: "Создан" }).fulfillment, "processing");
+  assert.equal(armtek({ Issued: "2" }).fulfillment, "delivered");
+  assert.equal(armtek({ REJECTED: "2" }).fulfillment, "cancelled");
+  for (const fields of [{}, { status: "Подтверждён" }, { statusId: 30 }, { statusId: "30" }]) {
+    const result = parseForumAutoOrderHistory([{ ...forumRow, ...fields }]).orders[0].items[0];
+    assert.equal(result.fulfillment, "in_transit");
+    assert.equal(result.deliveredQuantity, undefined);
+  }
+  assert.equal(parseForumAutoOrderHistory([{ ...forumRow, statusId: 100, arTovs: [{ ...forumRow.arTovs[0], k3: 2 }] }]).orders[0].items[0].fulfillment, "delivered");
+  assert.equal(parseForumAutoOrderHistory([{ ...forumRow, statusId: 0 }]).orders[0].items[0].fulfillment, "cancelled");
+  assert.equal(parseForumAutoOrderHistory([{ ...forumRow, statusId: 10 }]).orders[0].items[0].fulfillment, "processing");
+  assert.equal(parseForumAutoOrderHistory([{ ...forumRow, statusId: 50, status: "На комплектации" }]).orders[0].items[0].fulfillment, "processing");
 });
 
 test("Rossko portal-confirmed return code 31 and documented return code 36 stay separate from stock refusal and procurement", () => {

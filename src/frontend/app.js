@@ -30,10 +30,11 @@ import { bootstrapMarkupSettings } from "./markup-settings-ui.js";
 import { setupTableColumnSettings } from "./table-column-settings-ui.js";
 import {
   applySavedColumnWidths,
+  applyColumnAlignment,
   loadSharedColumnWidths,
+  restoreLocalColumnAlignments,
   restoreLocalColumnWidths,
   saveColumnWidths,
-  setupColumnResizing,
 } from "./table-column-widths.js";
 
 const form = document.querySelector("#search-form");
@@ -251,6 +252,9 @@ const tableColumnWidths = {
 };
 Object.assign(tableColumnWidths, restoreLocalColumnWidths("main", tableColumnWidths));
 const cartActionColumnWidth = 104;
+const defaultOfferColumnAlignments = { supplier: "left", brand: "left", article: "left", title: "left", deliveryDate: "left", quantity: "center", markupPrice: "center" };
+const tableColumnAlignments = restoreLocalColumnAlignments("main", defaultOfferColumnAlignments);
+const analogTableColumnAlignments = restoreLocalColumnAlignments("analogs", defaultOfferColumnAlignments);
 let visibleTableColumns = new Set(tableColumnIds);
 let visibleStpartsWarehouses = new Set(["green"]);
 let showArmtekNonReturnable = false;
@@ -932,15 +936,18 @@ const applyTableColumns = () => {
   const visibleColumns = getVisibleTableColumns();
   const minimumWidth = visibleColumns.reduce((width, column) => width + tableColumnWidths[column], cartActionColumnWidth);
   resultsTable.style.setProperty("--results-table-min-width", `${minimumWidth}px`);
-  const availableWidth = Math.max(minimumWidth, resultsTable.clientWidth) - cartActionColumnWidth;
   resultsTable.querySelectorAll("th[data-column]").forEach((header) => {
     header.style.width = visibleColumns.includes(header.dataset.column)
-      ? `${tableColumnWidths[header.dataset.column] / (minimumWidth - cartActionColumnWidth) * availableWidth}px`
+      ? `${tableColumnWidths[header.dataset.column]}px`
       : "";
   });
   tableColumnsReset.hidden = visibleTableColumns.size === tableColumnIds.length;
   document.querySelectorAll("[data-column]").forEach((element) => {
     element.hidden = !visibleColumns.includes(element.dataset.column);
+  });
+  resultsTable.querySelectorAll("[data-column]").forEach((cell) => {
+    cell.style.paddingInline = `${Math.min(12, (tableColumnWidths[cell.dataset.column] - 16) / 2)}px`;
+    applyColumnAlignment(cell, tableColumnAlignments[cell.dataset.column]);
   });
   resultsBody.querySelectorAll(".results-table__empty td").forEach((cell) => {
     cell.colSpan = visibleColumns.length + 1;
@@ -2170,16 +2177,17 @@ const applyAnalogTableColumns = () => {
   const minimumWidth = visibleColumns.reduce((width, column) => width + analogTableColumnWidths[column], cartActionColumnWidth);
   const analogsTable = analogsResultsBody.closest("table");
   analogsTable.style.setProperty("--analogs-results-table-min-width", `${minimumWidth}px`);
-  const availableWidth = Math.max(minimumWidth, analogsResults.clientWidth) - cartActionColumnWidth;
   analogsTable.querySelectorAll("th[data-analog-column]").forEach((header) => {
     header.style.width = visibleColumns.includes(header.dataset.analogColumn)
-      ? `${analogTableColumnWidths[header.dataset.analogColumn] / (minimumWidth - cartActionColumnWidth) * availableWidth}px`
+      ? `${analogTableColumnWidths[header.dataset.analogColumn]}px`
       : "";
   });
   analogsTable.querySelectorAll("[data-analog-column]").forEach((element) => {
     const visible = visibleColumns.includes(element.dataset.analogColumn);
     element.hidden = !visible;
     element.style.display = visible ? "" : "none";
+    element.style.paddingInline = `${Math.min(16, (analogTableColumnWidths[element.dataset.analogColumn] - 16) / 2)}px`;
+    applyColumnAlignment(element, analogTableColumnAlignments[element.dataset.analogColumn]);
   });
 };
 
@@ -2999,38 +3007,16 @@ const cartUi = bootstrapCart({ getMarkupPrice, showPurchasePrice: () => showPurc
 bootstrapMarkupSettings({ getSettings: () => markupSettings, applySettings: setMarkupSettings });
 bootstrapOrderHistory();
 
-setupColumnResizing({
-  table: resultsTable,
-  columnAttribute: "data-column",
-  widths: tableColumnWidths,
-  apply: applyTableColumns,
-  save: () => saveColumnWidths("main", tableColumnWidths),
-});
-setupColumnResizing({
-  table: analogsResultsBody.closest("table"),
-  columnAttribute: "data-analog-column",
-  widths: analogTableColumnWidths,
-  apply: applyAnalogTableColumns,
-  save: () => saveColumnWidths("analogs", analogTableColumnWidths),
-});
-
-const offerTableResizeObserver = new ResizeObserver((entries) => {
-  for (const entry of entries) {
-    if (entry.target === resultsTable) applyTableColumns();
-    else applyAnalogTableColumns();
-  }
-});
-offerTableResizeObserver.observe(resultsTable);
-offerTableResizeObserver.observe(analogsResults);
-
-setupTableColumnSettings({ table: resultsTable, columnAttribute: "data-column", widths: tableColumnWidths,
-  name: "main", title: "Столбцы проценки", apply: applyTableColumns, save: () => saveColumnWidths("main", tableColumnWidths) });
-setupTableColumnSettings({ table: analogsResults, columnAttribute: "data-analog-column", widths: analogTableColumnWidths,
-  name: "analogs", title: "Столбцы аналогов", apply: applyAnalogTableColumns, save: () => saveColumnWidths("analogs", analogTableColumnWidths) });
+setupTableColumnSettings({ table: resultsTable, columnAttribute: "data-column", widths: tableColumnWidths, alignments: tableColumnAlignments,
+  name: "main", title: "Столбцы проценки", apply: applyTableColumns, save: () => saveColumnWidths("main", tableColumnWidths, tableColumnAlignments) });
+setupTableColumnSettings({ table: analogsResults, columnAttribute: "data-analog-column", widths: analogTableColumnWidths, alignments: analogTableColumnAlignments,
+  name: "analogs", title: "Столбцы аналогов", apply: applyAnalogTableColumns, save: () => saveColumnWidths("analogs", analogTableColumnWidths, analogTableColumnAlignments) });
 
 loadSharedColumnWidths().then((savedWidths) => {
   Object.assign(tableColumnWidths, applySavedColumnWidths(tableColumnWidths, savedWidths.main));
   Object.assign(analogTableColumnWidths, applySavedColumnWidths(analogTableColumnWidths, savedWidths.analogs));
+  Object.assign(tableColumnAlignments, restoreLocalColumnAlignments("main", defaultOfferColumnAlignments));
+  Object.assign(analogTableColumnAlignments, restoreLocalColumnAlignments("analogs", defaultOfferColumnAlignments));
   garageUi.applyColumnWidths(savedWidths.garage);
   renderResults();
   if (!analogsModal.hidden) renderAnalogRowsNow();

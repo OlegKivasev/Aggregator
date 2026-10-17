@@ -13,6 +13,7 @@ import { SupplierAuthError } from "../../src/backend/errors.ts";
 import { parsePartKomOrderHistory } from "../../src/backend/suppliers/part-kom/part-kom-order.ts";
 import { parseArmtekOrderHistory } from "../../src/backend/suppliers/armtek/armtek-order.ts";
 import { parseRosskoOrderHistory } from "../../src/backend/suppliers/rossko/rossko-api-adapter.ts";
+import { parseForumAutoOrderHistory } from "../../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 
 // The browser uses a real local cart server; supplier searches and checks are fictional fixtures.
 const supplierOrigins = { armtek: "https://etp.armtek.ru/", "part-kom": "https://www.part-kom.ru/",
@@ -270,8 +271,7 @@ test("main and analog action columns stay compact on wide screens, after resizin
       await measure("#results-body .main-result-row");
     }
     await page.setViewportSize({ width: 1990, height: 1000 });
-    await page.locator('#results-table [data-resize-column="title"]').focus();
-    await page.keyboard.press("Shift+ArrowRight");
+    assert.equal(await page.locator("#results-table .table-column-resize").count(), 0);
     await measure("#results-body .main-result-row");
     await page.locator("#settings-toggle").click();
     await page.locator(".table-columns-settings__summary").click();
@@ -285,8 +285,7 @@ test("main and analog action columns stay compact on wide screens, after resizin
       await measure("#analogs-results-body .analogs-result-row");
     }
     await page.setViewportSize({ width: 1990, height: 1000 });
-    await page.locator('#analogs-results [data-resize-column="title"]').focus();
-    await page.keyboard.press("ArrowRight");
+    assert.equal(await page.locator("#analogs-results .table-column-resize").count(), 0);
     await measure("#analogs-results-body .analogs-result-row");
     await page.locator('#analogs-results [data-markup-settings]').click();
     await page.setViewportSize({ width: 390, height: 850 });
@@ -300,37 +299,27 @@ test("main and analog action columns stay compact on wide screens, after resizin
   });
 });
 
-test("offer columns visibly resize by dragging and keyboard while cart controls stay compact", async () => {
+test("offer columns use exact pixels without mouse resize handles or automatic stretching", async () => {
   await withCartPage(async (page) => {
-    await page.setViewportSize({ width: 1990, height: 1000 });
-    const resizeAndCheck = async (table, attribute, preferenceKey) => {
-      await page.waitForFunction((selector) => Math.abs(document.querySelector(`${selector} .cart-add-cell`).getBoundingClientRect().width - 104) < 1, table);
-      const header = page.locator(`${table} th[${attribute}="title"]`);
-      const handle = header.locator('[data-resize-column="title"]');
-      await handle.hover();
-      const before = await header.boundingBox();
-      const grip = await handle.boundingBox();
-      await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
-      await page.mouse.down();
-      assert.equal(await page.locator("body").evaluate((node) => node.classList.contains("is-resizing-table-column")), true);
-      await page.mouse.move(grip.x + grip.width / 2 + 80, grip.y + grip.height / 2, { steps: 8 });
-      await page.mouse.up();
-      const after = await header.boundingBox();
-      const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem("autoservice.tableColumnWidths.v1"))[key].title, preferenceKey);
-      assert.equal(saved, 403);
-      assert.ok(after.width > before.width + 25, `drag must visibly widen ${preferenceKey}: ${before.width} -> ${after.width}`);
-      await handle.focus();
-      await page.keyboard.press("Shift+ArrowLeft");
-      const narrower = await header.boundingBox();
-      assert.ok(narrower.width < after.width - 10, `keyboard must visibly narrow ${preferenceKey}: ${after.width} -> ${narrower.width}`);
-      const cell = await page.locator(`${table} tbody tr`).first().locator(`[${attribute}="title"]`).boundingBox();
-      assert.ok(Math.abs(cell.width - narrower.width) < 1, "header and body must share the resized width");
-      const actionCell = await page.locator(`${table} .cart-add-cell`).first().boundingBox();
-      assert.ok(Math.abs(actionCell.width - 104) < 1, "resizing must not restore the empty band next to cart controls");
+    const check = async (table, attribute) => {
+      assert.equal(await page.locator(`${table} .table-column-resize`).count(), 0);
+      for (const [column, width] of [["supplier", 100], ["brand", 125], ["title", 323], ["markupPrice", 120]]) {
+        const header = await page.locator(`${table} th[${attribute}="${column}"]`).boundingBox();
+        const cell = await page.locator(`${table} tbody tr`).first().locator(`[${attribute}="${column}"]`).boundingBox();
+        assert.ok(Math.abs(header.width - width) <= 1, `${table} ${column}: ${header.width} instead of ${width}`);
+        assert.ok(Math.abs(cell.width - width) <= 1);
+      }
     };
-    await resizeAndCheck("#results-table", "data-column", "main");
+    for (const width of [2504, 1990, 1366, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await check("#results-table", "data-column");
+    }
+    await page.setViewportSize({ width: 1990, height: 1000 });
     await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
-    await resizeAndCheck("#analogs-results", "data-analog-column", "analogs");
+    for (const width of [2504, 1990, 1366, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await check("#analogs-results", "data-analog-column");
+    }
   });
 });
 
@@ -347,12 +336,14 @@ test("table header settings validate, apply and persist separate main and analog
     assert.equal(await main.locator('[data-width-column="title"]').inputValue(), "323");
     const storedBefore = await page.evaluate(() => localStorage.getItem("autoservice.tableColumnWidths.v1"));
     await main.locator('[data-width-column="title"]').fill("480");
-    await main.locator('[data-width-column="supplier"]').fill("160");
-    for (const invalid of ["79", "801", "80.5", ""]) {
+    await main.locator('[data-width-column="supplier"]').fill("70");
+    await main.locator('[data-alignment-column="supplier"]').selectOption("right");
+    await main.locator('[data-alignment-column="brand"]').selectOption("center");
+    for (const invalid of ["23", "801", "24.5", ""]) {
       await main.locator('[data-width-column="quantity"]').fill(invalid);
       await main.getByRole("button", { name: "Применить", exact: true }).click();
       assert.equal(await main.isVisible(), true);
-      assert.match(await main.locator('[role="alert"]').textContent(), /от 80 до 800/);
+      assert.match(await main.locator('[role="alert"]').textContent(), /от 24 до 800/);
       assert.equal(await page.evaluate(() => localStorage.getItem("autoservice.tableColumnWidths.v1")), storedBefore, "an invalid draft must not partly save other widths");
     }
     await main.locator('[data-width-column="quantity"]').fill("150");
@@ -361,6 +352,11 @@ test("table header settings validate, apply and persist separate main and analog
     await main.getByRole("button", { name: "Применить", exact: true }).click();
     assert.equal((await savedMain).status(), 200);
     assert.equal(await main.isVisible(), false);
+    assert.ok(Math.abs((await page.locator('#results-table th[data-column="supplier"]').boundingBox()).width - 70) <= 1);
+    assert.ok(Math.abs((await page.locator('#results-table th[data-column="title"]').boundingBox()).width - 480) <= 1);
+    assert.equal(await page.locator('#results-body [data-column="supplier"]').first().evaluate((node) => getComputedStyle(node).textAlign), "right");
+    assert.equal(await page.locator('#results-body [data-column="brand"]').first().evaluate((node) => getComputedStyle(node).textAlign), "center");
+    assert.equal(await page.locator('#results-body [data-column="title"]').first().evaluate((node) => getComputedStyle(node).textAlign), "left");
     await openSettings("#results-table", "main");
     assert.equal(await main.locator('[data-width-column="title"]').inputValue(), "480");
     await main.locator('[data-width-column="title"]').fill("300");
@@ -378,6 +374,7 @@ test("table header settings validate, apply and persist separate main and analog
     const analogs = await openSettings("#analogs-results", "analogs");
     assert.equal(await analogs.locator('[data-width-column="title"]').inputValue(), "323");
     await analogs.locator('[data-width-column="title"]').fill("550");
+    await analogs.locator('[data-alignment-column="brand"]').selectOption("right");
     await page.setViewportSize({ width: 390, height: 850 });
     const bounds = await analogs.boundingBox();
     assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390 && bounds.y >= 0 && bounds.y + bounds.height <= 850);
@@ -387,17 +384,23 @@ test("table header settings validate, apply and persist separate main and analog
     assert.equal((await savedAnalogs).status(), 200);
     assert.equal(await page.locator("#analogs-modal").isVisible(), true);
     const preferences = await page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.tableColumnWidths.v1")));
-    assert.deepEqual({ title: preferences.main.title, supplier: preferences.main.supplier, quantity: preferences.main.quantity }, { title: 480, supplier: 160, quantity: 150 });
+    assert.deepEqual({ title: preferences.main.title, supplier: preferences.main.supplier, quantity: preferences.main.quantity }, { title: 480, supplier: 70, quantity: 150 });
     assert.equal(preferences.analogs.title, 550);
+    const alignments = await page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.tableColumnAlignments.v1")));
+    assert.equal(alignments.main.supplier, "right");
+    assert.equal(alignments.main.brand, "center");
+    assert.equal(alignments.analogs.brand, "right");
     await page.setViewportSize({ width: 1990, height: 1000 });
     await page.reload();
     await page.locator("#results-body .main-result-row").first().waitFor();
     await openSettings("#results-table", "main");
     assert.equal(await main.locator('[data-width-column="title"]').inputValue(), "480");
+    assert.equal(await main.locator('[data-alignment-column="supplier"]').inputValue(), "right");
     await page.keyboard.press("Escape");
     await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
     await openSettings("#analogs-results", "analogs");
     assert.equal(await analogs.locator('[data-width-column="title"]').inputValue(), "550");
+    assert.equal(await analogs.locator('[data-alignment-column="brand"]').inputValue(), "right");
   }, { preserveSearchState: true });
 });
 
@@ -674,9 +677,12 @@ async function openOfferAnalogs(page, row) {
 }
 
 async function narrowDeliveryColumn(page, selector) {
-  const handle = page.locator(`${selector} .table-column-resize[data-resize-column="deliveryDate"]`);
-  for (let index = 0; index < 4; index++) await handle.press("Shift+ArrowLeft");
-  assert.equal(await handle.getAttribute("aria-valuenow"), "80");
+  const name = selector === "#results-table" ? "main" : "analogs";
+  await page.locator(`${selector} thead th`).first().click({ button: "right" });
+  await page.locator(`#table-column-menu-${name}`).getByRole("menuitem", { name: "Настройки", exact: true }).click();
+  const dialog = page.locator(`#table-column-settings-${name}`);
+  await dialog.locator('[data-width-column="deliveryDate"]').fill("80");
+  await dialog.getByRole("button", { name: "Применить", exact: true }).click();
 }
 
 test("PartKOM Friday to Sunday range stays inside its highlight in search and analogs at narrow widths", async () => {
@@ -1561,7 +1567,7 @@ test("history supplier tabs show common filters without explanatory notes and qu
     await page.locator("#history-toggle").click();
     for (const [supplier, name] of [["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"]]) {
       await page.locator(`#history-tab-${supplier}`).click();
-      await page.waitForFunction((name) => document.querySelector(".history-card__header small")?.textContent === name, name);
+      await page.waitForFunction((name) => document.querySelector(".history-card__identity > small:first-child")?.textContent === name, name);
       assert.equal(await page.locator("#history-current, #history-archive").count(), 0);
       assert.equal(await page.locator("#history-period").isVisible(), true);
       assert.equal(await page.locator("#history-status-tabs").isVisible(), true);
@@ -1586,7 +1592,8 @@ test("history supplier tabs show common filters without explanatory notes and qu
         assert.equal(calls.length, previousCalls);
       }
       if (supplier === "rossko") {
-        assert.equal(await page.locator(".history-card__total").count(), 0);
+        assert.equal(await page.locator(".history-card__total").count(), 1);
+        assert.match(await page.locator(".history-card__total-note").innerText(), /По показанным позициям/);
       }
     }
     await page.setViewportSize({ width: 390, height: 844 });
@@ -1621,8 +1628,8 @@ test("history filters all suppliers by inclusive order dates and any item status
     await page.locator("#history-toggle").click();
     for (const [supplier, name] of [["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"]]) {
       if (supplier !== "part-kom") await page.locator(`#history-tab-${supplier}`).click();
-      await page.waitForFunction((name) => document.querySelector(".history-card__header small")?.textContent === name, name);
-      assert.equal(await page.locator("#history-status-tabs [role=tab]").count(), 7);
+      await page.waitForFunction((name) => document.querySelector(".history-card__identity > small:first-child")?.textContent === name, name);
+      assert.equal(await page.locator("#history-status-tabs [role=tab]").count(), 6);
       assert.equal(await page.locator("#history-status-attention").count(), 0);
       assert.equal(await page.locator("#history-scope, .history-limit").count(), 0);
       assert.doesNotMatch(await page.locator("#history-results").innerText(), /Показана ограниченная|не более 93|Активные заказы|Последние 500|Для полной истории/);
@@ -1634,7 +1641,7 @@ test("history filters all suppliers by inclusive order dates and any item status
       await page.locator("#history-status-cancelled").click();
       await shown(["END", "START-MIXED"]);
       assert.equal(await page.locator(".history-card").filter({ has: page.locator("h3", { hasText: "START-MIXED" }) }).locator("tbody tr").count(), 3);
-      assert.equal(await page.locator(".history-card__total").count(), 0);
+      assert.equal(await page.locator(".history-card__total").count(), 2);
       const supplierCall = calls.findLast((call) => call.supplier === supplier);
       if (supplier === "armtek") assert.deepEqual(supplierCall, { supplier, from: "2026-10-15", to: "2026-10-16" });
       else assert.deepEqual(supplierCall, { supplier });
@@ -1712,7 +1719,7 @@ test("arriving today tab uses local delivery dates, excludes finished items and 
     for (const [supplier, name] of [["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"]]) {
       if (supplier !== "part-kom") await page.locator(`#history-tab-${supplier}`).click();
       await page.waitForFunction((name) => !document.querySelector(".history-loading")
-        && document.querySelector(".history-card__header small")?.textContent === name, name);
+        && document.querySelector(".history-card__identity > small:first-child")?.textContent === name, name);
       const before = calls.length;
       await page.locator("#history-status-today").click();
       await shown(expected);
@@ -1727,7 +1734,7 @@ test("arriving today tab uses local delivery dates, excludes finished items and 
     await page.locator("#history-status-today").click();
     await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 24);
     for (const name of ["PartKOM", "Armtek", "Forum Auto", "Rossko"]) {
-      assert.equal(await page.locator(".history-card__header small", { hasText: new RegExp(`^${name}$`) }).count(), 6);
+      assert.equal(await page.locator(".history-card__identity > small:first-child", { hasText: new RegExp(`^${name}$`) }).count(), 6);
     }
     assert.equal(calls.length, before);
     if (process.env.HISTORY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.HISTORY_SCREENSHOT_DIR, "history-today-desktop.png") });
@@ -1776,15 +1783,15 @@ test("combined history progressively loads all suppliers, groups statuses and fi
     try {
       await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 7);
       assert.match(await page.locator(".history-loading").innerText(), /Forum Auto/);
-      assert.equal(await page.locator(".history-card__header small", { hasText: "Forum Auto" }).count(), 0);
+      assert.equal(await page.locator(".history-card__identity > small:first-child", { hasText: "Forum Auto" }).count(), 0);
     } finally { releaseForum(); }
     await shown(["CANCEL-MIXED", "UNKNOWN", "MOVING", "PARTIAL", "WAREHOUSE", "RETURN", "SHARED", "UNAVAILABLE", "SHARED"]);
     assert.equal(await page.locator(".history-item-status .history-status--unknown").count(), 1);
     assert.equal(await page.locator("#history-status-attention").count(), 0);
-    assert.deepEqual(await page.locator(".history-card__header small").allTextContents(),
+    assert.deepEqual(await page.locator(".history-card__identity > small:first-child").allTextContents(),
       ["PartKOM", "PartKOM", "Armtek", "Armtek", "Forum Auto", "Forum Auto", "Rossko", "Rossko", "PartKOM"]);
     const rossko = page.locator(".history-card").filter({ has: page.locator("small", { hasText: /^Rossko$/ }) });
-    assert.equal(await rossko.locator(".history-card__total").count(), 0);
+    assert.equal(await rossko.locator(".history-card__total").count(), 2);
     const partkom = page.locator(".history-card").filter({ has: page.locator("small", { hasText: /^PartKOM$/ }) });
     assert.equal(await partkom.locator(".history-card__total").count(), 3);
     assert.equal(await page.locator("#history-reset").isVisible(), false);
@@ -1792,7 +1799,7 @@ test("combined history progressively loads all suppliers, groups statuses and fi
     assert.deepEqual(calls.find((query) => query.supplier === "armtek"), { supplier: "armtek", from: "2026-09-16", to: "2026-10-15" });
     const beforeStatus = calls.length;
     for (const [group, expected] of [
-      ["active", ["MOVING", "WAREHOUSE", "SHARED"]], ["partial", ["PARTIAL"]], ["cancelled", ["CANCEL-MIXED", "UNAVAILABLE"]],
+      ["active", ["MOVING", "PARTIAL", "WAREHOUSE", "SHARED"]], ["cancelled", ["CANCEL-MIXED", "UNAVAILABLE"]],
       ["delivered", ["CANCEL-MIXED", "SHARED"]], ["returned", ["RETURN"]],
     ]) {
       await page.locator(`#history-status-${group}`).click();
@@ -1853,7 +1860,7 @@ test("combined history retains successful suppliers when one is unauthorized and
     assert.equal(await page.locator(".history-message.is-error").count(), 2);
     assert.match(await page.locator("#history-results").innerText(), /Armtek: Авторизация недоступна/);
     assert.match(await page.locator("#history-results").innerText(), /Forum Auto вернул некорректную историю/);
-    assert.deepEqual(await page.locator(".history-card__header small").allTextContents(), ["PartKOM", "Rossko"]);
+    assert.deepEqual(await page.locator(".history-card__identity > small:first-child").allTextContents(), ["PartKOM", "Rossko"]);
     await page.locator("#history-status-cancelled").click();
     assert.equal(await page.locator(".history-card").count(), 2);
     assert.equal(await page.locator(".history-message.is-error").count(), 2);
@@ -1898,14 +1905,56 @@ test("combined history discards an older Armtek date response while retaining th
     assert.equal(await page.locator(".history-card").count(), 4);
     assert.equal(await page.locator(".history-card h3", { hasText: "OLDER" }).count(), 0);
     assert.equal(await page.locator(".history-card h3", { hasText: "NEWER" }).count(), 1);
-    assert.deepEqual(await page.locator(".history-card__header small").allTextContents(), ["PartKOM", "Armtek", "Forum Auto", "Rossko"]);
+    assert.deepEqual(await page.locator(".history-card__identity > small:first-child").allTextContents(), ["PartKOM", "Armtek", "Forum Auto", "Rossko"]);
     await page.locator("#history-tab-part-kom").click();
     await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 1);
-    assert.equal(await page.locator(".history-card__header small").innerText(), "PartKOM");
+    assert.equal(await page.locator(".history-card__identity > small:first-child").innerText(), "PartKOM");
     await page.locator("#history-close").click();
     assert.equal(await page.locator("#history-modal").count(), 0);
   }, { fixedTime: "2026-10-15T12:00:00Z", partKomOrderHistory: async () => history("PARTKOM"),
     supplierOrderHistory: async (query) => history(query.supplier) });
+});
+
+test("history totals remain visible for every supplier with limited results and work statuses map to transit", async () => {
+  const histories = {
+    "part-kom": parsePartKomOrderHistory([{ orderNumber: "TOTAL-part-kom", detailNum: "A1", maker: "TEST", description: "Тестовая деталь",
+      quantity: 2, price: 100.5, stateTxt: "Принят в работу", orderDate: "2026-10-17 12:30:00" }]),
+    armtek: parseArmtekOrderHistory({ DATA: [{ ORDER: "TOTAL-armtek", PIN: "A1", BRAND: "TEST", NAME: "Тестовая деталь",
+      ZZKWMENG: "2", PRICE: "100.50", CURRENCY: "RUB", STATUS: "В работе", ORDER_DATE: "20261017123000" }] }),
+    "forum-auto": parseForumAutoOrderHistory([{ did: 123, nr: "TOTAL-forum-auto", dtc: "17.10.2026 12:30:00", status: "Подтвержден", statusId: 30,
+      arTovs: [{ nr: "A1", brand: "TEST", tovname: "Тестовая деталь", k1: 2, k3: 2, price: 100.5 }] }]),
+    rossko: parseRosskoOrderHistory('<Envelope><OrdersResult><success>true</success><OrdersList><Order><id>123</id><created_date>17.10.2026 12:30:00</created_date><parts><part><partnumber>A1</partnumber><brand>TEST</brand><name>Тестовая деталь</name><count>2</count><price>100.50</price><status>2</status></part></parts></Order></OrdersList></OrdersResult></Envelope>'),
+  };
+  histories.rossko.orders[0].number = "TOTAL-rossko";
+  for (const [supplier, history] of Object.entries(histories)) {
+    history.limited = supplier !== "armtek";
+    const base = history.orders[0];
+    history.orders.push({ ...base, number: `MISSING-${supplier}`, items: [{ ...base.items[0], price: null }] },
+      { ...base, number: `ZERO-${supplier}`, items: [{ ...base.items[0], price: 0 }] });
+  }
+  const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.locator("#history-tab-all").click();
+    await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 12);
+    const card = (number) => page.locator(".history-card").filter({ has: page.locator("h3", { hasText: new RegExp(`^Заказ № ${number}$`) }) });
+    for (const supplier of Object.keys(histories)) {
+      const total = card(`TOTAL-${supplier}`);
+      assert.equal(await total.locator(".history-card__total").innerText(), money.format(201));
+      assert.equal(await total.locator("tbody tr td").last().innerText(), money.format(201));
+      assert.equal(await total.locator(".history-card__total-note").count(), supplier === "armtek" ? 0 : 1);
+      assert.equal(await card(`MISSING-${supplier}`).locator(".history-card__total").innerText(), "—");
+      assert.equal(await card(`ZERO-${supplier}`).locator(".history-card__total").innerText(), money.format(0));
+      if (["armtek", "forum-auto"].includes(supplier)) {
+        assert.equal(await total.getAttribute("data-fulfillment"), "in_transit");
+        assert.match(await total.locator(".history-card__states").innerText(), /В пути/);
+        assert.doesNotMatch(await total.locator(".history-card__states").innerText(), /В обработке/);
+      }
+    }
+    if (process.env.TEST_CAPTURE_DIR) await card("TOTAL-rossko").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "history-rossko-total.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.locator("#history-modal").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+  }, { fixedTime: "2026-10-18T12:00:00Z", partKomOrderHistory: async () => histories["part-kom"], supplierOrderHistory: async (query) => histories[query.supplier] });
 });
 
 test("history highlights fulfillment in every supplier and preserves mixed and partial orders", async () => {
@@ -1958,7 +2007,12 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
     assert.equal(await inbound.getAttribute("data-fulfillment"), "in_transit");
     assert.match(await inbound.locator(".history-card__states").innerText(), /В пути/);
     assert.match(await page.locator('.history-card[data-fulfillment="ready"] .history-card__states').innerText(), /На складе/);
-    assert.match(await page.locator('.history-card[data-fulfillment="partial"] .history-card__states').innerText(), /Частичная поставка/);
+    const partial = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: /^Заказ № PARTIAL$/ }) });
+    assert.equal(await partial.locator("tbody tr").count(), 2);
+    assert.match(await partial.locator(".history-card__states").innerText(), /В обработке/);
+    assert.match(await partial.locator(".history-card__states").innerText(), /Получен/);
+    assert.equal(await page.locator("#history-status-partial").count(), 0);
+    assert.doesNotMatch(await page.locator("#history-results").innerText(), /Частичная поставка/);
     const ready = page.locator('.history-card[data-fulfillment="ready"]');
     const moving = page.locator('.history-card[data-fulfillment="in_transit"]').first();
     assert.equal(await ready.evaluate((node) => getComputedStyle(node).borderLeftColor), "rgb(40, 116, 187)");
@@ -1968,7 +2022,7 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
     assert.equal(await ready.locator(".history-status").first().evaluate((node) => getComputedStyle(node).color),
       await moving.locator(".history-status").first().evaluate((node) => getComputedStyle(node).color));
     assert.match(await page.locator('.history-card[data-fulfillment="unknown"] .history-card__states').innerText(), /Статус не уточнён/);
-    const mixed = page.locator('.history-card[data-fulfillment="mixed"] .history-card__states');
+    const mixed = page.locator('.history-card[data-fulfillment="mixed"]').filter({ has: page.locator("h3", { hasText: /^Заказ № MIXED$/ }) }).locator(".history-card__states");
     assert.equal(await mixed.locator(".history-status").count(), 2);
     assert.match(await mixed.innerText(), /Получен · 1/);
     assert.match(await mixed.innerText(), /В пути · 1/);
@@ -1981,7 +2035,7 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
       assert.match(await page.locator(".history-item-status").innerText(), /В пути/);
     }
     await page.locator("#history-tab-part-kom").click();
-    await page.locator('.history-card[data-fulfillment="mixed"]').waitFor();
+    await page.locator('.history-card[data-fulfillment="mixed"]').first().waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator("#history-modal").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
   }, { fixedTime: "2026-10-15T12:00:00Z", partKomOrderHistory: async () => history, supplierOrderHistory: async (query) => ({ orders: [{ number: query.supplier,
@@ -1999,12 +2053,12 @@ test("PartKOM settled partial cancellations split into cancelled and received ro
   })));
   await withCartPage(async (page) => {
     await page.locator("#history-toggle").click();
-    await page.waitForFunction(() => document.querySelectorAll('.history-card[data-fulfillment="partially_cancelled"]').length === 3);
-    const settled = page.locator('.history-card[data-fulfillment="partially_cancelled"]');
+    await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 4);
+    const settled = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: /^Заказ № CANCELLATION-FIXTURE-[1-3]$/ }) });
     for (const [index, [quantity, released, refused]] of cases.entries()) {
       const card = settled.nth(index);
-      assert.equal(await card.locator(".history-status--partially_cancelled").count(), 1);
-      assert.match(await card.locator(".history-card__states").innerText(), /Частично отменён/);
+      assert.equal(await card.locator(".history-status--partially_cancelled").count(), 0);
+      assert.match(await card.locator(".history-card__states").innerText(), /Отменён.*Получен/s);
       assert.equal(await card.locator("tbody tr").count(), 2);
       for (const [rowIndex, [state, label, count]] of [["cancelled", "Отменено", refused], ["delivered", "Получено", released]].entries()) {
         const row = card.locator("tbody tr").nth(rowIndex);
@@ -2020,20 +2074,18 @@ test("PartKOM settled partial cancellations split into cancelled and received ro
       assert.equal(await card.evaluate((node) => getComputedStyle(node).borderLeftColor), "rgb(184, 60, 60)");
       assert.doesNotMatch(await card.innerText(), /Частичная поставка|передан в службу доставки/);
     }
-    assert.equal(await page.locator('.history-card[data-fulfillment="partial"]').count(), 1);
+    assert.equal(await page.locator('.history-card[data-fulfillment="partial"]').count(), 0);
+    assert.equal(await page.locator("#history-status-partial").count(), 0);
     for (const status of ["cancelled", "delivered"]) {
       await page.locator(`#history-status-${status}`).click();
-      assert.equal(await page.locator(".history-card").count(), 3);
+      assert.equal(await page.locator(".history-card").count(), 4);
       assert.equal(await settled.count(), 3);
     }
-    await page.locator("#history-status-partial").click();
-    assert.equal(await page.locator(".history-card").count(), 1);
-    assert.equal(await settled.count(), 0);
     await page.locator("#history-status-today").click();
     assert.equal(await page.locator(".history-card").count(), 1);
     assert.equal(await settled.count(), 0);
     await page.locator("#history-status-active").click();
-    assert.equal(await page.locator(".history-card").count(), 0);
+    assert.equal(await page.locator(".history-card").count(), 1);
     await page.locator("#history-tab-all").click();
     await page.waitForFunction(() => !document.querySelector(".history-loading") && document.querySelectorAll(".history-card").length === 4);
     await page.locator("#history-status-cancelled").click();
@@ -2066,7 +2118,7 @@ test("Armtek actual issue overrides stale status and splits settled cancellation
     assert.match(await issued.locator(".history-item-status").innerText(), /Получен.*Получено 1 из 1 шт\./s);
     assert.doesNotMatch(await issued.innerText(), /Частичная поставка|частично поставлена/);
     const split = card("SPLIT");
-    assert.equal(await split.getAttribute("data-fulfillment"), "partially_cancelled");
+    assert.equal(await split.getAttribute("data-fulfillment"), "mixed");
     assert.equal(await split.locator("tbody tr").count(), 2);
     assert.equal(await split.locator(".history-card__quantity strong").innerText(), "1 / 10");
     assert.equal(await split.locator(".history-card__total").innerText(), money.format(1005));
@@ -2078,13 +2130,13 @@ test("Armtek actual issue overrides stale status and splits settled cancellation
       assert.equal(await row.locator("td").nth(4).innerText(), money.format(100.5 * quantity));
       assert.match(await row.locator(".order-return-terms").innerText(), /Возврат: 14 дн\./);
     }
-    assert.equal(await split.locator(".history-status--cancelled").evaluate((node) => getComputedStyle(node).color), "rgb(161, 46, 53)");
-    assert.equal(await split.locator(".history-status--delivered").evaluate((node) => getComputedStyle(node).color),
+    assert.equal(await split.locator(".history-item-status .history-status--cancelled").evaluate((node) => getComputedStyle(node).color), "rgb(161, 46, 53)");
+    assert.equal(await split.locator(".history-item-status .history-status--delivered").evaluate((node) => getComputedStyle(node).color),
       await issued.locator(".history-item-status .history-status--delivered").evaluate((node) => getComputedStyle(node).color));
-    assert.equal(await card("PENDING").getAttribute("data-fulfillment"), "partial");
-    assert.equal(await card("PENDING").locator("tbody tr").count(), 1);
+    assert.equal(await card("PENDING").getAttribute("data-fulfillment"), "mixed");
+    assert.equal(await card("PENDING").locator("tbody tr").count(), 3);
     assert.equal(await card("SHIPPED").getAttribute("data-fulfillment"), "in_transit");
-    for (const [status, expected] of [["delivered", 2], ["cancelled", 1], ["partial", 1], ["today", 2], ["active", 1]]) {
+    for (const [status, expected] of [["delivered", 3], ["cancelled", 2], ["today", 2], ["active", 2]]) {
       await page.locator(`#history-status-${status}`).click();
       assert.equal(await page.locator(".history-card").count(), expected);
     }
@@ -2131,7 +2183,7 @@ test("new cancellations share one history form across suppliers and stay unread 
     };
     await open();
     assert.equal(await page.locator(".history-card").count(), 1);
-    await page.locator("#history-status-partial").click();
+    await page.locator("#history-status-active").click();
     await page.locator("#history-cancellation-view").click();
     assert.equal(await page.locator("dialog[open]").count(), 1);
     assert.equal(await page.locator("#history-tabs").isVisible(), false);
@@ -2151,7 +2203,7 @@ test("new cancellations share one history form across suppliers and stay unread 
     assert.equal(await page.locator("#history-modal").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
     if (process.env.TEST_CAPTURE_DIR) await page.locator("#history-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "new-cancellations-mobile.png") });
     await page.locator("#history-cancellation-back").click();
-    assert.equal(await page.locator("#history-status-partial").getAttribute("aria-selected"), "true");
+    assert.equal(await page.locator("#history-status-active").getAttribute("aria-selected"), "true");
     await page.locator("#history-close").click();
     await page.reload();
     await open();

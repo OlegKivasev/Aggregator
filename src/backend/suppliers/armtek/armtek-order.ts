@@ -60,7 +60,8 @@ function armtekHistoryStatus(row: ArmtekHistoryMovement, quantity: number): Pick
   if (ready !== null && ready > 0) return { status, fulfillment: ready === quantity ? "ready" : "partial" };
   const orderStatus = historyText(row.ORDER_STATUS)?.toLocaleLowerCase().replaceAll("ё", "е");
   if (orderStatus === "отклонен") return { status, fulfillment: "cancelled" };
-  if (orderStatus === "создан" || orderStatus === "в работе") return { status, fulfillment: "processing" };
+  if (text === "в работе" || orderStatus === "в работе") return { status, fulfillment: "in_transit" };
+  if (orderStatus === "создан") return { status, fulfillment: "processing" };
   return { status, fulfillment: "unknown" };
 }
 

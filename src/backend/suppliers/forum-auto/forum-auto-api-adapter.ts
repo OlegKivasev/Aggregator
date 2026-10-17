@@ -328,14 +328,15 @@ async function forumAutoApiRequest(
 
 function forumAutoHistoryFulfillment(row: { statusId?: unknown; status?: unknown }): OrderFulfillment {
   const code = historyNumber(row.statusId);
-  const states: Record<number, OrderFulfillment> = { 0: "cancelled", 10: "processing", 20: "processing", 30: "processing",
+  const states: Record<number, OrderFulfillment> = { 0: "cancelled", 10: "processing", 20: "processing", 30: "in_transit",
     50: "processing", 90: "ready", 100: "delivered" };
   if (code !== null) return states[code] ?? "unknown";
   const status = historyText(row.status)?.toLocaleLowerCase().replaceAll("ё", "е");
   if (status === "выдан") return "delivered";
   if (status === "аннулирован") return "cancelled";
   if (status === "можно забрать") return "ready";
-  if (["отправлен на бронирование", "забронирован менеджером", "забронирован", "подтвержден", "на комплектации"].includes(status ?? "")) return "processing";
+  if (status === "подтвержден") return "in_transit";
+  if (["отправлен на бронирование", "забронирован менеджером", "забронирован", "на комплектации"].includes(status ?? "")) return "processing";
   return "unknown";
 }
 

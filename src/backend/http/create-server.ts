@@ -520,12 +520,12 @@ export function createAggregatorServer({
     if (url.pathname === "/api/ui-preferences/table-column-widths") {
       try {
         if (request.method === "GET") {
-          serveJson(response, 200, { widths: garage.getTableColumnWidths() });
+          serveJson(response, 200, garage.getTablePreferences());
           return;
         }
         if (request.method === "PUT") {
           const payload = garagePayload(await readJsonBody(request));
-          serveJson(response, 200, { widths: garage.setTableColumnWidths(payload.widths) });
+          serveJson(response, 200, garage.setTablePreferences(payload.widths, payload.alignments));
           return;
         }
       } catch (error) { serveGarageError(response, error, reportError, "table-column-widths"); return; }
