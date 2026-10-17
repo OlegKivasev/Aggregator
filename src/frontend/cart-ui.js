@@ -1,7 +1,7 @@
 import { escapeHtml, formatArticle, formatBrand, formatPrice } from "./result-formatting.js";
 import { formatDeliveryDate } from "./supplier-search-summary.js";
 import { formatOrderDate } from "./order-date-formatting.js";
-import { armtekReturnSource, formatArmtekReturnDays, hasPartKomWeekendDelivery } from "./order-notices.js";
+import { armtekReturnSource, formatArmtekReturnDays, hasPartKomOfferDeliveryWarning, hasPartKomWeekendDelivery } from "./order-notices.js";
 
 const supplierNames = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
 const maximumQuantity = (result) => Number.isFinite(result.quantity) ? Math.min(1_000_000, Math.floor(result.quantity)) : 0;
@@ -356,7 +356,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
       return `<tr data-cart-item-id="${escapeHtml(item.id)}" class="${selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || unresolved ? "disabled" : ""}></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
         <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : ""}${unresolved && result.supplier === "forum-auto" ? `<button type="button" class="cart-resolve-button" ${locked ? "disabled" : ""}>Заказа нет? Снять блокировку</button>` : ""}</td>
         ${activeSupplier === "all" ? `<td class="cart-item-supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
-        <td class="cart-item-delivery"><span class="${hasPartKomWeekendDelivery(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span>${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
+        <td class="cart-item-delivery"><span class="${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span>${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
         <td class="cart-item-price">${renderPrices(result)}</td>
         <td class="cart-item-quantity"><input class="cart-quantity" type="number" min="1" max="${maximumQuantity(result)}" step="1" value="${item.quantity}" inputmode="numeric"
           aria-label="Количество для ${escapeHtml(result.article)}" ${locked || unresolved ? "disabled" : ""}><span class="cart-item-stock">из ${maximumQuantity(result)}</span></td>
@@ -621,7 +621,7 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
             ${group.map(({ result, quantity }) => `<tr><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span>
               <span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td><td class="cart-item-name">${escapeHtml(result.title)}
               <span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>
-              <span class="cart-item-warehouse"><span class="${hasPartKomWeekendDelivery(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span></span></td>
+              <span class="cart-item-warehouse"><span class="${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span></span></td>
               <td class="cart-item-quantity" data-label="Кол-во">${quantity}</td><td class="cart-item-price" data-label="Цена, ₽">${renderPrices(result)}</td>
               <td class="cart-item-sum" data-label="Стоимость, ₽">${renderPrices(result, quantity)}</td></tr>`).join("")}
           </tbody></table></div><p class="cart-order-delivery">Дата поставки с учётом всех товаров: ${escapeHtml(formatCartLatestDeliveryDate(group))}</p></section>`;

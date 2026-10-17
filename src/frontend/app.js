@@ -15,7 +15,8 @@ import { openSearchStream } from "./search-stream.js";
 import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { bootstrapCart, renderCartOfferControls } from "./cart-ui.js";
 import { bootstrapOrderHistory } from "./order-history-ui.js";
-import { hasPartKomWeekendDelivery } from "./order-notices.js";
+import { hasPartKomOfferDeliveryWarning } from "./order-notices.js";
+import { isOfferDueSoon } from "./delivery-dates.js";
 import {
   isStpartsWarehouseVisible,
   normalizeStpartsWarehouseColors,
@@ -49,6 +50,8 @@ const searchLoadingCancel = document.querySelector("#search-loading-cancel");
 const cancelSearchButton = document.querySelector("#cancel-search-button");
 const markupPercentInput = document.querySelector("#markup-percent");
 const tableSearchInput = document.querySelector("#table-search");
+const mainDeliveryTabs = [...document.querySelectorAll("#results-delivery-tabs [data-delivery-window]")];
+const analogDeliveryTabs = [...document.querySelectorAll("#analogs-delivery-tabs [data-delivery-window]")];
 const sortButtons = [...resultsTable.querySelectorAll(".table-sort")];
 const tableColumnInputs = [...document.querySelectorAll(".table-column-input")];
 const tableColumnsReset = document.querySelector("#table-columns-reset");
@@ -180,6 +183,8 @@ let results = [];
 let sortState = { key: "markupPrice", direction: "ascending" };
 let markupPercent = 35;
 let tableSearchTerm = "";
+let mainDeliverySoon = false;
+let analogDeliverySoon = false;
 let contextMenuResult = null;
 let contextMenuAnchor = null;
 let contextMenuTabId = null;
@@ -462,7 +467,7 @@ const hasActiveAnalogFilter = (column) => (rangeFilterColumns.has(column)
   : getSelectedAnalogFilterValues(column).size > 0);
 
 const getVisibleAnalogResults = (items) => filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
-  items.filter((result) => isSupplierVisible(result.supplier)),
+  items.filter((result) => isSupplierVisible(result.supplier) && (!analogDeliverySoon || isOfferDueSoon(result))),
 ))));
 
 const getFilteredAnalogResults = (sourceResults, ignoredFilterColumn = null) => {
@@ -1195,7 +1200,7 @@ const getVisibleMainExactResults = (items) => {
   // Older persisted tabs can still contain automatically fetched analogs.
   const exactResults = items.filter((result) => result.isAnalog !== true);
   return filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
-    exactResults.filter((result) => isSupplierVisible(result.supplier)),
+    exactResults.filter((result) => isSupplierVisible(result.supplier) && (!mainDeliverySoon || isOfferDueSoon(result))),
   ))));
 };
 
@@ -1245,7 +1250,7 @@ const renderResults = () => {
         <td data-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
         <td data-column="title"><div class="result-title-cell">${renderOfferLink(result, result.title)}</div></td>
-        <td data-column="deliveryDate"><span class="delivery-date${hasPartKomWeekendDelivery(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
+        <td data-column="deliveryDate"><span class="delivery-date${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</span><span class="main-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         ${renderCartOfferControls(result)}
@@ -2072,7 +2077,7 @@ const showResultContextMenu = (result, clientX, clientY, anchor, canShowAnalogs,
   const bounds = resultContextMenu.getBoundingClientRect();
   resultContextMenu.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - bounds.width - 8))}px`;
   resultContextMenu.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - bounds.height - 8))}px`;
-  openResultButton.focus();
+  (canShowAnalogs ? showAnalogsButton : searchResultButton).focus({ preventScroll: true });
 };
 
 const setAnalogSearchUiState = (isSearching) => {
@@ -2129,6 +2134,7 @@ const renderAnalogSource = (result) => {
   analogsSourceDelivery.textContent = result.supplier === "mladov" && !result.deliveryDate
     ? "-"
     : formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo);
+  analogsSourceDelivery.classList.toggle("delivery-date--warning", hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo));
   analogsSourceWarehouse.textContent = formatWarehouse(result.warehouse);
   analogsSourceWarehouse.title = formatWarehouse(result.warehouse);
 };
@@ -2142,6 +2148,7 @@ const renderArticleAnalogSource = (article, brand) => {
   analogsSourcePrice.textContent = "-";
   analogsSourceMarkupPrice.textContent = "-";
   analogsSourceDelivery.textContent = "-";
+  analogsSourceDelivery.classList.remove("delivery-date--warning");
   analogsSourceWarehouse.textContent = "-";
   analogsSourceWarehouse.title = "";
 };
@@ -2217,7 +2224,7 @@ const renderAnalogRows = () => {
         <td data-analog-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-analog-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
         <td class="analogs-result-title" data-analog-column="title">${renderOfferLink(result, result.title)}</td>
-        <td data-analog-column="deliveryDate"><span class="delivery-date${hasPartKomWeekendDelivery(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
+        <td data-analog-column="deliveryDate"><span class="delivery-date${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span><span class="analogs-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
         <td class="garage-add-cell"><button type="button" class="garage-offer-button" draggable="${Boolean(result.offerId)}" data-garage-offer-id="${escapeHtml(result.offerId ?? "")}" data-garage-offer-quantity="${Number.isFinite(result.quantity) && result.quantity >= 0 ? result.quantity : ""}" aria-disabled="${!result.offerId}" aria-label="Добавить в гараж" title="Добавить в гараж"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5.1 9.75 1.25-3.2A2.25 2.25 0 0 1 8.45 5h7.1a2.25 2.25 0 0 1 2.1 1.55l1.25 3.2"/><path d="M4.5 10.25h15a1.5 1.5 0 0 1 1.5 1.5v4.75h-2.25V19H16.5v-2.5h-9V19H5.25v-2.5H3v-4.75a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="7.25" cy="13.5" r="1"/><circle cx="16.75" cy="13.5" r="1"/></svg></button></td>
@@ -2269,6 +2276,11 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
   selectedAnalogFilterValuesByColumn.clear();
   analogFilterRangesByColumn.clear();
   analogSearchTerm = "";
+  analogDeliverySoon = false;
+  analogDeliveryTabs.forEach((button) => {
+    const selected = button.dataset.deliveryWindow === "all";
+    button.setAttribute("aria-selected", String(selected)); button.tabIndex = selected ? 0 : -1;
+  });
   analogSortState = { key: "price", direction: "ascending" };
   analogSearchSuppliers = analogSupplierIds.filter(isSupplierVisible);
   analogVisibleLimit = 200;
@@ -2843,7 +2855,8 @@ const startSearch = (article, enabledSuppliers) => {
       showIncompleteSearchWarning(tab);
       renderTabs();
       saveSearchState();
-      if (tab.id === activeTabId && getMainTableResults(tab.results).filteredResults.length === 0) {
+      const tableResults = getMainTableResults(tab.results);
+      if (tab.id === activeTabId && (mainDeliverySoon ? tableResults.exactResults : tableResults.filteredResults).length === 0) {
         openArticleAnalogsModal(tab, submitButton);
       }
       return;
@@ -2956,6 +2969,23 @@ tableSearchInput.addEventListener("input", () => {
   tableSearchTerm = tableSearchInput.value;
   renderResults();
 });
+for (const [buttons, update] of [
+  [mainDeliveryTabs, (soon) => { mainDeliverySoon = soon; renderResults(); }],
+  [analogDeliveryTabs, (soon) => { analogDeliverySoon = soon; analogVisibleLimit = 200; renderAnalogRowsNow(); }],
+]) {
+  buttons.forEach((button, index) => {
+    button.addEventListener("click", () => {
+      buttons.forEach((tab) => { tab.setAttribute("aria-selected", String(tab === button)); tab.tabIndex = tab === button ? 0 : -1; });
+      update(button.dataset.deliveryWindow === "soon");
+    });
+    button.addEventListener("keydown", (event) => {
+      const next = event.key === "ArrowRight" ? (index + 1) % buttons.length : event.key === "ArrowLeft" ? (index + buttons.length - 1) % buttons.length
+        : event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : null;
+      if (next === null) return;
+      event.preventDefault(); buttons[next].focus({ preventScroll: true }); buttons[next].click();
+    });
+  });
+}
 setSearchUiState(false);
 renderTabs();
 renderResults();

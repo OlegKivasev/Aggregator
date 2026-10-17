@@ -31,6 +31,7 @@ async function withCartPage(check, options = {}) {
   let browser;
   const orderCalls = [];
   const refreshCalls = [];
+  const searchCalls = [];
   try {
     const suppliers = options.allSuppliers ? ["armtek", "part-kom", "forum-auto", "rossko"] : ["armtek", "part-kom"];
     const sessions = suppliers.map((supplier) => ({ supplier, authorized: true, lastCheckedAt: null, lastAuthorizedAt: null }));
@@ -44,6 +45,7 @@ async function withCartPage(check, options = {}) {
       getApplicabilityCachedBrands: () => [],
       listApplicabilitySavedArticles: () => ({ articles: [], brandCounts: [], hasMore: false }),
       streamSearch: async (query, emit) => {
+        searchCalls.push(structuredClone(query));
         emit({ type: "search_started", article: query.article, suppliers });
         emit({ type: "result", result: offer("armtek", options.stock ?? 4, { supplier: "armtek", keyzak: "TEST01",
           ...(options.armtekReturnDays !== undefined ? { returnDays: options.armtekReturnDays } : {}) }, options.deliveries?.armtek, options.title) });
@@ -54,6 +56,7 @@ async function withCartPage(check, options = {}) {
           emit({ type: "supplier_status", supplier: "forum-auto", status: "completed" });
           emit({ type: "supplier_status", supplier: "rossko", status: "completed" });
         }
+        for (const result of options.extraOffers ?? []) emit({ type: "result", result });
         emit({ type: "supplier_status", supplier: "armtek", status: "completed" });
         emit({ type: "supplier_status", supplier: "part-kom", status: "completed" });
         emit({ type: "search_completed", article: query.article });
@@ -105,8 +108,8 @@ async function withCartPage(check, options = {}) {
     await page.locator('#armtek-auth-form[data-authorized="true"]').waitFor({ state: "attached" });
     await page.locator("#article-input").fill("A1");
     await page.locator("#submit-button").click();
-    await page.waitForFunction((count) => document.querySelectorAll("#results-body .cart-offer-button").length === count, suppliers.length);
-    await check(page, { orderCalls, refreshCalls, origin });
+    await page.waitForFunction((count) => document.querySelectorAll("#results-body .cart-offer-button").length === count, suppliers.length + (options.extraOffers?.length ?? 0));
+    await check(page, { orderCalls, refreshCalls, searchCalls, origin });
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
@@ -379,17 +382,169 @@ test("PartKOM weekend delivery stays unchanged and shows an amber warning throug
     })) }], limited: false }) });
 });
 
-test("PartKOM Friday to Sunday range highlights only the unchanged date range on one line", async () => {
+async function assertDeliveryHighlightFits(date) {
+  const bounds = await date.evaluate((node) => {
+    const badge = node.getBoundingClientRect(); const cell = node.closest("td").getBoundingClientRect();
+    const range = document.createRange(); range.selectNodeContents(node);
+    return { textFits: [...range.getClientRects()].every((rect) => rect.left >= badge.left && rect.right <= badge.right
+      && rect.top >= badge.top && rect.bottom <= badge.bottom),
+    badgeFits: badge.left >= cell.left && badge.right <= cell.right, contentFits: node.scrollWidth <= node.clientWidth + 1 };
+  });
+  assert.deepEqual(bounds, { textFits: true, badgeFits: true, contentFits: true });
+}
+
+async function openOfferAnalogs(page, row) {
+  await row.focus(); await row.press("Shift+F10"); await page.locator("#show-analogs-button").click();
+  await page.locator("#analogs-results-body tr").nth(1).waitFor();
+}
+
+async function narrowDeliveryColumn(page, selector) {
+  const handle = page.locator(`${selector} .table-column-resize[data-resize-column="deliveryDate"]`);
+  for (let index = 0; index < 4; index++) await handle.press("Shift+ArrowLeft");
+  assert.equal(await handle.getAttribute("aria-valuenow"), "80");
+}
+
+test("PartKOM Friday to Sunday range stays inside its highlight in search and analogs at narrow widths", async () => {
   await withCartPage(async (page) => {
     const row = page.locator("#results-body tr").nth(1);
     const date = row.locator(".delivery-date--warning");
     assert.equal(await date.textContent(), "16.10.2026 - 18.10.2026");
-    assert.equal(await date.evaluate((node) => getComputedStyle(node).whiteSpace), "nowrap");
+    await narrowDeliveryColumn(page, "#results-table");
+    await assertDeliveryHighlightFits(date);
     assert.doesNotMatch(await row.innerText(), /Выходной|уточните доставку/);
     assert.equal(await row.locator('[data-column="deliveryDate"] b').count(), 0);
+    await openOfferAnalogs(page, row);
+    const analogDate = page.locator("#analogs-results-body .delivery-date--warning");
+    assert.equal(await analogDate.textContent(), "16.10.2026 - 18.10.2026");
+    await narrowDeliveryColumn(page, "#analogs-results");
+    for (const width of [1366, 768, 390]) {
+      await page.setViewportSize({ width, height: 850 }); await assertDeliveryHighlightFits(analogDate);
+      if (process.env.TEST_CAPTURE_DIR) await page.locator("#analogs-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, `partkom-range-analogs-${width}.png`) });
+    }
+    await page.locator("button[data-close-analogs-modal]").click(); await assertDeliveryHighlightFits(date);
   }, { fixedTime: "2026-10-16T12:00:00Z", deliveries: { partkom: {
     deliveryDate: "2026-10-16T09:00:00Z", deliveryDateTo: "2026-10-18T09:00:00Z",
   } } });
+});
+
+test("PartKOM weekday day-after-tomorrow highlights in search, analogs, cart and checkout", async () => {
+  await withCartPage(async (page) => {
+    const row = page.locator("#results-body tr").nth(1);
+    const date = row.locator(".delivery-date--warning"); assert.equal(await date.textContent(), "Послезавтра");
+    await assertDeliveryHighlightFits(date);
+    assert.equal(await page.locator("#results-body tr").first().locator(".delivery-date--warning").count(), 0);
+    await openOfferAnalogs(page, row);
+    assert.equal(await page.locator("#analogs-source-delivery.delivery-date--warning").textContent(), "Послезавтра");
+    const analogDate = page.locator("#analogs-results-body .delivery-date--warning");
+    assert.equal(await analogDate.textContent(), "Послезавтра"); await assertDeliveryHighlightFits(analogDate);
+    await page.locator("button[data-close-analogs-modal]").click();
+    await row.locator(".cart-offer-button").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1"); await page.locator("#cart-toggle").click();
+    assert.equal(await page.locator("#cart-items .delivery-date--warning").textContent(), "Послезавтра");
+    await openCheckout(page); assert.equal(await page.locator("#cart-order-groups .delivery-date--warning").textContent(), "Послезавтра");
+  }, { fixedTime: "2026-10-12T12:00:00Z", deliveries: {
+    armtek: { deliveryDate: "2026-10-14T09:00:00Z" }, partkom: { deliveryDate: "2026-10-14T09:00:00Z" },
+  } });
+});
+
+test("near-term tabs filter both tables and dynamically recalculate sidebar facets, averages and counts", async () => {
+  const date = (day) => `2026-10-${day}T09:00:00Z`;
+  const extra = (brand, price, from, to = null) => ({ supplier: "armtek", brand, article: "A1", title: `Деталь ${brand}`,
+    price, quantity: 3, warehouse: brand === "RANGE" ? "Ближний склад" : "Поздний склад",
+    deliveryDate: from, deliveryDateTo: to, deliveryDateApproximate: false, link: supplierOrigins.armtek });
+  await withCartPage(async (page, { searchCalls }) => {
+    const mainTab = page.locator('#results-delivery-tabs [data-delivery-window="soon"]');
+    const brand = page.locator('[data-filter-values="brand"]'); const supplier = page.locator('[data-filter-values="supplier"]');
+    const warehouse = page.locator('[data-filter-values="warehouse"]');
+    assert.match(await brand.innerText(), /Later/); assert.match(await supplier.innerText(), /PartKOM/);
+    await page.locator('#results-delivery-tabs [data-delivery-window="all"]').press("ArrowRight");
+    assert.equal(await mainTab.getAttribute("aria-selected"), "true");
+    assert.equal(await page.locator("#results-body .main-result-row").count(), 3);
+    assert.equal(await page.locator("#result-count").textContent(), "3");
+    assert.deepEqual(await brand.locator("button").allTextContents(), ["Range", "Test"]);
+    assert.doesNotMatch(await supplier.innerText(), /PartKOM|Rossko/);
+    assert.doesNotMatch(await warehouse.textContent(), /Поздний/);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "near-term-search-desktop.png") });
+    assert.match(await page.locator('[data-filter-values="markupPrice"] .filters-sidebar__averages').textContent(), /123,33/);
+    await brand.getByRole("button", { name: "Range", exact: true }).click();
+    assert.equal(await page.locator("#results-body .main-result-row").count(), 1);
+    assert.match(await supplier.innerText(), /^Armtek$/); assert.deepEqual(await warehouse.locator("button").allTextContents(), ["Ближний склад"]);
+    await page.locator("#filters-reset").click(); assert.equal(await page.locator("#results-body .main-result-row").count(), 3);
+    await page.locator('[data-filter-section="markupPrice"] summary').click();
+    await page.locator('[data-filter-column="markupPrice"][data-filter-range="from"]').fill("200");
+    await page.locator('[data-filter-column="markupPrice"][data-filter-range="from"]').press("Tab");
+    assert.equal(await page.locator("#results-body .main-result-row").count(), 1);
+    assert.deepEqual(await brand.locator("button").allTextContents(), ["Range"]);
+    await page.locator("#filters-reset").click();
+    await page.locator('[data-filter-section="deliveryDate"] summary').click();
+    await page.locator('[data-filter-column="deliveryDate"][data-filter-range="from"]').fill("2026-10-14");
+    await page.locator('[data-filter-column="deliveryDate"][data-filter-range="from"]').press("Tab");
+    assert.equal(await page.locator("#results-body .main-result-row").count(), 1);
+    assert.match(await supplier.textContent(), /Forum/);
+    await page.locator("#filters-reset").click();
+    await page.locator("#table-search").fill("Later");
+    assert.equal(await page.locator("#results-body .main-result-row").count(), 0);
+    assert.equal(await brand.locator("button").count(), 0);
+    await page.locator('#results-delivery-tabs [data-delivery-window="all"]').click();
+    assert.equal(await page.locator("#results-body .main-result-row").count(), 1);
+    await page.locator("#table-search").fill(""); assert.equal(await page.locator("#results-body .main-result-row").count(), 9);
+    await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
+    await page.waitForFunction(() => document.querySelectorAll("#analogs-results-body tr").length === 9);
+    const analogTab = page.locator('#analogs-delivery-tabs [data-delivery-window="soon"]');
+    const analogBrand = page.locator('[data-analog-filter-values="brand"]');
+    await analogTab.click(); assert.equal(await page.locator("#analogs-results-body tr").count(), 3);
+    assert.equal(await page.locator("#analogs-count").textContent(), "3");
+    assert.deepEqual(await analogBrand.locator("button").allTextContents(), ["Range", "Test"]);
+    assert.doesNotMatch(await page.locator('[data-analog-filter-values="supplier"]').innerText(), /PartKOM|Rossko/);
+    assert.doesNotMatch(await page.locator('[data-analog-filter-values="warehouse"]').textContent(), /Поздний/);
+    assert.match(await page.locator('[data-analog-filter-values="markupPrice"] .filters-sidebar__averages').textContent(), /123,33/);
+    if (process.env.TEST_CAPTURE_DIR) await page.locator("#analogs-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "near-term-analogs-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 850 });
+    assert.equal(await page.locator("#analogs-delivery-tabs").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+    if (process.env.TEST_CAPTURE_DIR) await page.locator("#analogs-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "near-term-analogs-mobile.png") });
+    await page.setViewportSize({ width: 1366, height: 850 });
+    await analogBrand.getByRole("button", { name: "Test", exact: true }).click();
+    assert.equal(await page.locator("#analogs-results-body tr").count(), 2);
+    await page.locator("#analogs-filters-reset").click(); assert.equal(await page.locator("#analogs-results-body tr").count(), 3);
+    await page.locator('[data-analog-filter-section="markupPrice"] summary').click();
+    await page.locator('[data-analog-filter-column="markupPrice"][data-analog-filter-range="from"]').fill("200");
+    await page.locator('[data-analog-filter-column="markupPrice"][data-analog-filter-range="from"]').press("Tab");
+    assert.equal(await page.locator("#analogs-results-body tr").count(), 1);
+    assert.deepEqual(await analogBrand.locator("button").allTextContents(), ["Range"]);
+    await page.locator("#analogs-filters-reset").click();
+    await page.locator('[data-analog-filter-section="deliveryDate"] summary').click();
+    await page.locator('[data-analog-filter-column="deliveryDate"][data-analog-filter-range="from"]').fill("2026-10-14");
+    await page.locator('[data-analog-filter-column="deliveryDate"][data-analog-filter-range="from"]').press("Tab");
+    assert.equal(await page.locator("#analogs-results-body tr").count(), 1);
+    assert.match(await page.locator('[data-analog-filter-values="supplier"]').textContent(), /Forum/);
+    await page.locator("#analogs-filters-reset").click();
+    await page.locator("#analogs-table-search").fill("Later"); assert.equal(await page.locator("#analogs-results-body tr").count(), 0);
+    await page.locator('#analogs-delivery-tabs [data-delivery-window="all"]').click();
+    assert.equal(await page.locator("#analogs-results-body tr").count(), 1);
+    await page.locator("#analogs-table-search").fill("");
+    assert.equal(await page.locator("#analogs-results-body tr").count(), 9);
+    assert.equal(searchCalls.length, 2);
+  }, { fixedTime: "2026-10-12T12:00:00Z", allSuppliers: true, deliveries: {
+    armtek: { deliveryDate: date(13) }, partkom: { deliveryDate: date(13) },
+    forum: { deliveryDate: date(14), deliveryDateApproximate: true }, rossko: { deliveryDate: date(12) },
+  }, extraOffers: [extra("LATER", 900, date(15)), extra("BROAD", 800, date(13), date(15)), extra("UNKNOWN", 700, null),
+    extra("RANGE", 150, date(13), date(14)), extra("TODAY", 750, date(12))] });
+});
+
+test("an empty near-term tab stays a filter after refreshing and does not start unrelated analog discovery", async () => {
+  await withCartPage(async (page, { searchCalls }) => {
+    await page.locator('#results-delivery-tabs [data-delivery-window="soon"]').click();
+    assert.equal(await page.locator("#results-body .main-result-row").count(), 0);
+    await page.locator("#submit-button").click();
+    await page.waitForFunction(() => document.querySelector("#results-panel").getAttribute("aria-busy") === "false");
+    assert.equal(searchCalls.length, 2);
+    assert.equal(await page.locator("#article-analogs-modal").isVisible(), false);
+    assert.equal(await page.locator("#results-body .main-result-row").count(), 0);
+    await page.locator('#results-delivery-tabs [data-delivery-window="all"]').click();
+    assert.equal(await page.locator("#results-body .main-result-row").count(), 2);
+  }, { fixedTime: "2026-10-12T12:00:00Z", deliveries: {
+    armtek: { deliveryDate: "2026-10-16T09:00:00Z" }, partkom: { deliveryDate: "2026-10-13T09:00:00Z" },
+  } });
 });
 
 test("PartKOM ranges extending into workdays have no highlight in search, checkout or history", async () => {

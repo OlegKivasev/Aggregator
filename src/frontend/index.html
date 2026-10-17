@@ -151,6 +151,10 @@
               </div>
             </div>
 
+            <div class="offer-delivery-tabs" id="results-delivery-tabs" role="tablist" aria-label="Срок доставки предложений">
+              <button type="button" role="tab" data-delivery-window="all" aria-selected="true" aria-controls="results-table">Все предложения</button>
+              <button type="button" role="tab" data-delivery-window="soon" aria-selected="false" aria-controls="results-table" tabindex="-1">В ближайшие дни</button>
+            </div>
             <div class="results-empty" id="results-empty">Выполните поиск товара</div>
 
             <div class="search-loading" id="search-loading" role="status" aria-live="polite" hidden>
@@ -801,6 +805,10 @@
                   <span><input id="analogs-markup-percent" type="number" min="0" max="1000" step="1" inputmode="decimal" /><b>%</b></span>
                 </label>
               </div>
+            </div>
+            <div class="offer-delivery-tabs" id="analogs-delivery-tabs" role="tablist" aria-label="Срок доставки аналогов">
+              <button type="button" role="tab" data-delivery-window="all" aria-selected="true" aria-controls="analogs-results">Все предложения</button>
+              <button type="button" role="tab" data-delivery-window="soon" aria-selected="false" aria-controls="analogs-results" tabindex="-1">В ближайшие дни</button>
             </div>
             <div class="search-loading analogs-search-loading" id="analogs-search-loading" role="status" aria-live="polite" hidden>
               <div class="search-loading__content">

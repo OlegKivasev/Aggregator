@@ -1984,6 +1984,7 @@ table tbody tr:hover td {
 
 .delivery-date.delivery-date--warning,
 .delivery-date--warning,
+.analogs-source__facts dd.delivery-date--warning,
 .history-card td .delivery-date--warning {
   display: inline-block;
   max-width: 100%;
@@ -1994,7 +1995,8 @@ table tbody tr:hover td {
   background: #fff4cc;
   color: #765000;
   line-height: 1.4;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   text-align: left;
 }
 
@@ -2006,6 +2008,12 @@ table tbody tr:hover td {
   font-weight: 800;
   white-space: nowrap;
 }
+
+.offer-delivery-tabs { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 4px; padding: 6px 18px; border-bottom: 1px solid var(--line); background: #fff; }
+.offer-delivery-tabs button { padding: 7px 10px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.offer-delivery-tabs button[aria-selected="true"] { color: var(--accent-dark); background: #fff0ea; }
+.offer-delivery-tabs button:hover { color: var(--accent-dark); }
+.offer-delivery-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .delivery-warehouse {
   display: flex;

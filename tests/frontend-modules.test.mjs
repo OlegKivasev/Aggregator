@@ -362,7 +362,7 @@ test("frontend shows purchase price below the retail price and discovers brands 
   assert.match(app, /let analogSearchSources = new Set\(\);/);
   assert.match(app, /const getVisibleAnalogResults = \(items\) =>/);
   assert.match(app, /const getMainTableResults = \(items\) =>/);
-  assert.match(app, /getMainTableResults\(tab\.results\)\.filteredResults\.length === 0/);
+  assert.match(app, /openArticleAnalogsModal\(tab, submitButton\)/);
   assert.match(app, /if \(!brands\.length\) \{\s+closeArticleAnalogsModal\(\);\s+return;/);
   assert.match(app, /analogSupplierIds\.filter\(\(supplier\) => tab\?\.enabledSuppliers\.includes\(supplier\)/);
 });
