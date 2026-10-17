@@ -3496,6 +3496,10 @@ th[aria-sort="descending"] .analogs-sort span::after {
 .vk-notifications-settings .field select { width: 100%; min-width: 0; padding: 9px 12px; border: 1px solid #dce3ea; border-radius: 8px; color: var(--ink); background: var(--surface); font: inherit; }
 .vk-notifications-settings .field select:focus-visible { border-color: var(--accent); outline: 0; box-shadow: 0 0 0 3px rgba(255, 75, 19, .12); }
 .vk-notifications-settings__connection { padding: 10px 12px; border-radius: 8px; color: var(--muted); background: var(--page); }
+.vk-notifications-settings__pairing, .vk-notifications-settings__pair-command { display: grid; min-width: 0; gap: 10px; }
+.vk-notifications-settings__pairing { padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.vk-notifications-settings__pairing input { min-width: 0; color: var(--ink); background: var(--page); }
+.vk-notifications-settings__pairing p:empty { display: none; }
 .vk-notifications-settings__toggle { margin: 0; }
 .vk-notifications-settings__toggle label { align-items: flex-start; padding: 10px 12px; line-height: 1.5; }
 .vk-notifications-settings__toggle input { margin-top: 1px; }

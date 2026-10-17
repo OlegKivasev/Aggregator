@@ -24,6 +24,16 @@ const observe = (repository, value, supplier = "armtek", time = now) => reposito
 const response = (value) => new Response(JSON.stringify({ response: value }), { headers: { "Content-Type": "application/json" } });
 const chats = [{ id: 2000000001, title: "Рабочая беседа" }];
 const settingsValue = (fields = {}) => ({ token, groupId: 77, groupName: "Тестовое сообщество", chats, peerId: chats[0].id, enabled: false, ...fields });
+const pollResponse = (value, type = "application/json") => new Response(JSON.stringify(value), { headers: { "Content-Type": type } });
+const chatMessage = (text, fields = {}) => ({ type: "message_new", group_id: 77,
+  object: { message: { peer_id: 2000000003, from_id: 123, out: 0, text, ...fields } } });
+async function waitForState(service, check) {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    if (check(service.state())) return service.state();
+    await new Promise(setImmediate);
+  }
+  assert.fail("Notification service did not reach the expected state");
+}
 
 async function fixture(t, options = {}) {
   const directory = await mkdtemp(join(tmpdir(), "aggregator-vk-"));
@@ -33,6 +43,13 @@ async function fixture(t, options = {}) {
   let current = history();
   let timestamp = now;
   const client = new VkClient(async (url, init) => {
+    if (new URL(url).hostname === "lp.vk.com") {
+      assert.equal(init.method, "GET"); assert.equal(init.redirect, "error"); assert.equal(url.includes(token), false);
+      const params = new URL(url).searchParams;
+      calls.push({ method: "longpoll", params, signal: init.signal });
+      if (options.poll) return options.poll(params, init);
+      throw new Error("Unexpected Long Poll fixture request");
+    }
     assert.equal(init.method, "POST"); assert.equal(init.redirect, "error"); assert.equal(url.includes(token), false);
     const params = new URLSearchParams(init.body);
     assert.equal(params.get("access_token"), token);
@@ -42,6 +59,9 @@ async function fixture(t, options = {}) {
     if (url.endsWith("groups.getById")) return response({ groups: [{ id: 77, name: "Тестовое сообщество" }] });
     if (url.endsWith("messages.getConversations")) return response({ count: (options.chats ?? chats).length,
       items: (options.chats ?? chats).map((chat) => ({ conversation: { peer: { id: chat.id, type: "chat" }, can_write: { allowed: true }, chat_settings: { title: chat.title, state: "in" } } })) });
+    if (url.endsWith("groups.getLongPollSettings")) return response(options.pollSettings ?? { is_enabled: true, api_version: "5.199", events: { message_new: 1 } });
+    if (url.endsWith("groups.getLongPollServer")) return response(options.pollServer ?? { server: "https://lp.vk.com/whp/77", key: "fixture_ephemeral_key", ts: "1" });
+    if (url.endsWith("messages.getConversationsById")) return response({ items: [{ peer: { id: Number(params.get("peer_ids")), type: "chat" }, chat_settings: { state: "in", title: "Автосервис" } }] });
     if (url.endsWith("messages.send")) return options.send ? options.send(params, init)
       : response([{ peer_id: Number(params.get("peer_ids")), message_id: 0, conversation_message_id: 123 }]);
     throw new Error("Unexpected fixture request");
@@ -210,6 +230,152 @@ test("multiple or missing chats never cause an arbitrary recipient to be selecte
   assert.equal((await empty.service.connect(token, new AbortController().signal)).peerId, null);
   await assert.rejects(empty.service.configure({ enabled: true }), /Выберите/);
   assert.equal(empty.calls.some((call) => call.method === "messages.send"), false);
+});
+
+test("a chat missing from the conversation list binds only after the current authenticated command", async (t) => {
+  let release;
+  const incoming = new Promise((resolve) => { release = resolve; });
+  const f = await fixture(t, { chats: [], poll: async () => incoming });
+  await f.service.connect(token, new AbortController().signal);
+  const waiting = await f.service.beginChatPairing(new AbortController().signal);
+  assert.match(waiting.pairing.command, /^\/aggregator [a-f0-9]{32}$/);
+  assert.equal(Date.parse(waiting.pairing.expiresAt) - now, 300_000);
+  assert.equal(JSON.stringify(waiting).includes("fixture_ephemeral_key"), false);
+  assert.equal(JSON.stringify(waiting).includes(token), false);
+  await assert.rejects(f.service.beginChatPairing(new AbortController().signal), /Дождитесь/);
+  const command = waiting.pairing.command;
+  release(pollResponse({ ts: "2", updates: [
+    { ...chatMessage(command), group_id: 88 }, chatMessage(command, { peer_id: 123 }),
+    chatMessage(command, { from_id: -77 }), chatMessage(command, { out: 1 }),
+    chatMessage("/aggregator wrong-code"), chatMessage("Пересланное", { fwd_messages: [{ text: command }] }),
+    chatMessage(`[club77|Магазин] ${command}`),
+  ] }, "text/javascript; charset=utf-8"));
+  const state = await waitForState(f.service, (value) => value.testMessage === "sent");
+  assert.equal(state.peerId, 2000000003); assert.equal(state.chats[0].title, "Автосервис");
+  assert.equal(state.enabled, false); assert.equal(state.pairing, null); assert.equal(f.loads.length, 0);
+  assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 1);
+  assert.equal(f.calls.at(-1).params.get("peer_ids"), "2000000003");
+  const reloaded = new EncryptedVkSettings(join(f.directory, "vk.enc.json"), Buffer.alloc(32, 17));
+  assert.equal(reloaded.get().peerId, 2000000003);
+  const resaved = await f.service.connect(token, new AbortController().signal);
+  assert.equal(resaved.peerId, 2000000003); assert.equal(resaved.pairing, null);
+  assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 1);
+});
+
+test("Long Poll setup explains disabled events and versions and rejects unsafe upstream destinations", async (t) => {
+  for (const pollSettings of [
+    { is_enabled: false, api_version: "5.199", events: { message_new: 1 } },
+    { is_enabled: true, api_version: "5.199", events: { message_new: 0 } },
+    { is_enabled: true, api_version: "5.131", events: { message_new: 1 } },
+  ]) {
+    const f = await fixture(t, { chats: [], pollSettings });
+    await f.service.connect(token, new AbortController().signal);
+    await assert.rejects(f.service.beginChatPairing(new AbortController().signal), /Long Poll/);
+    assert.equal(f.calls.some((call) => call.method === "longpoll"), false); assert.equal(f.service.state().pairing, null);
+  }
+  for (const server of ["https://127.0.0.1/wh77", "http://lp.vk.com/wh77", "https://lp.vk.com.evil.test/wh77", "https://user:password@lp.vk.com/wh77", "https://lp.vk.com:8443/wh77"]) {
+    const f = await fixture(t, { chats: [], pollServer: { server, key: "fixture_key", ts: "1" } });
+    await f.service.connect(token, new AbortController().signal);
+    await assert.rejects(f.service.beginChatPairing(new AbortController().signal), /недопустимый адрес/);
+    assert.equal(f.calls.some((call) => call.method === "longpoll"), false);
+  }
+});
+
+test("cancelling or disconnecting during pairing cannot bind a late incoming command", async (t) => {
+  for (const action of ["cancelChatPairing", "disconnect"]) {
+    let release;
+    const incoming = new Promise((resolve) => { release = resolve; });
+    const f = await fixture(t, { chats: [], poll: async () => incoming });
+    await f.service.connect(token, new AbortController().signal);
+    const waiting = await f.service.beginChatPairing(new AbortController().signal);
+    f.service[action]();
+    assert.equal(f.calls.at(-1).signal.aborted, true);
+    release(pollResponse({ ts: "2", updates: [chatMessage(waiting.pairing.command)] }));
+    await new Promise(setImmediate);
+    assert.equal(f.service.state().peerId, null); assert.equal(f.service.state().pairing, null);
+    assert.equal(f.service.state().configured, action !== "disconnect");
+    assert.equal(f.calls.some((call) => call.method === "messages.send"), false);
+  }
+});
+
+test("cancelling pairing setup aborts its API request before any listener starts", async (t) => {
+  let started; const ready = new Promise((resolve) => { started = resolve; });
+  const f = await fixture(t, { fetch: async (url, init) => {
+    assert.ok(url.endsWith("groups.getLongPollSettings")); started();
+    return new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }));
+  } });
+  f.settings.set(settingsValue({ chats: [], peerId: null }));
+  const starting = f.service.beginChatPairing(new AbortController().signal);
+  const rejected = assert.rejects(starting);
+  await ready; f.service.cancelChatPairing(); await rejected;
+  assert.equal(f.service.state().pairing, null); assert.equal(f.service.state().peerId, null);
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].signal.aborted, true);
+});
+
+test("pairing expires after five minutes, aborts the poll and replaces the command on retry", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = await fixture(t, { chats: [], poll: async (_params, init) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+  }) });
+  await f.service.connect(token, new AbortController().signal);
+  const waiting = await f.service.beginChatPairing(new AbortController().signal);
+  t.mock.timers.tick(300_000);
+  const state = await waitForState(f.service, (value) => !!value.pairing?.error);
+  assert.match(state.pairing.error, /Время подключения истекло/); assert.equal(state.peerId, null);
+  const retry = await f.service.beginChatPairing(new AbortController().signal);
+  assert.notEqual(retry.pairing.command, waiting.pairing.command);
+  f.service.cancelChatPairing();
+});
+
+test("malformed Long Poll data does not choose a destination or expose raw errors", async (t) => {
+  for (const payload of [{ ts: null, updates: [] }, { ts: "2", updates: "bad" }, { failed: 4 }, { ts: "2", updates: [null] }]) {
+    const f = await fixture(t, { chats: [], poll: async () => pollResponse(payload) });
+    await f.service.connect(token, new AbortController().signal);
+    await f.service.beginChatPairing(new AbortController().signal);
+    const state = await waitForState(f.service, (value) => !!value.pairing?.error);
+    assert.equal(state.peerId, null); assert.equal(f.calls.some((call) => call.method === "messages.send"), false);
+  }
+});
+
+test("Long Poll corrects an expired timestamp and refreshes its key without changing the pairing command", async (t) => {
+  let release; const incoming = new Promise((resolve) => { release = resolve; });
+  let polls = 0;
+  const f = await fixture(t, { chats: [], poll: async (params) => {
+    polls++;
+    if (polls === 1) return pollResponse({ failed: 1, ts: "10" });
+    if (polls === 2) { assert.equal(params.get("ts"), "10"); return pollResponse({ failed: 2 }); }
+    return incoming;
+  } });
+  await f.service.connect(token, new AbortController().signal);
+  const state = await f.service.beginChatPairing(new AbortController().signal);
+  release(pollResponse({ ts: "11", updates: [chatMessage(state.pairing.command)] }));
+  for (let attempt = 0; attempt < 3; attempt++) await new Promise((resolve) => setTimeout(resolve, 400));
+  await waitForState(f.service, (value) => value.testMessage === "sent");
+  assert.equal(f.calls.filter((call) => call.method === "groups.getLongPollServer").length, 2);
+  assert.equal(f.calls.filter((call) => call.method === "longpoll").length, 3);
+});
+
+test("Long Poll requests time out after thirty seconds and reveal no ephemeral key", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = await fixture(t, { chats: [], poll: async (_params, init) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener("abort", () => reject(new Error("fixture_ephemeral_key")), { once: true });
+  }) });
+  await f.service.connect(token, new AbortController().signal);
+  await f.service.beginChatPairing(new AbortController().signal);
+  t.mock.timers.tick(30_000);
+  const state = await waitForState(f.service, (value) => !!value.pairing?.error);
+  assert.equal(state.peerId, null); assert.equal(JSON.stringify(state).includes("fixture_ephemeral_key"), false);
+  assert.match(state.pairing.error, /Не удалось получить сообщение/);
+});
+
+test("missing optional chat details use the authenticated peer identifier and still verify welcome delivery", async () => {
+  const command = "/aggregator 0123456789abcdef0123456789abcdef";
+  for (const detail of [{ response: { items: [{ peer: { id: 2000000003, type: "chat" } }] } }, { error: { error_code: 917, error_msg: "private" } }]) {
+    const client = new VkClient(async (url) => new URL(url).hostname === "lp.vk.com"
+      ? pollResponse({ ts: "2", updates: [chatMessage(command)] }) : pollResponse(detail));
+    const chat = await client.waitForChat(token, 77, command, { server: "https://lp.vk.com/whp/77", key: "fixture_key", ts: "1" }, new AbortController().signal);
+    assert.deepEqual(chat, { id: 2000000003, title: "ID 2000000003" });
+  }
 });
 
 test("a pending welcome retries while paused without sending queued order updates or querying suppliers", async (t) => {
@@ -436,9 +602,16 @@ test("VK settings HTTP validates bodies, protects secrets and separates setup fr
   assert.equal((await save("bad-json")).status, 400);
   assert.equal((await save(JSON.stringify({ token: "bad" }))).status, 400);
   assert.equal((await save(JSON.stringify({ token }), { "Sec-Fetch-Site": "cross-site" })).status, 403);
+  const startPairing = (body, extraHeaders = {}) => fetch(`${url}/pairing`, { method: "POST", headers: { "Content-Type": "application/json", ...extraHeaders }, body });
+  assert.equal((await startPairing("{}")).status, 400);
+  assert.equal((await startPairing("{}", { "Sec-Fetch-Site": "cross-site" })).status, 403);
+  assert.equal((await startPairing(JSON.stringify({ peerId: 2000000001 }))).status, 400);
   const saved = await save(JSON.stringify({ token })); assert.equal(saved.status, 200);
   assert.equal(saved.headers.get("cache-control"), "no-store");
   const state = await saved.json(); assert.equal(state.enabled, false); assert.equal(JSON.stringify(state).includes(token), false);
+  assert.equal((await startPairing("{}")).status, 409);
+  const cancelledPairing = await fetch(`${url}/pairing`, { method: "DELETE" });
+  assert.equal(cancelledPairing.status, 200); assert.equal((await cancelledPairing.json()).configured, true);
   assert.equal((await fetch(`${url}/state`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: true, peerId: 2000000099 }) })).status, 400);
   assert.equal((await fetch(url, { method: "DELETE" })).status, 200);
   assert.equal((await (await fetch(url)).json()).configured, false);

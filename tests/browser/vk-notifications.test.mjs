@@ -20,7 +20,13 @@ async function withSettings(check, options = {}) {
     const settings = new EncryptedVkSettings(join(directory, "vk.enc.json"), options.noEncryption ? null : Buffer.alloc(32, 19));
     const repository = new SqliteNotificationRepository(join(directory, "orders.sqlite"));
     const sends = [];
+    let deliverPoll;
     const client = new VkClient(async (url, init) => {
+      if (new URL(url).hostname === "lp.vk.com") return new Promise((resolve, reject) => {
+        deliverPoll = (text) => resolve(new Response(JSON.stringify({ ts: "2", updates: [{ type: "message_new", group_id: 77,
+          object: { message: { peer_id: 2000000003, from_id: 123, out: 0, text } } }] }), { headers: { "Content-Type": "application/json" } }));
+        init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+      });
       let value;
       if (url.endsWith("groups.getTokenPermissions")) value = { mask: 4096, permissions: [] };
       else if (url.endsWith("groups.getById")) value = { groups: [{ id: 77, name: '<img src=x onerror="window.vkXss=1">' }] };
@@ -28,6 +34,9 @@ async function withSettings(check, options = {}) {
         items: Array.from({ length: options.noChats ? 0 : options.multiple ? 2 : 1 }, (_, index) => ({ conversation: {
           peer: { id: 2000000001 + index, type: "chat" }, chat_settings: { state: "in", title: index ? "Другой чат" : "Рабочая беседа" }, can_write: { allowed: true },
         } })) };
+      else if (url.endsWith("groups.getLongPollSettings")) value = { is_enabled: !options.pollDisabled, api_version: "5.199", events: { message_new: 1 } };
+      else if (url.endsWith("groups.getLongPollServer")) value = { server: "https://lp.vk.com/whp/77", key: "fixture_ephemeral_key", ts: "1" };
+      else if (url.endsWith("messages.getConversationsById")) value = { items: [{ peer: { id: 2000000003, type: "chat" }, chat_settings: { state: "in", title: "Автосервис" } }] };
       else if (url.endsWith("messages.send")) {
         const params = new URLSearchParams(init.body); sends.push(params);
         if (options.denied) return new Response(JSON.stringify({ error: { error_code: 7, error_msg: fixtureToken } }), { headers: { "Content-Type": "application/json" } });
@@ -61,7 +70,7 @@ async function withSettings(check, options = {}) {
     await page.goto(origin); await page.waitForLoadState("networkidle");
     await page.locator("#vk-notifications-settings summary").click();
     await page.waitForFunction(() => document.querySelector("#vk-notifications-connection").textContent.length > 0);
-    await check(page, { sends, directory, settings, service });
+    await check(page, { sends, directory, settings, service, deliver: (text) => { assert.ok(deliverPoll); deliverPoll(text); } });
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
@@ -146,14 +155,54 @@ test("VK UI prevents saving an unencrypted token when the server master key is m
   }, { noEncryption: true });
 });
 
-test("VK UI explains how to retry discovery when an added bot has no available conversations", async () => {
-  await withSettings(async (page, { sends }) => {
+test("VK UI binds an undiscoverable chat through a one-time message without entering another API key", async () => {
+  await withSettings(async (page, { sends, deliver, settings }) => {
     await page.locator("#vk-notifications-token").fill(fixtureToken);
     await page.getByRole("button", { name: "Сохранить ключ" }).click();
-    await page.waitForFunction(() => document.querySelector("#vk-notifications-connection").textContent.includes("упоминанием сообщества через @"));
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-connection").textContent.includes("Подключите нужную беседу по сообщению"));
     assert.equal(await page.locator("#vk-notifications-enabled").isEnabled(), false);
     assert.equal(await page.locator("#vk-notifications-chat-label").isVisible(), false);
     assert.equal(sends.length, 0);
+    await page.locator("#vk-notifications-pair-start").click();
+    await page.locator("#vk-notifications-pair-command-panel").waitFor({ state: "visible" });
+    const command = await page.locator("#vk-notifications-pair-command").inputValue();
+    assert.match(command, /^\/aggregator [a-f0-9]{32}$/);
+    assert.equal(await page.locator("#vk-notifications-token").inputValue(), "");
+    await page.setViewportSize({ width: 320, height: 1100 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.evaluate(() => Object.defineProperty(navigator, "clipboard", { value: { writeText: async (value) => { window.vkCopiedCommand = value; } } }));
+    await page.locator("#vk-notifications-pair-copy").click();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-pair-status").textContent.includes("Команда скопирована"));
+    assert.match(await page.locator("#vk-notifications-pair-status").textContent(), /[Сс]копир/);
+    assert.equal(await page.evaluate(() => window.vkCopiedCommand), command);
+    deliver(`[club77|Магазин] ${command}`);
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-connection").textContent.includes("Беседа: Автосервис"));
+    assert.equal(settings.get().peerId, 2000000003); assert.equal(settings.get().enabled, false);
+    assert.equal(sends.length, 1); assert.equal(sends[0].get("peer_ids"), "2000000003");
+    assert.equal(await page.locator("#vk-notifications-pairing").isVisible(), false);
+    assert.match(await page.locator("#vk-notifications-status").textContent(), /Тестовое сообщение отправлено/);
+  }, { noChats: true });
+});
+
+test("VK UI explains the missing Long Poll setting and allows cancelling the command", async () => {
+  await withSettings(async (page, { sends }) => {
+    await page.locator("#vk-notifications-token").fill(fixtureToken);
+    await page.getByRole("button", { name: "Сохранить ключ" }).click();
+    await page.locator("#vk-notifications-pair-start").waitFor({ state: "visible" });
+    await page.locator("#vk-notifications-pair-start").click();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Long Poll API"));
+    assert.equal(await page.locator("#vk-notifications-pair-command-panel").isVisible(), false);
+    assert.equal(sends.length, 0);
+  }, { noChats: true, pollDisabled: true });
+  await withSettings(async (page, { service, sends }) => {
+    await page.locator("#vk-notifications-token").fill(fixtureToken);
+    await page.getByRole("button", { name: "Сохранить ключ" }).click();
+    await page.locator("#vk-notifications-pair-start").waitFor({ state: "visible" });
+    await page.locator("#vk-notifications-pair-start").click();
+    await page.locator("#vk-notifications-pair-command-panel").waitFor({ state: "visible" });
+    await page.locator("#vk-notifications-pair-cancel").click();
+    await page.locator("#vk-notifications-pair-command-panel").waitFor({ state: "hidden" });
+    assert.equal(service.state().pairing, null); assert.equal(service.state().peerId, null); assert.equal(sends.length, 0);
   }, { noChats: true });
 });
 

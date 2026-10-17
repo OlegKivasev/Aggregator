@@ -6,7 +6,7 @@ import { readJsonBody, RequestBodyError } from "./request-body.ts";
 import { serveJson } from "./responses.ts";
 
 export async function serveVkNotifications(request: IncomingMessage, response: ServerResponse, url: URL, service?: OrderNotificationService): Promise<boolean> {
-  if (url.pathname !== "/api/notifications/vk" && url.pathname !== "/api/notifications/vk/state") return false;
+  if (!["/api/notifications/vk", "/api/notifications/vk/state", "/api/notifications/vk/pairing"].includes(url.pathname)) return false;
   response.setHeader("Cache-Control", "no-store");
   if (!service) { serveJson(response, 503, { message: "Уведомления ВК не подключены на сервере." }); return true; }
   if (url.search) { serveJson(response, 400, { message: "Неверный запрос уведомлений ВК." }); return true; }
@@ -29,6 +29,13 @@ export async function serveVkNotifications(request: IncomingMessage, response: S
       const state = await service.configure(await readJsonBody(request), controller.signal);
       if (!controller.signal.aborted) serveJson(response, 200, state);
     }
+    else if (url.pathname === "/api/notifications/vk/pairing" && request.method === "POST") {
+      const payload = await readJsonBody(request);
+      if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).length) throw new NotificationSettingsError("Неверный запрос подключения беседы.");
+      const state = await service.beginChatPairing(controller.signal);
+      if (!controller.signal.aborted) serveJson(response, 200, state);
+    }
+    else if (url.pathname === "/api/notifications/vk/pairing" && request.method === "DELETE") serveJson(response, 200, service.cancelChatPairing());
     else serveJson(response, 405, { message: "Method not allowed" });
   } catch (error) {
     if (!controller.signal.aborted) {

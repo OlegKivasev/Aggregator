@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { randomBytes } from "node:crypto";
 import type { OrderHistory } from "../purchasing/order-history-contract.ts";
 import type { OrderHistorySupplier } from "../purchasing/order-cancellation-contract.ts";
 import { createBoundedAbortSignal } from "../abort.ts";
@@ -23,6 +24,7 @@ export interface NotificationHistorySource {
   observe(supplier: OrderHistorySupplier, history: OrderHistory): void;
 }
 interface SupplierCheck { supplier: OrderHistorySupplier; lastSuccessAt: string | null; limited: boolean; error: string | null }
+interface ChatPairing { command: string; expiresAt: string; error: string | null }
 
 export class OrderNotificationService {
   private readonly settings: EncryptedVkSettings;
@@ -35,6 +37,9 @@ export class OrderNotificationService {
   private controller = new AbortController();
   private mutationController = new AbortController();
   private work: Promise<void> | null = null;
+  private pairingWork: Promise<void> | null = null;
+  private pairingController = new AbortController();
+  private pairing: ChatPairing | null = null;
   private mutating = false;
   private stopped = false;
   private deliveryBlocked = false;
@@ -54,6 +59,7 @@ export class OrderNotificationService {
       groupName: current?.groupName ?? null, chats: current?.chats ?? [], peerId: current?.peerId ?? null,
       intervalMinutes: 10, checking: this.work !== null, lastCheckAt: this.lastCheckAt, nextCheckAt: this.nextCheckAt,
       error: this.error, suppliers: structuredClone(this.checks),
+      pairing: this.pairing ? { ...this.pairing } : null,
       testMessage: current?.peerId ? this.repository.welcomeState(`${current.groupId}:${current.peerId}`) : null,
       ...(current?.peerId ? this.repository.counts(`${current.groupId}:${current.peerId}`) : { pending: 0, failed: 0 }) };
   }
@@ -73,7 +79,7 @@ export class OrderNotificationService {
     if (!validVkToken(token)) throw new NotificationSettingsError("Укажите корректный ключ доступа сообщества ВК.");
     if (!this.settings.persistent()) throw new NotificationSettingsError("Для сохранения ключа ВК настройте серверное шифрование.", 503);
     if (this.mutating) throw new NotificationSettingsError("Подключение ВК уже обновляется.", 409);
-    this.mutating = true; this.controller.abort();
+    this.mutating = true; this.controller.abort(); this.cancelChatPairing();
     const bounded = createBoundedAbortSignal(AbortSignal.any([signal, this.mutationController.signal]), 90_000, "VK connection timed out");
     try {
       await this.work;
@@ -82,6 +88,9 @@ export class OrderNotificationService {
       bounded.signal.throwIfAborted();
       if (this.stopped) throw new NotificationSettingsError("Сервер завершает работу.", 503);
       const previous = this.settings.get();
+      // VK's recent-dialog list is not authoritative for a chat already bound to this community.
+      const retained = previous?.groupId === connection.groupId ? previous.chats.find((chat) => chat.id === previous.peerId) : undefined;
+      if (retained && !connection.chats.some((chat) => chat.id === retained.id)) connection.chats = [...connection.chats.slice(0, 999), retained];
       const peerId = previous?.groupId === connection.groupId && connection.chats.some((chat) => chat.id === previous.peerId)
         ? previous.peerId : complete && connection.chats.length === 1 ? connection.chats[0].id : null;
       this.settings.set({ token, ...connection, peerId, enabled: false });
@@ -91,6 +100,44 @@ export class OrderNotificationService {
       return this.state();
     } finally { bounded.dispose(); this.mutating = false; }
   }
+  async beginChatPairing(signal: AbortSignal) {
+    if (this.stopped) throw new NotificationSettingsError("Сервер завершает работу.", 503);
+    if (this.mutating || this.pairingWork) throw new NotificationSettingsError("Дождитесь завершения подключения беседы.", 409);
+    const config = this.settings.get();
+    if (!config) throw new NotificationSettingsError("Сначала сохраните ключ сообщества ВК.");
+    if (config.peerId !== null) throw new NotificationSettingsError("Беседа уже выбрана. Для нового подключения сначала отключите ВК.", 409);
+    this.mutating = true;
+    this.pairingController = new AbortController();
+    const controller = this.pairingController;
+    const setup = createBoundedAbortSignal(AbortSignal.any([signal, this.mutationController.signal, controller.signal]), 30_000, "VK chat pairing setup timed out");
+    try {
+      const session = await this.vk.prepareChatPairing(config.token, config.groupId, setup.signal);
+      setup.signal.throwIfAborted();
+      if (this.stopped) throw new NotificationSettingsError("Сервер завершает работу.", 503);
+      const command = `/aggregator ${randomBytes(16).toString("hex")}`;
+      this.pairing = { command, expiresAt: new Date(this.now() + 5 * 60_000).toISOString(), error: null };
+      const bounded = createBoundedAbortSignal(controller.signal, 5 * 60_000, "VK chat pairing expired");
+      this.pairingWork = this.vk.waitForChat(config.token, config.groupId, command, session, bounded.signal).then(async (chat) => {
+        bounded.signal.throwIfAborted();
+        const current = this.settings.get();
+        if (!current || current.token !== config.token || current.groupId !== config.groupId || current.peerId !== null) return;
+        const chats = [...current.chats.filter((item) => item.id !== chat.id).slice(0, 999), chat];
+        this.settings.set({ ...current, chats, peerId: chat.id, enabled: false });
+        this.error = null; this.deliveryBlocked = false; this.nextCheckAt = null; this.nextSupplierCheck.clear();
+        await this.welcome(bounded.signal);
+        this.pairing = null;
+      }).catch((error: unknown) => {
+        if (!controller.signal.aborted && this.pairing) this.pairing.error = bounded.signal.aborted
+          ? "Время подключения истекло. Начните заново и отправьте новую команду в течение 5 минут."
+          : error instanceof VkError ? error.message : "Не удалось подключить беседу ВК. Начните подключение заново.";
+      }).finally(() => { bounded.dispose(); this.pairingWork = null; });
+      return this.state();
+    } finally { setup.dispose(); this.mutating = false; }
+  }
+  cancelChatPairing() {
+    this.pairingController.abort(); this.pairing = null;
+    return this.state();
+  }
   async configure(payload: unknown, signal: AbortSignal = new AbortController().signal) {
     if (this.mutating) throw new NotificationSettingsError("Дождитесь завершения подключения ВК.", 409);
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new NotificationSettingsError("Неверные настройки уведомлений.");
@@ -99,7 +146,7 @@ export class OrderNotificationService {
     if (!current) throw new NotificationSettingsError("Сначала сохраните ключ сообщества ВК.");
     const selected = peerId === undefined ? current.peerId : peerId;
     if (typeof enabled !== "boolean" || !validPeerId(selected) || !current.chats.some((chat) => chat.id === selected)) throw new NotificationSettingsError("Выберите доступную беседу сообщества.");
-    this.mutating = true; this.controller.abort();
+    this.mutating = true; this.controller.abort(); this.cancelChatPairing();
     const bounded = createBoundedAbortSignal(AbortSignal.any([signal, this.mutationController.signal]), 15_000, "VK settings timed out");
     try {
       await this.work;
@@ -125,6 +172,7 @@ export class OrderNotificationService {
     await this.sendPending(current, current.peerId, signal, true);
   }
   disconnect() {
+    this.cancelChatPairing();
     this.controller.abort(); this.mutationController.abort(); this.mutationController = new AbortController();
     const current = this.settings.get();
     if (current?.peerId) this.repository.forgetWelcome(`${current.groupId}:${current.peerId}`);
@@ -213,6 +261,6 @@ export class OrderNotificationService {
       if (!welcomeOnly) await delay(400, undefined, { signal });
     }
   }
-  stop(): void { this.stopped = true; if (this.timer) clearInterval(this.timer); this.timer = null; this.controller.abort(); this.mutationController.abort(); }
-  async close(): Promise<void> { this.stop(); await this.work; this.repository.close(); }
+  stop(): void { this.stopped = true; if (this.timer) clearInterval(this.timer); this.timer = null; this.controller.abort(); this.mutationController.abort(); this.pairingController.abort(); }
+  async close(): Promise<void> { this.stop(); await Promise.all([this.work, this.pairingWork]); this.repository.close(); }
 }

@@ -385,6 +385,21 @@
               </div>
             </form>
             <p class="vk-notifications-settings__connection" id="vk-notifications-connection" role="status"></p>
+            <div class="vk-notifications-settings__pairing" id="vk-notifications-pairing" hidden>
+              <p class="settings-drawer__hint">Если ВК не показывает беседу в списке, подключите её по одноразовой команде.</p>
+              <div class="auth-actions">
+                <button class="button-secondary btn btn-light" type="button" id="vk-notifications-pair-start">Подключить беседу по сообщению</button>
+              </div>
+              <div class="vk-notifications-settings__pair-command" id="vk-notifications-pair-command-panel" hidden>
+                <label class="field" for="vk-notifications-pair-command"><span>Команда подключения</span><input id="vk-notifications-pair-command" type="text" readonly autocomplete="off" spellcheck="false"></label>
+                <p class="settings-drawer__hint">В нужной беседе выберите бота через @, затем вставьте команду и отправьте сообщение. Код действует 5 минут. После подключения беседа появится в настройках, а бот отправит тестовое сообщение.</p>
+                <div class="auth-actions">
+                  <button class="button-secondary btn btn-light" type="button" id="vk-notifications-pair-copy">Скопировать команду</button>
+                  <button class="button-secondary btn btn-light" type="button" id="vk-notifications-pair-cancel">Отменить</button>
+                </div>
+              </div>
+              <p class="vk-notifications-settings__status" id="vk-notifications-pair-status" role="status" aria-live="polite"></p>
+            </div>
             <label class="field" id="vk-notifications-chat-label" hidden>
               <span>Беседа</span>
               <select id="vk-notifications-chat"></select>
