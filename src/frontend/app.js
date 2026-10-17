@@ -25,6 +25,8 @@ import { isPartKomReturnableVisible } from "./partkom-return-settings.js";
 import { isForumAutoReturnableVisible } from "./forum-auto-return-settings.js";
 import { isArmtekReturnableVisible } from "./armtek-return-settings.js";
 import { bootstrapGarage } from "./garage-ui.js";
+import { calculateMarkupPrice, markupPercentForPrice, restoreMarkupSettings, showPurchasePrice } from "./markup-settings.js";
+import { bootstrapMarkupSettings } from "./markup-settings-ui.js";
 import {
   applySavedColumnWidths,
   loadSharedColumnWidths,
@@ -48,7 +50,6 @@ const searchLoadingDescription = document.querySelector("#search-loading-descrip
 const searchLoadingNote = document.querySelector("#search-loading-note");
 const searchLoadingCancel = document.querySelector("#search-loading-cancel");
 const cancelSearchButton = document.querySelector("#cancel-search-button");
-const markupPercentInput = document.querySelector("#markup-percent");
 const tableSearchInput = document.querySelector("#table-search");
 const mainDeliveryTabs = [...document.querySelectorAll("#results-delivery-tabs [data-delivery-window]")];
 const analogDeliveryTabs = [...document.querySelectorAll("#analogs-delivery-tabs [data-delivery-window]")];
@@ -164,7 +165,6 @@ const analogsResults = document.querySelector("#analogs-results");
 const analogsResultsBody = document.querySelector("#analogs-results-body");
 const analogsCount = document.querySelector("#analogs-count");
 const analogsTableSearch = document.querySelector("#analogs-table-search");
-const analogsMarkupPercent = document.querySelector("#analogs-markup-percent");
 const analogsShowMore = document.querySelector("#analogs-show-more");
 const analogSortButtons = [...document.querySelectorAll("[data-analog-sort-key]")];
 const closeAnalogsModalButtons = [...document.querySelectorAll("[data-close-analogs-modal]")];
@@ -181,7 +181,7 @@ let activeTabId = null;
 let tabSequence = 1;
 let results = [];
 let sortState = { key: "markupPrice", direction: "ascending" };
-let markupPercent = 35;
+let markupSettings = restoreMarkupSettings();
 let tableSearchTerm = "";
 let mainDeliverySoon = false;
 let analogDeliverySoon = false;
@@ -249,7 +249,7 @@ const tableColumnWidths = {
   markupPrice: 120,
 };
 Object.assign(tableColumnWidths, restoreLocalColumnWidths("main", tableColumnWidths));
-const cartActionColumnWidth = 98;
+const cartActionColumnWidth = 104;
 let visibleTableColumns = new Set(tableColumnIds);
 let visibleStpartsWarehouses = new Set(["green"]);
 let showArmtekNonReturnable = false;
@@ -295,12 +295,12 @@ const getFilterValue = (result, column) => {
   return String(result[column] ?? "-");
 };
 
-const getRangeFilterValue = (result, column, percent = markupPercent) => {
+const getRangeFilterValue = (result, column, settings = markupSettings) => {
   if (column === "quantity") {
     return Number.isFinite(result.quantity) ? result.quantity : null;
   }
   if (column === "markupPrice") {
-    return getMarkupPrice(result, percent);
+    return getMarkupPrice(result, settings);
   }
   const timestamp = result.deliveryDate ? new Date(result.deliveryDate).getTime() : Number.NaN;
   return Number.isFinite(timestamp) ? timestamp : null;
@@ -349,12 +349,12 @@ const renderAveragePrices = (container, items) => {
     line.append(`${label}: `, value);
     averages.append(line);
   };
-  appendAverage("Средняя закуп. цена", getAveragePrice(items, (result) => result.price));
+  if (showPurchasePrice(markupSettings)) appendAverage("Средняя закуп. цена", getAveragePrice(items, (result) => result.price));
   appendAverage("Средняя цена", getAveragePrice(items, (result) => getMarkupPrice(result)));
   container.append(averages);
 };
 
-const getFilteredResults = (sourceResults, searchTerm, percent, ignoredFilterColumn = null) => {
+const getFilteredResults = (sourceResults, searchTerm, settings, ignoredFilterColumn = null) => {
   const normalizedSearchTerm = searchTerm.trim().toLocaleLowerCase();
 
   return sourceResults.filter((result) => {
@@ -388,7 +388,7 @@ const getFilteredResults = (sourceResults, searchTerm, percent, ignoredFilterCol
         const to = column === "deliveryDate" && range.to
           ? new Date(`${range.to}T23:59:59.999`).getTime()
           : Number(range.to);
-        const value = getRangeFilterValue(result, column, percent);
+        const value = getRangeFilterValue(result, column, settings);
         return Number.isFinite(value)
           && (!range.from || value >= from)
           && (!range.to || value <= to);
@@ -405,11 +405,11 @@ const renderFilterValues = () => {
   mainFilterColumns.forEach((column) => {
     const container = filterValueContainers[column];
     const section = filterSections[column];
-    const candidateResults = getFilteredResults(visibleExactResults, tableSearchTerm, markupPercent, column);
+    const candidateResults = getFilteredResults(visibleExactResults, tableSearchTerm, markupSettings, column);
     container.replaceChildren();
 
     if (rangeFilterColumns.has(column)) {
-      const hasValues = candidateResults.some((result) => Number.isFinite(getRangeFilterValue(result, column, markupPercent)));
+      const hasValues = candidateResults.some((result) => Number.isFinite(getRangeFilterValue(result, column, markupSettings)));
       section.hidden = !isFilterColumnVisible(column) || !hasValues;
       if (!hasValues) {
         return;
@@ -668,11 +668,6 @@ const restoreSupplierVisibility = () => {
   supplierIds.forEach(updateSupplierVisibility);
 };
 
-const normalizeMarkupPercent = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.min(1000, Math.max(0, parsed)) : 35;
-};
-
 const normalizeTabName = (value) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 100) : "");
 const withoutOfferId = (result) => {
   if (!result || typeof result !== "object" || Array.isArray(result)) {
@@ -693,7 +688,7 @@ const createSearchTab = (data = {}) => ({
     typeof data.hasSearched === "boolean"
       ? data.hasSearched
       : Boolean(data.results?.length) || Boolean(data.status && data.status !== "Ожидание поиска"),
-  markupPercent: normalizeMarkupPercent(data.markupPercent),
+  markupSettings: restoreMarkupSettings(data.markupSettings, data.markupPercent),
   supplierStatuses: {},
   supplierStatusDetails: {},
   supplierSearchStartedAt: {},
@@ -805,7 +800,7 @@ const syncActiveTab = () => {
   tab.enabledSuppliers = getEnabledSuppliers();
   tab.status = globalStatus.textContent;
   tab.results = results;
-  tab.markupPercent = markupPercent;
+  tab.markupSettings = markupSettings;
 };
 
 const sessionPillStatus = (authorized) => (authorized ? "completed" : "idle");
@@ -835,12 +830,9 @@ const updateSupplierNotice = (session) => {
 
 const resultCollator = new Intl.Collator("ru", { numeric: true, sensitivity: "base" });
 
-const getMarkupPrice = (result, percent = markupPercent) => {
-  const price = Number(result.price);
-  return Number.isFinite(price) && price > 0 ? price * (1 + percent / 100) : null;
-};
+const getMarkupPrice = (result, settings = markupSettings) => calculateMarkupPrice(result.price, settings);
 
-const getSortValue = (result, key, percent = markupPercent) => {
+const getSortValue = (result, key, settings = markupSettings) => {
   if (key === "supplier") {
     return supplierNames[result.supplier] ?? result.supplier;
   }
@@ -851,7 +843,7 @@ const getSortValue = (result, key, percent = markupPercent) => {
   }
 
   if (key === "markupPrice") {
-    return getMarkupPrice(result, percent);
+    return getMarkupPrice(result, settings);
   }
 
   if (key === "brand") {
@@ -878,7 +870,7 @@ const compareSortValues = (leftValue, rightValue) => {
     : resultCollator.compare(String(leftValue), String(rightValue));
 };
 
-const compareResults = (left, right, state = sortState, percent = markupPercent, nearTerm = false) => {
+const compareResults = (left, right, state = sortState, settings = markupSettings, nearTerm = false) => {
   let dayComparison = 0;
   if (nearTerm && state.key === "deliveryDate") {
     const leftDay = deliveryCalendarDay(left.deliveryDate);
@@ -887,7 +879,7 @@ const compareResults = (left, right, state = sortState, percent = markupPercent,
   }
   const comparison = dayComparison || (state.key === "deliveryDate"
     ? compareDeliveryDatesThenPrice(left, right)
-    : compareSortValues(getSortValue(left, state.key, percent), getSortValue(right, state.key, percent)));
+    : compareSortValues(getSortValue(left, state.key, settings), getSortValue(right, state.key, settings)));
 
   if (state.key === "markupPrice" && comparison === 0) {
     return compareDeliveryDates(left, right);
@@ -941,7 +933,7 @@ const applyTableColumns = () => {
   resultsTable.style.setProperty("--results-table-min-width", `${minimumWidth}px`);
   resultsTable.querySelectorAll("th[data-column]").forEach((header) => {
     header.style.width = visibleColumns.includes(header.dataset.column)
-      ? `${tableColumnWidths[header.dataset.column] / minimumWidth * 100}%`
+      ? `calc(${tableColumnWidths[header.dataset.column] / (minimumWidth - cartActionColumnWidth) * 100}% - ${tableColumnWidths[header.dataset.column] / (minimumWidth - cartActionColumnWidth) * cartActionColumnWidth}px)`
       : "";
   });
   tableColumnsReset.hidden = visibleTableColumns.size === tableColumnIds.length;
@@ -1086,7 +1078,7 @@ const saveSearchState = () => {
           status: tab.status,
           results: tab.results.map(withoutOfferId),
           hasSearched: tab.hasSearched,
-          markupPercent: tab.markupPercent,
+          markupSettings: tab.markupSettings,
         })),
       }),
     );
@@ -1152,8 +1144,7 @@ const activateTab = (tabId) => {
   syncActiveTab();
   activeTabId = tab.id;
   results = tab.results;
-  markupPercent = tab.markupPercent;
-  markupPercentInput.value = String(markupPercent);
+  markupSettings = tab.markupSettings;
   articleInput.value = tab.article;
   globalStatus.textContent = tab.status;
   supplierEnabledInputs.forEach((input) => {
@@ -1218,7 +1209,7 @@ const getMainTableResults = (items) => {
 
   return {
     exactResults,
-    filteredResults: getFilteredResults(visibleExactResults, tableSearchTerm, markupPercent),
+    filteredResults: getFilteredResults(visibleExactResults, tableSearchTerm, markupSettings),
   };
 };
 
@@ -1238,13 +1229,13 @@ const renderResults = () => {
 
   const { exactResults, filteredResults } = getMainTableResults(results);
   const sortedResults = [...filteredResults].sort((left, right) =>
-    compareResults(left, right, sortState, markupPercent, mainDeliverySoon));
+    compareResults(left, right, sortState, markupSettings, mainDeliverySoon));
   const bestPrice = filteredResults
-    .filter((result) => getMarkupPrice(result, markupPercent) !== null)
-    .reduce((best, result) => !best || getMarkupPrice(result, markupPercent) < getMarkupPrice(best, markupPercent) ? result : best, null);
+    .filter((result) => getMarkupPrice(result, markupSettings) !== null)
+    .reduce((best, result) => !best || getMarkupPrice(result, markupSettings) < getMarkupPrice(best, markupSettings) ? result : best, null);
   const isSearching = Boolean(getActiveTab()?.source);
   updateSortHeaders(sortButtons, sortState);
-  const renderResult = (result, percent) => {
+  const renderResult = (result, settings) => {
     const supplierName = supplierNames[result.supplier] ?? result.supplier;
     const deliveryDate = result.supplier === "mladov" && !result.deliveryDate
       ? "-"
@@ -1259,7 +1250,7 @@ const renderResults = () => {
         <td data-column="title"><div class="result-title-cell">${renderOfferLink(result, result.title)}</div></td>
         <td data-column="deliveryDate"><span class="delivery-date${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
-        <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, percent)))}</span><span class="main-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
+        <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, settings)))}</span>${showPurchasePrice(markupSettings) ? `<span class="main-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>` : ""}${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         ${renderCartOfferControls(result)}
       </tr>
     `;
@@ -1271,21 +1262,21 @@ const renderResults = () => {
   const emptyMessage = exactResults.length ? "Нет позиций с выбранными условиями." : "По вашему запросу ничего не найдено.";
   hideWarehouseTooltip();
   resultsBody.innerHTML = sortedResults.length
-    ? sortedResults.map((result) => renderResult(result, markupPercent)).join("")
+    ? sortedResults.map((result) => renderResult(result, markupSettings)).join("")
     : renderEmptyRow(emptyMessage);
   applyTableColumns();
   updateResultCount(sortedResults);
   renderFilterValues();
 };
 
-const setMarkupPercent = (value) => {
-  markupPercent = normalizeMarkupPercent(value);
-  markupPercentInput.value = String(markupPercent);
+const setMarkupSettings = (settings) => {
+  markupSettings = settings;
   const tab = getActiveTab();
-  if (tab) {
-    tab.markupPercent = markupPercent;
-  }
+  if (tab) tab.markupSettings = settings;
   renderResults();
+  if (analogSourceResult) renderAnalogSource(analogSourceResult);
+  renderAnalogRowsNow();
+  cartUi.renderPrices();
   saveSearchState();
 };
 
@@ -2137,6 +2128,7 @@ const renderAnalogSource = (result) => {
   analogsSourceTitle.title = result.title;
   analogsSourceSupplier.textContent = supplierNames[result.supplier] ?? result.supplier;
   analogsSourcePrice.textContent = formatPrice(result.price);
+  analogsSourcePrice.closest("[data-analog-column]").hidden = !showPurchasePrice(markupSettings);
   analogsSourceMarkupPrice.textContent = formatPrice(getMarkupPrice(result));
   analogsSourceDelivery.textContent = result.supplier === "mladov" && !result.deliveryDate
     ? "-"
@@ -2147,6 +2139,7 @@ const renderAnalogSource = (result) => {
 };
 
 const renderArticleAnalogSource = (article, brand) => {
+  analogsSourcePrice.closest("[data-analog-column]").hidden = !showPurchasePrice(markupSettings);
   analogsSourceBrand.textContent = formatBrand(brand);
   analogsSourceArticle.textContent = formatArticle(article);
   analogsSourceTitle.textContent = "Поиск аналогов по выбранному бренду";
@@ -2177,7 +2170,7 @@ const applyAnalogTableColumns = () => {
   analogsTable.style.setProperty("--analogs-results-table-min-width", `${minimumWidth}px`);
   analogsTable.querySelectorAll("th[data-analog-column]").forEach((header) => {
     header.style.width = visibleColumns.includes(header.dataset.analogColumn)
-      ? `${analogTableColumnWidths[header.dataset.analogColumn] / minimumWidth * 100}%`
+      ? `calc(${analogTableColumnWidths[header.dataset.analogColumn] / (minimumWidth - cartActionColumnWidth) * 100}% - ${analogTableColumnWidths[header.dataset.analogColumn] / (minimumWidth - cartActionColumnWidth) * cartActionColumnWidth}px)`
       : "";
   });
   analogsTable.querySelectorAll("[data-analog-column]").forEach((element) => {
@@ -2196,10 +2189,10 @@ const renderAnalogRows = () => {
   const normalizedTerm = analogSearchTerm.trim().toLocaleLowerCase();
   const visibleResults = getVisibleAnalogResults(analogSearchResults);
   const filteredResults = getFilteredAnalogResults(visibleResults);
-  const rows = [...filteredResults].sort((left, right) => compareResults(left, right, analogSortState, markupPercent, analogDeliverySoon));
+  const rows = [...filteredResults].sort((left, right) => compareResults(left, right, analogSortState, markupSettings, analogDeliverySoon));
   const bestPrice = filteredResults
-    .filter((result) => Number.isFinite(result.price) && result.price > 0)
-    .reduce((best, result) => !best || result.price < best.price ? result : best, null);
+    .filter((result) => getMarkupPrice(result) !== null)
+    .reduce((best, result) => !best || getMarkupPrice(result) < getMarkupPrice(best) ? result : best, null);
   const hasActiveAnalogFilters = mainFilterColumns.some((column) => hasActiveAnalogFilter(column));
   analogsCount.textContent = normalizedTerm || hasActiveAnalogFilters ? `${rows.length} из ${visibleResults.length}` : String(visibleResults.length);
   analogsCount.title = normalizedTerm || hasActiveAnalogFilters ? "Показано с учетом поиска и фильтров" : "Всего найдено";
@@ -2233,7 +2226,7 @@ const renderAnalogRows = () => {
         <td class="analogs-result-title" data-analog-column="title">${renderOfferLink(result, result.title)}</td>
         <td data-analog-column="deliveryDate"><span class="delivery-date${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
-        <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span><span class="analogs-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
+        <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${showPurchasePrice(markupSettings) ? `<span class="analogs-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>` : ""}${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
         ${renderCartOfferControls(result)}
       </tr>`;
   }).join("");
@@ -2296,7 +2289,6 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
   setAnalogSearchUiState(false);
   setAnalogFiltersSidebarOpen(false);
   analogsTableSearch.value = "";
-  analogsMarkupPercent.value = String(markupPercent);
   if (sourceResult) {
     renderAnalogSource(sourceResult);
   } else {
@@ -2534,15 +2526,6 @@ showAnalogsButton.addEventListener("click", () => {
 analogsTableSearch.addEventListener("input", () => {
   analogSearchTerm = analogsTableSearch.value;
   analogVisibleLimit = 200;
-  renderAnalogRowsNow();
-});
-
-analogsMarkupPercent.addEventListener("change", () => {
-  setMarkupPercent(analogsMarkupPercent.value);
-  analogsMarkupPercent.value = String(markupPercent);
-  if (analogSourceResult) {
-    renderAnalogSource(analogSourceResult);
-  }
   renderAnalogRowsNow();
 });
 
@@ -2961,8 +2944,7 @@ if (!searchTabs.length) {
 const restoredTab = getActiveTab();
 if (restoredTab) {
   results = restoredTab.results;
-  markupPercent = restoredTab.markupPercent;
-  markupPercentInput.value = String(markupPercent);
+  markupSettings = restoredTab.markupSettings;
   articleInput.value = restoredTab.article;
   globalStatus.textContent = restoredTab.status;
   supplierEnabledInputs.forEach((input) => {
@@ -2970,9 +2952,6 @@ if (restoredTab) {
   });
 }
 supplierSearchSelectionsRestored = true;
-markupPercentInput.addEventListener("change", () => {
-  setMarkupPercent(markupPercentInput.value);
-});
 tableSearchInput.addEventListener("input", () => {
   tableSearchTerm = tableSearchInput.value;
   renderResults();
@@ -3008,8 +2987,13 @@ setSearchUiState(false);
 renderTabs();
 renderResults();
 loadSessions().catch(() => undefined);
-const garageUi = bootstrapGarage({ getMarkupPercent: () => markupPercent, startSearch: startSearchForArticle });
-bootstrapCart({ getMarkupPrice });
+const garageUi = bootstrapGarage({ getMarkupPercent: (offerId) => {
+  const offer = [...results, ...analogSearchResults].find((result) => result.offerId === offerId);
+  if (!offer) throw new Error("Предложение устарело. Повторите поиск перед добавлением в гараж.");
+  return markupPercentForPrice(offer.price, markupSettings);
+}, startSearch: startSearchForArticle });
+const cartUi = bootstrapCart({ getMarkupPrice, showPurchasePrice: () => showPurchasePrice(markupSettings, true) });
+bootstrapMarkupSettings({ getSettings: () => markupSettings, applySettings: setMarkupSettings });
 bootstrapOrderHistory();
 
 setupColumnResizing({

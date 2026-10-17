@@ -283,7 +283,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(html, /id="analogs-source-title"/);
   assert.match(html, /id="analogs-source-markup-price"/);
   assert.match(html, /id="analogs-table-search"/);
-  assert.match(html, /id="analogs-markup-percent"/);
+  assert.match(html, /class="markup-settings-trigger"[^>]*data-markup-settings[^>]*aria-label="Настроить клиентскую наценку в аналогах"/);
   assert.doesNotMatch(html, /id="analogs-purchase-price-toggle"/);
   assert.match(html, /id="analogs-filters-toggle"[^>]*aria-controls="analogs-filters-sidebar"[^>]*aria-expanded="true"/);
   assert.match(html, /id="analogs-filters-sidebar"/);
@@ -340,7 +340,7 @@ test("frontend shows purchase price below the retail price and discovers brands 
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
 
   assert.doesNotMatch(html, /id="purchase-price-toggle"|data-column="purchasePrice"/);
-  assert.match(html, /data-column="markupPrice"[^>]*><button[^>]*data-sort-key="markupPrice">Цена/);
+  assert.match(html, /data-column="markupPrice"[^>]*>[\s\S]*?data-sort-key="markupPrice">Цена/);
   assert.match(html, /table-column-input" type="checkbox" value="markupPrice" checked><span>Цена/);
   assert.doesNotMatch(html, /table-column-input" type="checkbox" value="price"/);
   assert.match(app, /let sortState = \{ key: "markupPrice", direction: "ascending" \}/);
@@ -411,7 +411,7 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(app, /filtersResize\.addEventListener\("pointerdown"/);
   assert.match(app, /filtersToggle\.setAttribute\("aria-label", open \? "Скрыть фильтры" : "Открыть фильтры"\)/);
   assert.match(app, /button\.setAttribute\("aria-pressed", String\(selected\)\)/);
-  assert.match(app, /const candidateResults = getFilteredResults\(visibleExactResults, tableSearchTerm, markupPercent, column\);/);
+  assert.match(app, /const candidateResults = getFilteredResults\(visibleExactResults, tableSearchTerm, markupSettings, column\);/);
   assert.match(app, /const isFilterColumnVisible = \(column\) => column === "warehouse" \|\| visibleTableColumns\.has\(column\);/);
   assert.match(app, /section\.hidden = !isFilterColumnVisible\(column\) \|\| values\.length === 0;/);
   assert.match(app, /section\.hidden = !isFilterColumnVisible\(column\) \|\| !hasValues;/);
@@ -478,7 +478,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(styles, /\.garage-control\s*\{[^}]*align-self: stretch;[^}]*align-items: center;/s);
   assert.match(styles, /\.garage-sidebar\s*\{[^}]*--garage-sidebar-width: 260px;[^}]*min-width: 180px;[^}]*max-width: 420px;/s);
   assert.match(styles, /\.garage-search-form\s*\{[^}]*min-height: 40px;/s);
-  assert.match(styles, /\.cart-add-column, \.cart-add-cell\s*\{[^}]*width: 98px;/s);
+  assert.match(styles, /\.cart-add-column, \.cart-add-cell\s*\{[^}]*width: 104px;/s);
   assert.match(styles, /\.garage-offer-button svg\s*\{[^}]*stroke: currentColor;/s);
   assert.match(garage, /const workspace = document\.querySelector\("\.workspace"\);/);
   assert.match(garage, /workspace\.hidden = true;/);
@@ -559,9 +559,9 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /formatDeliveryDate\(latest\.deliveryDate, latest\.deliveryDateApproximate, latest\.deliveryDateTo\)/);
   assert.doesNotMatch(garage, /Сохранить", "btn btn-light"|confirmRemove|cancelRemove/);
   assert.match(garage, /sidebar\.addEventListener\("drop"/);
-  assert.match(app, /const cartActionColumnWidth = 98;/);
+  assert.match(app, /const cartActionColumnWidth = 104;/);
   assert.match(app, /const startSearchForArticle = \(value\) =>/);
-  assert.match(app, /bootstrapGarage\(\{ getMarkupPercent: \(\) => markupPercent, startSearch: startSearchForArticle \}\)/);
+  assert.match(app, /return markupPercentForPrice\(offer\.price, markupSettings\);/);
   assert.match(app, /renderCartOfferControls\(result\)/);
   assert.match(app, /const withoutOfferId = \(result\) =>/);
   assert.match(app, /results: tab\.results\.map\(withoutOfferId\)/);
@@ -788,7 +788,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(app, /main-best-price/);
   assert.match(app, /const tableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+deliveryDate: 180,\s+quantity: 120,\s+markupPrice: 120,/s);
   assert.match(app, /--results-table-min-width/);
-  assert.match(app, /tableColumnWidths\[header\.dataset\.column\] \/ minimumWidth \* 100/);
+  assert.match(app, /tableColumnWidths\[header\.dataset\.column\] \/ \(minimumWidth - cartActionColumnWidth\) \* 100/);
   assert.match(app, /const analogTableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+deliveryDate: 180,\s+quantity: 120,\s+markupPrice: 120,/s);
   assert.match(app, /const applyAnalogTableColumns = \(\) =>/);
   assert.match(app, /--analogs-results-table-min-width/);

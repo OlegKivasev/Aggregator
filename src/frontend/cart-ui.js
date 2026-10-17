@@ -197,14 +197,14 @@ const validateCart = (value) => {
   return value;
 };
 
-export const bootstrapCart = ({ getMarkupPrice }) => {
+export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   const renderPrices = (result, quantity = 1) => `<span class="cart-price main-result-price" title="Цена с наценкой">${escapeHtml(cartPriceFormat.format(getMarkupPrice(result) * quantity))}</span>
-    <span class="cart-purchase-price main-result-purchase-price" title="Закупочная цена">${escapeHtml(cartPriceFormat.format(result.price * quantity))}</span>`;
+    ${showPurchasePrice() ? `<span class="cart-purchase-price main-result-purchase-price" title="Закупочная цена">${escapeHtml(cartPriceFormat.format(result.price * quantity))}</span>` : ""}`;
   const renderTotals = (items) => {
     const price = items.reduce((sum, item) => sum + getMarkupPrice(item.result) * item.quantity, 0);
     const purchasePrice = items.reduce((sum, item) => sum + item.result.price * item.quantity, 0);
     return `<strong class="cart-total-price" title="Сумма с наценкой">${escapeHtml(formatPrice(price))}</strong>
-      <span class="cart-purchase-price main-result-purchase-price" title="Закупочная сумма">${escapeHtml(formatPrice(purchasePrice))}</span>`;
+      ${showPurchasePrice() ? `<span class="cart-purchase-price main-result-purchase-price" title="Закупочная сумма">${escapeHtml(formatPrice(purchasePrice))}</span>` : ""}`;
   };
   const toggle = document.querySelector("#cart-toggle");
   const badge = document.querySelector("#cart-badge");
@@ -769,4 +769,5 @@ export const bootstrapCart = ({ getMarkupPrice }) => {
   });
   document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy && !checking) void refresh().catch(() => {}); }); // Background refresh is optional.
   void refresh().catch(() => { badge.hidden = true; }); // Opening the cart shows any loading error.
+  return { renderPrices: render };
 };

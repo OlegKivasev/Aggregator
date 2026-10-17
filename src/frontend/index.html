@@ -145,9 +145,6 @@
                   <span class="visually-hidden">Поиск по таблице</span>
                   <input id="table-search" type="search" placeholder="Бренд, артикул или название" autocomplete="off" />
                 </label>
-                <label class="markup-control" for="markup-percent">Наценка
-                  <span><input id="markup-percent" type="number" min="0" max="1000" step="1" value="35" inputmode="decimal"><b>%</b></span>
-                </label>
               </div>
             </div>
 
@@ -182,7 +179,7 @@
                     <th scope="col" data-column="title" aria-sort="none"><button type="button" class="table-sort" data-sort-key="title">Наименование<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" data-column="deliveryDate" aria-sort="none"><button type="button" class="table-sort" data-sort-key="deliveryDate">Доставка<span class="table-sort__icon" aria-hidden="true"></span></button></th>
                     <th scope="col" data-column="quantity" aria-sort="none"><button type="button" class="table-sort" data-sort-key="quantity">Остаток<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                    <th scope="col" data-column="markupPrice" aria-sort="ascending"><button type="button" class="table-sort is-active" data-sort-key="markupPrice">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                    <th scope="col" data-column="markupPrice" aria-sort="ascending"><div class="price-heading"><button type="button" class="markup-settings-trigger" data-markup-settings aria-label="Настроить клиентскую наценку" aria-haspopup="dialog" aria-controls="markup-settings-dialog" aria-expanded="false">%</button><button type="button" class="table-sort is-active" data-sort-key="markupPrice">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></div></th>
                     <th scope="col" class="cart-add-column"><span class="visually-hidden">Количество, добавление в корзину и гараж</span></th>
                   </tr>
                 </thead>
@@ -801,9 +798,6 @@
                   <span class="visually-hidden">Поиск по аналогам</span>
                   <input id="analogs-table-search" type="search" placeholder="Бренд, артикул или название" autocomplete="off" />
                 </label>
-                <label class="analogs-markup" for="analogs-markup-percent">Наценка
-                  <span><input id="analogs-markup-percent" type="number" min="0" max="1000" step="1" inputmode="decimal" /><b>%</b></span>
-                </label>
               </div>
             </div>
             <div class="offer-delivery-tabs" id="analogs-delivery-tabs" role="tablist" aria-label="Срок доставки аналогов">
@@ -828,7 +822,7 @@
                   <th data-analog-column="title"><button type="button" class="analogs-sort" data-analog-sort-key="title">Наименование<span aria-hidden="true"></span></button></th>
                   <th data-analog-column="deliveryDate"><button type="button" class="analogs-sort" data-analog-sort-key="deliveryDate">Доставка<span aria-hidden="true"></span></button></th>
                   <th data-analog-column="quantity"><button type="button" class="analogs-sort" data-analog-sort-key="quantity">Остаток<span aria-hidden="true"></span></button></th>
-                  <th data-analog-column="markupPrice"><button type="button" class="analogs-sort" data-analog-sort-key="markupPrice">Цена<span aria-hidden="true"></span></button></th>
+                  <th data-analog-column="markupPrice"><div class="price-heading"><button type="button" class="markup-settings-trigger" data-markup-settings aria-label="Настроить клиентскую наценку в аналогах" aria-haspopup="dialog" aria-controls="markup-settings-dialog" aria-expanded="false">%</button><button type="button" class="analogs-sort" data-analog-sort-key="markupPrice">Цена<span aria-hidden="true"></span></button></div></th>
                   <th class="cart-add-column"><span class="visually-hidden">Добавить в корзину или гараж</span></th>
                 </tr></thead>
                 <tbody id="analogs-results-body"></tbody>

@@ -105,10 +105,12 @@ async function withCartPage(check, options = {}) {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
-    await page.addInitScript((suppliers) => {
+    await page.addInitScript(({ suppliers, preserve, legacyMarkup }) => {
+      if (preserve && sessionStorage.getItem("markup-test-initialized")) return;
       localStorage.setItem("autoservice.supplierVisibility", JSON.stringify(suppliers));
-      localStorage.setItem("autoservice.searchState", JSON.stringify({ activeTabId: "cart-test", tabs: [{ id: "cart-test", article: "A1", enabledSuppliers: suppliers, results: [] }] }));
-    }, suppliers);
+      localStorage.setItem("autoservice.searchState", JSON.stringify({ activeTabId: "cart-test", tabs: [{ id: "cart-test", article: "A1", enabledSuppliers: suppliers, results: [], markupPercent: legacyMarkup }] }));
+      if (preserve) sessionStorage.setItem("markup-test-initialized", "true");
+    }, { suppliers, preserve: options.preserveSearchState, legacyMarkup: options.legacyMarkup });
     await page.goto(origin);
     await page.locator('#armtek-auth-form[data-authorized="true"]').waitFor({ state: "attached" });
     await page.locator("#article-input").fill("A1");
@@ -130,6 +132,170 @@ async function openCheckout(page) {
   await page.locator("#cart-test-order").click();
   await page.waitForFunction(() => document.querySelector("#cart-order-confirm").open);
 }
+
+test("markup popup applies fixed, tiered and no markup consistently in offers, analogs and cart", async () => {
+  await withCartPage(async (page, { origin, searchCalls }) => {
+    const mainTrigger = page.locator('#results-table [data-markup-settings]');
+    const popup = page.locator("#markup-settings-dialog");
+    const armtek = page.locator('#results-body tr[data-result-index="0"]');
+    assert.equal(await page.locator("#markup-percent, #analogs-markup-percent").count(), 0);
+    await mainTrigger.click();
+    assert.equal(await popup.locator('[data-markup-mode="fixed"]').getAttribute("aria-selected"), "true");
+    assert.equal(await popup.locator("#markup-apply").evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(255, 75, 19)");
+    await popup.locator("#markup-fixed-percent").fill("50");
+    await page.keyboard.press("Escape");
+    assert.equal(await armtek.locator(".main-result-price").textContent(), "135,00 ₽", "closing without Apply keeps the old markup");
+    await mainTrigger.click();
+    await popup.locator("#markup-fixed-percent").fill("1001");
+    await popup.locator("#markup-apply").click();
+    assert.equal(await popup.isVisible(), true);
+    assert.equal(await popup.locator("#markup-settings-error").isVisible(), true);
+    assert.equal(await armtek.locator(".main-result-price").textContent(), "135,00 ₽");
+    await popup.locator("#markup-fixed-percent").fill("12,5");
+    await popup.locator('input[value="retail"]').check();
+    await popup.locator("#markup-apply").click();
+    assert.equal(await armtek.locator(".main-result-price").textContent(), "112,50 ₽");
+    assert.equal(await page.locator("#results-body .main-result-purchase-price").count(), 0);
+    await openOfferAnalogs(page, armtek);
+    assert.equal(await page.locator("#analogs-source-price").isVisible(), false);
+    assert.equal(await page.locator("#analogs-source-markup-price").textContent(), "112,50 ₽");
+    const analogTrigger = page.locator('#analogs-results [data-markup-settings]');
+    await analogTrigger.click();
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#analogs-modal").isVisible(), true, "Escape only closes the markup popup above analogs");
+    assert.equal(await analogTrigger.evaluate((node) => node === document.activeElement), true);
+    await analogTrigger.click();
+    assert.equal(await popup.locator("#markup-fixed-percent").inputValue(), "12.5");
+    await popup.locator('[data-markup-mode="tiered"]').click();
+    await popup.locator("#markup-add-tier").click();
+    await popup.locator("[data-tier-price]").fill("100");
+    await popup.locator("[data-tier-percent]").fill("100");
+    await popup.locator("#markup-fallback-percent").fill("10");
+    await popup.locator('input[value="both"]').check();
+    await popup.locator("#markup-show-in-cart").uncheck();
+    if (process.env.TEST_CAPTURE_DIR) await popup.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "markup-tiered.png") });
+    await popup.locator("#markup-apply").click();
+    assert.equal(await armtek.locator(".main-result-price").textContent(), "200,00 ₽");
+    assert.equal(await page.locator("#results-body tr").first().locator('[data-column="supplier"]').textContent(), "PartKOM", "tiered prices can reverse the supplier ordering");
+    assert.equal(await page.locator("#results-body tr").first().locator(".main-best-price").count(), 1);
+    const analogArmtek = page.locator('#analogs-results-body tr').filter({ has: page.locator('[data-analog-column="supplier"]', { hasText: /^Armtek$/ }) });
+    assert.equal(await analogArmtek.locator(".analogs-result-price").textContent(), "200,00 ₽");
+    await page.locator('[data-analog-sort-key="markupPrice"]').click();
+    assert.equal(await page.locator("#analogs-results-body tr").first().locator('[data-analog-column="supplier"]').textContent(), "PartKOM");
+    assert.equal(await page.locator("#analogs-results-body tr").first().locator(".analogs-best-price").count(), 1);
+    assert.equal(await page.locator("#analogs-source-price").isVisible(), true);
+    assert.equal(await page.locator("#analogs-source-markup-price").textContent(), "200,00 ₽");
+    await analogArmtek.locator(".cart-offer-button").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator('button[data-close-analogs-modal]').click();
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#cart-refresh-overlay").hidden);
+    assert.equal(await page.locator("#cart-items .cart-price").first().textContent(), "200,00");
+    assert.equal(await page.locator("#cart-modal .cart-purchase-price").count(), 0);
+    const savedCart = await page.evaluate(async (url) => (await fetch(`${url}/api/cart`)).json(), origin);
+    assert.equal(savedCart.items[0].result.price, 100, "the supplier purchase price stays unchanged");
+    await openCheckout(page);
+    assert.equal(await page.locator("#cart-order-confirm .cart-price").first().textContent(), "200,00");
+    assert.equal(await page.locator("#cart-order-confirm .cart-purchase-price").count(), 0);
+    await page.locator("#cart-order-cancel").click();
+    await page.locator("#cart-close").click();
+    await mainTrigger.click();
+    await popup.locator('[data-markup-mode="none"]').click();
+    assert.equal(await popup.locator("#markup-display").isVisible(), false);
+    if (process.env.TEST_CAPTURE_DIR) await popup.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "markup-none.png") });
+    await popup.locator("#markup-apply").click();
+    assert.equal(await armtek.locator(".main-result-price").textContent(), "100,00 ₽");
+    assert.equal(await armtek.locator(".main-result-purchase-price").count(), 0);
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#cart-refresh-overlay").hidden);
+    assert.equal(await page.locator("#cart-items .cart-price").first().textContent(), "100,00");
+    assert.equal(await page.locator("#cart-modal .cart-purchase-price").count(), 0);
+    assert.equal(searchCalls.length, 2, "only the main and analog searches call suppliers");
+  });
+});
+
+test("markup restores legacy values, persists applied tiers and validates the draft before applying", async () => {
+  await withCartPage(async (page) => {
+    const trigger = page.locator('#results-table [data-markup-settings]');
+    const popup = page.locator("#markup-settings-dialog");
+    await trigger.click();
+    assert.equal(await popup.locator("#markup-fixed-percent").inputValue(), "17");
+    if (process.env.TEST_CAPTURE_DIR) await popup.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "markup-fixed.png") });
+    await popup.locator('[data-markup-mode="tiered"]').click();
+    for (let index = 0; index < 2; index++) {
+      await popup.locator("#markup-add-tier").click();
+      await popup.locator("[data-tier-price]").nth(index).fill("500");
+      await popup.locator("[data-tier-percent]").nth(index).fill(String(20 - index));
+    }
+    await popup.locator("#markup-apply").click();
+    assert.match(await popup.locator("#markup-settings-error").textContent(), /должны различаться/);
+    await popup.locator("[data-tier-price]").nth(1).fill("100");
+    await popup.locator("[data-tier-percent]").nth(1).fill("25");
+    await popup.locator("#markup-fallback-percent").fill("10");
+    await popup.locator("#markup-apply").click();
+    assert.equal(await page.locator("#results-body .main-result-price").first().textContent(), "125,00 ₽");
+    await page.reload();
+    await page.locator("#results-body .main-result-row").first().waitFor();
+    await trigger.click();
+    assert.equal(await popup.locator('[data-markup-mode="tiered"]').getAttribute("aria-selected"), "true");
+    assert.deepEqual(await popup.locator("[data-tier-price]").evaluateAll((nodes) => nodes.map((node) => node.value)), ["100", "500"]);
+    assert.equal(await popup.locator("#markup-fallback-percent").inputValue(), "10");
+    await popup.locator('[data-tier-remove]').first().click();
+    await popup.locator('[data-markup-mode="fixed"]').click();
+    await popup.locator('[data-markup-panel="fixed"] [data-markup-clear]').click();
+    await popup.locator("#markup-apply").click();
+    assert.match(await popup.locator("#markup-settings-error").textContent(), /Заполните/);
+    await page.keyboard.press("Escape");
+    assert.equal(await trigger.evaluate((node) => node === document.activeElement), true);
+    assert.equal(await page.locator("#results-body .main-result-price").first().textContent(), "125,00 ₽");
+  }, { preserveSearchState: true, legacyMarkup: 17 });
+});
+
+test("main and analog action columns stay compact on wide screens, after resizing and on mobile", async () => {
+  await withCartPage(async (page) => {
+    const measure = async (selector) => {
+      const dimensions = await page.locator(selector).first().evaluate((row) => {
+        const cell = row.querySelector(".cart-add-cell").getBoundingClientRect();
+        const button = row.querySelector(".cart-offer-button").getBoundingClientRect();
+        return { width: cell.width, gap: cell.right - button.right };
+      });
+      assert.ok(Math.abs(dimensions.width - 104) <= 1, JSON.stringify(dimensions));
+      assert.ok(dimensions.gap <= 9 && dimensions.gap >= 7, JSON.stringify(dimensions));
+    };
+    for (const width of [2504, 1990, 1366, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await measure("#results-body .main-result-row");
+    }
+    await page.setViewportSize({ width: 1990, height: 1000 });
+    await page.locator('#results-table [data-resize-column="title"]').focus();
+    await page.keyboard.press("Shift+ArrowRight");
+    await measure("#results-body .main-result-row");
+    await page.locator("#settings-toggle").click();
+    await page.locator(".table-columns-settings__summary").click();
+    await page.locator('.table-column-input[value="title"]').uncheck();
+    await page.locator("#settings-close").click();
+    await measure("#results-body .main-result-row");
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "compact-main-table.png") });
+    await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
+    for (const width of [2504, 1990, 1366, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await measure("#analogs-results-body .analogs-result-row");
+    }
+    await page.setViewportSize({ width: 1990, height: 1000 });
+    await page.locator('#analogs-results [data-resize-column="title"]').focus();
+    await page.keyboard.press("ArrowRight");
+    await measure("#analogs-results-body .analogs-result-row");
+    await page.locator('#analogs-results [data-markup-settings]').click();
+    await page.setViewportSize({ width: 390, height: 850 });
+    await page.waitForFunction(() => {
+      const rect = document.querySelector("#markup-settings-dialog").getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight;
+    });
+    const bounds = await page.locator("#markup-settings-dialog").boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390 && bounds.y >= 0 && bounds.y + bounds.height <= 850, JSON.stringify(bounds));
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "markup-mobile.png") });
+  });
+});
 
 test("cart adds bounded quantities, persists, orders and removes confirmed items", async () => {
   await withCartPage(async (page, { orderCalls }) => {
