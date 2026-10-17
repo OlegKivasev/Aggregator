@@ -142,18 +142,23 @@ export class VkClient {
   private async pairedChat(token: string, groupId: number, peerId: number, signal: AbortSignal): Promise<VkChat> {
     try {
       const data = object(await this.call("messages.getConversationsById", token, { peer_ids: String(peerId), group_id: String(groupId) }, signal));
-      if (!Array.isArray(data.items) || data.items.length !== 1) throw new VkError("ВК не подтвердил беседу.");
-      const conversation = object(data.items[0]); const peer = object(conversation.peer);
-      if (peer.id !== peerId || peer.type !== "chat") throw new VkError("ВК не подтвердил беседу.");
-      if (conversation.chat_settings !== undefined) {
-        const settings = object(conversation.chat_settings);
-        if (settings.state !== "in" || typeof settings.title !== "string" || settings.title.length > 200) throw new VkError("Не удалось проверить участие бота в беседе.");
-        return { id: peerId, title: settings.title };
+      signal.throwIfAborted();
+      if (!Array.isArray(data.items) || data.items.length > 1) throw new VkError("ВК вернул некорректные сведения о беседе.");
+      // An empty lookup has no metadata; the matched one-time command already supplied the authenticated peer ID.
+      if (data.items.length === 1) {
+        const conversation = object(data.items[0]); const peer = object(conversation.peer);
+        if (peer.id !== peerId || peer.type !== "chat") throw new VkError("ВК вернул сведения о другой беседе. Начните подключение заново.");
+        if (conversation.chat_settings !== undefined) {
+          const settings = object(conversation.chat_settings);
+          if (settings.state !== "in" || typeof settings.title !== "string" || settings.title.length > 200) throw new VkError("Не удалось проверить участие бота в беседе.");
+          return { id: peerId, title: settings.title };
+        }
       }
     } catch (error) {
       // The authenticated incoming event identifies the chat. Reading its title can require extra chat permissions.
-      if (!(error instanceof VkError) || error.code !== 917 && error.code !== 7) throw error;
+      if (!(error instanceof VkError) || error.code === null || ![7, 15, 917, 925].includes(error.code)) throw error;
     }
+    signal.throwIfAborted();
     return { id: peerId, title: `ID ${peerId}` };
   }
 

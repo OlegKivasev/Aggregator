@@ -63,7 +63,7 @@ async function fixture(t, options = {}) {
       items: (options.chats ?? chats).map((chat) => ({ conversation: { peer: { id: chat.id, type: "chat" }, can_write: { allowed: true }, chat_settings: { title: chat.title, state: "in" } } })) });
     if (url.endsWith("groups.getLongPollSettings")) return response(options.pollSettings ?? { is_enabled: true, api_version: "5.199", events: { message_new: 1 } });
     if (url.endsWith("groups.getLongPollServer")) return response(options.pollServer ?? { server: "https://lp.vk.com/whp/77", key: "fixture_ephemeral_key", ts: "1" });
-    if (url.endsWith("messages.getConversationsById")) return response({ items: [{ peer: { id: Number(params.get("peer_ids")), type: "chat" }, chat_settings: { state: "in", title: "Автосервис" } }] });
+    if (url.endsWith("messages.getConversationsById")) return response(options.chatDetails ?? { items: [{ peer: { id: Number(params.get("peer_ids")), type: "chat" }, chat_settings: { state: "in", title: "Автосервис" } }] });
     if (url.endsWith("messages.send")) return options.send ? options.send(params, init)
       : response([{ peer_id: Number(params.get("peer_ids")), message_id: 0, conversation_message_id: 123 }]);
     throw new Error("Unexpected fixture request");
@@ -431,12 +431,83 @@ test("Long Poll requests time out after thirty seconds and reveal no ephemeral k
 
 test("missing optional chat details use the authenticated peer identifier and still verify welcome delivery", async () => {
   const command = "/aggregator 0123456789abcdef0123456789abcdef";
-  for (const detail of [{ response: { items: [{ peer: { id: 2000000003, type: "chat" } }] } }, { error: { error_code: 917, error_msg: "private" } }]) {
+  for (const detail of [{ response: { count: 0, items: [] } }, { response: { items: [{ peer: { id: 2000000003, type: "chat" } }] } },
+    ...[7, 15, 917, 925].map((code) => ({ error: { error_code: code, error_msg: "private" } }))]) {
     const client = new VkClient(async (url) => new URL(url).hostname === "lp.vk.com"
       ? pollResponse({ ts: "2", updates: [chatMessage(command)] }) : pollResponse(detail));
     const chat = await client.waitForChat(token, 77, command, { server: "https://lp.vk.com/whp/77", key: "fixture_key", ts: "1" }, new AbortController().signal);
     assert.deepEqual(chat, { id: 2000000003, title: "ID 2000000003" });
   }
+});
+
+test("an empty chat lookup binds the command peer, persists it and reports the actual welcome result", async (t) => {
+  for (const denied of [false, true]) {
+    let release;
+    const incoming = new Promise((resolve) => { release = resolve; });
+    const f = await fixture(t, { chats: [], chatDetails: { count: 0, items: [] }, poll: async () => incoming,
+      ...(denied ? { apiErrors: { "messages.send": 917 } } : {}) });
+    await f.service.connect(token, new AbortController().signal);
+    const waiting = await f.service.beginChatPairing(new AbortController().signal);
+    assert.equal(f.service.state().peerId, null); assert.equal(f.calls.some((call) => call.method === "messages.send"), false);
+    release(pollResponse({ ts: "2", updates: [chatMessage(`[club77|Магазин] ${waiting.pairing.command}`)] }));
+    const state = await waitForState(f.service, (value) => value.testMessage === (denied ? "failed" : "sent"));
+    assert.equal(state.peerId, 2000000003); assert.equal(state.chats[0].title, "ID 2000000003");
+    assert.equal(state.enabled, false); assert.equal(state.pairing, null); assert.equal(f.loads.length, 0);
+    assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 1);
+    assert.equal(f.calls.at(-1).params.get("peer_ids"), "2000000003");
+    const reloaded = new EncryptedVkSettings(join(f.directory, "vk.enc.json"), Buffer.alloc(32, 17));
+    assert.equal(reloaded.get().peerId, 2000000003);
+    if (denied) { assert.match(state.error, /Тестовое сообщение не отправлено/); assert.match(state.error, /messages.send, код 917/); }
+    else assert.equal(state.error, null);
+  }
+});
+
+test("malformed, conflicting and explicitly left chat details never select a recipient or send a welcome", async (t) => {
+  const peer = { id: 2000000003, type: "chat" };
+  for (const chatDetails of [
+    {}, { items: null }, { items: {} }, { items: [{ peer }, { peer }] },
+    { items: [{ peer: { ...peer, id: 2000000099 } }] }, { items: [{ peer: { ...peer, type: "user" } }] },
+    { items: [{ peer, chat_settings: { state: "left", title: "Чат" } }] },
+    { items: [{ peer, chat_settings: { state: "kicked", title: "Чат" } }] },
+  ]) {
+    let release;
+    const incoming = new Promise((resolve) => { release = resolve; });
+    const f = await fixture(t, { chats: [], chatDetails, poll: async () => incoming });
+    await f.service.connect(token, new AbortController().signal);
+    const waiting = await f.service.beginChatPairing(new AbortController().signal);
+    release(pollResponse({ ts: "2", updates: [chatMessage(waiting.pairing.command)] }));
+    await waitForState(f.service, (value) => !!value.pairing?.error);
+    assert.equal(f.service.state().peerId, null); assert.equal(f.settings.get().peerId, null);
+    assert.equal(f.calls.some((call) => call.method === "messages.send"), false);
+  }
+});
+
+test("authentication and temporary chat lookup failures still stop pairing without selecting a recipient", async (t) => {
+  for (const code of [5, 6]) {
+    let release;
+    const incoming = new Promise((resolve) => { release = resolve; });
+    const f = await fixture(t, { apiErrors: { "messages.getConversationsById": code }, poll: async () => incoming });
+    f.settings.set(settingsValue({ chats: [], peerId: null }));
+    const waiting = await f.service.beginChatPairing(new AbortController().signal);
+    release(pollResponse({ ts: "2", updates: [chatMessage(waiting.pairing.command)] }));
+    const state = await waitForState(f.service, (value) => !!value.pairing?.error);
+    assert.equal(state.peerId, null); assert.equal(state.pairing.error.includes(token), false);
+    assert.equal(f.calls.some((call) => call.method === "messages.send"), false);
+  }
+});
+
+test("an aborted chat lookup cannot return a late empty response as a paired chat", async () => {
+  let started; const ready = new Promise((resolve) => { started = resolve; });
+  let release; const details = new Promise((resolve) => { release = resolve; });
+  const command = "/aggregator 0123456789abcdef0123456789abcdef";
+  const client = new VkClient(async (url) => {
+    if (new URL(url).hostname === "lp.vk.com") return pollResponse({ ts: "2", updates: [chatMessage(command)] });
+    assert.ok(url.endsWith("messages.getConversationsById")); started(); return details;
+  });
+  const controller = new AbortController();
+  const waiting = client.waitForChat(token, 77, command, { server: "https://lp.vk.com/whp/77", key: "fixture_key", ts: "1" }, controller.signal);
+  const rejected = assert.rejects(waiting, { name: "AbortError" });
+  await ready; controller.abort(); release(response({ count: 0, items: [] })); await rejected;
 });
 
 test("a pending welcome retries while paused without sending queued order updates or querying suppliers", async (t) => {

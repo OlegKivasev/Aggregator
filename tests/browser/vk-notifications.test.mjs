@@ -39,7 +39,7 @@ async function withSettings(check, options = {}) {
         } })) };
       else if (url.endsWith("groups.getLongPollSettings")) value = { is_enabled: !options.pollDisabled, api_version: "5.199", events: { message_new: 1 } };
       else if (url.endsWith("groups.getLongPollServer")) value = { server: "https://lp.vk.com/whp/77", key: "fixture_ephemeral_key", ts: "1" };
-      else if (url.endsWith("messages.getConversationsById")) value = { items: [{ peer: { id: 2000000003, type: "chat" }, chat_settings: { state: "in", title: "Автосервис" } }] };
+      else if (url.endsWith("messages.getConversationsById")) value = options.chatDetails ?? { items: [{ peer: { id: 2000000003, type: "chat" }, chat_settings: { state: "in", title: "Автосервис" } }] };
       else if (url.endsWith("messages.send")) {
         const params = new URLSearchParams(init.body); sends.push(params);
         if (options.denied) return new Response(JSON.stringify({ error: { error_code: 7, error_msg: fixtureToken } }), { headers: { "Content-Type": "application/json" } });
@@ -254,4 +254,27 @@ test("VK UI identifies a denied Long Poll server without blaming chat permission
     await page.locator("#vk-notifications-pair-command-panel").waitFor({ state: "visible" });
     assert.equal(sends.length, 0);
   }, options);
+});
+
+test("VK UI pairs a chat missing from the lookup by its command ID and accurately reports welcome delivery", async () => {
+  for (const denied of [false, true]) await withSettings(async (page, { sends, settings, deliver }) => {
+    await page.locator("#vk-notifications-token").fill(fixtureToken);
+    await page.getByRole("button", { name: "Сохранить ключ" }).click();
+    await page.locator("#vk-notifications-pair-start").waitFor({ state: "visible" });
+    await page.locator("#vk-notifications-pair-start").click();
+    await page.locator("#vk-notifications-pair-command-panel").waitFor({ state: "visible" });
+    assert.equal(settings.get().peerId, null); assert.equal(sends.length, 0);
+    deliver(`[club77|Магазин] ${await page.locator("#vk-notifications-pair-command").inputValue()}`);
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-connection").textContent.includes("Беседа: ID 2000000003"));
+    assert.equal(settings.get().peerId, 2000000003); assert.equal(settings.get().enabled, false);
+    assert.equal(sends.length, 1); assert.equal(sends[0].get("peer_ids"), "2000000003");
+    assert.equal(await page.locator("#vk-notifications-pairing").isVisible(), false);
+    const status = await page.locator("#vk-notifications-status").textContent();
+    assert.equal(status.includes(fixtureToken), false);
+    if (denied) { assert.match(status, /Тестовое сообщение не отправлено/); assert.equal(status.includes("Тестовое сообщение отправлено"), false); }
+    else assert.match(status, /Тестовое сообщение отправлено/);
+    await page.reload(); await page.locator("#vk-notifications-settings summary").click();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-connection").textContent.includes("Беседа: ID 2000000003"));
+    assert.equal(sends.length, 1);
+  }, { noChats: true, chatDetails: { count: 0, items: [] }, denied });
 });
