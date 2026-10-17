@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
+import { DatabaseSync } from "node:sqlite";
 import { EncryptedVkSettings } from "../src/backend/notifications/encrypted-vk-settings.ts";
 import { VkClient, VkError } from "../src/backend/notifications/vk-client.ts";
 import { SqliteNotificationRepository } from "../src/backend/notifications/sqlite-notification-repository.ts";
@@ -13,6 +14,7 @@ import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 import { parsePartKomOrderHistory } from "../src/backend/suppliers/part-kom/part-kom-order.ts";
 import { parseArmtekOrderHistory } from "../src/backend/suppliers/armtek/armtek-order.ts";
 import { SupplierAuthError, SupplierTimeoutError } from "../src/backend/errors.ts";
+import { nextOrderCheckTime } from "../src/backend/notifications/order-check-schedule.ts";
 
 const now = Date.parse("2026-10-17T12:00:00Z");
 const token = "vk1.a.fixture_secret_not_a_real_token";
@@ -73,7 +75,8 @@ async function fixture(t, options = {}) {
     load: async (supplier, signal) => { loads.push(supplier); return options.load ? options.load(supplier, signal) : [current]; }, observe: () => {} };
   const service = new OrderNotificationService(settings, repository, client, source, () => timestamp);
   t.after(async () => { await service.close(); await rm(directory, { recursive: true, force: true }); });
-  return { directory, settings, repository, service, calls, loads, client, setHistory: (value) => { current = value; }, advance: () => { timestamp += orderCheckIntervalMs; } };
+  return { directory, settings, repository, service, calls, loads, client, setHistory: (value) => { current = value; },
+    setTime: (value) => { timestamp = value; }, advance: (duration = orderCheckIntervalMs) => { timestamp += duration; } };
 }
 
 test("monitor initializes each supplier without announcing old orders or terminal states", () => {
@@ -142,6 +145,88 @@ test("malformed supplier responses cannot establish a baseline or consume an eve
   } finally { repository.close(); }
 });
 
+test("Forum Auto disappearance requires manual review and reports each last-known product without inventing a terminal status", () => {
+  const repository = new SqliteNotificationRepository(":memory:");
+  const missing = history([part({ quantity: 2 }), part({ article: "B2", title: "Колодки", quantity: 1, price: 300 })], "FORUM-1");
+  const remaining = history([part()], "FORUM-2");
+  const complete = { orders: [...missing.orders, ...remaining.orders], limited: false };
+  const update = (value) => observe(repository, value, "forum-auto");
+  try {
+    update(complete); assert.equal(repository.pending(target, now), null);
+    update(remaining);
+    const message = repository.pending(target, now);
+    assert.match(message.text, /ТРЕБУЕТ ПРОВЕРКИ · Forum Auto\nЗаказ № FORUM-1/);
+    assert.match(message.text, /мог быть получен или отменён/); assert.match(message.text, /Последние известные товары:/);
+    assert.match(message.text, /TEST A1 — Фильтр\n  2 шт\. · 200 ₽/);
+    assert.match(message.text, /TEST B2 — Колодки\n  1 шт\. · 300 ₽/);
+    assert.doesNotMatch(message.text, /ОТМЕНЕНО|ПОЛУЧЕНО|НОВЫЙ ЗАКАЗ|FORUM-2/);
+    repository.sent(message.id); update(remaining); assert.equal(repository.pending(target, now), null);
+    update(complete); assert.equal(repository.pending(target, now), null);
+    update(remaining); assert.match(repository.pending(target, now).text, /ТРЕБУЕТ ПРОВЕРКИ/);
+  } finally { repository.close(); }
+});
+
+test("only complete valid Forum Auto feeds establish and change the active list; other suppliers never infer disappearance", () => {
+  const repository = new SqliteNotificationRepository(":memory:");
+  const empty = { orders: [], limited: false };
+  try {
+    observe(repository, history(), "forum-auto");
+    observe(repository, { ...empty, limited: true }, "forum-auto");
+    assert.equal(repository.pending(target, now), null);
+    assert.throws(() => repository.observe(target, [
+      { supplier: "forum-auto", histories: [empty] },
+      { supplier: "armtek", histories: [history([part({ quantity: NaN })])] },
+    ], now));
+    observe(repository, history(), "forum-auto"); assert.equal(repository.pending(target, now), null);
+    observe(repository, empty, "forum-auto");
+    const message = repository.pending(target, now); assert.match(message.text, /Заказ № ORDER-1/);
+    repository.sent(message.id);
+    for (const supplier of ["armtek", "part-kom", "rossko"]) {
+      observe(repository, history(), supplier); observe(repository, empty, supplier);
+    }
+    assert.equal(repository.pending(target, now), null);
+    const other = "77:2000000002";
+    repository.observe(other, [{ supplier: "forum-auto", histories: [{ ...history(), limited: true }] }], now);
+    repository.observe(other, [{ supplier: "forum-auto", histories: [empty] }], now);
+    assert.equal(repository.pending(other, now), null);
+  } finally { repository.close(); }
+});
+
+test("Forum Auto presence and queued disappearance survive restart without duplicate or cross-chat delivery", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "aggregator-forum-monitor-"));
+  const path = join(directory, "orders.sqlite");
+  let repository = new SqliteNotificationRepository(path);
+  t.after(async () => { repository.close(); await rm(directory, { recursive: true, force: true }); });
+  observe(repository, history(), "forum-auto");
+  repository.close(); repository = new SqliteNotificationRepository(path);
+  observe(repository, { orders: [], limited: false }, "forum-auto");
+  const original = repository.pending(target, now); assert.match(original.text, /ТРЕБУЕТ ПРОВЕРКИ/);
+  repository.close(); repository = new SqliteNotificationRepository(path);
+  observe(repository, { orders: [], limited: false }, "forum-auto");
+  const restored = repository.pending(target, now);
+  assert.equal(restored.id, original.id); assert.equal(restored.randomId, original.randomId);
+  assert.equal(repository.pending("77:2000000002", now), null); assert.equal(repository.counts(target).pending, 1);
+  repository.sent(restored.id);
+  observe(repository, { orders: [], limited: false }, "forum-auto"); assert.equal(repository.pending(target, now), null);
+});
+
+test("upgrading a database with old Forum Auto snapshots initializes current presence without announcing historical disappearances", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "aggregator-forum-upgrade-"));
+  const path = join(directory, "orders.sqlite");
+  let repository = new SqliteNotificationRepository(path);
+  t.after(async () => { repository.close(); await rm(directory, { recursive: true, force: true }); });
+  observe(repository, { orders: [...history().orders, ...history([part()], "STILL-ACTIVE").orders], limited: false }, "forum-auto");
+  repository.close();
+  const legacy = new DatabaseSync(path);
+  try { legacy.exec("DROP TABLE vk_forum_active_orders"); } finally { legacy.close(); }
+  repository = new SqliteNotificationRepository(path);
+  observe(repository, history([part()], "STILL-ACTIVE"), "forum-auto");
+  assert.equal(repository.pending(target, now), null);
+  observe(repository, { orders: [], limited: false }, "forum-auto");
+  const message = repository.pending(target, now).text;
+  assert.match(message, /Заказ № STILL-ACTIVE/); assert.doesNotMatch(message, /Заказ № ORDER-1/);
+});
+
 test("outbox and baselines survive restart; retries keep the same random_id and destination", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "aggregator-vk-restart-"));
   const path = join(directory, "orders.sqlite");
@@ -208,7 +293,7 @@ test("connecting sends one welcome but leaves supplier checks and order notifica
   const message = f.calls.at(-1).params.get("message");
   assert.match(message, /Агрегатор автозапчастей подключён к этой беседе/);
   assert.match(message, /новых заказах у поставщиков, отменах и получении товаров/);
-  assert.match(message, /каждые 10 минут при включённых уведомлениях[\s\S]*в настройках агрегатора/);
+  assert.match(message, /каждые 10 минут с 07:00 до 23:00 по самарскому времени \(UTC\+4\) при включённых уведомлениях[\s\S]*в настройках агрегатора/);
   await f.service.connect(token, new AbortController().signal);
   assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 1);
   assert.equal(JSON.stringify(state).includes(token), false);
@@ -595,7 +680,7 @@ test("a digest lists several products separately inside each order and status", 
 });
 
 test("fixed ten-minute scheduler resumes deferred reads without re-fetching already checked suppliers", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const f = await fixture(t);
   f.settings.set(settingsValue({ enabled: true }));
   const release = f.service.beginForegroundOperation();
@@ -605,6 +690,83 @@ test("fixed ten-minute scheduler resumes deferred reads without re-fetching alre
   t.mock.timers.tick(orderCheckIntervalMs - 1); assert.equal(f.loads.length, 1);
   f.advance(); t.mock.timers.tick(1); await f.service.runOnce(); assert.equal(f.loads.length, 2);
   f.service.stop(); t.mock.timers.tick(orderCheckIntervalMs); assert.equal(f.loads.length, 2);
+});
+
+test("the Samara monitoring window excludes 23:00 and includes exactly 07:00 across calendar boundaries", () => {
+  for (const [time, next] of [
+    ["2026-10-17T06:59:59.999+04:00", "2026-10-17T07:00:00+04:00"],
+    ["2026-10-17T07:00:00+04:00", "2026-10-17T07:00:00+04:00"],
+    ["2026-10-17T22:59:59.999+04:00", "2026-10-17T22:59:59.999+04:00"],
+    ["2026-10-17T23:00:00+04:00", "2026-10-18T07:00:00+04:00"],
+    ["2026-10-18T00:00:00+04:00", "2026-10-18T07:00:00+04:00"],
+    ["2026-12-31T23:59:00+04:00", "2027-01-01T07:00:00+04:00"],
+  ]) assert.equal(nextOrderCheckTime(Date.parse(time)), Date.parse(next));
+});
+
+test("a server started at night wakes at 07:00 instead of retaining its startup minute offset", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const start of ["2026-10-17T23:03:00+04:00", "2026-10-18T06:55:00+04:00"]) {
+    const f = await fixture(t);
+    const morning = Date.parse("2026-10-18T07:00:00+04:00");
+    f.setTime(Date.parse(start)); f.settings.set(settingsValue({ enabled: true }));
+    f.service.start(); await f.service.runOnce();
+    assert.equal(f.loads.length, 0); assert.equal(f.calls.length, 0);
+    assert.equal(f.service.state().nextCheckAt, new Date(morning).toISOString());
+    const wait = morning - Date.parse(start);
+    f.advance(wait - 1); t.mock.timers.tick(wait - 1); assert.equal(f.loads.length, 0);
+    f.advance(1); t.mock.timers.tick(1); await f.service.runOnce();
+    assert.equal(f.loads.length, 1); assert.equal(f.service.state().lastCheckAt, new Date(morning).toISOString());
+    assert.equal(f.service.state().nextCheckAt, new Date(morning + orderCheckIntervalMs).toISOString());
+    f.advance(); t.mock.timers.tick(orderCheckIntervalMs); await f.service.runOnce(); assert.equal(f.loads.length, 2);
+    f.service.stop();
+  }
+});
+
+test("checks stop at 23:00, retain the baseline and outbox and deliver pending changes after 07:00", async (t) => {
+  const f = await fixture(t);
+  f.settings.set(settingsValue({ enabled: true }));
+  f.setTime(Date.parse("2026-10-17T22:59:00+04:00")); await f.service.runOnce();
+  assert.equal(f.loads.length, 1);
+  observe(f.repository, history([part({ fulfillment: "cancelled" })]));
+  f.setTime(Date.parse("2026-10-17T23:00:00+04:00")); await f.service.runOnce();
+  f.setTime(Date.parse("2026-10-18T06:59:59+04:00")); await f.service.runOnce();
+  assert.equal(f.loads.length, 1); assert.equal(f.calls.length, 0); assert.equal(f.repository.counts(target).pending, 1);
+  assert.equal(f.service.state().nextCheckAt, "2026-10-18T03:00:00.000Z");
+  f.setTime(Date.parse("2026-10-18T07:00:00+04:00")); await f.service.runOnce();
+  assert.equal(f.loads.length, 2); assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 1);
+  assert.match(f.calls.at(-1).params.get("message"), /ОТМЕНЕНО · Armtek/); assert.equal(f.repository.counts(target).pending, 0);
+});
+
+test("a supplier response crossing 23:00 is saved but cannot start another supplier or send order alerts at night", async (t) => {
+  const f = await fixture(t, { suppliers: ["armtek", "part-kom"], load: async () => {
+    f.setTime(Date.parse("2026-10-17T23:00:00+04:00")); return [history([part({ fulfillment: "cancelled" })])];
+  } });
+  observe(f.repository, history()); f.settings.set(settingsValue({ enabled: true }));
+  f.setTime(Date.parse("2026-10-17T22:59:59+04:00")); await f.service.runOnce();
+  assert.deepEqual(f.loads, ["armtek"]); assert.equal(f.calls.length, 0);
+  assert.equal(f.repository.counts(target).pending, 1); assert.equal(f.service.state().nextCheckAt, "2026-10-18T03:00:00.000Z");
+});
+
+test("enabling at night schedules morning but an explicit connection test remains available", async (t) => {
+  const f = await fixture(t);
+  f.setTime(Date.parse("2026-10-17T23:05:00+04:00"));
+  const connected = await f.service.connect(token, new AbortController().signal);
+  assert.equal(connected.testMessage, "sent");
+  const state = await f.service.configure({ enabled: true }); await f.service.runOnce();
+  assert.equal(state.enabled, true); assert.equal(state.nextCheckAt, "2026-10-18T03:00:00.000Z");
+  assert.equal(f.loads.length, 0); assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 1);
+});
+
+test("a failed Forum Auto check never triggers disappearance and the next successful empty list does", async (t) => {
+  let fail = false; let orders = history();
+  const f = await fixture(t, { suppliers: ["forum-auto"], load: async () => {
+    if (fail) throw new SupplierTimeoutError("private"); return [orders];
+  } });
+  f.settings.set(settingsValue({ enabled: true })); await f.service.runOnce();
+  fail = true; f.advance(); await f.service.runOnce(); assert.equal(f.calls.length, 0);
+  assert.match(f.service.state().suppliers.find((item) => item.supplier === "forum-auto").error, /не ответил вовремя/);
+  fail = false; orders = { orders: [], limited: false }; f.advance(); await f.service.runOnce();
+  assert.equal(f.calls.length, 1); assert.match(f.calls[0].params.get("message"), /ТРЕБУЕТ ПРОВЕРКИ · Forum Auto/);
 });
 
 test("a truncated list of community dialogs never auto-selects its only visible chat", async (t) => {

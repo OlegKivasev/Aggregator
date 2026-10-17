@@ -3,7 +3,7 @@ import type { OrderHistorySupplier } from "../purchasing/order-cancellation-cont
 
 export const supplierNames: Record<OrderHistorySupplier, string> = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
 export const notificationSuppliers = Object.keys(supplierNames) as OrderHistorySupplier[];
-export type EventKind = "new" | "cancelled" | "received";
+export type EventKind = "new" | "cancelled" | "received" | "missing";
 export interface MonitoredItem { article: string; brand: string | null; title: string | null; quantity: number; cancelled: number; received: number; price: number | null }
 export interface MonitoredOrder { number: string; date: string | null; items: Record<string, MonitoredItem> }
 export interface OrderEvent { supplier: OrderHistorySupplier; number: string; kind: EventKind; items: MonitoredItem[] }
@@ -57,7 +57,7 @@ export function orderChanges(supplier: OrderHistorySupplier, incoming: Monitored
 }
 
 const clean = (value: string): string => value.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim();
-const labels: Record<EventKind, string> = { new: "НОВЫЙ ЗАКАЗ", cancelled: "ОТМЕНЕНО", received: "ПОЛУЧЕНО" };
+const labels: Record<EventKind, string> = { new: "НОВЫЙ ЗАКАЗ", cancelled: "ОТМЕНЕНО", received: "ПОЛУЧЕНО", missing: "ТРЕБУЕТ ПРОВЕРКИ" };
 const amount = (value: number): string => value.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
 
 /** Plain text only; shipping is never treated as receipt. */
@@ -65,7 +65,8 @@ export function formatOrderEvents(events: OrderEvent[]): string[] {
   const messages: string[] = [];
   let message = "Заказы: обновления";
   for (const event of events) {
-    const header = `\n\n${labels[event.kind]} · ${supplierNames[event.supplier]}\nЗаказ № ${clean(event.number)}`;
+    const header = `\n\n${labels[event.kind]} · ${supplierNames[event.supplier]}\nЗаказ № ${clean(event.number)}`
+      + (event.kind === "missing" ? "\nЗаказ исчез из списка активных. Проверьте у поставщика: он мог быть получен или отменён.\nПоследние известные товары:" : "");
     let block = header;
     for (const item of event.items) {
       const line = `\n• ${clean([item.brand, item.article].filter(Boolean).join(" "))}${item.title ? ` — ${clean(item.title)}` : ""}\n  ${amount(item.quantity)} шт.${item.price === null ? "" : ` · ${amount(item.price * item.quantity)} ₽`}`;

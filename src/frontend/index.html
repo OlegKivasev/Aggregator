@@ -374,7 +374,7 @@
         <details class="vk-notifications-settings suppliers-panel" id="vk-notifications-settings">
           <summary class="suppliers-panel__summary">Уведомления ВКонтакте</summary>
           <div class="vk-notifications-settings__content">
-            <p class="settings-drawer__hint">Новые заказы, отмены и получение: проверка каждые 10 минут, даже при закрытом браузере.</p>
+            <p class="settings-drawer__hint">Новые заказы, отмены и получение: проверка каждые 10 минут с 07:00 до 23:00 по самарскому времени (UTC+4), даже при закрытом браузере. Ночью проверка и уведомления о заказах приостановлены.</p>
             <form id="vk-notifications-form" class="auth-form">
               <label class="field" for="vk-notifications-token">
                 <span>Ключ доступа сообщества</span>
@@ -410,7 +410,7 @@
             <p class="settings-drawer__hint">После подключения в выбранную беседу придёт тестовое сообщение. Уведомления о заказах включаются отдельно. Первый запуск запоминает текущую историю; далее сообщает о новых изменениях.</p>
             <p class="vk-notifications-settings__status" id="vk-notifications-status" role="status" aria-live="polite"></p>
             <ul class="vk-notifications-settings__suppliers" id="vk-notifications-suppliers" hidden></ul>
-            <p class="settings-drawer__hint">Forum Auto предоставляет только активные заказы: исчезновение заказа не подтверждает отмену или получение.</p>
+            <p class="settings-drawer__hint">Если заказ Forum Auto исчезнет из полного списка активных, бот сообщит об этом отдельно. Причину нужно проверить у поставщика: заказ мог быть получен или отменён.</p>
             <div class="auth-actions">
               <button class="button-secondary btn btn-light" type="button" id="vk-notifications-refresh">Обновить состояние</button>
               <button class="button-secondary btn btn-light" type="button" id="vk-notifications-disconnect" disabled>Отключить ВК</button>

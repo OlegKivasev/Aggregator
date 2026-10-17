@@ -8,11 +8,12 @@ import { SqliteNotificationRepository } from "./sqlite-notification-repository.t
 import { VkClient, VkError } from "./vk-client.ts";
 import { notificationSuppliers, supplierNames, monitoredOrders } from "./order-events.ts";
 import { SupplierAuthError, SupplierTimeoutError } from "../errors.ts";
+import { nextOrderCheckTime } from "./order-check-schedule.ts";
 
 export const orderCheckIntervalMs = 10 * 60_000;
 const welcomeMessage = "Агрегатор автозапчастей подключён к этой беседе.\n\n"
   + "Здесь будут появляться уведомления о новых заказах у поставщиков, отменах и получении товаров. Товары будут перечислены отдельными строками.\n\n"
-  + "Проверка заказов — каждые 10 минут при включённых уведомлениях. Включить или приостановить уведомления можно в настройках агрегатора.\n\n"
+  + "Проверка заказов — каждые 10 минут с 07:00 до 23:00 по самарскому времени (UTC+4) при включённых уведомлениях. Ночью проверка и уведомления о заказах приостановлены. Включить или приостановить уведомления можно в настройках агрегатора.\n\n"
   + "Это тестовое сообщение: отправка в беседу работает.";
 export class NotificationSettingsError extends Error {
   readonly status: number;
@@ -33,7 +34,7 @@ export class OrderNotificationService {
   private readonly source: NotificationHistorySource;
   private readonly now: () => number;
   private readonly checks: SupplierCheck[] = notificationSuppliers.map((supplier) => ({ supplier, lastSuccessAt: null, limited: false, error: null }));
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
   private controller = new AbortController();
   private mutationController = new AbortController();
   private work: Promise<void> | null = null;
@@ -156,7 +157,7 @@ export class OrderNotificationService {
       if (enabled) this.repository.retryFailed(`${current.groupId}:${selected}`);
       if (enabled) this.nextSupplierCheck.clear();
       this.error = null; this.deliveryBlocked = false;
-      this.nextCheckAt = enabled ? new Date(this.now()).toISOString() : null;
+      this.nextCheckAt = enabled ? new Date(nextOrderCheckTime(this.now())).toISOString() : null;
       // Connection tests are allowed while regular order notifications are paused.
       await this.welcome(bounded.signal);
     } finally { bounded.dispose(); this.mutating = false; }
@@ -185,20 +186,30 @@ export class OrderNotificationService {
     this.armTimer();
     void this.runOnce();
   }
-  private armTimer(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = setInterval(() => { void this.runOnce(); }, orderCheckIntervalMs); this.timer.unref();
+  private armTimer(at = this.now() + orderCheckIntervalMs): void {
+    if (this.timer) clearTimeout(this.timer);
+    const now = this.now();
+    const allowed = nextOrderCheckTime(now);
+    const next = allowed > now ? allowed : nextOrderCheckTime(at);
+    this.timer = setTimeout(() => { this.armTimer(); void this.runOnce(); }, Math.max(1, next - now)); this.timer.unref();
   }
   runOnce(): Promise<void> {
     if (this.work) return this.work;
     const config = this.settings.get();
     if (this.stopped || this.mutating || !config || config.peerId === null) return Promise.resolve();
     if (!config.enabled && !this.repository.pending(`${config.groupId}:${config.peerId}`, this.now(), true)) return Promise.resolve();
+    const now = this.now();
+    const allowed = nextOrderCheckTime(now);
+    if (allowed > now) {
+      this.nextCheckAt = config.enabled ? new Date(allowed).toISOString() : null;
+      if (this.timer) this.armTimer(allowed);
+      return Promise.resolve();
+    }
     if (this.timer) this.armTimer();
     this.deferred = false;
     this.controller = new AbortController();
     const signal = this.controller.signal;
-    this.nextCheckAt = config.enabled ? new Date(this.now() + orderCheckIntervalMs).toISOString() : null;
+    this.nextCheckAt = config.enabled ? new Date(nextOrderCheckTime(now + orderCheckIntervalMs)).toISOString() : null;
     const operation = config.enabled ? this.cycle(config, config.peerId, signal) : this.sendPending(config, config.peerId, signal, true);
     this.work = operation.catch(() => {
       if (!signal.aborted) this.error = "Не удалось завершить проверку уведомлений. Повторим через 10 минут.";
@@ -211,6 +222,8 @@ export class OrderNotificationService {
     this.error = null;
     for (const check of this.checks) {
       signal.throwIfAborted();
+      const now = this.now();
+      if (nextOrderCheckTime(now) > now) break;
       if (!this.source.available(check.supplier)) { check.error = "Поставщик не подключён."; continue; }
       if ((this.nextSupplierCheck.get(check.supplier) ?? 0) > this.now()) continue;
       if (this.foregroundOperations > 0) { this.deferred = true; check.error = "Проверка отложена: поставщик занят."; continue; }
@@ -243,6 +256,8 @@ export class OrderNotificationService {
     if (this.deliveryBlocked) { this.error = "Отправка приостановлена. Проверьте ключ и права бота, затем обновите подключение."; return; }
     for (let sent = 0; sent < (welcomeOnly ? 1 : 20); sent++) {
       signal.throwIfAborted();
+      const now = this.now();
+      if (!welcomeOnly && nextOrderCheckTime(now) > now) break;
       const pending = this.repository.pending(target, this.now(), welcomeOnly);
       if (!pending) break;
       try {
@@ -261,6 +276,6 @@ export class OrderNotificationService {
       if (!welcomeOnly) await delay(400, undefined, { signal });
     }
   }
-  stop(): void { this.stopped = true; if (this.timer) clearInterval(this.timer); this.timer = null; this.controller.abort(); this.mutationController.abort(); this.pairingController.abort(); }
+  stop(): void { this.stopped = true; if (this.timer) clearTimeout(this.timer); this.timer = null; this.controller.abort(); this.mutationController.abort(); this.pairingController.abort(); }
   async close(): Promise<void> { this.stop(); await Promise.all([this.work, this.pairingWork]); this.repository.close(); }
 }

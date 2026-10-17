@@ -24,15 +24,19 @@ export class SqliteNotificationRepository {
       CREATE TABLE IF NOT EXISTS vk_order_notification_welcome (
         target TEXT PRIMARY KEY, message_id INTEGER NOT NULL UNIQUE
       ) STRICT;
+      CREATE TABLE IF NOT EXISTS vk_forum_active_orders (
+        target TEXT PRIMARY KEY, numbers TEXT NOT NULL
+      ) STRICT;
     `); } catch (error) { this.database.close(); throw error; }
   }
 
   observe(target: string, batches: Array<{ supplier: OrderHistorySupplier; histories: OrderHistory[] }>, now: number): void {
-    const prepared = batches.map(({ supplier, histories }) => ({ supplier, orders: this.combine(histories) }));
+    const prepared = batches.map(({ supplier, histories }) => ({ supplier, orders: this.combine(histories), complete: histories.length > 0 && histories.every((history) => !history.limited) }));
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const events: OrderEvent[] = [];
-      for (const { supplier, orders } of prepared) {
+      for (const { supplier, orders, complete } of prepared) {
+        if (supplier === "forum-auto" && complete) events.push(...this.observeForumActiveOrders(target, orders));
         const baseline = this.database.prepare("SELECT day FROM vk_order_monitor_baseline WHERE target=? AND supplier=?").get(target, supplier);
         for (const order of orders) {
           const row = this.database.prepare("SELECT payload FROM vk_order_monitor_snapshot WHERE target=? AND supplier=? AND number=?").get(target, supplier, order.number);
@@ -50,6 +54,27 @@ export class SqliteNotificationRepository {
         .run(randomInt(1, 2_147_483_647), target, message);
       this.database.exec("COMMIT");
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+  }
+
+  private observeForumActiveOrders(target: string, orders: MonitoredOrder[]): OrderEvent[] {
+    const row = this.database.prepare("SELECT numbers FROM vk_forum_active_orders WHERE target=?").get(target);
+    const current = new Set(orders.map((order) => order.number));
+    const events: OrderEvent[] = [];
+    if (row) {
+      const previous: unknown = JSON.parse(String(row.numbers));
+      if (!Array.isArray(previous) || previous.length > 500 || previous.some((number) => typeof number !== "string" || !number || number.length > 200)) throw new Error("Invalid Forum Auto active orders");
+      for (const number of previous) {
+        if (current.has(number)) continue;
+        const stored = this.database.prepare("SELECT payload FROM vk_order_monitor_snapshot WHERE target=? AND supplier='forum-auto' AND number=?").get(target, number);
+        if (!stored) throw new Error("Missing Forum Auto order snapshot");
+        const order = JSON.parse(String(stored.payload)) as MonitoredOrder;
+        events.push({ supplier: "forum-auto", number, kind: "missing", items: Object.values(order.items) });
+      }
+    }
+    // The first complete response establishes current presence, including after upgrading an existing history database.
+    this.database.prepare(`INSERT INTO vk_forum_active_orders VALUES (?,?)
+      ON CONFLICT(target) DO UPDATE SET numbers=excluded.numbers`).run(target, JSON.stringify([...current]));
+    return events;
   }
 
   private combine(histories: OrderHistory[]): MonitoredOrder[] {

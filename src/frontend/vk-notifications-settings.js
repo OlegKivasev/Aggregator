@@ -20,7 +20,7 @@ const names = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Au
 let state = null;
 let busy = false;
 let pairingPoll = null;
-const date = (value) => value ? new Date(value).toLocaleString("ru-RU") : "ещё не было";
+const date = (value) => value ? new Date(value).toLocaleString("ru-RU", { timeZone: "Europe/Samara" }) : "ещё не было";
 const validDate = (value) => value === null || typeof value === "string" && Number.isFinite(Date.parse(value));
 
 const validate = (value) => {

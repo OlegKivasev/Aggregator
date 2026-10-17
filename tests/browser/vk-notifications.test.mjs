@@ -48,7 +48,8 @@ async function withSettings(check, options = {}) {
       return new Response(JSON.stringify({ response: value }), { headers: { "Content-Type": "application/json" } });
     });
     service = new OrderNotificationService(settings, repository, client, { available: () => false,
-      load: async () => { throw new Error("Supplier API must not be called by this test"); }, observe: () => {} });
+      load: async () => { throw new Error("Supplier API must not be called by this test"); }, observe: () => {} },
+    () => options.now ?? Date.parse("2026-10-17T12:00:00Z"));
     const html = await readFile("src/frontend/index.html", "utf8");
     const markup = /<details class="vk-notifications-settings[^"]*"[\s\S]*?<\/details>/.exec(html)?.[0];
     assert.ok(markup);
@@ -67,7 +68,7 @@ async function withSettings(check, options = {}) {
     server.listen(0, "127.0.0.1"); await once(server, "listening");
     const origin = `http://127.0.0.1:${server.address().port}`;
     browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER_EXECUTABLE_PATH });
-    const page = await browser.newPage({ viewport: { width: 800, height: 1000 } });
+    const page = await browser.newPage({ viewport: { width: 800, height: 1000 }, timezoneId: "UTC" });
     const errors = []; page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     await page.goto(origin); await page.waitForLoadState("networkidle");
@@ -277,4 +278,20 @@ test("VK UI pairs a chat missing from the lookup by its command ID and accuratel
     await page.waitForFunction(() => document.querySelector("#vk-notifications-connection").textContent.includes("Беседа: ID 2000000003"));
     assert.equal(sends.length, 1);
   }, { noChats: true, chatDetails: { count: 0, items: [] }, denied });
+});
+
+test("VK UI explains the nightly pause and Forum Auto review alerts and shows 07:00 in Samara even for a UTC browser", async () => {
+  await withSettings(async (page, { service, sends }) => {
+    const text = await page.locator("#vk-notifications-settings").textContent();
+    assert.match(text, /с 07:00 до 23:00 по самарскому времени \(UTC\+4\)/);
+    assert.match(text, /Если заказ Forum Auto исчезнет[\s\S]*мог быть получен или отменён/);
+    await page.locator("#vk-notifications-token").fill(fixtureToken);
+    await page.getByRole("button", { name: "Сохранить ключ" }).click();
+    await page.waitForFunction(() => !document.querySelector("#vk-notifications-enabled").disabled);
+    await page.locator("#vk-notifications-enabled").check();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Следующая:"));
+    assert.match(await page.locator("#vk-notifications-status").textContent(), /18\.10\.2026, 07:00:00/);
+    assert.equal(service.state().nextCheckAt, "2026-10-18T03:00:00.000Z");
+    await service.runOnce(); assert.equal(sends.length, 1);
+  }, { now: Date.parse("2026-10-17T23:05:00+04:00") });
 });
