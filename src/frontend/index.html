@@ -371,25 +371,36 @@
           <button type="button" class="button-secondary settings-close btn btn-light" id="settings-close" aria-label="Закрыть настройки">×</button>
         </div>
 
-        <details class="vk-notifications-settings" id="vk-notifications-settings">
-          <summary>Уведомления ВКонтакте</summary>
-          <p>Новые заказы, отмены и получение: проверка каждые 10 минут, даже при закрытом браузере.</p>
-          <form id="vk-notifications-form">
-            <label for="vk-notifications-token">Ключ доступа сообщества</label>
-            <input id="vk-notifications-token" class="form-control" type="password" autocomplete="new-password" maxlength="512" required placeholder="Ключ с правом работы с сообщениями">
-            <button class="btn btn-primary" type="submit">Сохранить ключ</button>
-          </form>
-          <p id="vk-notifications-connection" role="status"></p>
-          <label id="vk-notifications-chat-label" hidden>Беседа
-            <select id="vk-notifications-chat" class="form-select"></select>
-          </label>
-          <label class="vk-notifications-enabled"><input type="checkbox" id="vk-notifications-enabled" disabled> Отправлять уведомления в выбранную беседу</label>
-          <p>После подключения в выбранную беседу придёт тестовое сообщение. Уведомления о заказах включаются отдельно. Первый запуск запоминает текущую историю; далее сообщает о новых изменениях.</p>
-          <p>Forum Auto предоставляет только активные заказы: исчезновение заказа не подтверждает отмену или получение.</p>
-          <p id="vk-notifications-status" role="status" aria-live="polite"></p>
-          <ul id="vk-notifications-suppliers"></ul>
-          <button class="btn btn-light" type="button" id="vk-notifications-refresh">Обновить состояние</button>
-          <button class="btn btn-light" type="button" id="vk-notifications-disconnect" disabled>Отключить ВК</button>
+        <details class="vk-notifications-settings suppliers-panel" id="vk-notifications-settings">
+          <summary class="suppliers-panel__summary">Уведомления ВКонтакте</summary>
+          <div class="vk-notifications-settings__content">
+            <p class="settings-drawer__hint">Новые заказы, отмены и получение: проверка каждые 10 минут, даже при закрытом браузере.</p>
+            <form id="vk-notifications-form" class="auth-form">
+              <label class="field" for="vk-notifications-token">
+                <span>Ключ доступа сообщества</span>
+                <input id="vk-notifications-token" type="password" autocomplete="new-password" maxlength="512" required placeholder="Ключ с правом работы с сообщениями">
+              </label>
+              <div class="auth-actions">
+                <button class="btn btn-primary" type="submit">Сохранить ключ</button>
+              </div>
+            </form>
+            <p class="vk-notifications-settings__connection" id="vk-notifications-connection" role="status"></p>
+            <label class="field" id="vk-notifications-chat-label" hidden>
+              <span>Беседа</span>
+              <select id="vk-notifications-chat"></select>
+            </label>
+            <div class="supplier-options__list supplier-options__list--single vk-notifications-settings__toggle">
+              <label><input type="checkbox" id="vk-notifications-enabled" disabled><span>Отправлять уведомления в выбранную беседу</span></label>
+            </div>
+            <p class="settings-drawer__hint">После подключения в выбранную беседу придёт тестовое сообщение. Уведомления о заказах включаются отдельно. Первый запуск запоминает текущую историю; далее сообщает о новых изменениях.</p>
+            <p class="vk-notifications-settings__status" id="vk-notifications-status" role="status" aria-live="polite"></p>
+            <ul class="vk-notifications-settings__suppliers" id="vk-notifications-suppliers" hidden></ul>
+            <p class="settings-drawer__hint">Forum Auto предоставляет только активные заказы: исчезновение заказа не подтверждает отмену или получение.</p>
+            <div class="auth-actions">
+              <button class="button-secondary btn btn-light" type="button" id="vk-notifications-refresh">Обновить состояние</button>
+              <button class="button-secondary btn btn-light" type="button" id="vk-notifications-disconnect" disabled>Отключить ВК</button>
+            </div>
+          </div>
         </details>
 
         <details class="table-columns-settings">

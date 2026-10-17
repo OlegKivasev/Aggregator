@@ -3488,12 +3488,30 @@ th[aria-sort="descending"] .analogs-sort span::after {
     position: static;
   }
 }
-.vk-notifications-settings { margin: 12px 0; padding: 14px; border: 1px solid #dce4ef; border-radius: 12px; background: #f8fbff; }
-.vk-notifications-settings summary { cursor: pointer; font-weight: 600; }
-.vk-notifications-settings p, .vk-notifications-settings li { font-size: 12px; color: #617089; margin: 10px 0; }
-.vk-notifications-settings form { display: grid; gap: 8px; margin: 12px 0; }
-.vk-notifications-settings label { display: block; font-size: 13px; margin: 10px 0; }
+.vk-notifications-settings { margin: 0 0 14px; background: var(--surface); }
+.vk-notifications-settings__content { display: grid; min-width: 0; gap: 14px; margin-top: 14px; }
+.vk-notifications-settings p { margin: 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .vk-notifications-settings [hidden] { display: none !important; }
-.vk-notifications-settings .vk-notifications-enabled { display: flex; align-items: flex-start; gap: 8px; }
+.vk-notifications-settings .field { min-width: 0; }
+.vk-notifications-settings .field select { width: 100%; min-width: 0; padding: 9px 12px; border: 1px solid #dce3ea; border-radius: 8px; color: var(--ink); background: var(--surface); font: inherit; }
+.vk-notifications-settings .field select:focus-visible { border-color: var(--accent); outline: 0; box-shadow: 0 0 0 3px rgba(255, 75, 19, .12); }
+.vk-notifications-settings__connection { padding: 10px 12px; border-radius: 8px; color: var(--muted); background: var(--page); }
+.vk-notifications-settings__toggle { margin: 0; }
+.vk-notifications-settings__toggle label { align-items: flex-start; padding: 10px 12px; line-height: 1.5; }
+.vk-notifications-settings__toggle input { margin-top: 1px; }
+.vk-notifications-settings__toggle label:has(input:checked) { border-color: #ffc3b0; background: #fff8f4; }
+.vk-notifications-settings__toggle label:has(input:disabled) { color: var(--muted); background: var(--page); }
+.vk-notifications-settings__status { color: var(--ink); }
+.vk-notifications-settings__status:empty { display: none; }
+.vk-notifications-settings__suppliers { display: grid; margin: 0; padding: 0; border-top: 1px solid var(--line); list-style: none; }
+.vk-notifications-settings__suppliers li { display: grid; grid-template-columns: 86px minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 12px; line-height: 1.5; }
+.vk-notifications-settings__suppliers strong { color: var(--ink); font-weight: 700; }
+.vk-notifications-settings__suppliers span { color: var(--muted); overflow-wrap: anywhere; }
 .vk-notifications-settings [data-error="true"] { color: #b42318; }
-.vk-notifications-settings > button { margin: 5px 4px 0 0; }
+.vk-notifications-settings .auth-actions { flex-wrap: wrap; }
+.vk-notifications-settings .btn { min-height: 36px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 12px; font-weight: 700; line-height: 1.4; cursor: pointer; }
+.vk-notifications-settings .btn-primary { color: #fff; }
+.vk-notifications-settings .btn-light { color: var(--ink); background: #f7f9fb; }
+.vk-notifications-settings .btn-light:hover:enabled { background: #eef2f6; }
+.vk-notifications-settings .btn:focus-visible, .vk-notifications-settings input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.vk-notifications-settings .btn:disabled { opacity: .5; cursor: default; }

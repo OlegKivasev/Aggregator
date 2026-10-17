@@ -41,7 +41,7 @@ const paint = () => {
   if (!state) return;
   const selectedChat = state.chats.find((item) => item.id === state.peerId);
   connection.textContent = !state.persistent ? "Для сохранения ключа администратору нужно настроить серверное шифрование."
-    : state.configured ? `Сообщество: ${state.groupName}. ${selectedChat ? `Беседа: ${selectedChat.title}.` : state.chats.length ? "Выберите беседу для уведомлений." : "Доступных бесед нет. Проверьте, что бот добавлен в чат и может писать сообщения, затем сохраните ключ повторно."}` : "ВК пока не подключён.";
+    : state.configured ? `Сообщество: ${state.groupName}. ${selectedChat ? `Беседа: ${selectedChat.title}.` : state.chats.length ? "Выберите беседу для уведомлений." : "Не удалось найти доступную беседу. Если бот уже добавлен, отправьте в чат сообщение с упоминанием сообщества через @, затем сохраните ключ повторно."}` : "ВК пока не подключён.";
   chat.replaceChildren(...state.chats.map((item) => {
     const option = document.createElement("option"); option.value = String(item.id); option.textContent = item.title; return option;
   }));
@@ -51,9 +51,13 @@ const paint = () => {
   const testMessage = state.testMessage === "sent" ? "Тестовое сообщение отправлено. " : state.testMessage === "pending" ? "Тестовое сообщение ожидает отправки. " : state.testMessage === "failed" ? "Не удалось отправить тестовое сообщение. Проверьте права бота и сохраните ключ повторно. " : "";
   status.textContent = state.error ?? (!state.configured ? "" : `${testMessage}${state.enabled ? "Уведомления включены." : "Уведомления о заказах выключены."} Последняя проверка: ${date(state.lastCheckAt)}.${state.enabled && state.nextCheckAt ? ` Следующая: ${date(state.nextCheckAt)}.` : ""} В очереди: ${state.pending}. Ошибок отправки: ${state.failed}.${state.checking ? " Проверяем заказы…" : ""}`);
   status.dataset.error = String(!!state.error || state.failed > 0);
+  supplierList.hidden = !state.configured;
   supplierList.replaceChildren(...state.suppliers.map((item) => {
     const li = document.createElement("li");
-    li.textContent = `${names[item.supplier]}: ${item.error ?? `проверка ${date(item.lastSuccessAt)}`}${item.limited ? "; поставщик ограничил выборку — часть событий может быть недоступна" : ""}`;
+    const name = document.createElement("strong"); name.textContent = names[item.supplier];
+    const detail = document.createElement("span");
+    detail.textContent = `${item.error ?? `Проверка: ${date(item.lastSuccessAt)}`}${item.limited ? "; поставщик ограничил выборку — часть событий может быть недоступна" : ""}`;
+    li.append(name, detail);
     return li;
   }));
 };

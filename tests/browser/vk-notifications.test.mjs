@@ -24,8 +24,8 @@ async function withSettings(check, options = {}) {
       let value;
       if (url.endsWith("groups.getTokenPermissions")) value = { mask: 4096, permissions: [] };
       else if (url.endsWith("groups.getById")) value = { groups: [{ id: 77, name: '<img src=x onerror="window.vkXss=1">' }] };
-      else if (url.endsWith("messages.getConversations")) value = { count: options.multiple ? 2 : 1,
-        items: Array.from({ length: options.multiple ? 2 : 1 }, (_, index) => ({ conversation: {
+      else if (url.endsWith("messages.getConversations")) value = { count: options.noChats ? 0 : options.multiple ? 2 : 1,
+        items: Array.from({ length: options.noChats ? 0 : options.multiple ? 2 : 1 }, (_, index) => ({ conversation: {
           peer: { id: 2000000001 + index, type: "chat" }, chat_settings: { state: "in", title: index ? "Другой чат" : "Рабочая беседа" }, can_write: { allowed: true },
         } })) };
       else if (url.endsWith("messages.send")) {
@@ -38,14 +38,15 @@ async function withSettings(check, options = {}) {
     service = new OrderNotificationService(settings, repository, client, { available: () => false,
       load: async () => { throw new Error("Supplier API must not be called by this test"); }, observe: () => {} });
     const html = await readFile("src/frontend/index.html", "utf8");
-    const markup = /<details class="vk-notifications-settings"[\s\S]*?<\/details>/.exec(html)?.[0];
+    const markup = /<details class="vk-notifications-settings[^"]*"[\s\S]*?<\/details>/.exec(html)?.[0];
     assert.ok(markup);
+    const reference = options.reference ? /<article class="auth-card" data-supplier="armtek">[\s\S]*?<\/article>/.exec(html)?.[0] : "";
     server = createServer(async (request, response) => {
       const url = new URL(request.url, "http://127.0.0.1");
       if (await serveVkNotifications(request, response, url, service)) return;
       if (url.pathname === "/") {
         response.setHeader("Content-Type", "text/html; charset=utf-8");
-        response.end(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><link rel="stylesheet" href="/styles.css"></head><body><main style="width:420px;padding:20px">${markup}</main><script type="module" src="/vk-notifications-settings.js"></script></body></html>`);
+        response.end(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"></head><body><main style="width:min(100%,620px);padding:20px;background:#fff">${markup}${reference}</main><script type="module" src="/vk-notifications-settings.js"></script></body></html>`);
       } else if (["/styles.css", "/vk-notifications-settings.js"].includes(url.pathname)) {
         response.setHeader("Content-Type", url.pathname.endsWith(".js") ? "application/javascript" : "text/css");
         response.end(await readFile(join("src/frontend", url.pathname.slice(1))));
@@ -97,6 +98,30 @@ test("VK UI saves only a token, renders supplier text safely, remains paused and
   });
 });
 
+test("VK settings share supplier form styling and fit a narrow settings panel", async () => {
+  await withSettings(async (page) => {
+    const styles = await page.evaluate(() => {
+      const values = (selector) => {
+        const value = getComputedStyle(document.querySelector(selector));
+        return { background: value.backgroundColor, border: value.borderColor, radius: value.borderRadius, font: value.fontFamily };
+      };
+      return { button: values("#vk-notifications-form .btn-primary"), referenceButton: values("#armtek-auth-form .btn-primary"),
+        field: values("#vk-notifications-token"), referenceField: values("#armtek-login") };
+    });
+    assert.deepEqual(styles.button.background, styles.referenceButton.background);
+    assert.deepEqual(styles.field, styles.referenceField);
+    assert.equal(await page.locator("#vk-notifications-suppliers").isVisible(), false);
+    await page.setViewportSize({ width: 320, height: 1100 });
+    const layout = await page.evaluate(() => {
+      const section = document.querySelector("#vk-notifications-settings");
+      return { page: document.documentElement.scrollWidth, viewport: innerWidth, section: section.getBoundingClientRect().width, content: section.scrollWidth };
+    });
+    assert.ok(layout.page <= layout.viewport); assert.ok(layout.content <= layout.section);
+    await page.locator("#vk-notifications-token").focus();
+    assert.notEqual(await page.locator("#vk-notifications-token").evaluate((input) => getComputedStyle(input).boxShadow), "none");
+  }, { reference: true });
+});
+
 test("VK UI requires an explicit recipient choice for multiple chats", async () => {
   await withSettings(async (page, { sends, settings }) => {
     await page.locator("#vk-notifications-token").fill(fixtureToken);
@@ -119,6 +144,17 @@ test("VK UI prevents saving an unencrypted token when the server master key is m
     assert.equal(await page.locator("#vk-notifications-token").isDisabled(), true);
     assert.match(await page.locator("#vk-notifications-connection").textContent(), /шифрование/);
   }, { noEncryption: true });
+});
+
+test("VK UI explains how to retry discovery when an added bot has no available conversations", async () => {
+  await withSettings(async (page, { sends }) => {
+    await page.locator("#vk-notifications-token").fill(fixtureToken);
+    await page.getByRole("button", { name: "Сохранить ключ" }).click();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-connection").textContent.includes("упоминанием сообщества через @"));
+    assert.equal(await page.locator("#vk-notifications-enabled").isEnabled(), false);
+    assert.equal(await page.locator("#vk-notifications-chat-label").isVisible(), false);
+    assert.equal(sends.length, 0);
+  }, { noChats: true });
 });
 
 test("VK UI reports a failed welcome without exposing the token or claiming successful delivery", async () => {
