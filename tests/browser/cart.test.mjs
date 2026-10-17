@@ -1748,6 +1748,28 @@ test("history button shows a red circular indicator before opening and clears it
     assert.ok(pulse);
     assert.notEqual(pulse.first, pulse.second);
     assert.equal(pulse.iterations, "infinite");
+    for (const viewport of [{ width: 1366, height: 850 }, { width: 390, height: 844 }, { width: 320, height: 740 }]) {
+      await page.setViewportSize(viewport);
+      const clipping = await toggle.evaluate((node) => {
+        const animation = node.getAnimations().find((item) => item.animationName === "history-cancellation-pulse");
+        animation.pause(); animation.currentTime = 1350;
+        const spread = Number(/0px 0px 0px ([\d.]+)px/.exec(getComputedStyle(node).boxShadow)?.[1]);
+        const box = node.getBoundingClientRect();
+        const clippedBy = [];
+        for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+          const style = getComputedStyle(parent); const bounds = parent.getBoundingClientRect();
+          if (["hidden", "clip", "auto", "scroll"].includes(style.overflowX)
+            && (box.left - spread < bounds.left - .5 || box.right + spread > bounds.right + .5)) clippedBy.push(`${parent.className}: horizontal`);
+          if (["hidden", "clip", "auto", "scroll"].includes(style.overflowY)
+            && (box.top - spread < bounds.top - .5 || box.bottom + spread > bounds.bottom + .5)) clippedBy.push(`${parent.className}: vertical`);
+        }
+        animation.currentTime = 500;
+        return { spread, clippedBy };
+      });
+      assert.equal(clipping.spread, 10);
+      assert.deepEqual(clipping.clippedBy, [], `The entire pulse must fit at ${viewport.width}px`);
+    }
+    await page.setViewportSize({ width: 1366, height: 850 });
     const box = await toggle.boundingBox();
     assert.equal(box.width, 40);
     assert.equal(box.height, 40);

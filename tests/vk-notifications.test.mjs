@@ -15,6 +15,8 @@ import { parsePartKomOrderHistory } from "../src/backend/suppliers/part-kom/part
 import { parseArmtekOrderHistory } from "../src/backend/suppliers/armtek/armtek-order.ts";
 import { SupplierAuthError, SupplierTimeoutError } from "../src/backend/errors.ts";
 import { nextOrderCheckTime } from "../src/backend/notifications/order-check-schedule.ts";
+import { OrderCancellationService } from "../src/backend/purchasing/order-cancellation-service.ts";
+import { SqliteOrderCancellationRepository } from "../src/backend/purchasing/sqlite-order-cancellation-repository.ts";
 
 const now = Date.parse("2026-10-17T12:00:00Z");
 const token = "vk1.a.fixture_secret_not_a_real_token";
@@ -72,11 +74,32 @@ async function fixture(t, options = {}) {
   });
   const loads = [];
   const source = { available: (supplier) => (options.suppliers ?? ["armtek"]).includes(supplier),
-    load: async (supplier, signal) => { loads.push(supplier); return options.load ? options.load(supplier, signal) : [current]; }, observe: () => {} };
+    load: async (supplier, signal) => { loads.push(supplier); return options.load ? options.load(supplier, signal) : [current]; },
+    observe: (supplier, value) => options.observe?.(supplier, value) };
   const service = new OrderNotificationService(settings, repository, client, source, () => timestamp);
   t.after(async () => { await service.close(); await rm(directory, { recursive: true, force: true }); });
   return { directory, settings, repository, service, calls, loads, client, setHistory: (value) => { current = value; },
     setTime: (value) => { timestamp = value; }, advance: (duration = orderCheckIntervalMs) => { timestamp += duration; } };
+}
+
+async function withCancellationHistoryServer(t, supplier, getHistory, options = {}) {
+  let server; let cancellations;
+  t.after(async () => {
+    if (server?.listening) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
+    cancellations?.close();
+  });
+  const f = await fixture(t, { ...options, suppliers: [supplier], load: async () => [getHistory()],
+    observe: (id, value) => cancellations.observe(id, value) });
+  const databasePath = join(f.directory, "orders.sqlite");
+  cancellations = new OrderCancellationService(new SqliteOrderCancellationRepository(databasePath));
+  const previous = process.env.GARAGE_DB_PATH;
+  process.env.GARAGE_DB_PATH = databasePath;
+  try {
+    server = createAggregatorServer({ publicDir: join(process.cwd(), "src/frontend"), notifications: f.service,
+      application: { streamSearch: async () => {}, partKomOrderHistory: async () => getHistory(), supplierOrderHistory: async () => getHistory() } });
+  } finally { if (previous === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previous; }
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  return { ...f, origin: `http://127.0.0.1:${server.address().port}` };
 }
 
 test("monitor initializes each supplier without announcing old orders or terminal states", () => {
@@ -116,6 +139,48 @@ test("one digest combines new orders, cancellation deltas and received quantitie
     observe(repository, history([part({ fulfillment: "partial", cancelledQuantity: 4, deliveredQuantity: 5 })]));
     assert.match(repository.pending(target, now).text, /ПОЛУЧЕНО[\s\S]*2 шт\./);
   } finally { repository.close(); }
+});
+
+test("reading a supplier cancellation in the aggregator before the monitor detects it does not suppress its VK notification", async (t) => {
+  for (const supplier of ["armtek", "part-kom", "forum-auto", "rossko"]) {
+    let current = history();
+    const f = await withCancellationHistoryServer(t, supplier, () => current);
+    f.settings.set(settingsValue({ enabled: true })); await f.service.runOnce();
+    current = history([part({ fulfillment: "partially_cancelled", cancelledQuantity: 2 })]);
+    const query = supplier === "armtek" ? "?from=2026-10-01&to=2026-10-17" : "";
+    const loaded = await fetch(`${f.origin}/api/order-history/${supplier}${query}`); assert.equal(loaded.status, 200); await loaded.json();
+    const inbox = await (await fetch(`${f.origin}/api/order-cancellations`)).json(); assert.equal(inbox.total, 1);
+    const seen = await fetch(`${f.origin}/api/order-cancellations/seen`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notices: inbox.notices.map(({ id, revision }) => ({ id, revision })) }) });
+    assert.equal(seen.status, 200); assert.equal((await seen.json()).total, 0);
+    assert.equal(f.calls.length, 0); await new Promise(setImmediate);
+    f.advance(); await f.service.runOnce();
+    assert.equal(f.calls.length, 1); assert.equal(f.calls[0].params.get("peer_ids"), "2000000001");
+    assert.match(f.calls[0].params.get("message"), /ОТМЕНЕНО[\s\S]*Заказ № ORDER-1[\s\S]*2 шт\./);
+    assert.equal((await (await fetch(`${f.origin}/api/order-cancellations`)).json()).total, 0);
+    f.advance(); await f.service.runOnce(); assert.equal(f.calls.length, 1);
+  }
+});
+
+test("acknowledging a queued cancellation leaves VK delivery and its persisted retry identifier intact", async (t) => {
+  let current = history(); let unavailable = true;
+  const f = await withCancellationHistoryServer(t, "part-kom", () => current, { send: async (params) => {
+    if (unavailable) throw new Error("Fixture temporary VK failure");
+    return response([{ peer_id: Number(params.get("peer_ids")), message_id: 0, conversation_message_id: 123 }]);
+  } });
+  f.settings.set(settingsValue({ enabled: true })); await f.service.runOnce();
+  current = history([part({ fulfillment: "cancelled" })]); f.advance(); await f.service.runOnce();
+  const queued = f.repository.pending(target, now + 2 * orderCheckIntervalMs); assert.ok(queued);
+  const inbox = await (await fetch(`${f.origin}/api/order-cancellations`)).json(); assert.equal(inbox.total, 1);
+  const seen = await fetch(`${f.origin}/api/order-cancellations/seen`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notices: inbox.notices.map(({ id, revision }) => ({ id, revision })) }) });
+  assert.equal((await seen.json()).total, 0);
+  assert.deepEqual(f.repository.pending(target, now + 2 * orderCheckIntervalMs), queued);
+  unavailable = false; await new Promise(setImmediate); f.advance(); await f.service.runOnce();
+  assert.equal(f.calls.length, 2); assert.equal(f.calls[0].params.get("random_id"), f.calls[1].params.get("random_id"));
+  assert.match(f.calls[1].params.get("message"), /ОТМЕНЕНО · PartKOM/);
+  assert.equal(f.repository.counts(target).pending, 0);
+  assert.equal((await (await fetch(`${f.origin}/api/order-cancellations`)).json()).total, 0);
 });
 
 test("archive/current overlap, descriptions, missing rows and shipment do not invent receipt or cancellation", () => {

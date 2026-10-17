@@ -99,7 +99,7 @@
 .garage-offer-button[draggable="true"]:active { cursor: grabbing; }
 .garage-offer-button:hover:not([aria-disabled="true"]), .garage-offer-button:focus-visible:not([aria-disabled="true"]) { color: var(--accent-dark); background: #fff3ed; outline: 0; }
 .garage-offer-button[aria-disabled="true"] { color: #aab4c0; }
-.search-toolbar { display: flex; min-height: 48px; flex: 0 0 auto; align-items: flex-end; gap: 12px; }
+.search-toolbar { display: flex; min-height: 48px; flex: 0 0 auto; align-items: flex-end; gap: 12px; padding: 10px 10px 6px 0; }
 .search-toolbar > .search-row { flex: 1 1 auto; min-width: 0; }
 .cart-toggle { position: relative; z-index: 3; display: grid; width: 48px; height: 48px; flex: 0 0 48px; padding: 8px 8px 0 0; place-items: center; border: 0; background: transparent; }
 .cart-toggle[hidden] { display: none; }
