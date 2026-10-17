@@ -27,6 +27,9 @@ async function withSettings(check, options = {}) {
           object: { message: { peer_id: 2000000003, from_id: 123, out: 0, text } } }] }), { headers: { "Content-Type": "application/json" } }));
         init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
       });
+      const denied = url.endsWith("groups.getLongPollSettings") ? options.pollSettingsDenied
+        : url.endsWith("groups.getLongPollServer") ? options.pollServerDenied : undefined;
+      if (denied !== undefined) return new Response(JSON.stringify({ error: { error_code: denied, error_msg: fixtureToken } }), { headers: { "Content-Type": "application/json" } });
       let value;
       if (url.endsWith("groups.getTokenPermissions")) value = { mask: 4096, permissions: [] };
       else if (url.endsWith("groups.getById")) value = { groups: [{ id: 77, name: '<img src=x onerror="window.vkXss=1">' }] };
@@ -217,4 +220,38 @@ test("VK UI reports a failed welcome without exposing the token or claiming succ
     assert.equal(settings.get().enabled, false); assert.equal(sends.length, 1);
     assert.equal(await page.locator("#vk-notifications-token").inputValue(), "");
   }, { denied: true });
+});
+
+test("VK UI can pair and verify a welcome when reading administrative Long Poll settings is denied", async () => {
+  await withSettings(async (page, { sends, settings, deliver }) => {
+    await page.locator("#vk-notifications-token").fill(fixtureToken);
+    await page.getByRole("button", { name: "Сохранить ключ" }).click();
+    await page.locator("#vk-notifications-pair-start").waitFor({ state: "visible" });
+    await page.locator("#vk-notifications-pair-start").click();
+    await page.locator("#vk-notifications-pair-command-panel").waitFor({ state: "visible" });
+    assert.equal(sends.length, 0); assert.equal(settings.get().peerId, null);
+    deliver(await page.locator("#vk-notifications-pair-command").inputValue());
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Тестовое сообщение отправлено"));
+    assert.equal(settings.get().peerId, 2000000003); assert.equal(settings.get().enabled, false); assert.equal(sends.length, 1);
+  }, { noChats: true, pollSettingsDenied: 15 });
+});
+
+test("VK UI identifies a denied Long Poll server without blaming chat permissions and allows retry", async () => {
+  const options = { noChats: true, pollSettingsDenied: 7, pollServerDenied: 15 };
+  await withSettings(async (page, { sends, settings }) => {
+    await page.locator("#vk-notifications-token").fill(fixtureToken);
+    await page.getByRole("button", { name: "Сохранить ключ" }).click();
+    await page.locator("#vk-notifications-pair-start").waitFor({ state: "visible" });
+    await page.locator("#vk-notifications-pair-start").click();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("groups.getLongPollServer, код 15"));
+    const message = await page.locator("#vk-notifications-status").textContent();
+    assert.equal(message.includes(fixtureToken), false); assert.equal(message.includes("отправлять сообщения в выбранную беседу"), false);
+    assert.equal(await page.locator("#vk-notifications-pair-command-panel").isVisible(), false);
+    assert.equal(await page.locator("#vk-notifications-status").getAttribute("data-error"), "true");
+    assert.equal(settings.get().peerId, null); assert.equal(sends.length, 0);
+    delete options.pollServerDenied;
+    await page.locator("#vk-notifications-pair-start").click();
+    await page.locator("#vk-notifications-pair-command-panel").waitFor({ state: "visible" });
+    assert.equal(sends.length, 0);
+  }, options);
 });

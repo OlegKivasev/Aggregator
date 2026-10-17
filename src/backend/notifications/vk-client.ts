@@ -15,6 +15,22 @@ const object = (value: unknown): Record<string, unknown> => {
   return value as Record<string, unknown>;
 };
 const validTimestamp = (value: unknown): value is string => typeof value === "string" && /^\d{1,32}$/.test(value);
+const validErrorCode = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0;
+function apiError(method: string, code: unknown): VkError {
+  if (!validErrorCode(code)) return new VkError();
+  if (code === 5 || code === 27 || code === 28) return new VkError("ВКонтакте отклонил ключ сообщества. Проверьте подключение.", true, code);
+  const context = `(${method}, код ${code})`;
+  if (method.startsWith("groups.getLongPoll")) {
+    if (code === 7 || code === 15) return new VkError(`ВК отказал в доступе к Long Poll ${context}. Проверьте разрешения ключа «Сообщения» и «Управление сообществом», затем сохраните ключ в агрегаторе повторно. В сообществе включите Long Poll API и входящие сообщения.`, true, code);
+    if (code === 100) return new VkError(`Не удалось подключить Long Poll ${context}. В сообществе ВК откройте «Работа с API → Long Poll API», включите Long Poll версии 5.199 и входящие сообщения в типах событий.`, true, code);
+  }
+  if ([7, 15, 901, 902, 917, 925, 945, 946].includes(code)) {
+    if (method === "messages.send") return new VkError(`ВКонтакте не разрешил отправку в выбранную беседу ${context}. Проверьте право ключа на сообщения и разрешение боту писать в беседу.`, true, code);
+    if (method === "messages.getConversations" || method === "messages.getConversationsById") return new VkError(`ВК не разрешил прочитать сведения о беседах ${context}. Проверьте право ключа сообщества на сообщения.`, true, code);
+    return new VkError(`ВК отказал в доступе ${context}. Проверьте разрешения ключа сообщества.`, true, code);
+  }
+  return new VkError(`ВКонтакте вернул ошибку ${context}. Повторите попытку позже.`, false, code);
+}
 function longPollSession(value: unknown): VkLongPollSession {
   const data = object(value);
   if (typeof data.server !== "string" || data.server.length > 2_000 || typeof data.key !== "string"
@@ -54,11 +70,7 @@ export class VkClient {
         body: new URLSearchParams({ ...params, access_token: token, v: "5.199" }) });
       const payload = await readResponse(response);
       if (payload.error !== undefined) {
-        const code = object(payload.error).error_code;
-        if (code === 5 || code === 27 || code === 28) throw new VkError("ВКонтакте отклонил ключ сообщества. Проверьте подключение.", true, code);
-        if ([7, 15, 901, 902, 917, 925, 945, 946].includes(Number(code))) throw new VkError("У сообщества нет права отправлять сообщения в выбранную беседу.", true, Number(code));
-        if (method.startsWith("groups.getLongPoll") && code === 100) throw new VkError("В сообществе ВК откройте «Работа с API → Long Poll API», включите Long Poll и входящие сообщения в типах событий.", true, 100);
-        throw new VkError();
+        throw apiError(method, object(payload.error).error_code);
       }
       if (!("response" in payload)) throw new VkError("ВКонтакте вернул некорректный ответ.");
       return payload.response;
@@ -71,18 +83,21 @@ export class VkClient {
   }
 
   async prepareChatPairing(token: string, groupId: number, signal: AbortSignal): Promise<VkLongPollSession> {
-    let settings: Record<string, unknown>;
+    let settings: Record<string, unknown> | undefined;
     try { settings = object(await this.call("groups.getLongPollSettings", token, { group_id: String(groupId) }, signal)); }
     catch (error) {
-      if (error instanceof VkError && error.code === 7) throw new VkError("Нет доступа к настройкам Long Poll ВК. Проверьте право ключа на сообщения и раздел сообщества «Работа с API → Long Poll API».", true);
-      throw error;
+      // Reading administrative settings can be denied while the actual event server remains accessible.
+      // Only its successful response permits pairing; all other setup errors still stop the operation.
+      if (!(error instanceof VkError) || error.code !== 7 && error.code !== 15) throw error;
     }
-    if (typeof settings.is_enabled !== "boolean") throw new VkError("Не удалось проверить настройки Long Poll ВК.");
-    const events = object(settings.events);
-    if (!settings.is_enabled || events.message_new !== 1 && events.message_new !== true) {
-      throw new VkError("В сообществе ВК откройте «Работа с API → Long Poll API», включите Long Poll и входящие сообщения в типах событий.", true);
+    if (settings !== undefined) {
+      if (typeof settings.is_enabled !== "boolean") throw new VkError("Не удалось проверить настройки Long Poll ВК.");
+      const events = object(settings.events);
+      if (!settings.is_enabled || events.message_new !== 1 && events.message_new !== true) {
+        throw new VkError("В сообществе ВК откройте «Работа с API → Long Poll API», включите Long Poll и входящие сообщения в типах событий.", true);
+      }
+      if (settings.api_version !== "5.199") throw new VkError("В настройках Long Poll API сообщества выберите версию 5.199 и сохраните изменения.", true);
     }
-    if (settings.api_version !== "5.199") throw new VkError("В настройках Long Poll API сообщества выберите версию 5.199 и сохраните изменения.", true);
     return this.longPollServer(token, groupId, signal);
   }
   private async longPollServer(token: string, groupId: number, signal: AbortSignal): Promise<VkLongPollSession> {
@@ -122,7 +137,7 @@ export class VkClient {
       }
       await delay(400, undefined, { signal });
     }
-    throw new VkError("Не удалось дождаться команды. Начните подключение беседы заново.");
+    throw new VkError("Не удалось дождаться команды. Проверьте, что в сообществе включён Long Poll API версии 5.199 и входящие сообщения, затем начните подключение заново.");
   }
   private async pairedChat(token: string, groupId: number, peerId: number, signal: AbortSignal): Promise<VkChat> {
     try {
@@ -176,8 +191,7 @@ export class VkClient {
     const receipt = object(result[0]);
     if (receipt.peer_id !== peerId) throw new VkError("ВКонтакте не подтвердил получателя сообщения.");
     if (receipt.error !== undefined) {
-      const code = Number(object(receipt.error).code);
-      throw new VkError("ВКонтакте не разрешил отправку в выбранную беседу.", [7, 15, 901, 902, 917, 925, 945, 946].includes(code));
+      throw apiError("messages.send", object(receipt.error).code);
     }
     // Community messages may have message_id=0; conversation IDs are separate.
     if (!Number.isSafeInteger(receipt.message_id) || Number(receipt.message_id) < 0

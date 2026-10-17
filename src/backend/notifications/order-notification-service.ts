@@ -128,7 +128,7 @@ export class OrderNotificationService {
         this.pairing = null;
       }).catch((error: unknown) => {
         if (!controller.signal.aborted && this.pairing) this.pairing.error = bounded.signal.aborted
-          ? "Время подключения истекло. Начните заново и отправьте новую команду в течение 5 минут."
+          ? "Время подключения истекло. Проверьте, что в сообществе включён Long Poll API версии 5.199 и входящие сообщения. Начните заново и отправьте новую команду в течение 5 минут."
           : error instanceof VkError ? error.message : "Не удалось подключить беседу ВК. Начните подключение заново.";
       }).finally(() => { bounded.dispose(); this.pairingWork = null; });
       return this.state();

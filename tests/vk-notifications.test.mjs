@@ -55,6 +55,8 @@ async function fixture(t, options = {}) {
     assert.equal(params.get("access_token"), token);
     calls.push({ method: url.split("/").at(-1), params, signal: init.signal });
     if (options.fetch) return options.fetch(url, init, calls);
+    const apiError = options.apiErrors?.[url.split("/").at(-1)];
+    if (apiError !== undefined) return pollResponse({ error: { error_code: apiError, error_msg: token } });
     if (url.endsWith("groups.getTokenPermissions")) return response({ mask: 4096, permissions: [{ name: "messages", setting: 1 }] });
     if (url.endsWith("groups.getById")) return response({ groups: [{ id: 77, name: "Тестовое сообщество" }] });
     if (url.endsWith("messages.getConversations")) return response({ count: (options.chats ?? chats).length,
@@ -278,6 +280,65 @@ test("Long Poll setup explains disabled events and versions and rejects unsafe u
     await f.service.connect(token, new AbortController().signal);
     await assert.rejects(f.service.beginChatPairing(new AbortController().signal), /недопустимый адрес/);
     assert.equal(f.calls.some((call) => call.method === "longpoll"), false);
+  }
+});
+
+test("denied access to administrative Long Poll settings still requires a real validated event server", async (t) => {
+  for (const code of [7, 15]) {
+    const f = await fixture(t, { apiErrors: { "groups.getLongPollSettings": code } });
+    const session = await f.client.prepareChatPairing(token, 77, new AbortController().signal);
+    assert.deepEqual(session, { server: "https://lp.vk.com/whp/77", key: "fixture_ephemeral_key", ts: "1" });
+    assert.deepEqual(f.calls.map((call) => call.method), ["groups.getLongPollSettings", "groups.getLongPollServer"]);
+    assert.equal(f.service.state().peerId, null);
+    const unsafe = await fixture(t, { apiErrors: { "groups.getLongPollSettings": code },
+      pollServer: { server: "https://lp.vk.com.evil.test/wh77", key: "fixture_key", ts: "1" } });
+    await assert.rejects(unsafe.client.prepareChatPairing(token, 77, new AbortController().signal), /недопустимый адрес/);
+    assert.equal(unsafe.calls.some((call) => call.method === "longpoll"), false);
+  }
+});
+
+test("Long Poll server denials identify the failing method and code before any listener or message starts", async (t) => {
+  for (const settingsDenied of [false, true]) for (const code of [7, 15]) {
+    const f = await fixture(t, { apiErrors: { "groups.getLongPollServer": code,
+      ...(settingsDenied ? { "groups.getLongPollSettings": 15 } : {}) } });
+    f.settings.set(settingsValue({ chats: [], peerId: null }));
+    await assert.rejects(f.service.beginChatPairing(new AbortController().signal), (error) => {
+      assert.ok(error instanceof VkError); assert.equal(error.code, code); assert.equal(error.permanent, true);
+      assert.match(error.message, new RegExp(`groups.getLongPollServer, код ${code}`));
+      assert.match(error.message, /разрешения ключа/); assert.equal(error.message.includes(token), false);
+      assert.equal(error.message.includes("отправлять сообщения в выбранную беседу"), false);
+      return true;
+    });
+    assert.deepEqual(f.calls.map((call) => call.method), ["groups.getLongPollSettings", "groups.getLongPollServer"]);
+    assert.equal(f.service.state().pairing, null); assert.equal(f.service.state().peerId, null); assert.equal(f.loads.length, 0);
+  }
+});
+
+test("authentication, configuration, malformed codes and temporary settings failures do not bypass setup checks", async (t) => {
+  for (const code of [5, 6, 27, 100, "7", 0, null]) {
+    const f = await fixture(t, { apiErrors: { "groups.getLongPollSettings": code } });
+    await assert.rejects(f.client.prepareChatPairing(token, 77, new AbortController().signal), (error) => {
+      assert.ok(error instanceof VkError); assert.equal(error.message.includes(token), false); return true;
+    });
+    assert.deepEqual(f.calls.map((call) => call.method), ["groups.getLongPollSettings"]);
+  }
+});
+
+test("reading chat details and actually sending messages report distinct safe permission errors", async (t) => {
+  for (const code of [7, 15]) {
+    const read = await fixture(t, { apiErrors: { "messages.getConversations": code } });
+    await assert.rejects(read.client.connect(token, new AbortController().signal), (error) => {
+      assert.equal(error.code, code); assert.match(error.message, /прочитать сведения о беседах/);
+      assert.match(error.message, /messages.getConversations/); assert.equal(error.message.includes(token), false); return true;
+    });
+    for (const perPeer of [false, true]) {
+      const send = await fixture(t, perPeer ? { send: async () => response([{ peer_id: chats[0].id, error: { code, error_msg: token } }]) }
+        : { apiErrors: { "messages.send": code } });
+      await assert.rejects(send.client.send(token, 77, chats[0].id, "Тест", 123, new AbortController().signal), (error) => {
+        assert.equal(error.code, code); assert.equal(error.permanent, true); assert.match(error.message, /не разрешил отправку/);
+        assert.match(error.message, /messages.send/); assert.equal(error.message.includes(token), false); return true;
+      });
+    }
   }
 });
 
