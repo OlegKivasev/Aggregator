@@ -21,6 +21,9 @@ export class SqliteNotificationRepository {
         attempts INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0,
         state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','sent','failed'))
       ) STRICT;
+      CREATE TABLE IF NOT EXISTS vk_order_notification_welcome (
+        target TEXT PRIMARY KEY, message_id INTEGER NOT NULL UNIQUE
+      ) STRICT;
     `); } catch (error) { this.database.close(); throw error; }
   }
 
@@ -65,9 +68,44 @@ export class SqliteNotificationRepository {
     return [...combined.values()];
   }
 
-  pending(target: string, now: number): { id: number; randomId: number; text: string; attempts: number } | null {
+  ensureWelcome(target: string, text: string): void {
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = this.database.prepare("SELECT message_id FROM vk_order_notification_welcome WHERE target=?").get(target);
+      if (!existing) {
+        const message = this.database.prepare("INSERT INTO vk_order_notification_outbox(random_id,target,text) VALUES (?,?,?)")
+          .run(randomInt(1, 2_147_483_647), target, text);
+        this.database.prepare("INSERT INTO vk_order_notification_welcome VALUES (?,?)").run(target, message.lastInsertRowid);
+      }
+      this.database.exec("COMMIT");
+    } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+  }
+  welcomeState(target: string): "pending" | "sent" | "failed" | null {
+    const row = this.database.prepare(`SELECT state FROM vk_order_notification_outbox
+      WHERE id=(SELECT message_id FROM vk_order_notification_welcome WHERE target=?)`).get(target);
+    if (!row) return null;
+    if (row.state !== "pending" && row.state !== "sent" && row.state !== "failed") throw new Error("Invalid welcome message state");
+    return row.state;
+  }
+  retryWelcome(target: string): void {
+    this.database.prepare(`UPDATE vk_order_notification_outbox SET state='pending',attempts=0,next_attempt=0
+      WHERE id=(SELECT message_id FROM vk_order_notification_welcome WHERE target=?) AND state!='sent'`).run(target);
+  }
+  forgetWelcome(target: string): void {
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare("DELETE FROM vk_order_notification_outbox WHERE id=(SELECT message_id FROM vk_order_notification_welcome WHERE target=?)").run(target);
+      this.database.prepare("DELETE FROM vk_order_notification_welcome WHERE target=?").run(target);
+      this.database.exec("COMMIT");
+    } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+  }
+
+  pending(target: string, now: number, welcomeOnly = false): { id: number; randomId: number; text: string; attempts: number } | null {
     // Preserve order even while the oldest message is waiting for its retry.
-    const row = this.database.prepare("SELECT id,random_id,text,attempts,next_attempt FROM vk_order_notification_outbox WHERE target=? AND state='pending' ORDER BY id LIMIT 1").get(target);
+    const row = welcomeOnly
+      ? this.database.prepare(`SELECT id,random_id,text,attempts,next_attempt FROM vk_order_notification_outbox
+        WHERE target=? AND state='pending' AND id=(SELECT message_id FROM vk_order_notification_welcome WHERE target=?)`).get(target, target)
+      : this.database.prepare("SELECT id,random_id,text,attempts,next_attempt FROM vk_order_notification_outbox WHERE target=? AND state='pending' ORDER BY id LIMIT 1").get(target);
     if (!row || Number(row.next_attempt) > now) return null;
     const id = Number(row.id);
     if (!Number.isSafeInteger(id) || id < 1) throw new Error("Notification identifier limit reached");

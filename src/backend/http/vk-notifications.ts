@@ -25,7 +25,10 @@ export async function serveVkNotifications(request: IncomingMessage, response: S
       const state = await service.connect(token, controller.signal);
       if (!controller.signal.aborted) serveJson(response, 200, state);
     } else if (url.pathname === "/api/notifications/vk" && request.method === "DELETE") serveJson(response, 200, service.disconnect());
-    else if (url.pathname === "/api/notifications/vk/state" && request.method === "PUT") serveJson(response, 200, service.configure(await readJsonBody(request)));
+    else if (url.pathname === "/api/notifications/vk/state" && request.method === "PUT") {
+      const state = await service.configure(await readJsonBody(request), controller.signal);
+      if (!controller.signal.aborted) serveJson(response, 200, state);
+    }
     else serveJson(response, 405, { message: "Method not allowed" });
   } catch (error) {
     if (!controller.signal.aborted) {

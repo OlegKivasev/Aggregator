@@ -18,6 +18,7 @@ const validDate = (value) => value === null || typeof value === "string" && Numb
 const validate = (value) => {
   if (!value || typeof value !== "object" || ["configured", "persistent", "enabled", "checking"].some((key) => typeof value[key] !== "boolean")
     || value.intervalMinutes !== 10 || !validDate(value.lastCheckAt) || !validDate(value.nextCheckAt)
+    || ![null, "pending", "sent", "failed"].includes(value.testMessage)
     || value.groupName !== null && (typeof value.groupName !== "string" || value.groupName.length > 200)
     || value.error !== null && (typeof value.error !== "string" || value.error.length > 500)
     || !["pending", "failed"].every((key) => Number.isSafeInteger(value[key]) && value[key] >= 0)
@@ -47,7 +48,8 @@ const paint = () => {
   if (state.peerId === null) chat.selectedIndex = -1; else chat.value = String(state.peerId);
   chatLabel.hidden = !state.configured || state.chats.length === 0 || state.chats.length === 1 && state.peerId !== null;
   enabled.checked = state.enabled;
-  status.textContent = state.error ?? (!state.configured ? "" : `${state.enabled ? "Уведомления включены." : "Отправка выключена."} Последняя проверка: ${date(state.lastCheckAt)}.${state.enabled && state.nextCheckAt ? ` Следующая: ${date(state.nextCheckAt)}.` : ""} В очереди: ${state.pending}. Ошибок отправки: ${state.failed}.${state.checking ? " Проверяем заказы…" : ""}`);
+  const testMessage = state.testMessage === "sent" ? "Тестовое сообщение отправлено. " : state.testMessage === "pending" ? "Тестовое сообщение ожидает отправки. " : state.testMessage === "failed" ? "Не удалось отправить тестовое сообщение. Проверьте права бота и сохраните ключ повторно. " : "";
+  status.textContent = state.error ?? (!state.configured ? "" : `${testMessage}${state.enabled ? "Уведомления включены." : "Уведомления о заказах выключены."} Последняя проверка: ${date(state.lastCheckAt)}.${state.enabled && state.nextCheckAt ? ` Следующая: ${date(state.nextCheckAt)}.` : ""} В очереди: ${state.pending}. Ошибок отправки: ${state.failed}.${state.checking ? " Проверяем заказы…" : ""}`);
   status.dataset.error = String(!!state.error || state.failed > 0);
   supplierList.replaceChildren(...state.suppliers.map((item) => {
     const li = document.createElement("li");

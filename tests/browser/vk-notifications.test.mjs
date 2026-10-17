@@ -20,7 +20,7 @@ async function withSettings(check, options = {}) {
     const settings = new EncryptedVkSettings(join(directory, "vk.enc.json"), options.noEncryption ? null : Buffer.alloc(32, 19));
     const repository = new SqliteNotificationRepository(join(directory, "orders.sqlite"));
     const sends = [];
-    const client = new VkClient(async (url) => {
+    const client = new VkClient(async (url, init) => {
       let value;
       if (url.endsWith("groups.getTokenPermissions")) value = { mask: 4096, permissions: [] };
       else if (url.endsWith("groups.getById")) value = { groups: [{ id: 77, name: '<img src=x onerror="window.vkXss=1">' }] };
@@ -28,7 +28,11 @@ async function withSettings(check, options = {}) {
         items: Array.from({ length: options.multiple ? 2 : 1 }, (_, index) => ({ conversation: {
           peer: { id: 2000000001 + index, type: "chat" }, chat_settings: { state: "in", title: index ? "Другой чат" : "Рабочая беседа" }, can_write: { allowed: true },
         } })) };
-      else { sends.push(url); throw new Error("No notification may be sent during connection setup"); }
+      else if (url.endsWith("messages.send")) {
+        const params = new URLSearchParams(init.body); sends.push(params);
+        if (options.denied) return new Response(JSON.stringify({ error: { error_code: 7, error_msg: fixtureToken } }), { headers: { "Content-Type": "application/json" } });
+        value = [{ peer_id: Number(params.get("peer_ids")), message_id: 0, conversation_message_id: sends.length }];
+      } else throw new Error("Unexpected fixture request");
       return new Response(JSON.stringify({ response: value }), { headers: { "Content-Type": "application/json" } });
     });
     service = new OrderNotificationService(settings, repository, client, { available: () => false,
@@ -78,13 +82,18 @@ test("VK UI saves only a token, renders supplier text safely, remains paused and
     assert.match(await page.locator("#vk-notifications-connection").textContent(), /Беседа: Рабочая беседа/);
     assert.equal(await page.evaluate(() => window.vkXss), undefined);
     assert.equal(await page.evaluate((key) => JSON.stringify(localStorage).includes(key), fixtureToken), false);
-    assert.equal(sends.length, 0);
+    assert.equal(sends.length, 1);
+    assert.match(sends[0].get("message"), /Агрегатор автозапчастей подключён/);
+    assert.match(await page.locator("#vk-notifications-status").textContent(), /Тестовое сообщение отправлено[\s\S]*Уведомления о заказах выключены/);
+    await page.getByRole("button", { name: "Обновить состояние" }).click();
+    await page.waitForFunction(() => !document.querySelector("#vk-notifications-refresh").disabled);
+    assert.equal(sends.length, 1);
     await page.locator("#vk-notifications-enabled").check();
     await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Уведомления включены"));
     assert.equal(settings.get().enabled, true);
     await page.getByRole("button", { name: "Отключить ВК" }).click();
     await page.waitForFunction(() => document.querySelector("#vk-notifications-connection").textContent === "ВК пока не подключён.");
-    assert.equal(settings.get(), null); assert.equal(sends.length, 0);
+    assert.equal(settings.get(), null); assert.equal(sends.length, 1);
   });
 });
 
@@ -95,10 +104,13 @@ test("VK UI requires an explicit recipient choice for multiple chats", async () 
     await page.locator("#vk-notifications-chat-label").waitFor({ state: "visible" });
     assert.equal(await page.locator("#vk-notifications-enabled").isDisabled(), true);
     assert.equal(settings.get().peerId, null);
+    assert.equal(sends.length, 0);
     await page.locator("#vk-notifications-chat").selectOption("2000000002");
     await page.waitForFunction(() => !document.querySelector("#vk-notifications-enabled").disabled);
     assert.equal(settings.get().peerId, 2000000002);
-    assert.equal(settings.get().enabled, false); assert.equal(sends.length, 0);
+    assert.equal(settings.get().enabled, false); assert.equal(sends.length, 1);
+    assert.equal(sends[0].get("peer_ids"), "2000000002");
+    assert.match(await page.locator("#vk-notifications-status").textContent(), /Тестовое сообщение отправлено/);
   }, { multiple: true });
 });
 
@@ -107,4 +119,17 @@ test("VK UI prevents saving an unencrypted token when the server master key is m
     assert.equal(await page.locator("#vk-notifications-token").isDisabled(), true);
     assert.match(await page.locator("#vk-notifications-connection").textContent(), /шифрование/);
   }, { noEncryption: true });
+});
+
+test("VK UI reports a failed welcome without exposing the token or claiming successful delivery", async () => {
+  await withSettings(async (page, { sends, settings }) => {
+    await page.locator("#vk-notifications-token").fill(fixtureToken);
+    await page.getByRole("button", { name: "Сохранить ключ" }).click();
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Тестовое сообщение не отправлено"));
+    const message = await page.locator("#vk-notifications-status").textContent();
+    assert.equal(message.includes(fixtureToken), false); assert.equal(message.includes("Тестовое сообщение отправлено"), false);
+    assert.equal(await page.locator("#vk-notifications-status").getAttribute("data-error"), "true");
+    assert.equal(settings.get().enabled, false); assert.equal(sends.length, 1);
+    assert.equal(await page.locator("#vk-notifications-token").inputValue(), "");
+  }, { denied: true });
 });

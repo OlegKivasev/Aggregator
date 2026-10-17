@@ -42,7 +42,8 @@ async function fixture(t, options = {}) {
     if (url.endsWith("groups.getById")) return response({ groups: [{ id: 77, name: "Тестовое сообщество" }] });
     if (url.endsWith("messages.getConversations")) return response({ count: (options.chats ?? chats).length,
       items: (options.chats ?? chats).map((chat) => ({ conversation: { peer: { id: chat.id, type: "chat" }, can_write: { allowed: true }, chat_settings: { title: chat.title, state: "in" } } })) });
-    if (url.endsWith("messages.send")) return response([{ peer_id: chats[0].id, message_id: 0, conversation_message_id: 123 }]);
+    if (url.endsWith("messages.send")) return options.send ? options.send(params, init)
+      : response([{ peer_id: Number(params.get("peer_ids")), message_id: 0, conversation_message_id: 123 }]);
     throw new Error("Unexpected fixture request");
   });
   const loads = [];
@@ -175,25 +176,124 @@ test("VK settings are encrypted, fail closed on missing or wrong master key and 
   assert.throws(() => memoryOnly.set(settingsValue()), /шифрование/);
 });
 
-test("saving only the community token discovers a single chat and leaves all sending disabled", async (t) => {
+test("connecting sends one welcome but leaves supplier checks and order notifications disabled", async (t) => {
   const f = await fixture(t);
   const state = await f.service.connect(token, new AbortController().signal);
   assert.equal(state.peerId, chats[0].id); assert.equal(state.enabled, false);
   await f.service.runOnce(); assert.equal(f.loads.length, 0);
-  assert.deepEqual(f.calls.map((call) => call.method), ["groups.getTokenPermissions", "groups.getById", "messages.getConversations"]);
+  assert.deepEqual(f.calls.map((call) => call.method), ["groups.getTokenPermissions", "groups.getById", "messages.getConversations", "messages.send"]);
+  assert.equal(state.testMessage, "sent");
+  const message = f.calls.at(-1).params.get("message");
+  assert.match(message, /Агрегатор автозапчастей подключён к этой беседе/);
+  assert.match(message, /новых заказах у поставщиков, отменах и получении товаров/);
+  assert.match(message, /каждые 10 минут при включённых уведомлениях[\s\S]*в настройках агрегатора/);
+  await f.service.connect(token, new AbortController().signal);
+  assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 1);
   assert.equal(JSON.stringify(state).includes(token), false);
-  assert.throws(() => f.service.configure({ enabled: true, peerId: 2000000099 }), /Выберите/);
+  await assert.rejects(f.service.configure({ enabled: true, peerId: 2000000099 }), /Выберите/);
+  f.service.disconnect();
+  await f.service.connect(token, new AbortController().signal);
+  assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 2);
 });
 
 test("multiple or missing chats never cause an arbitrary recipient to be selected", async (t) => {
   const f = await fixture(t, { chats: [...chats, { id: 2000000002, title: "Другой чат" }] });
   const state = await f.service.connect(token, new AbortController().signal);
   assert.equal(state.peerId, null);
-  assert.throws(() => f.service.configure({ enabled: true }), /Выберите/);
-  assert.equal(f.service.configure({ enabled: false, peerId: 2000000002 }).peerId, 2000000002);
+  assert.equal(f.calls.some((call) => call.method === "messages.send"), false);
+  await assert.rejects(f.service.configure({ enabled: true }), /Выберите/);
+  assert.equal((await f.service.configure({ enabled: false, peerId: 2000000002 })).peerId, 2000000002);
+  assert.equal(f.calls.at(-1).params.get("peer_ids"), "2000000002");
+  assert.equal(f.service.state().testMessage, "sent");
+  assert.equal(f.service.state().enabled, false);
   const empty = await fixture(t, { chats: [] });
   assert.equal((await empty.service.connect(token, new AbortController().signal)).peerId, null);
-  assert.throws(() => empty.service.configure({ enabled: true }), /Выберите/);
+  await assert.rejects(empty.service.configure({ enabled: true }), /Выберите/);
+  assert.equal(empty.calls.some((call) => call.method === "messages.send"), false);
+});
+
+test("a pending welcome retries while paused without sending queued order updates or querying suppliers", async (t) => {
+  let unavailable = true;
+  const f = await fixture(t, { send: async (params) => {
+    if (unavailable) throw new Error(token);
+    return response([{ peer_id: Number(params.get("peer_ids")), message_id: 0, conversation_message_id: 123 }]);
+  } });
+  const state = await f.service.connect(token, new AbortController().signal);
+  assert.equal(state.configured, true); assert.equal(state.enabled, false); assert.equal(state.testMessage, "pending");
+  assert.match(state.error, /Тестовое сообщение не отправлено/); assert.equal(state.error.includes(token), false);
+  const first = f.calls.at(-1).params.get("random_id");
+  observe(f.repository, history()); observe(f.repository, history([part({ fulfillment: "cancelled" })]));
+  await f.service.runOnce(); assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 1);
+  unavailable = false; f.advance(); await f.service.runOnce();
+  assert.equal(f.service.state().testMessage, "sent"); assert.equal(f.service.state().error, null);
+  assert.equal(f.service.state().pending, 1); assert.equal(f.loads.length, 0);
+  assert.equal(f.calls.at(-1).params.get("random_id"), first);
+  assert.match(f.calls.at(-1).params.get("message"), /Агрегатор автозапчастей подключён/);
+});
+
+test("welcome delivery and its retry identifier survive restart and remain isolated by destination", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "aggregator-vk-welcome-"));
+  const path = join(directory, "orders.sqlite");
+  let repository = new SqliteNotificationRepository(path);
+  t.after(async () => { repository.close(); await rm(directory, { recursive: true, force: true }); });
+  repository.ensureWelcome(target, "Тест подключения");
+  const first = repository.pending(target, now, true);
+  repository.retry(first.id, first.attempts, now, false);
+  repository.close(); repository = new SqliteNotificationRepository(path);
+  repository.ensureWelcome(target, "Другой текст не создаёт дубль");
+  const restored = repository.pending(target, now + 60_000, true);
+  assert.equal(restored.randomId, first.randomId); assert.equal(restored.text, "Тест подключения");
+  assert.equal(repository.pending("88:2000000001", now + 60_000, true), null);
+  repository.sent(restored.id);
+  repository.ensureWelcome(target, "Ещё один текст");
+  assert.equal(repository.welcomeState(target), "sent"); assert.equal(repository.pending(target, now, true), null);
+  repository.forgetWelcome(target); repository.ensureWelcome(target, "Повторное подключение");
+  assert.equal(repository.pending(target, now, true).text, "Повторное подключение");
+});
+
+test("a permanent welcome failure is visible and saving the repaired connection retries the same message", async (t) => {
+  let denied = true;
+  const f = await fixture(t, { send: async (params) => denied
+    ? new Response(JSON.stringify({ error: { error_code: 7, error_msg: token } }), { headers: { "Content-Type": "application/json" } })
+    : response([{ peer_id: Number(params.get("peer_ids")), message_id: 0, conversation_message_id: 123 }]) });
+  assert.equal((await f.service.connect(token, new AbortController().signal)).testMessage, "failed");
+  const first = f.calls.at(-1).params.get("random_id");
+  f.advance(); await f.service.runOnce();
+  assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 1);
+  denied = false;
+  assert.equal((await f.service.connect(token, new AbortController().signal)).testMessage, "sent");
+  assert.equal(f.calls.at(-1).params.get("random_id"), first); assert.equal(f.loads.length, 0);
+});
+
+test("disconnect aborts a pending welcome and cannot resurrect its destination or message", async (t) => {
+  let started; const ready = new Promise((resolve) => { started = resolve; });
+  const f = await fixture(t, { send: async (_params, init) => {
+    started(); await new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }));
+  } });
+  const connecting = f.service.connect(token, new AbortController().signal);
+  const rejected = assert.rejects(connecting);
+  await ready; f.service.disconnect(); await rejected;
+  assert.equal(f.settings.get(), null); assert.equal(f.repository.welcomeState(target), null);
+  assert.equal(f.repository.pending(target, now), null);
+});
+
+test("a digest lists several products separately inside each order and status", () => {
+  const items = [
+    { brand: "BOSCH", article: "0451103316", title: "Масляный фильтр", quantity: 2, price: 450 },
+    { brand: "MANN", article: "C 24 015", title: "Воздушный фильтр", quantity: 1, price: 1200 },
+  ];
+  assert.equal(formatOrderEvents([
+    { supplier: "armtek", number: "ПРИМЕР-101", kind: "new", items },
+    { supplier: "part-kom", number: "ПРИМЕР-102", kind: "cancelled", items: [{ ...items[0], quantity: 1 }] },
+    { supplier: "part-kom", number: "ПРИМЕР-102", kind: "received", items },
+  ])[0], "Заказы: обновления\n\nНОВЫЙ ЗАКАЗ · Armtek\nЗаказ № ПРИМЕР-101"
+    + "\n• BOSCH 0451103316 — Масляный фильтр\n  2 шт. · 900 ₽"
+    + "\n• MANN C 24 015 — Воздушный фильтр\n  1 шт. · 1 200 ₽"
+    + "\n\nОТМЕНЕНО · PartKOM\nЗаказ № ПРИМЕР-102"
+    + "\n• BOSCH 0451103316 — Масляный фильтр\n  1 шт. · 450 ₽"
+    + "\n\nПОЛУЧЕНО · PartKOM\nЗаказ № ПРИМЕР-102"
+    + "\n• BOSCH 0451103316 — Масляный фильтр\n  2 шт. · 900 ₽"
+    + "\n• MANN C 24 015 — Воздушный фильтр\n  1 шт. · 1 200 ₽");
 });
 
 test("fixed ten-minute scheduler resumes deferred reads without re-fetching already checked suppliers", async (t) => {
@@ -213,6 +313,7 @@ test("a truncated list of community dialogs never auto-selects its only visible 
   const f = await fixture(t, { fetch: async (url, init) => {
     if (url.endsWith("groups.getTokenPermissions")) return response({ mask: 4096, permissions: [] });
     if (url.endsWith("groups.getById")) return response({ groups: [{ id: 77, name: "Тестовое сообщество" }] });
+    if (url.endsWith("messages.send")) return response([{ peer_id: chats[0].id, message_id: 0, conversation_message_id: 123 }]);
     assert.ok(url.endsWith("messages.getConversations"));
     const offset = Number(new URLSearchParams(init.body).get("offset"));
     return response({ count: 1001, items: Array.from({ length: 50 }, (_, index) => ({ conversation: offset === 0 && index === 0
@@ -222,14 +323,15 @@ test("a truncated list of community dialogs never auto-selects its only visible 
   const state = await f.service.connect(token, new AbortController().signal);
   assert.equal(state.chats.length, 1); assert.equal(state.peerId, null); assert.equal(state.enabled, false);
   assert.equal(f.calls.filter((call) => call.method === "messages.getConversations").length, 20);
-  assert.equal(f.service.configure({ enabled: false, peerId: chats[0].id }).peerId, chats[0].id);
+  assert.equal((await f.service.configure({ enabled: false, peerId: chats[0].id })).peerId, chats[0].id);
 });
 
 test("failed deliveries persist and retry the same VK random_id; permanent errors pause delivery until re-enabled", async (t) => {
   let failure = true; const delivered = [];
   const f = await fixture(t, { fetch: async (url, init) => {
     assert.ok(url.endsWith("messages.send"));
-    delivered.push(new URLSearchParams(init.body).get("random_id"));
+    const params = new URLSearchParams(init.body);
+    if (params.get("message").startsWith("Заказы:")) delivered.push(params.get("random_id"));
     if (failure) return new Response(JSON.stringify({ error: { error_code: 5, error_msg: token } }), { headers: { "Content-Type": "application/json" } });
     return response([{ peer_id: chats[0].id, message_id: 0, conversation_message_id: 123 }]);
   } });
@@ -238,7 +340,7 @@ test("failed deliveries persist and retry the same VK random_id; permanent error
   f.setHistory(history([part({ fulfillment: "cancelled" })])); await f.service.runOnce();
   assert.equal(f.service.state().failed, 1); assert.equal(f.service.state().pending, 0);
   f.advance(); await f.service.runOnce(); assert.equal(delivered.length, 1);
-  failure = false; f.service.configure({ enabled: true }); await f.service.runOnce();
+  failure = false; await f.service.configure({ enabled: true }); await f.service.runOnce();
   assert.equal(delivered.length, 2); assert.equal(delivered[0], delivered[1]);
   assert.equal(f.service.state().failed, 0); assert.equal(f.service.state().pending, 0);
 });
