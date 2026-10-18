@@ -335,6 +335,45 @@ test("Forum Auto history requests only active orders and preserves transport fai
   assert.throws(() => parseForumAutoApiResponse({ status: 200, contentType: "application/json", body: "broken" }, "listorders"), SupplierIntegrationError);
 });
 
+test("Forum Auto history treats documented no-active-orders fault 26 as a complete empty list", async () => {
+  for (const status of [200, 400, 422]) {
+    for (const key of ["FaultCode", "faultCode", "faultcode", "code"]) {
+      let calls = 0;
+      const response = { status, contentType: "application/json", body: JSON.stringify({ [key]: "26", message: "private upstream text" }) };
+      const result = await listForumAutoOrderHistory({ login: "fixture", password: "fixture" }, new AbortController().signal,
+        async (method, params) => {
+          calls++;
+          assert.equal(method, "listorders");
+          assert.equal(params.toString(), "did=0");
+          return parseForumAutoApiResponse(response, method);
+        });
+      assert.deepEqual(result, { orders: [], limited: false });
+      assert.equal(calls, 1, "an empty active list must not be retried");
+      assert.throws(() => parseForumAutoApiResponse(response, "listorders"), SupplierIntegrationError,
+        "fault 26 must remain an error outside the active-history request");
+    }
+  }
+});
+
+test("Forum Auto empty-history handling preserves other faults, invalid responses and cancellation", async () => {
+  const credentials = { login: "fixture", password: "fixture" };
+  const response = (status, payload) => ({ status, contentType: "application/json", body: JSON.stringify(payload) });
+  const failures = [5, 6, 10, 11, 12, 21, 27].map((faultCode) => response(200, { faultCode }));
+  failures.push(...[401, 403, 429, 500].map((status) => response(status, { faultCode: 26 })),
+    response(200, { error: "private upstream text" }));
+  for (const failure of failures) {
+    await assert.rejects(listForumAutoOrderHistory(credentials, new AbortController().signal,
+      async (method) => parseForumAutoApiResponse(failure, method)),
+    (error) => error instanceof SupplierAuthError || error instanceof SupplierIntegrationError);
+  }
+  const controller = new AbortController();
+  const reason = new Error("fixture abort");
+  await assert.rejects(listForumAutoOrderHistory(credentials, controller.signal, async (method) => {
+    controller.abort(reason);
+    return parseForumAutoApiResponse(response(200, { faultCode: 26 }), method);
+  }), (error) => error === reason);
+});
+
 test("Armtek and Rossko histories use fixed read-only methods and honor abort", async (t) => {
   const calls = [];
   t.mock.method(globalThis, "fetch", async (url, options) => {

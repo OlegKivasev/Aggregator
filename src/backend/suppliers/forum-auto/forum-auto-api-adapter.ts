@@ -158,7 +158,8 @@ export function parseForumAutoApiResponse(response: SiteHttpResponse, method?: F
   if ((method === "listgoods" || method === "listbrands") && (response.status === 400 || response.status === 422)) {
     return [];
   }
-  if (method === "addgoodstoorder" && response.status >= 400
+  if ((method === "addgoodstoorder" && response.status >= 400
+    || method === "listorders" && (response.status === 400 || response.status === 422))
     && response.contentType?.toLocaleLowerCase().startsWith("application/json")) {
     let fault: unknown;
     try { fault = JSON.parse(response.body) as unknown; } catch { /* The non-success status remains an integration error. */ }
@@ -375,7 +376,16 @@ export function parseForumAutoOrderHistory(payload: unknown): OrderHistory {
 export async function listForumAutoOrderHistory(credentials: ForumAutoCredentials, signal: AbortSignal,
   request: ForumAutoApiRequester = forumAutoApiRequest): Promise<OrderHistory> {
   signal.throwIfAborted();
-  return parseForumAutoOrderHistory(await request("listorders", new URLSearchParams({ did: "0" }), signal, 30_000, credentials));
+  try {
+    return parseForumAutoOrderHistory(await request("listorders", new URLSearchParams({ did: "0" }), signal, 30_000, credentials));
+  } catch (error) {
+    signal.throwIfAborted();
+    // Fault 26 confirms an empty active list; order-detail and checkout requests still reject it.
+    if (error instanceof SupplierIntegrationError && error.diagnosticCode === "forum_auto_fault_26") {
+      return finishOrderHistory([]);
+    }
+    throw error;
+  }
 }
 
 export function parseForumAutoOrderResult(payload: unknown, line: PurchaseLine): OrderGroupResult {

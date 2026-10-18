@@ -13,7 +13,7 @@ import { SupplierAuthError } from "../../src/backend/errors.ts";
 import { parsePartKomOrderHistory } from "../../src/backend/suppliers/part-kom/part-kom-order.ts";
 import { parseArmtekOrderHistory } from "../../src/backend/suppliers/armtek/armtek-order.ts";
 import { parseRosskoOrderHistory } from "../../src/backend/suppliers/rossko/rossko-api-adapter.ts";
-import { parseForumAutoOrderHistory } from "../../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
+import { listForumAutoOrderHistory, parseForumAutoApiResponse, parseForumAutoOrderHistory } from "../../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 
 // The browser uses a real local cart server; supplier searches and checks are fictional fixtures.
 const supplierOrigins = { armtek: "https://etp.armtek.ru/", "part-kom": "https://www.part-kom.ru/",
@@ -1871,6 +1871,25 @@ test("history filters all suppliers by inclusive order dates and any item status
     }
   }, { fixedTime: "2026-10-15T12:00:00Z", partKomOrderHistory: async () => { calls.push({ supplier: "part-kom" }); return history; },
     supplierOrderHistory: async (query) => { calls.push(query); return history; } });
+});
+
+test("Forum Auto empty active history opens and reloads without history or cancellation errors", async () => {
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.locator("#history-tab-forum-auto").click();
+    const loaded = () => page.waitForFunction(() => document.querySelector("#history-cancellation-notice").hidden
+      && document.querySelector("#history-results .history-message:not(.is-error)")?.textContent.includes("заказов нет"));
+    await loaded();
+    const refreshed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/order-history/forum-auto");
+    await page.locator("#history-reload").click();
+    assert.equal((await refreshed).status(), 200);
+    await loaded();
+    assert.equal(await page.locator(".history-card, .history-message.is-error").count(), 0);
+    assert.equal(await page.locator("#history-cancellation-retry").isVisible(), false);
+  }, { allSuppliers: true, supplierOrderHistory: async (query, signal) => query.supplier === "forum-auto"
+    ? listForumAutoOrderHistory({ login: "fixture", password: "fixture" }, signal, async (method) => parseForumAutoApiResponse({
+      status: 200, contentType: "application/json", body: '{"faultCode":26,"message":"private upstream text"}',
+    }, method)) : { orders: [], limited: false } });
 });
 
 test("Forum Auto history retains the order ID through document and status changes and searches both references", async () => {
