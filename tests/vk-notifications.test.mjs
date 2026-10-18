@@ -128,6 +128,29 @@ test("website events persist, paginate without gaps and keep arrivals after a re
   assert.deepEqual(repository.feed(), pending, "restart and repeated responses cannot duplicate a website event");
 });
 
+test("selective website reads preserve unseen neighbours, pagination and persisted read state", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "aggregator-selective-feed-"));
+  const path = join(directory, "orders.sqlite");
+  let repository = new SqliteNotificationRepository(path);
+  t.after(async () => { repository.close(); await rm(directory, { recursive: true, force: true }); });
+  const update = (number) => repository.observeFeed([{ supplier: "armtek", histories: [history([part()], number)] }], now);
+  update("BASE");
+  for (let index = 1; index <= 35; index++) update(`NEW-${index}`);
+  const first = repository.feed();
+  const older = repository.feed(first.nextBefore);
+  const ids = [first.entries[0].id, first.entries[2].id, older.entries.at(-1).id];
+  assert.equal(repository.markFeedEntriesSeen(ids, now), true);
+  assert.equal(repository.markFeedEntriesSeen(ids, now), true, "repeated acknowledgements are idempotent");
+  update("ARRIVED-AFTER");
+  repository.close(); repository = new SqliteNotificationRepository(path);
+  const current = repository.feed();
+  const all = [...current.entries, ...repository.feed(current.nextBefore).entries];
+  assert.equal(current.unreadCount, 33);
+  assert.deepEqual(all.filter((entry) => entry.read).map((entry) => entry.id).sort((a, b) => a - b), ids.sort((a, b) => a - b));
+  assert.equal(repository.markFeedEntriesSeen([ids[0], current.latestId + 1], now), false);
+  assert.equal(repository.feed().unreadCount, 33);
+});
+
 test("the website monitor works without a VK key and respects the same night pause", async (t) => {
   const f = await fixture(t);
   await f.service.runOnce(); assert.equal(f.loads.length, 1); assert.equal(f.service.orderFeed().unreadCount, 0);
@@ -149,7 +172,7 @@ test("reading the website feed cannot consume a queued VK event or reset its ret
   f.advance(); f.setHistory(history([part({ fulfillment: "cancelled" })])); await f.service.runOnce();
   const id = f.calls.at(-1).params.get("random_id");
   assert.equal(f.service.orderFeed().unreadCount, 1); assert.equal(f.repository.counts(target).pending, 1);
-  f.service.markOrdersSeen({ throughId: f.service.orderFeed().latestId });
+  f.service.markOrdersSeen({ ids: [f.service.orderFeed().latestId] });
   unavailable = false; f.advance(); await f.service.runOnce();
   assert.equal(f.service.orderFeed().unreadCount, 0); assert.equal(f.service.orderFeed().entries.length, 1);
   assert.equal(f.calls.at(-1).params.get("random_id"), id); assert.equal(f.repository.counts(target).pending, 0);
@@ -164,7 +187,12 @@ test("website feed HTTP validates cursors and acknowledgements and never checks 
   const view = await first.json(); assert.equal(view.unreadCount, 1); assert.equal(f.loads.length, 0); assert.equal(f.calls.length, 0);
   for (const query of ["?bad=1", "?before=-1", "?before=1&before=2", "?before=9007199254740992", "?before=1.2"]) assert.equal((await fetch(url + query)).status, 400);
   const post = (payload, headers = {}) => fetch(`${url}/seen`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(payload) });
-  for (const payload of [{ throughId: "1" }, { throughId: 1, bad: true }, { throughId: view.latestId + 1 }, []]) assert.equal((await post(payload)).status, 400);
+  for (const payload of [{ throughId: "1" }, { throughId: 1, bad: true }, { throughId: view.latestId + 1 }, [], {},
+    { ids: [] }, { ids: [0] }, { ids: [-1] }, { ids: ["1"] }, { ids: [1, 1] }, { ids: [view.latestId + 1] },
+    { ids: [view.latestId], throughId: view.latestId }, { ids: Array.from({ length: 101 }, (_, index) => index + 1) }]) {
+    assert.equal((await post(payload)).status, 400);
+  }
+  assert.equal((await post({ ids: [view.latestId] }, { "Sec-Fetch-Site": "cross-site" })).status, 403);
   assert.equal((await post({ throughId: view.latestId }, { "Sec-Fetch-Site": "cross-site" })).status, 403);
   assert.equal((await fetch(`${url}/seen`)).status, 405);
   f.repository.observeFeed([{ supplier: "rossko", histories: [history()] }], now);

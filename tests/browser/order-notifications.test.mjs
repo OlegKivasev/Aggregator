@@ -42,8 +42,9 @@ async function withFeed(check) {
       ["/order-notifications-ui.js", "application/javascript"], ["/notification-bell.png", "image/png"]]);
     server = createServer(async (request, response) => {
       const url = new URL(request.url, "http://127.0.0.1");
-      if (url.pathname.startsWith("/api/notifications/orders") && mode !== "ok") {
-        response.writeHead(mode === "offline" ? 503 : 200, { "Content-Type": "application/json" });
+      if (url.pathname.startsWith("/api/notifications/orders") && mode !== "ok"
+        && (!mode.startsWith("ack-") || url.pathname.endsWith("/seen"))) {
+        response.writeHead(mode.endsWith("offline") ? 503 : 200, { "Content-Type": "application/json" });
         response.end(JSON.stringify({ entries: [{ kind: "<script>" }], unreadCount: 0 })); return;
       }
       if (url.pathname.endsWith("/seen")) { onRead?.(); onRead = null; }
@@ -73,13 +74,15 @@ async function withFeed(check) {
   }
 }
 
-test("bell shows safe colored order cards, multiple products and fits mobile without consuming unread events", async () => {
+test("bell shows safe colored order cards, multiple products and fits mobile with automatic visible reads", async () => {
   await withFeed(async (page) => {
     const trigger = page.locator("#order-notifications-trigger");
     await trigger.click();
     const panel = page.locator("#order-notifications-panel");
     assert.equal(await panel.locator(".order-notification-card").count(), 4);
     for (const kind of ["new", "cancelled", "received", "missing"]) assert.equal(await panel.locator(`.order-notification-card--${kind}`).count(), 1);
+    assert.equal(await panel.locator("header p").count(), 0);
+    await page.waitForFunction(() => Number(document.querySelector("#order-notifications-count").textContent) < 4);
     const cancelled = panel.locator(".order-notification-card--cancelled");
     assert.match(await cancelled.textContent(), /2 шт\./); assert.match(await cancelled.textContent(), /200/);
     assert.match(await panel.locator(".order-notification-card--received").textContent(), /3 шт\./);
@@ -100,33 +103,43 @@ test("bell shows safe colored order cards, multiple products and fits mobile wit
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "order-notifications-mobile.png") });
     await page.keyboard.press("Escape"); assert.equal(await panel.isVisible(), false);
     assert.equal(await trigger.evaluate((node) => node === document.activeElement), true);
-    assert.equal(await page.locator("#order-notifications-count").textContent(), "4");
   });
 });
 
-test("reading a visible snapshot is shared across browsers and preserves a newer arriving event", async () => {
+test("read all includes unloaded older events, preserves a new arrival and shares visible reads across browsers", async () => {
   await withFeed(async (page, { onRead, addOrder, browser, origin, service }) => {
+    for (let index = 0; index < 35; index++) addOrder(`BULK-${index}`);
+    await page.clock.runFor(30_001);
+    await page.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "39");
+    await page.setViewportSize({ width: 1366, height: 480 });
     await page.locator("#order-notifications-trigger").click();
+    await page.waitForFunction(() => Number(document.querySelector("#order-notifications-count").textContent) < 39
+      && !document.querySelector("#order-notifications-read").disabled);
+    await page.route("**/api/notifications/orders/seen", async (route) => {
+      if (route.request().postDataJSON().throughId !== undefined) await page.keyboard.press("Escape");
+      await route.continue();
+    });
     onRead(() => addOrder("DURING-READ"));
     await page.locator("#order-notifications-read").click();
     await page.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "1");
-    assert.equal(await page.locator(".order-notification-card.is-unread").count(), 1);
-    assert.match(await page.locator(".order-notification-card.is-unread").textContent(), /DURING-READ/);
+    assert.equal(await page.locator("#order-notifications-panel").isVisible(), false);
+    assert.equal(service.orderFeed().unreadCount, 1);
+    assert.equal(service.orderFeed().entries[0].number, "DURING-READ");
     const other = await browser.newPage({ viewport: { width: 1366, height: 900 } });
     await other.goto(origin);
     await other.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "1");
-    await other.locator("#order-notifications-trigger").click(); await other.locator("#order-notifications-read").click();
+    await other.locator("#order-notifications-trigger").click();
     await other.waitForFunction(() => document.querySelector("#order-notifications-count").hidden);
     assert.equal(service.orderFeed().unreadCount, 0);
     await page.clock.runFor(30_001);
     await page.waitForFunction(() => document.querySelector("#order-notifications-count").hidden);
-    assert.equal(await page.locator(".order-notification-card").count(), 5, "reading keeps the event history");
+    assert.equal(await page.locator(".order-notification-card").count(), 30, "reading keeps the loaded event history");
     await other.close();
   });
 });
 
 test("feed polling and pagination retain every event after a long absence and failures preserve known alerts", async () => {
-  await withFeed(async (page, { addOrder, setMode }) => {
+  await withFeed(async (page, { addOrder, setMode, service }) => {
     for (let index = 0; index < 35; index++) addOrder(`LATER-${index}`);
     await page.clock.runFor(30_001);
     await page.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "39");
@@ -136,13 +149,82 @@ test("feed polling and pagination retain every event after a long absence and fa
     await page.waitForFunction(() => document.querySelectorAll(".order-notification-card").length === 39);
     const ids = await page.locator(".order-notification-card").evaluateAll((cards) => cards.map((card) => card.dataset.notificationId));
     assert.equal(new Set(ids).size, 39);
+    await page.waitForFunction(() => !document.querySelector("#order-notifications-read").disabled);
+    const unread = service.orderFeed().unreadCount;
     for (const mode of ["offline", "malformed"]) {
       setMode(mode); await page.clock.runFor(30_001);
       await page.locator(".order-notifications-error").waitFor({ state: "visible" });
-      assert.equal(await page.locator("#order-notifications-count").textContent(), "39");
+      assert.equal(await page.locator("#order-notifications-count").textContent(), String(unread));
       assert.equal(await page.locator(".order-notification-card").count(), 39);
     }
     setMode("ok"); await page.locator(".order-notifications-error button").click();
     await page.locator(".order-notifications-error").waitFor({ state: "hidden" });
+  });
+});
+
+test("failed automatic acknowledgements preserve unread cards and can be retried without a request loop", async () => {
+  await withFeed(async (page, { setMode, service }) => {
+    const acknowledgements = [];
+    page.on("request", (request) => { if (new URL(request.url()).pathname.endsWith("/seen")) acknowledgements.push(request.postDataJSON()); });
+    setMode("ack-offline");
+    await page.locator("#order-notifications-trigger").click();
+    const error = page.locator(".order-notifications-error");
+    await error.waitFor({ state: "visible" });
+    assert.equal(service.orderFeed().unreadCount, 4);
+    assert.equal(await page.locator(".order-notification-card.is-unread").count(), 4);
+    const failed = acknowledgements.length;
+    await page.clock.runFor(100);
+    assert.equal(acknowledgements.length, failed);
+    setMode("ack-malformed");
+    await error.getByRole("button", { name: "Повторить" }).click();
+    await page.waitForFunction(() => !document.querySelector("#order-notifications-read").disabled);
+    assert.equal(service.orderFeed().unreadCount, 4);
+    assert.equal(await page.locator(".order-notification-card.is-unread").count(), 4);
+    setMode("ok");
+    await error.getByRole("button", { name: "Повторить" }).click();
+    await page.waitForFunction(() => Number(document.querySelector("#order-notifications-count").textContent) < 4);
+    assert.equal(await error.isVisible(), false);
+  });
+});
+
+test("only cards in view are read; hidden pages and closed panels preserve unseen cards and show a clear divider", async () => {
+  await withFeed(async (page, { addOrder, service }) => {
+    for (let index = 0; index < 35; index++) addOrder(`VISIBLE-${index}`);
+    await page.clock.runFor(30_001);
+    await page.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "39");
+    const acknowledgements = [];
+    page.on("request", (request) => { if (new URL(request.url()).pathname.endsWith("/seen")) acknowledgements.push(request.postDataJSON()); });
+    await page.setViewportSize({ width: 1366, height: 480 });
+    await page.locator("#order-notifications-trigger").click();
+    const settled = () => page.waitForFunction(() => Number(document.querySelector("#order-notifications-count").textContent) < 39
+      && !document.querySelector("#order-notifications-read").disabled);
+    await settled();
+    assert.ok(service.orderFeed().unreadCount > 30, "opening must not read offscreen or unloaded cards");
+    assert.ok(acknowledgements.length > 0 && acknowledgements.every((payload) => Array.isArray(payload.ids) && payload.throughId === undefined));
+    assert.equal(await page.locator(".order-notification-card").first().evaluate((card) => card.classList.contains("is-unread")), false);
+    assert.equal(await page.locator(".order-notification-card").last().evaluate((card) => card.classList.contains("is-unread")), true);
+    const divider = page.getByRole("separator", { name: "Непрочитанные", exact: true });
+    assert.equal(await divider.count(), 1);
+    assert.equal(await divider.evaluate((node) => getComputedStyle(node, "::before").borderTopWidth), "2px");
+    const beforeScroll = service.orderFeed().unreadCount;
+    const order = await page.locator(".order-notification-card").evaluateAll((cards) => cards.map((card) => card.dataset.notificationId));
+    await page.evaluate(() => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+      document.dispatchEvent(new Event("visibilitychange"));
+      const scroll = document.querySelector(".order-notifications-scroll"); scroll.scrollTop = scroll.scrollHeight;
+    });
+    await page.clock.runFor(100);
+    assert.equal(service.orderFeed().unreadCount, beforeScroll);
+    await page.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event("visibilitychange")); });
+    await page.waitForFunction((previous) => Number(document.querySelector("#order-notifications-count").textContent) < previous, beforeScroll);
+    await settled();
+    assert.equal(await page.locator(".order-notification-card").last().evaluate((card) => card.classList.contains("is-unread")), false);
+    assert.deepEqual(await page.locator(".order-notification-card").evaluateAll((cards) => cards.map((card) => card.dataset.notificationId)), order);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "order-notifications-read-divider.png") });
+    await page.keyboard.press("Escape");
+    const beforeClosed = service.orderFeed().unreadCount;
+    await page.clock.runFor(30_001);
+    assert.equal(service.orderFeed().unreadCount, beforeClosed);
+    assert.ok(beforeClosed > 0);
   });
 });

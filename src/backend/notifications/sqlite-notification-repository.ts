@@ -99,6 +99,15 @@ export class SqliteNotificationRepository {
     return true;
   }
 
+  markFeedEntriesSeen(ids: number[], now: number): boolean {
+    const placeholders = ids.map(() => "?").join(",");
+    const found = this.database.prepare(`SELECT COUNT(*) AS total FROM order_notification_feed WHERE id IN (${placeholders})`).get(...ids);
+    if (Number(found?.total) !== ids.length) return false;
+    this.database.prepare(`UPDATE order_notification_feed SET seen_at=? WHERE id IN (${placeholders}) AND seen_at IS NULL`)
+      .run(new Date(now).toISOString(), ...ids);
+    return true;
+  }
+
   private observeForumActiveOrders(target: string, orders: MonitoredOrder[]): OrderEvent[] {
     const row = this.database.prepare("SELECT numbers FROM vk_forum_active_orders WHERE target=?").get(target);
     const current = new Set(orders.map((order) => order.number));

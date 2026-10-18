@@ -70,8 +70,15 @@ export class OrderNotificationService {
   orderFeed(before: number | null = null) { return this.repository.feed(before); }
   markOrdersSeen(payload: unknown) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new NotificationSettingsError("Неверный запрос прочтения уведомлений.");
-    const { throughId, ...rest } = payload as { throughId?: unknown };
-    if (Object.keys(rest).length || typeof throughId !== "number" || !Number.isSafeInteger(throughId) || throughId < 0
+    const { throughId, ids, ...rest } = payload as { throughId?: unknown; ids?: unknown };
+    if (Object.keys(rest).length || (throughId === undefined) === (ids === undefined)) {
+      throw new NotificationSettingsError("Неверный запрос прочтения уведомлений.");
+    }
+    if (ids !== undefined) {
+      if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100 || new Set(ids).size !== ids.length
+        || ids.some((id) => typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0)
+        || !this.repository.markFeedEntriesSeen(ids, this.now())) throw new NotificationSettingsError("Неверный номер уведомления.");
+    } else if (typeof throughId !== "number" || !Number.isSafeInteger(throughId) || throughId < 0
       || !this.repository.markFeedSeen(throughId, this.now())) throw new NotificationSettingsError("Неверный номер уведомления.");
     return this.orderFeed();
   }

@@ -29,12 +29,13 @@ export function bootstrapOrderNotifications() {
   const panel = element("section", "order-notifications-panel");
   panel.id = "order-notifications-panel"; panel.hidden = true;
   panel.setAttribute("role", "dialog"); panel.setAttribute("aria-labelledby", "order-notifications-title");
-  panel.innerHTML = `<header><div><h2 id="order-notifications-title">Уведомления</h2><p>Новые заказы, отмены и получение</p></div><button type="button" class="order-notifications-close" aria-label="Закрыть уведомления">×</button></header>
+  panel.innerHTML = `<header><h2 id="order-notifications-title">Уведомления</h2><button type="button" class="order-notifications-close" aria-label="Закрыть уведомления">×</button></header>
     <div class="order-notifications-toolbar"><span id="order-notifications-summary" role="status"></span><button type="button" id="order-notifications-read" disabled>Прочитать все</button></div>
     <div class="order-notifications-error" role="alert" hidden><span></span><button type="button">Повторить</button></div>
     <div class="order-notifications-scroll"><div class="order-notifications-empty" hidden></div><ol class="order-notifications-list"></ol><button type="button" id="order-notifications-more" hidden>Показать ещё</button></div>`;
   document.body.append(panel);
   const list = panel.querySelector("ol");
+  const scroll = panel.querySelector(".order-notifications-scroll");
   const empty = panel.querySelector(".order-notifications-empty");
   const error = panel.querySelector('[role="alert"]');
   const summary = panel.querySelector("#order-notifications-summary");
@@ -50,6 +51,25 @@ export function bootstrapOrderNotifications() {
   let pending = false;
   let timer = null;
   let controller = null;
+
+  const readVisible = () => {
+    if (panel.hidden || document.hidden || !loaded || pending || !error.hidden) return;
+    const bounds = scroll.getBoundingClientRect();
+    const ids = [...list.querySelectorAll(".is-unread .order-notification-card__number")].filter((node) => {
+      const target = node.getBoundingClientRect();
+      const width = Math.max(0, Math.min(bounds.right, target.right) - Math.max(bounds.left, target.left));
+      const height = Math.max(0, Math.min(bounds.bottom, target.bottom) - Math.max(bounds.top, target.top));
+      return target.width > 0 && target.height > 0 && width * height >= target.width * target.height / 2;
+    }).map((node) => Number(node.closest("[data-notification-id]").dataset.notificationId)).slice(0, 100);
+    if (ids.length) void request({ seen: { ids } });
+  };
+  const visibilityObserver = new IntersectionObserver(readVisible, { root: scroll, threshold: .5 });
+  const observeVisible = () => {
+    visibilityObserver.disconnect();
+    if (!panel.hidden && !document.hidden) {
+      for (const number of list.querySelectorAll(".is-unread .order-notification-card__number")) visibilityObserver.observe(number);
+    }
+  };
 
   const position = () => {
     if (panel.hidden) return;
@@ -68,8 +88,23 @@ export function bootstrapOrderNotifications() {
     read.disabled = pending || unreadCount === 0;
   };
   const render = () => {
+    const focusedId = list.contains(document.activeElement) && document.activeElement.matches(".order-notification-card__expand")
+      ? document.activeElement.closest("[data-notification-id]").dataset.notificationId : null;
+    const anchor = scroll.scrollTop > 0 ? [...list.querySelectorAll("[data-notification-id]")]
+      .find((card) => card.getBoundingClientRect().bottom > scroll.getBoundingClientRect().top) : null;
+    const anchorId = anchor?.dataset.notificationId;
+    const anchorTop = anchor?.getBoundingClientRect().top;
+    visibilityObserver.disconnect();
     updateBadge(); list.replaceChildren();
+    let previousRead = null;
     for (const entry of [...entries.values()].sort((a, b) => b.id - a.id)) {
+      if (previousRead !== null && previousRead !== entry.read) {
+        const label = entry.read ? "Прочитанные" : "Непрочитанные";
+        const divider = element("li", `order-notifications-divider${entry.read ? "" : " is-unread"}`, label);
+        divider.setAttribute("role", "separator"); divider.setAttribute("aria-label", label);
+        list.append(divider);
+      }
+      previousRead = entry.read;
       const row = element("li");
       const card = element("article", `order-notification-card order-notification-card--${entry.kind}${entry.read ? "" : " is-unread"}`);
       card.dataset.notificationId = String(entry.id);
@@ -107,8 +142,15 @@ export function bootstrapOrderNotifications() {
     empty.hidden = entries.size > 0;
     empty.textContent = loaded ? "Пока нет новых событий. Заказы проверяются автоматически каждые 10 минут с учётом настроенной ночной паузы. Первая проверка запоминает текущие заказы." : "Загружаем уведомления…";
     more.hidden = nextBefore === null; more.disabled = pending;
+    if (anchorId) {
+      const restored = list.querySelector(`[data-notification-id="${anchorId}"]`);
+      if (restored) scroll.scrollTop += restored.getBoundingClientRect().top - anchorTop;
+    }
+    if (focusedId) list.querySelector(`[data-notification-id="${focusedId}"] .order-notification-card__expand`)?.focus({ preventScroll: true });
+    observeVisible();
   };
   const close = (restoreFocus = true) => {
+    visibilityObserver.disconnect();
     panel.hidden = true; trigger.setAttribute("aria-expanded", "false");
     if (restoreFocus) trigger.focus({ preventScroll: true });
   };
@@ -116,20 +158,22 @@ export function bootstrapOrderNotifications() {
     clearTimeout(timer);
     if (!document.hidden) timer = setTimeout(() => void request(), 30_000);
   };
-  const request = async (before = null, markSeen = false) => {
+  const request = async ({ before = null, seen = null } = {}) => {
     if (pending) return;
     pending = true; updateBadge(); more.disabled = true;
     controller = new AbortController(); const active = controller;
     const timeout = setTimeout(() => active.abort(), 15_000);
     try {
-      const response = await fetch(markSeen ? "/api/notifications/orders/seen" : `/api/notifications/orders${before === null ? "" : `?before=${before}`}`, {
-        method: markSeen ? "POST" : "GET", signal: active.signal,
-        ...(markSeen ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ throughId: latestId }) } : {}),
+      const response = await fetch(seen ? "/api/notifications/orders/seen" : `/api/notifications/orders${before === null ? "" : `?before=${before}`}`, {
+        method: seen ? "POST" : "GET", signal: active.signal,
+        ...(seen ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(seen) } : {}),
       });
       if (!response.ok) throw new Error("Notification request failed");
       const value = await response.json();
       if (!validFeed(value) || new Set(value.entries.map((entry) => entry.id)).size !== value.entries.length) throw new Error("Invalid notification feed");
-      if (markSeen) for (const entry of entries.values()) if (entry.id <= latestId) entry.read = true;
+      if (seen) for (const entry of entries.values()) {
+        if (seen.ids ? seen.ids.includes(entry.id) : entry.id <= seen.throughId) entry.read = true;
+      }
       const reset = before === null && value.latestId > latestId;
       if (reset) entries.clear();
       for (const entry of value.entries) entries.set(entry.id, entry);
@@ -139,27 +183,30 @@ export function bootstrapOrderNotifications() {
       if (panel.hidden) updateBadge(); else render();
     } catch {
       if (!active.signal.aborted || !document.hidden) {
-        error.hidden = false; error.querySelector("span").textContent = markSeen ? "Не удалось отметить уведомления. Попробуйте ещё раз." : "Не удалось загрузить уведомления. Попробуйте ещё раз.";
+        error.hidden = false; error.querySelector("span").textContent = seen ? "Не удалось отметить уведомления. Попробуйте ещё раз." : "Не удалось загрузить уведомления. Попробуйте ещё раз.";
         if (!loaded) empty.textContent = "Уведомления пока недоступны.";
       }
-    } finally { clearTimeout(timeout); controller = null; pending = false; updateBadge(); more.disabled = false; schedule(); }
+    } finally { clearTimeout(timeout); controller = null; pending = false; updateBadge(); more.disabled = false; schedule(); readVisible(); }
   };
   trigger.addEventListener("click", () => {
     if (!panel.hidden) { close(); return; }
     panel.hidden = false; trigger.setAttribute("aria-expanded", "true"); render(); position(); closeButton.focus(); void request();
   });
   closeButton.addEventListener("click", () => close());
-  read.addEventListener("click", () => void request(null, true));
-  more.addEventListener("click", () => { if (nextBefore !== null) void request(nextBefore); });
+  read.addEventListener("click", () => void request({ seen: { throughId: latestId } }));
+  more.addEventListener("click", () => { if (nextBefore !== null) void request({ before: nextBefore }); });
   error.querySelector("button").addEventListener("click", () => void request());
   document.addEventListener("pointerdown", (event) => { if (!panel.hidden && !panel.contains(event.target) && !trigger.contains(event.target)) close(false); });
   document.addEventListener("keydown", (event) => {
     if (!panel.hidden && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
   });
-  document.addEventListener("visibilitychange", () => { if (document.hidden) { clearTimeout(timer); controller?.abort(); } else void request(); });
+  document.addEventListener("visibilitychange", () => {
+    observeVisible();
+    if (document.hidden) { clearTimeout(timer); controller?.abort(); } else void request();
+  });
   window.addEventListener("resize", position);
-  window.addEventListener("pagehide", () => { clearTimeout(timer); controller?.abort(); });
-  window.addEventListener("pageshow", () => void request());
+  window.addEventListener("pagehide", () => { visibilityObserver.disconnect(); clearTimeout(timer); controller?.abort(); });
+  window.addEventListener("pageshow", () => { observeVisible(); void request(); });
   void request();
 }
 
