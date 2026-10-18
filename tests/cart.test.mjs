@@ -709,7 +709,7 @@ test("Forum Auto checks an externally tagged order after a lost creation respons
 test("Forum Auto treats a documented order refusal as rejected without leaving an uncertain attempt", async () => {
   const orderedLine = line("forum-auto");
   for (const [status, payload] of [[200, { FaultCode: 28 }], [400, { faultcode: "28" }],
-    [200, [{ FaultCode: 28 }]]]) {
+    [200, [{ FaultCode: 28 }]], [200, { errors: { FaultCode: 28 } }], [400, { errors: { FaultCode: 28 } }]]) {
     let calls = 0;
     const response = await placeForumAutoOrder(orderedLine, { login: "fixture", password: "fixture" },
       new AbortController().signal, "33333333-3333-4333-8333-333333333333", async (method) => {

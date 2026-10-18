@@ -33,6 +33,7 @@ interface ForumAutoOffer {
 }
 
 interface ForumAutoFault {
+  errors?: unknown;
   FaultCode?: unknown;
   faultCode?: unknown;
   faultcode?: unknown;
@@ -121,9 +122,14 @@ function deliveryDateFromDuration(days: unknown, hours: unknown): string | null 
 }
 
 function forumAutoFaultCode(payload: unknown): number | null {
-  const candidate = Array.isArray(payload) && payload.length === 1 ? payload[0] : payload;
+  let candidate = Array.isArray(payload) && payload.length === 1 ? payload[0] : payload;
   if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
     return null;
+  }
+  const errors = (candidate as ForumAutoFault).errors;
+  if (errors !== undefined) {
+    if (!errors || typeof errors !== "object" || Array.isArray(errors)) return null;
+    candidate = errors;
   }
   const fault = candidate as ForumAutoFault;
   const rawCode = fault.FaultCode ?? fault.faultCode ?? fault.faultcode ?? fault.code;

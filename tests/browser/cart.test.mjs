@@ -1888,7 +1888,7 @@ test("Forum Auto empty active history opens and reloads without history or cance
     assert.equal(await page.locator("#history-cancellation-retry").isVisible(), false);
   }, { allSuppliers: true, supplierOrderHistory: async (query, signal) => query.supplier === "forum-auto"
     ? listForumAutoOrderHistory({ login: "fixture", password: "fixture" }, signal, async (method) => parseForumAutoApiResponse({
-      status: 200, contentType: "application/json", body: '{"faultCode":26,"message":"private upstream text"}',
+      status: 200, contentType: "application/json", body: '{"errors":{"FaultCode":26,"FaultString":"private upstream text"}}',
     }, method)) : { orders: [], limited: false } });
 });
 

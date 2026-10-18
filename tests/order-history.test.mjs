@@ -374,6 +374,39 @@ test("Forum Auto empty-history handling preserves other faults, invalid response
   }), (error) => error === reason);
 });
 
+test("Forum Auto history recognizes the real REST errors envelope instead of rejecting an empty active list", async () => {
+  for (const FaultCode of [26, "26"]) {
+    const response = { status: 200, contentType: "application/json; charset=utf-8",
+      body: JSON.stringify({ errors: { FaultCode, FaultString: "private upstream text", FaultDetail: "private credentials" } }) };
+    const result = await listForumAutoOrderHistory({ login: "fixture", password: "fixture" }, new AbortController().signal,
+      async (method) => parseForumAutoApiResponse(response, method));
+    assert.deepEqual(result, { orders: [], limited: false });
+  }
+});
+
+test("Forum Auto REST errors envelopes preserve authorization, limits and real failures without exposing upstream text", () => {
+  for (const FaultCode of [1, 5, 6, 10, 11, 12, 21, 26, 27]) {
+    const fault = { errors: { FaultCode, FaultString: "private upstream text", FaultDetail: "private credentials" } };
+    for (const payload of [fault, [fault]]) {
+      const response = { status: 200, contentType: "application/json", body: JSON.stringify(payload) };
+      assert.throws(() => parseForumAutoApiResponse(response, "listorders"), (error) => {
+        assert.ok(error instanceof ([10, 11, 12].includes(FaultCode) ? SupplierAuthError : SupplierIntegrationError));
+        if (error instanceof SupplierIntegrationError) assert.equal(error.diagnosticCode, `forum_auto_fault_${FaultCode}`);
+        assert.doesNotMatch(`${error.message} ${error.publicMessage}`, /private/);
+        return true;
+      });
+    }
+  }
+  const response = { status: 200, contentType: "application/json", body: '{"errors":{"FaultCode":27}}' };
+  assert.deepEqual(parseForumAutoApiResponse(response, "listgoods"), []);
+  assert.deepEqual(parseForumAutoApiResponse(response, "listbrands"), []);
+  assert.throws(() => parseForumAutoApiResponse({ ...response, body: '{"errors":{"FaultCode":10}}' }, "clientinfo"), SupplierAuthError);
+  for (const errors of [null, [], "private upstream text", { FaultCode: "invalid" }]) {
+    const malformed = { ...response, body: JSON.stringify({ errors }) };
+    assert.throws(() => parseForumAutoOrderHistory(parseForumAutoApiResponse(malformed, "listorders")), SupplierIntegrationError);
+  }
+});
+
 test("Armtek and Rossko histories use fixed read-only methods and honor abort", async (t) => {
   const calls = [];
   t.mock.method(globalThis, "fetch", async (url, options) => {
