@@ -47,8 +47,6 @@ import type { OrderHistorySupplier } from "../purchasing/order-cancellation-cont
 import type { OrderNotificationService } from "../notifications/order-notification-service.ts";
 import { serveVkNotifications } from "./vk-notifications.ts";
 import { serveOrderNotifications } from "./order-notifications.ts";
-import type { PartImageSearch } from "../images/part-image-search.ts";
-import { servePartImages } from "./part-images.ts";
 
 export interface AggregatorApplication {
   testCartOrder?: TestOrder;
@@ -96,7 +94,6 @@ interface CreateAggregatorServerOptions {
   application: AggregatorApplication;
   publicDir: string;
   notifications?: OrderNotificationService;
-  partImages?: PartImageSearch;
   reportError?: (event: OperationalErrorEvent) => void;
 }
 
@@ -224,7 +221,6 @@ export function createAggregatorServer({
   application,
   publicDir,
   notifications,
-  partImages,
   reportError = ({ operation, category, diagnosticCode }) => console.error(
     `[aggregator] ${operation} failed (${category})${diagnosticCode ? ` [${diagnosticCode}]` : ""}`,
   ),
@@ -247,7 +243,6 @@ export function createAggregatorServer({
 
     if (await serveVkNotifications(request, response, url, notifications)) return;
     if (await serveOrderNotifications(request, response, url, notifications)) return;
-    if (await servePartImages(request, response, url, partImages)) return;
     if (/^\/api\/(?:search|cart|order-history|suppliers)(?:\/|$)/.test(url.pathname)) {
       const release = notifications?.beginForegroundOperation();
       if (release) response.once("close", release);

@@ -14,8 +14,6 @@ import { parsePartKomOrderHistory } from "../../src/backend/suppliers/part-kom/p
 import { parseArmtekOrderHistory } from "../../src/backend/suppliers/armtek/armtek-order.ts";
 import { parseRosskoOrderHistory } from "../../src/backend/suppliers/rossko/rossko-api-adapter.ts";
 import { parseForumAutoOrderHistory } from "../../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
-import { ImageSearchKey } from "../../src/backend/images/image-search-key.ts";
-import { PartImageSearch } from "../../src/backend/images/part-image-search.ts";
 
 // The browser uses a real local cart server; supplier searches and checks are fictional fixtures.
 const supplierOrigins = { armtek: "https://etp.armtek.ru/", "part-kom": "https://www.part-kom.ru/",
@@ -98,7 +96,7 @@ async function withCartPage(check, options = {}) {
         },
       },
     };
-    server = createAggregatorServer({ application, publicDir: resolve("src/frontend"), partImages: options.partImages });
+    server = createAggregatorServer({ application, publicDir: resolve("src/frontend") });
     await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
     const origin = `http://127.0.0.1:${server.address().port}`;
     browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER_EXECUTABLE_PATH });
@@ -136,131 +134,37 @@ async function openCheckout(page) {
   await page.waitForFunction(() => document.querySelector("#cart-order-confirm").open);
 }
 
-async function imageSearchFixture(t, request, configured = false) {
-  const directory = await mkdtemp(join(tmpdir(), "aggregator-images-browser-"));
-  const service = new PartImageSearch(new ImageSearchKey(join(directory, "key.enc.json"), null), request);
-  if (configured) service.configure("fictional_image_search_key_123456");
-  t.after(async () => { service.close(); await rm(directory, { recursive: true, force: true }); });
-  return service;
-}
-const imageSearchRow = (index) => ({ title: `Фильтр ${index} <img src=x onerror=window.imageXss=1>`,
-  thumbnail: `https://images.example/thumb-${index}.png`, original: `https://images.example/full-${index}.png`,
-  source: "Каталог", link: `https://catalog.example/part-${index}` });
-const imageSearchResponse = (indices, next = false) => new Response(JSON.stringify({ images_results: indices.map(imageSearchRow),
-  ...(next ? { serpapi_pagination: { next: "https://untrusted.example/not-followed" } } : {}) }), { headers: { "Content-Type": "application/json" } });
-
-test("image gallery opens from offers and analogs, connects a key, paginates, previews safely and fits mobile", async (t) => {
-  const calls = [];
-  const service = await imageSearchFixture(t, async (url) => {
-    calls.push(url.searchParams.get("q"));
-    return url.searchParams.get("ijn") === "0" ? imageSearchResponse([1, 2], true) : imageSearchResponse([2, 3]);
-  });
+test("image search opens Google Images in a separate safe tab with the selected offer or analog brand and article", async () => {
   const analogOffers = ["armtek", "part-kom"].map((supplier) => ({ ...offer(supplier, 2, supplier === "armtek"
-    ? { supplier, keyzak: "TEST01" } : { supplier, makerId: "101", providerId: "202" }), brand: "OTHER", article: "AN/2", isAnalog: true }));
-  await withCartPage(async (page) => {
-    await page.route("https://images.example/**", (route) => route.request().url().includes("/full-") ? route.abort()
-      : route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="100"><rect width="120" height="100" fill="silver"/></svg>' }));
+    ? { supplier, keyzak: "TEST01" } : { supplier, makerId: "101", providerId: "202" }), brand: "Бренд & Co", article: "AN/2 +#", isAnalog: true }));
+  await withCartPage(async (page, { searchCalls }) => {
+    const imageRequests = [];
+    page.on("request", (request) => { if (new URL(request.url()).pathname.startsWith("/api/part-images")) imageRequests.push(request.url()); });
+    await page.context().route("https://www.google.com/search?**", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Тест перехода к изображениям</title>" }));
+    const checkTab = async (expectedQuery) => {
+      const before = searchCalls.length;
+      const opened = page.context().waitForEvent("page");
+      await page.getByRole("menuitem", { name: "Найти изображения", exact: true }).click();
+      const tab = await opened;
+      await tab.waitForURL((url) => url.origin === "https://www.google.com" && url.pathname === "/search", { waitUntil: "domcontentloaded" });
+      const url = new URL(tab.url());
+      assert.equal(url.origin, "https://www.google.com"); assert.equal(url.pathname, "/search");
+      assert.equal(url.searchParams.get("tbm"), "isch"); assert.equal(url.searchParams.get("q"), expectedQuery);
+      assert.equal(await tab.evaluate(() => window.opener === null), true);
+      assert.equal(await tab.evaluate(() => document.referrer), "");
+      assert.equal(searchCalls.length, before, "opening images must not query suppliers");
+      await tab.close(); await page.bringToFront();
+      assert.equal(await page.locator("#part-images-dialog").count(), 0);
+    };
     const source = page.locator("#results-body .results-table__row").first();
-    await source.click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Найти изображения", exact: true }).click();
-    const dialog = page.locator("#part-images-dialog"); await dialog.waitFor();
-    await page.waitForFunction(() => document.querySelector("#part-images-settings").open);
-    assert.equal(await page.locator("#part-images-brand").inputValue(), "TEST");
-    assert.equal(await page.locator("#part-images-article").inputValue(), "A1");
-    assert.equal(new URL(await page.locator("#part-images-google").getAttribute("href")).searchParams.get("q"), "TEST A1");
-    assert.equal(calls.length, 0);
-    await page.locator("#part-images-key").fill("bad");
-    await dialog.getByRole("button", { name: "Сохранить ключ", exact: true }).click();
-    await page.waitForFunction(() => document.querySelector("#part-images-key-state").textContent.includes("корректный"));
-    await page.locator("#part-images-key").fill("fictional_image_search_key_123456");
-    await dialog.getByRole("button", { name: "Сохранить ключ", exact: true }).click();
-    await page.waitForFunction(() => document.querySelectorAll(".part-images__card").length === 2);
-    assert.equal(await page.locator("#part-images-key").inputValue(), "");
-    assert.equal(await dialog.locator(".part-images__card p img,script").count(), 0);
-    assert.equal(await page.evaluate(() => window.imageXss), undefined);
-    await page.locator("#part-images-more").click();
-    await page.waitForFunction(() => document.querySelectorAll(".part-images__card").length === 3);
-    assert.equal(await page.locator("#part-images-more").isVisible(), false);
-    await dialog.locator(".part-images__card > button").first().click();
-    await page.waitForFunction(() => document.querySelector(".part-images__preview img").src.endsWith("thumb-1.png")
-      && document.querySelector(".part-images__preview img").naturalWidth > 0);
-    assert.equal(await dialog.getByRole("link", { name: "Открыть источник", exact: true }).getAttribute("href"), "https://catalog.example/part-1");
-    await page.keyboard.press("Escape"); assert.equal(await dialog.isVisible(), true);
-    assert.equal(await dialog.locator(".part-images__preview").isVisible(), false);
-    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "part-images-desktop.png") });
-    await page.setViewportSize({ width: 390, height: 844 });
-    assert.equal(await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth && node.getBoundingClientRect().right <= innerWidth), true);
-    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "part-images-mobile.png") });
-    await page.keyboard.press("Escape"); assert.equal(await dialog.isVisible(), false);
-    await page.waitForFunction(() => document.activeElement?.matches("#results-body .results-table__row"));
-    await page.setViewportSize({ width: 1366, height: 850 });
+    await source.click({ button: "right" }); await checkTab("TEST A1");
+    assert.equal(await page.locator("#results-body .results-table__row").count(), 2);
     await openOfferAnalogs(page, source);
     const analog = page.locator("#analogs-results-body .analogs-result-row").first();
-    await analog.scrollIntoViewIfNeeded();
-    // The application dismisses menus on scroll; finish pending layout/scroll before opening one.
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
-    await analog.click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Найти изображения", exact: true }).click();
-    await page.waitForFunction(() => document.querySelectorAll(".part-images__card").length === 2);
-    assert.equal(await page.locator("#part-images-brand").inputValue(), "OTHER");
-    assert.equal(await page.locator("#part-images-article").inputValue(), "AN/2");
-    await page.keyboard.press("Tab"); assert.equal(await dialog.evaluate((node) => node.contains(document.activeElement)), true);
-    await page.keyboard.press("Escape"); assert.equal(await dialog.isVisible(), false);
+    await analog.focus(); await analog.press("Shift+F10"); await checkTab("Бренд & Co AN/2 +#");
     assert.equal(await page.locator("#analogs-modal").isVisible(), true);
-    assert.deepEqual(calls, ["TEST A1", "TEST A1", "OTHER AN/2"]);
-  }, { partImages: service, analogOffers });
-});
-
-test("image gallery preserves loaded cards on quota errors, clears stale query results and removes the key", async (t) => {
-  const service = await imageSearchFixture(t, async (url) => url.searchParams.get("ijn") === "1"
-    ? new Response("private provider details", { status: 429 })
-    : imageSearchResponse(url.searchParams.get("q").includes("NONE") ? [] : [1, 2], true), true);
-  await withCartPage(async (page) => {
-    await page.locator("#results-body .results-table__row").first().click({ button: "right" });
-    await page.locator("#find-images-button").click();
-    await page.waitForFunction(() => document.querySelectorAll(".part-images__card").length === 2);
-    await page.locator("#part-images-more").click();
-    await page.waitForFunction(() => document.querySelector("#part-images-feedback").textContent.includes("Лимит"));
-    assert.equal(await page.locator(".part-images__card").count(), 2);
-    assert.equal(await page.locator("#part-images-more").isVisible(), true);
-    await page.route("**/api/part-images?**", (route) => route.fulfill({ contentType: "text/html", body: "<html>private proxy details</html>" }), { times: 1 });
-    await page.locator("#part-images-more").click();
-    await page.waitForFunction(() => document.querySelector("#part-images-feedback").textContent.includes("некорректный ответ"));
-    assert.equal(await page.locator(".part-images__card").count(), 2);
-    assert.doesNotMatch(await page.locator("#part-images-feedback").textContent(), /private proxy details|Unexpected token/);
-    await page.locator("#part-images-article").fill("NONE");
-    assert.equal(await page.locator(".part-images__card").count(), 0);
-    assert.equal(await page.locator("#part-images-more").isVisible(), false);
-    await page.locator(".part-images__search").getByRole("button", { name: "Найти", exact: true }).click();
-    await page.waitForFunction(() => document.querySelector("#part-images-feedback").textContent.includes("не найдены"));
-    await page.locator("#part-images-settings-toggle").click();
-    await page.locator("#part-images-disconnect").click();
-    await page.waitForFunction(() => document.querySelector("#part-images-feedback").textContent.includes("Ключ удалён"));
-    assert.equal(service.state().configured, false);
-    assert.equal(await page.locator("#part-images-disconnect").isDisabled(), true);
-    assert.equal(await page.locator("#part-images-google").isVisible(), true);
-  }, { partImages: service });
-});
-
-test("closing the image gallery cancels its request and a later open accepts only the new response", { timeout: 15_000 }, async (t) => {
-  let calls = 0; let started; let cancelled;
-  const start = new Promise((resolve) => { started = resolve; });
-  const abort = new Promise((resolve) => { cancelled = resolve; });
-  const service = await imageSearchFixture(t, async (_url, options) => {
-    calls++;
-    if (calls > 1) return imageSearchResponse([3]);
-    started();
-    return new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => { cancelled(); reject(options.signal.reason); }, { once: true }));
-  }, true);
-  await withCartPage(async (page) => {
-    const row = page.locator("#results-body .results-table__row").first();
-    await row.click({ button: "right" }); await page.locator("#find-images-button").click(); await start;
-    await page.keyboard.press("Escape"); await abort;
-    await row.click({ button: "right" }); await page.locator("#find-images-button").click();
-    await page.waitForFunction(() => document.querySelectorAll(".part-images__card").length === 1);
-    assert.match(await page.locator(".part-images__card p").textContent(), /Фильтр 3/);
-    assert.equal(calls, 2);
-  }, { partImages: service });
+    assert.deepEqual(imageRequests, []);
+  }, { analogOffers });
 });
 
 test("markup popup applies fixed, tiered and no markup consistently in offers, analogs and cart", async () => {

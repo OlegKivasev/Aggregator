@@ -28,7 +28,6 @@ import { bootstrapGarage } from "./garage-ui.js";
 import { calculateMarkupPrice, markupPercentForPrice, restoreMarkupSettings, showPurchasePrice } from "./markup-settings.js";
 import { bootstrapMarkupSettings } from "./markup-settings-ui.js";
 import { setupTableColumnSettings } from "./table-column-settings-ui.js";
-import { bootstrapPartImages } from "./part-images-ui.js";
 import {
   applySavedColumnWidths,
   applyColumnAlignment,
@@ -39,7 +38,6 @@ import {
   saveColumnWidths,
 } from "./table-column-widths.js";
 
-const openPartImages = bootstrapPartImages();
 const form = document.querySelector("#search-form");
 const articleInput = document.querySelector("#article-input");
 const submitButton = document.querySelector("#submit-button");
@@ -2531,9 +2529,13 @@ showAnalogsButton.addEventListener("click", () => {
 
 findImagesButton.addEventListener("click", () => {
   const result = contextMenuResult;
-  const anchor = contextMenuAnchor;
   hideResultContextMenu();
-  if (result) void openPartImages(result, anchor);
+  const article = typeof result?.article === "string" ? result.article.trim() : "";
+  if (!article) return;
+  const brand = typeof result.brand === "string" ? result.brand.trim() : "";
+  const url = new URL("https://www.google.com/search");
+  url.search = new URLSearchParams({ tbm: "isch", q: brand ? `${brand} ${article}` : article }).toString();
+  window.open(url.href, "_blank", "noopener,noreferrer");
 });
 
 analogsTableSearch.addEventListener("input", () => {
