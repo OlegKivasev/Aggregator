@@ -150,7 +150,7 @@ function renderOrder(order, limited, supplierName, supplier) {
     if (item.title) part.append(element("span", "", item.title));
     const delivery = element("td");
     const active = !["delivered", "cancelled", "returned"].includes(item.fulfillment);
-    const highlightDelivery = active && hasPartKomWeekendDelivery(supplier, item.expectedDate, item.guaranteedDate);
+    const highlightDelivery = active && hasPartKomWeekendDelivery(supplier, item.expectedDate);
     delivery.append(element("strong", highlightDelivery && item.expectedDate ? "delivery-date--warning" : "", formatOrderDate(item.expectedDate) ?? "Не указана"));
     if (item.guaranteedDate && item.guaranteedDate !== item.expectedDate) {
       const guaranteed = element("span", "", "Гарантировано: ");

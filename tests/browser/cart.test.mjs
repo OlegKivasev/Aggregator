@@ -1001,7 +1001,7 @@ test("near-term tabs include PartKOM only for tomorrow on a weekday in both tabl
   }
 });
 
-test("PartKOM ranges extending into workdays have no highlight in search, checkout or history", async () => {
+test("PartKOM offer ranges keep weekday rules but an ordered expected weekend is independent of its guarantee", async () => {
   await withCartPage(async (page) => {
     const row = page.locator("#results-body tr").nth(1);
     assert.equal(await row.locator(".delivery-date").textContent(), "17.10.2026 - 20.10.2026");
@@ -1014,12 +1014,12 @@ test("PartKOM ranges extending into workdays have no highlight in search, checko
     assert.equal(await page.locator("#cart-order-groups .delivery-date--warning").count(), 0);
     await page.locator("#cart-order-accept").click();
     await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
-    assert.equal(await page.locator(".cart-partkom-receipt .delivery-date--warning").count(), 0);
+    assert.equal(await page.locator(".cart-partkom-receipt .delivery-date--warning").textContent(), "17.10.2026");
     await page.locator("#cart-order-cancel").click();
     await page.locator("#cart-close").click();
     await page.locator("#history-toggle").click();
     await page.locator(".history-card").waitFor();
-    assert.equal(await page.locator(".history-card .delivery-date--warning").count(), 0);
+    assert.equal(await page.locator(".history-card .delivery-date--warning").textContent(), "17.10.2026");
   }, { fixedTime: "2026-10-16T12:00:00Z", deliveries: { partkom: {
     deliveryDate: "2026-10-17T09:00:00Z", deliveryDateTo: "2026-10-20T09:00:00Z",
   } }, partKomReceipt: { expectedDate: "2026-10-17", guaranteedDate: "2026-10-20" },
@@ -1027,6 +1027,37 @@ test("PartKOM ranges extending into workdays have no highlight in search, checko
       article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 120, status: "В работе", fulfillment: "processing",
       expectedDate: "2026-10-17", guaranteedDate: "2026-10-20", warehouse: null,
     }] }], limited: false }) });
+});
+
+test("PartKOM ready Sunday is highlighted despite a weekday guarantee, but missing dates and terminal rows are not", async () => {
+  const states = ["ready", "processing", "in_transit", "delivered", "cancelled", "returned"];
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.locator(".history-card").waitFor();
+    const rows = page.locator(".history-card tbody tr");
+    assert.equal(await rows.count(), 8);
+    for (let index = 0; index < states.length; index++) {
+      const row = rows.nth(index);
+      const expected = row.locator(".delivery-date--warning");
+      assert.equal(await expected.count(), index < 3 ? 1 : 0, states[index]);
+      if (index < 3) {
+        assert.equal(await expected.textContent(), "18.10.2026 02:41");
+        assert.equal(await expected.evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(255, 244, 204)");
+      }
+      assert.equal(await row.locator("time").textContent(), "21.10.2026 07:01");
+      assert.equal(await row.locator("time.delivery-date--warning").count(), 0);
+    }
+    assert.match(await rows.first().innerText(), /На складе/);
+    assert.equal(await rows.nth(6).locator(".delivery-date--warning").count(), 0, "a weekend guarantee must not highlight a weekday expectation");
+    assert.equal(await rows.nth(7).locator(".delivery-date--warning").count(), 0, "an absent expectation must not borrow its guarantee");
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "partkom-sunday-ready.png") });
+  }, { partKomOrderHistory: async () => ({ limited: false, orders: [{ number: "SUNDAY-READY", date: "2026-10-15", items: [
+    ...states.map((fulfillment) => ({ article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 120,
+      status: fulfillment === "ready" ? "На складе 1 из 1 шт." : null, fulfillment,
+      expectedDate: "2026-10-18 02:41:00", guaranteedDate: "2026-10-21 07:01:00", warehouse: null })),
+    ...["2026-10-19 02:41:00", null].map((expectedDate) => ({ article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 120,
+      status: null, fulfillment: "ready", expectedDate, guaranteedDate: "2026-10-18 07:01:00", warehouse: null })),
+  ] }] }) });
 });
 
 test("a verified absent Forum Auto order can be unlocked without sending another order", async () => {

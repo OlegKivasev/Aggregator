@@ -41,7 +41,7 @@ const partKomReceiptNode = (receipt, orderIds, acceptedQuantity) => {
   const price = Number.isFinite(receipt.price) && receipt.price > 0 && Number.isFinite(receipt.price * receipt.quantity) ? receipt.price : null;
   add("Цена", price === null ? null : formatPrice(price));
   add("Сумма", price === null ? null : formatPrice(price * receipt.quantity));
-  const highlightDelivery = hasPartKomWeekendDelivery("part-kom", receipt.expectedDate, receipt.guaranteedDate);
+  const highlightDelivery = hasPartKomWeekendDelivery("part-kom", receipt.expectedDate);
   add("Ожидаемый срок", formatOrderDate(receipt.expectedDate), false, highlightDelivery);
   add("Гарантированный срок", formatOrderDate(receipt.guaranteedDate));
   add("Склад", receipt.placement);
