@@ -48,6 +48,10 @@ async function withCartPage(check, options = {}) {
       streamSearch: async (query, emit) => {
         searchCalls.push(structuredClone(query));
         emit({ type: "search_started", article: query.article, suppliers });
+        if (options.failedSearchSupplier && query.suppliers?.length === 1 && query.suppliers[0] === options.failedSearchSupplier) {
+          emit({ type: "supplier_status", supplier: options.failedSearchSupplier, status: "error" });
+          emit({ type: "search_completed", article: query.article }); return;
+        }
         if (query.mode === "analogs" && options.analogOffers) {
           for (const result of options.analogOffers) emit({ type: "result", result });
           for (const supplier of suppliers) emit({ type: "supplier_status", supplier, status: "completed" });
@@ -133,6 +137,106 @@ async function openCheckout(page) {
   await page.locator("#cart-test-order").click();
   await page.waitForFunction(() => document.querySelector("#cart-order-confirm").open);
 }
+
+async function openGarageWithFirstOffer(page) {
+  const origin = new URL(page.url()).origin;
+  const created = await page.request.post(`${origin}/api/garage/vehicles`, { data: { name: "Гранта" } });
+  assert.equal(created.status(), 201);
+  const { vehicle } = await created.json();
+  const offerId = await page.locator('#results-body tr[data-result-index="0"] .garage-offer-button').getAttribute("data-garage-offer-id");
+  const added = await page.request.post(`${origin}/api/garage/vehicles/${vehicle.id}/items`, {
+    data: { vehicleRevision: vehicle.revision, offerId, markupPercent: 35, requiredQuantity: 1 },
+  });
+  assert.equal(added.status(), 201);
+  await page.reload();
+  const button = page.locator(`.garage-vehicles__button[data-vehicle-id="${vehicle.id}"]`);
+  await button.waitFor({ state: "attached" });
+  if (!await button.isVisible()) await page.locator("#garage-toggle").click();
+  await button.click();
+  await page.locator('#garage-items td[data-garage-column="article"]').waitFor();
+}
+
+test("garage title fills the panel and column settings preview, cancel, persist and align exact pixel widths", async () => {
+  await withCartPage(async (page) => {
+    await page.setViewportSize({ width: 2100, height: 900 });
+    await openGarageWithFirstOffer(page);
+    const table = page.locator(".garage-data-table");
+    const title = table.locator('th[data-garage-column="title"]');
+    const supplier = table.locator('th[data-garage-column="supplier"]');
+    const fills = () => page.waitForFunction(() => {
+      const container = document.querySelector(".garage-view__table");
+      return Math.abs(container.clientWidth - container.querySelector("table").getBoundingClientRect().width) <= 1;
+    });
+    await fills();
+    assert.ok((await title.boundingBox()).width > 323);
+    assert.equal(await table.locator(".table-column-resize").count(), 0);
+    const openSettings = async () => {
+      await supplier.scrollIntoViewIfNeeded();
+      await page.evaluate(() => new Promise(requestAnimationFrame));
+      await supplier.click({ button: "right" });
+      await page.locator("#table-column-menu-garage").getByRole("menuitem", { name: "Настройки" }).click();
+    };
+    await openSettings();
+    const dialog = page.getByRole("dialog", { name: "Столбцы гаража", exact: true });
+    await dialog.getByRole("spinbutton", { name: "Ширина: Поставщик", exact: true }).fill("60");
+    await dialog.getByRole("spinbutton", { name: "Ширина: Доставка", exact: true }).fill("24");
+    await dialog.getByRole("combobox", { name: "Выравнивание: Поставщик", exact: true }).selectOption("center");
+    assert.equal(Math.round((await supplier.boundingBox()).width), 60);
+    assert.equal(Math.round((await table.locator('th[data-garage-column="deliveryDate"]').boundingBox()).width), 24);
+    assert.equal(await table.locator('td[data-garage-column="supplier"]').evaluate((cell) => getComputedStyle(cell).textAlign), "center");
+    await dialog.getByRole("button", { name: "Отмена", exact: true }).click();
+    assert.equal(Math.round((await supplier.boundingBox()).width), 100);
+    await openSettings();
+    await dialog.getByRole("spinbutton", { name: "Ширина: Поставщик", exact: true }).fill("60");
+    await dialog.getByRole("spinbutton", { name: "Ширина: Наименование", exact: true }).fill("480");
+    await dialog.getByRole("combobox", { name: "Выравнивание: Поставщик", exact: true }).selectOption("right");
+    const saved = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/ui-preferences/table-column-widths" && response.request().method() === "PUT");
+    await dialog.getByRole("button", { name: "Применить", exact: true }).click();
+    assert.equal((await saved).status(), 200);
+    await page.reload();
+    await page.locator('#garage-items td[data-garage-column="article"]').waitFor();
+    assert.equal(Math.round((await supplier.boundingBox()).width), 60);
+    assert.equal(await table.locator('td[data-garage-column="supplier"]').evaluate((cell) => getComputedStyle(cell).textAlign), "right");
+    await fills();
+    const width = (await title.boundingBox()).width;
+    await page.setViewportSize({ width: 2400, height: 900 });
+    await fills();
+    assert.ok((await title.boundingBox()).width > width);
+    assert.equal(Math.round((await supplier.boundingBox()).width), 60);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "garage-columns.png") });
+  }, { fixedTime: "2026-10-18T10:00:00Z", title: "Механизм замка двери задней правой" });
+});
+
+test("garage refresh updates real delivery dates and clearly flags failed or expired supplier snapshots", async () => {
+  const options = { fixedTime: "2026-10-18T10:00:00Z", deliveries: { armtek: { deliveryDate: "2026-10-05", deliveryDateTo: null } } };
+  await withCartPage(async (page, { searchCalls }) => {
+    await openGarageWithFirstOffer(page);
+    const delivery = page.locator('#garage-items tr:has(td[data-garage-column="article"]) td[data-garage-column="deliveryDate"]');
+    assert.match(await delivery.innerText(), /Срок доставки устарел/);
+    assert.match(await delivery.innerText(), /Было:.*05\.10\.2026/);
+    const refresh = async () => {
+      const refreshed = page.waitForResponse((response) => /\/api\/garage\/vehicles\/[^/]+\/refresh$/.test(new URL(response.url()).pathname));
+      await page.locator("#garage-refresh").click();
+      const response = await refreshed; assert.equal(response.status(), 200);
+      const value = await response.json();
+      await page.waitForFunction(() => !document.querySelector("#garage-refresh").disabled);
+      return value.vehicle.items[0];
+    };
+    options.deliveries.armtek.deliveryDate = "2026-10-20";
+    assert.equal((await refresh()).deliveryDate, "2026-10-20");
+    assert.equal(await delivery.locator(".garage-delivery-warning").count(), 0);
+    assert.deepEqual(searchCalls.at(-1), { article: "A1", suppliers: ["armtek"] });
+    options.failedSearchSupplier = "armtek";
+    assert.equal((await refresh()).availabilityStatus, "supplier_error");
+    assert.match(await delivery.innerText(), /Не удалось проверить/);
+    assert.match(await page.locator(".garage-group-summary__delivery").innerText(), /Не подтверждена/);
+    delete options.failedSearchSupplier;
+    options.deliveries.armtek.deliveryDate = "2026-10-05";
+    assert.equal((await refresh()).deliveryDate, "2026-10-05", "expired supplier dates must never be replaced with invented dates");
+    assert.match(await delivery.innerText(), /Срок доставки устарел/);
+    assert.match(await page.locator("#garage-status").innerText(), /Не подтверждены/);
+  }, options);
+});
 
 test("camera and context menus open Google Images directly for offers and analogs", async () => {
   const analogOffers = ["armtek", "part-kom"].map((supplier) => ({ ...offer(supplier, 2, supplier === "armtek"

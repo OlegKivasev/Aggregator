@@ -1,6 +1,6 @@
 import { minimumColumnWidth, maximumColumnWidth } from "./table-column-widths.js";
 
-export const setupTableColumnSettings = ({ table, columnAttribute, widths, alignments, name, title, apply, save }) => {
+export const setupTableColumnSettings = ({ table, columnAttribute, widths, alignments, name, title, apply, save, previewText = "Изменения сразу видны в проценке и аналогах." }) => {
   const menu = document.createElement("div");
   menu.className = "result-context-menu table-column-context-menu";
   menu.id = `table-column-menu-${name}`;
@@ -17,12 +17,13 @@ export const setupTableColumnSettings = ({ table, columnAttribute, widths, align
   dialog.id = `table-column-settings-${name}`;
   dialog.setAttribute("aria-labelledby", `${dialog.id}-title`);
   dialog.innerHTML = `<form novalidate><header><h2></h2><button type="button" data-column-settings-cancel aria-label="Закрыть настройки столбцов">×</button></header>
-    <p class="table-column-settings-dialog__hint">Изменения сразу видны в проценке и аналогах. «Применить» сохраняет их, «Отмена» возвращает прежний вид. Ширина — от 24 до 800 px. Свободное место занимает «Наименование», а если оно скрыто — самый широкий столбец: его ширина считается минимальной.</p>
+    <p class="table-column-settings-dialog__hint"></p>
     <div class="table-column-settings-dialog__fields"></div><p class="table-column-settings-dialog__error" role="alert" hidden></p>
     <footer><button type="button" class="btn btn-light" data-column-settings-cancel>Отмена</button><button type="submit" class="btn btn-primary">Применить</button></footer></form>`;
   const heading = dialog.querySelector("h2");
   heading.id = `${dialog.id}-title`;
   heading.textContent = title;
+  dialog.querySelector(".table-column-settings-dialog__hint").textContent = `${previewText} «Применить» сохраняет их, «Отмена» возвращает прежний вид. Ширина — от 24 до 800 px. Свободное место занимает «Наименование», а если оно скрыто — самый широкий столбец: его ширина считается минимальной.`;
   document.body.append(dialog);
   const fields = dialog.querySelector(".table-column-settings-dialog__fields");
   const error = dialog.querySelector('[role="alert"]');

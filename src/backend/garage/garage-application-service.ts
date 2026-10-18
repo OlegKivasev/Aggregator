@@ -59,6 +59,11 @@ function normalizeGroupId(value: unknown): string | null {
   return value;
 }
 function sameText(left: string, right: string): boolean { return left.trim().toLocaleLowerCase("ru-RU") === right.trim().toLocaleLowerCase("ru-RU"); }
+function sameArticle(left: string, right: string): boolean {
+  const normalize = (value: string) => value.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase("ru-RU");
+  const article = normalize(left);
+  return article.length > 0 && article === normalize(right);
+}
 function safeLink(value: string): string {
   const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new GarageValidationError("offer link is invalid");
@@ -321,11 +326,12 @@ export class GarageApplicationService {
   private async refreshItem(item: GarageItem, signal: AbortSignal): Promise<void> {
     const checkedAt = now();
     const lookup = await this.offerLookup.findOffers(item.article, item.supplier, signal);
+    signal.throwIfAborted();
     if (lookup.failed) {
       this.repository.refreshItem({ ...item, lastCheckedAt: checkedAt, availabilityStatus: "supplier_error" }, checkedAt);
       return;
     }
-    const candidates = lookup.results.filter((result) => result.supplier === item.supplier && sameText(result.brand, item.brand) && sameText(result.article, item.article));
+    const candidates = lookup.results.filter((result) => result.supplier === item.supplier && sameText(result.brand, item.brand) && sameArticle(result.article, item.article));
     const sameWarehouse = candidates.filter((result) => result.warehouse === item.warehouse);
     const matches = sameWarehouse.length === 1 ? sameWarehouse : candidates.length === 1 ? candidates : [];
     if (matches.length !== 1) {

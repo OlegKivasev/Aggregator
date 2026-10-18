@@ -87,6 +87,34 @@ test("garage persists vehicles, guards revisions, merges known duplicates, and r
   }
 });
 
+test("garage refresh matches article formatting, retains ambiguous snapshots and never writes after an abort", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autoservice-garage-refresh-"));
+  let results = [{ ...offer, article: "ABC123", deliveryDate: "2026-10-19", deliveryDateTo: "2026-10-20", price: 130 }];
+  let failed = false;
+  let abort = null;
+  const service = new GarageApplicationService(new SqliteGarageRepository(join(directory, "garage.sqlite")), {
+    findOffers: async () => { abort?.(); return { results, failed }; },
+  });
+  try {
+    const vehicle = service.createVehicle("Гранта");
+    const saved = service.addOffer(vehicle.id, vehicle.revision, service.registerSearchOffer(offer), 35, 1);
+    const refresh = () => service.refreshVehicle(vehicle.id, service.getVehicle(vehicle.id).revision, new AbortController().signal);
+    assert.equal((await refresh()).items[0].deliveryDate, "2026-10-19");
+    assert.equal(service.getVehicle(vehicle.id).items[0].purchasePrice, 130);
+    results = [{ ...offer, article: "ABC-123", price: 140 }, { ...offer, article: "ABC 123", price: 150 }];
+    assert.equal((await refresh()).items[0].availabilityStatus, "not_found");
+    assert.equal(service.getVehicle(vehicle.id).items[0].deliveryDate, "2026-10-19");
+    failed = true;
+    assert.equal((await refresh()).items[0].availabilityStatus, "supplier_error");
+    const current = service.getVehicle(vehicle.id);
+    const controller = new AbortController();
+    abort = () => controller.abort(new Error("fixture abort"));
+    await assert.rejects(service.refreshVehicle(vehicle.id, current.revision, controller.signal), /fixture abort/);
+    assert.deepEqual(service.getVehicle(vehicle.id), current);
+    assert.equal(current.items[0].id, saved.id);
+  } finally { service.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test("garage migrates existing items into the ungrouped section", async () => {
   const directory = await mkdtemp(join(tmpdir(), "autoservice-garage-legacy-"));
   const path = join(directory, "garage.sqlite");

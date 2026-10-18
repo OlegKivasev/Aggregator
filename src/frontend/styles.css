@@ -60,6 +60,8 @@
 .garage-data-table th[data-garage-column="sum"] .table-sort { justify-content: center; width: 100%; }
 .garage-data-table th[data-garage-column="deliveryDate"] .table-sort { justify-content: flex-start; width: 100%; }
 .garage-data-table td[data-garage-column="article"] { color: #0666d6; font-weight: 700; }
+.garage-delivery-warning { display: block; color: #a66500; }
+.garage-delivery-previous { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .garage-group-editor { display: grid; gap: 6px; margin: 6px 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; }
 .garage-groups-sidebar .garage-search-form { margin: 10px 0 8px; }
 .garage-groups { max-height: none; }
@@ -1757,34 +1759,6 @@ input {
   background: #f4f6f8;
 }
 
-.table-column-resize {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  right: -4px;
-  width: 9px;
-  height: 100%;
-  cursor: col-resize;
-  touch-action: none;
-}
-
-.table-column-resize::after {
-  position: absolute;
-  top: 20%;
-  right: 3px;
-  width: 2px;
-  height: 60%;
-  border-radius: 2px;
-  background: transparent;
-  content: "";
-}
-
-th:hover > .table-column-resize::after,
-.table-column-resize:focus-visible::after,
-body.is-resizing-table-column .table-column-resize::after { background: var(--accent); }
-
-.table-column-resize:focus-visible { outline: 2px solid rgba(255, 75, 19, 0.45); outline-offset: -2px; }
-body.is-resizing-table-column { cursor: col-resize; user-select: none; }
 
 .results-data-table tbody td {
   padding: 10px 12px;

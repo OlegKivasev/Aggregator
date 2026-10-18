@@ -1,6 +1,8 @@
 import { formatArticle, formatBrand, formatPrice, formatQuantity, getSafeResultLink } from "./result-formatting.js";
 import { formatDeliveryDate } from "./supplier-search-summary.js";
-import { applySavedColumnWidths, restoreLocalColumnWidths, saveColumnWidths, setupColumnResizing } from "./table-column-widths.js";
+import { applySavedColumnWidths, restoreLocalColumnWidths, saveColumnWidths, applyColumnAlignment, fitOfferColumnWidths, restoreLocalColumnAlignments } from "./table-column-widths.js";
+import { setupTableColumnSettings } from "./table-column-settings-ui.js";
+import { garageDeliveryWarning } from "./garage-offer-presentation.js";
 
 const api = async (path, options = {}, allowConflict = false) => {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
@@ -31,6 +33,8 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   const view = document.querySelector("#garage-view");
   const viewName = document.querySelector("#garage-vehicle-name");
   const itemsBody = document.querySelector("#garage-items");
+  const garageTable = view.querySelector("table");
+  const garageTableViewport = view.querySelector(".garage-view__table");
   const status = document.querySelector("#garage-status");
   const resultCount = document.querySelector("#garage-result-count");
   const total = document.querySelector("#garage-total");
@@ -120,6 +124,8 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   const closeThresholdRatio = 0.02;
   const garageColumnWidths = { supplier: 100, brand: 125, article: 140, title: 323, deliveryDate: 180, quantity: 120, price: 120, sum: 120 };
   Object.assign(garageColumnWidths, restoreLocalColumnWidths("garage", garageColumnWidths));
+  const defaultGarageAlignments = { supplier: "left", brand: "left", article: "left", title: "left", deliveryDate: "left", quantity: "center", price: "center", sum: "center" };
+  const garageAlignments = restoreLocalColumnAlignments("garage", defaultGarageAlignments);
   const garageActionColumnWidth = 52;
 
   const setStatus = (message) => { status.textContent = message; };
@@ -586,6 +592,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   const sumGarageItems = (items) => items.reduce((sum, item) => sum + item.regularPrice * item.requiredQuantity, 0);
   const sumGaragePurchaseItems = (items) => items.reduce((sum, item) => sum + item.purchasePrice * item.requiredQuantity, 0);
   const formatGroupDeliveryDate = (items) => {
+    if (items.some((item) => garageDeliveryWarning(item))) return "Не подтверждена";
     if (items.some((item) => !item.deliveryDate || Number.isNaN(new Date(item.deliveryDate).getTime())
       || (item.deliveryDateTo && Number.isNaN(new Date(item.deliveryDateTo).getTime())))) {
       return "Не указана";
@@ -727,11 +734,16 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   ];
   const applyGarageTableColumns = () => {
     const columns = getGarageVisibleColumns();
-    const minimumWidth = columns.reduce((width, column) => width + garageColumnWidths[column], garageActionColumnWidth);
-    view.style.setProperty("--results-table-min-width", `${minimumWidth}px`);
-    view.querySelectorAll("th[data-garage-column]").forEach((header) => {
-      const width = garageColumnWidths[header.dataset.garageColumn];
-      header.style.width = !header.hidden && width ? `${width / minimumWidth * 100}%` : "";
+    const layout = fitOfferColumnWidths(garageColumnWidths, columns, garageTableViewport.clientWidth, garageActionColumnWidth);
+    garageTable.style.setProperty("--results-table-min-width", `${layout.totalWidth}px`);
+    garageTable.querySelector(".garage-actions-column").style.width = `${garageActionColumnWidth}px`;
+    garageTable.querySelectorAll("th[data-garage-column]").forEach((header) => {
+      header.style.width = `${layout.widths[header.dataset.garageColumn]}px`;
+    });
+    garageTable.querySelectorAll("[data-garage-column]").forEach((cell) => {
+      const column = cell.dataset.garageColumn;
+      cell.style.setProperty("padding-inline", `${Math.min(12, (garageColumnWidths[column] - 16) / 2)}px`, "important");
+      applyColumnAlignment(cell, garageAlignments[column]);
     });
   };
   const renderItems = () => {
@@ -777,7 +789,10 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
       for (const [column, value] of cells) {
         const cell = element("td");
         cell.dataset.garageColumn = column;
-        if (column === "article" || column === "title") {
+        if (column === "deliveryDate" && garageDeliveryWarning(item)) {
+          cell.append(element("strong", garageDeliveryWarning(item), "garage-delivery-warning"));
+          if (item.deliveryDate) cell.append(element("small", `Было: ${value}`, "garage-delivery-previous"));
+        } else if (column === "article" || column === "title") {
           appendOfferLink(cell, item, value, column === "title");
         } else {
           cell.textContent = value;
@@ -846,6 +861,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
       actions.append(menu); row.append(actions); itemsBody.append(row);
       }
     }
+    applyGarageTableColumns();
   };
   const openAdd = (offerId, vehicleId = null, supplierQuantity = null) => {
     if (!offerId) {
@@ -1145,7 +1161,17 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
       : { key, direction: "ascending" };
     renderItems();
   }));
-  refresh.addEventListener("click", async () => { refresh.disabled = true; try { const { payload } = await api(`/api/garage/vehicles/${selectedVehicle.id}/refresh`, { method: "POST", body: JSON.stringify({ revision: selectedVehicle.revision }) }); selectedVehicle = payload.vehicle; renderItems(); await loadVehicles(); } catch (error) { setStatus(error.message); showToast(error.message, "error"); } finally { refresh.disabled = false; } });
+  refresh.addEventListener("click", async () => {
+    refresh.disabled = true;
+    try {
+      const { payload } = await api(`/api/garage/vehicles/${selectedVehicle.id}/refresh`, { method: "POST", body: JSON.stringify({ revision: selectedVehicle.revision }) });
+      selectedVehicle = payload.vehicle; renderItems(); await loadVehicles();
+      const unconfirmed = selectedVehicle.items.filter((item) => garageDeliveryWarning(item)).length;
+      const message = unconfirmed ? `Проверка завершена. Не подтверждены предложения или сроки: ${unconfirmed}. Подробности — в столбце «Доставка».` : `Проверено предложений: ${selectedVehicle.items.length}.`;
+      setStatus(message); showToast(message, unconfirmed ? "error" : "success");
+    } catch (error) { setStatus(error.message); showToast(error.message, "error"); }
+    finally { refresh.disabled = false; }
+  });
   modal.querySelectorAll("[data-garage-close]").forEach((button) => button.addEventListener("click", closeModal));
   const addOfferToVehicle = async (duplicateStrategy) => {
     const vehicle = vehicles.find((item) => item.id === selectedAddVehicleId);
@@ -1221,16 +1247,20 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
     }
     await showVehicle(vehicleId);
   }).catch((error) => setStatus(error.message));
-  setupColumnResizing({
-    table: view.querySelector("table"),
+  setupTableColumnSettings({
+    table: garageTable,
     columnAttribute: "data-garage-column",
     widths: garageColumnWidths,
+    alignments: garageAlignments,
+    name: "garage", title: "Столбцы гаража", previewText: "Изменения сразу видны в таблице гаража.",
     apply: applyGarageTableColumns,
-    save: () => saveColumnWidths("garage", garageColumnWidths),
+    save: () => saveColumnWidths("garage", garageColumnWidths, garageAlignments),
   });
+  new ResizeObserver(applyGarageTableColumns).observe(garageTableViewport);
   return {
     applyColumnWidths(savedWidths) {
       Object.assign(garageColumnWidths, applySavedColumnWidths(garageColumnWidths, savedWidths));
+      Object.assign(garageAlignments, restoreLocalColumnAlignments("garage", defaultGarageAlignments));
       applyGarageTableColumns();
     },
   };
