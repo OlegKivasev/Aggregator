@@ -1818,6 +1818,57 @@ test("history filters all suppliers by inclusive order dates and any item status
     supplierOrderHistory: async (query) => { calls.push(query); return history; } });
 });
 
+test("history search filters loaded orders by number and parts across supplier views without new requests", async () => {
+  const calls = [];
+  const part = (article, brand, title, fulfillment = "in_transit") => ({ article, brand, title, fulfillment, quantity: 1, price: 100,
+    status: null, expectedDate: null, guaranteedDate: null, warehouse: null });
+  const history = (supplier) => ({ limited: false, orders: [
+    { number: `${supplier}-ORDER-42`, date: "2026-10-17", items: [part("7031410", "REINZ", "Герметик серый"), part("BM0246", "BELMAG", "Стойка стабилизатора", "ready")] },
+    { number: `${supplier}-OTHER`, date: "2026-10-16", items: [part("OTHER", "ELRING", "Прокладка", "delivered")] },
+    { number: `${supplier}-OLD`, date: "2026-10-10", items: [part("OLD", "ELRING", "Герметик старый")] },
+  ] });
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    const search = page.getByRole("searchbox", { name: "Поиск в истории заказов", exact: true });
+    const shown = async (count) => page.waitForFunction((count) => document.querySelectorAll(".history-card").length === count
+      && !document.querySelector(".history-loading"), count);
+    for (const supplier of ["all", "part-kom", "armtek", "forum-auto", "rossko"]) {
+      await page.locator(`#history-tab-${supplier}`).click();
+      assert.equal(await search.inputValue(), "");
+      await shown(supplier === "all" ? 12 : 3);
+      const before = calls.length;
+      for (const query of ["order-42", "7031410", "bm0246", "rEiNz", "  СеРыЙ   ГЕРМЕТИК  "]) {
+        await search.fill(query); await shown(supplier === "all" ? 4 : 1);
+        assert.equal(await page.locator(".history-card").first().locator("tbody tr").count(), 2, "a matching part keeps the full order and total visible");
+      }
+      await search.fill(".*"); await shown(0);
+      assert.match(await page.locator("#history-results").textContent(), /По выбранным фильтрам заказов нет/);
+      await search.fill("bm0246"); await search.press("Enter"); await shown(supplier === "all" ? 4 : 1);
+      assert.equal(calls.length, before, "typing and Enter must not request supplier history");
+    }
+    await page.locator("#history-tab-all").click();
+    assert.equal(await search.inputValue(), "bm0246", "each supplier view restores its own search");
+    await shown(4);
+    await page.locator("#history-reload").click(); await shown(4);
+    assert.equal(await search.inputValue(), "bm0246");
+    await search.fill("ПРОКЛАДКА"); await shown(4);
+    await page.locator("#history-status-active").click(); await shown(0);
+    await page.locator("#history-status-delivered").click(); await shown(4);
+    await page.locator("#history-from").fill("2026-10-17"); await shown(0);
+    await page.locator("#history-reset").click(); await shown(12);
+    assert.equal(await search.inputValue(), "");
+    assert.equal(await page.locator("#history-reset").isVisible(), false);
+    await search.fill("7031410"); await shown(4);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "history-search-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const input = await search.boundingBox(); assert.ok(input.x >= 0 && input.x + input.width <= 390);
+    assert.equal(await page.locator("#history-toolbar").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "history-search-mobile.png") });
+  }, { fixedTime: "2026-10-18T12:00:00Z", allSuppliers: true,
+    partKomOrderHistory: async () => { calls.push("part-kom"); return history("part-kom"); },
+    supplierOrderHistory: async (query) => { calls.push(query.supplier); return history(query.supplier); } });
+});
+
 test("arriving today tab uses local delivery dates, excludes finished items and works across suppliers", async () => {
   const calls = [];
   const item = (expectedDate, fulfillment = "in_transit", guaranteedDate = null) => ({

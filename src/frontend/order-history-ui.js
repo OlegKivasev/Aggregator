@@ -31,6 +31,12 @@ const statusGroups = new Map([
 const dateValue = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
 function orderMatchesFilters(order, values, today) {
+  const terms = values.query.trim().toLocaleLowerCase("ru-RU").split(/\s+/).filter(Boolean);
+  if (terms.length) {
+    const text = [order.number, ...order.items.flatMap((item) => [item.article, item.brand, item.title])]
+      .filter((value) => typeof value === "string").join(" ").toLocaleLowerCase("ru-RU");
+    if (!terms.every((term) => text.includes(term))) return false;
+  }
   const rows = order.items.flatMap(historyItemRows);
   const states = statusGroups.get(values.status).states;
   if (states.length && !rows.some((item) => states.includes(item.fulfillment))) return false;
@@ -206,12 +212,15 @@ export function bootstrapOrderHistory() {
         <label>Дата заказа с <input type="date" id="history-from"></label>
         <label>по <input type="date" id="history-to"></label></div>
       <div class="history-actions"><button type="button" id="history-reset" hidden>Сбросить</button>
-        <button type="button" id="history-reload">Обновить</button></div></form>
+        <button type="button" id="history-reload">Обновить</button></div>
+      <input type="search" class="history-search" id="history-search" maxlength="200" autocomplete="off" spellcheck="false"
+        aria-label="Поиск в истории заказов" placeholder="Номер заказа, артикул, бренд или название товара"></form>
       <div id="history-results" role="tabpanel" aria-live="polite"></div></div>`;
   const tabs = dialog.querySelector("#history-tabs");
   const results = dialog.querySelector("#history-results");
   const from = dialog.querySelector("#history-from");
   const to = dialog.querySelector("#history-to");
+  const search = dialog.querySelector("#history-search");
   const reset = dialog.querySelector("#history-reset");
   const statusTabs = dialog.querySelector("#history-status-tabs");
   const views = [...suppliers, ["all", "Все поставщики"]];
@@ -221,7 +230,7 @@ export function bootstrapOrderHistory() {
     return { from: dateValue(start), to: dateValue(end) };
   };
   const defaultFilters = (supplier) => {
-    return { ...(supplier === "armtek" ? defaultPeriod() : { from: "", to: "" }), status: "" };
+    return { ...(supplier === "armtek" ? defaultPeriod() : { from: "", to: "" }), status: "", query: "" };
   };
   const defaults = new Map(views.map(([supplier]) => [supplier, defaultFilters(supplier)]));
   const filters = new Map([...defaults].map(([supplier, values]) => [supplier, { ...values }]));
@@ -275,12 +284,12 @@ export function bootstrapOrderHistory() {
   };
   const saveFilters = () => {
     const values = filters.get(selected);
-    filters.set(selected, { ...values, from: from.value, to: to.value });
+    filters.set(selected, { ...values, from: from.value, to: to.value, query: search.value });
   };
   const updateControls = () => {
     const values = filters.get(selected);
     const initial = defaults.get(selected);
-    reset.hidden = values.status === "" && values.from === initial.from && values.to === initial.to;
+    reset.hidden = values.status === "" && values.from === initial.from && values.to === initial.to && !values.query;
     for (const button of tabs.children) button.setAttribute("aria-selected", String(button.dataset.supplier === selected));
     for (const button of statusTabs.children) button.setAttribute("aria-selected", String(button.dataset.status === values.status));
     results.setAttribute("aria-labelledby", `history-tab-${selected} history-status-${values.status || "all"}`);
@@ -289,6 +298,7 @@ export function bootstrapOrderHistory() {
     const values = filters.get(selected);
     from.value = values.from;
     to.value = values.to;
+    search.value = values.query;
     from.required = to.required = selected === "armtek";
     updateControls();
   };
@@ -490,6 +500,8 @@ export function bootstrapOrderHistory() {
   });
   dialog.querySelector("#history-toolbar").addEventListener("submit", (event) => { event.preventDefault(); applyFilters(); });
   for (const input of [from, to]) input.addEventListener("change", applyFilters);
+  search.addEventListener("input", () => { filters.get(selected).query = search.value; updateControls(); render(); });
+  search.addEventListener("keydown", (event) => { if (event.key === "Enter") event.preventDefault(); });
   dialog.querySelector("#history-reload").addEventListener("click", () => { scanCancellations(); load(); sharedHistoryRequests.clear(); });
   cancellationRetry.addEventListener("click", () => { scanCancellations(); sharedHistoryRequests.clear(); });
   cancellationView.addEventListener("click", () => {
