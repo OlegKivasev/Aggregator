@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readPort } from "./config.ts";
+import { getStateFilePath, readPort, supplierCredentialsEncryptionKey } from "./config.ts";
+import { ImageSearchKey } from "./images/image-search-key.ts";
+import { PartImageSearch } from "./images/part-image-search.ts";
 import { createAggregatorServer, type AggregatorApplication } from "./http/create-server.ts";
 import { createOrderNotifications } from "./notifications/create-order-notifications.ts";
 import {
@@ -85,7 +87,8 @@ const application: AggregatorApplication = {
 };
 
 const notifications = createOrderNotifications(application);
-const server = createAggregatorServer({ application, publicDir, notifications: notifications.service });
+const partImages = new PartImageSearch(new ImageSearchKey(getStateFilePath("image-search-key.enc.json"), supplierCredentialsEncryptionKey));
+const server = createAggregatorServer({ application, publicDir, notifications: notifications.service, partImages });
 
 server.listen(port, host, () => {
   notifications.service.start();
@@ -94,6 +97,7 @@ server.listen(port, host, () => {
 
 function shutdown(): void {
   notifications.service.stop();
+  partImages.close();
   server.close(() => {
     notifications.close().then(() => shutdownSearchService()).then(
       () => process.exit(0),

@@ -28,6 +28,7 @@ import { bootstrapGarage } from "./garage-ui.js";
 import { calculateMarkupPrice, markupPercentForPrice, restoreMarkupSettings, showPurchasePrice } from "./markup-settings.js";
 import { bootstrapMarkupSettings } from "./markup-settings-ui.js";
 import { setupTableColumnSettings } from "./table-column-settings-ui.js";
+import { bootstrapPartImages } from "./part-images-ui.js";
 import {
   applySavedColumnWidths,
   applyColumnAlignment,
@@ -38,6 +39,7 @@ import {
   saveColumnWidths,
 } from "./table-column-widths.js";
 
+const openPartImages = bootstrapPartImages();
 const form = document.querySelector("#search-form");
 const articleInput = document.querySelector("#article-input");
 const submitButton = document.querySelector("#submit-button");
@@ -154,6 +156,7 @@ const tabContextMenu = document.querySelector("#tab-context-menu");
 const renameTabButton = document.querySelector("#rename-tab-button");
 const warehouseTooltip = document.querySelector("#warehouse-tooltip");
 const showAnalogsButton = document.querySelector("#show-analogs-button");
+const findImagesButton = document.querySelector("#find-images-button");
 const analogsModal = document.querySelector("#analogs-modal");
 const analogsSourceBrand = document.querySelector("#analogs-source-brand");
 const analogsSourceArticle = document.querySelector("#analogs-source-article");
@@ -2524,6 +2527,13 @@ showAnalogsButton.addEventListener("click", () => {
   if (result) {
     startAnalogSearch(result, anchor);
   }
+});
+
+findImagesButton.addEventListener("click", () => {
+  const result = contextMenuResult;
+  const anchor = contextMenuAnchor;
+  hideResultContextMenu();
+  if (result) void openPartImages(result, anchor);
 });
 
 analogsTableSearch.addEventListener("input", () => {
