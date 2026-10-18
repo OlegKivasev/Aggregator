@@ -1,7 +1,8 @@
 import { escapeHtml, formatArticle, formatBrand, formatPrice } from "./result-formatting.js";
 import { formatDeliveryDate } from "./supplier-search-summary.js";
 import { formatOrderDate } from "./order-date-formatting.js";
-import { armtekReturnSource, formatArmtekReturnDays, hasPartKomOfferDeliveryWarning, hasPartKomWeekendDelivery } from "./order-notices.js";
+import { formatOrderStatus } from "./order-history-presentation.js";
+import { armtekReturnSource, formatArmtekReturnDays, hasOfferDeliveryWarning, hasSupplierWeekendDelivery } from "./order-notices.js";
 
 const supplierNames = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
 const maximumQuantity = (result) => Number.isFinite(result.quantity) ? Math.min(1_000_000, Math.floor(result.quantity)) : 0;
@@ -25,7 +26,7 @@ const partKomReceiptNode = (receipt, orderIds, acceptedQuantity) => {
     const term = document.createElement("dt");
     term.textContent = label;
     const description = document.createElement("dd");
-    description.textContent = String(value);
+    description.textContent = status ? formatOrderStatus(String(value)) : String(value);
     if (status) description.className = "cart-partkom-receipt__state";
     if (highlightDate) {
       const date = document.createElement("span");
@@ -41,11 +42,11 @@ const partKomReceiptNode = (receipt, orderIds, acceptedQuantity) => {
   const price = Number.isFinite(receipt.price) && receipt.price > 0 && Number.isFinite(receipt.price * receipt.quantity) ? receipt.price : null;
   add("Цена", price === null ? null : formatPrice(price));
   add("Сумма", price === null ? null : formatPrice(price * receipt.quantity));
-  const highlightDelivery = hasPartKomWeekendDelivery("part-kom", receipt.expectedDate);
+  const highlightDelivery = hasSupplierWeekendDelivery("part-kom", receipt.expectedDate);
   add("Ожидаемый срок", formatOrderDate(receipt.expectedDate), false, highlightDelivery);
   add("Гарантированный срок", formatOrderDate(receipt.guaranteedDate));
   add("Склад", receipt.placement);
-  for (const [label, value] of [["Отказано", receipt.refusalCount], ["На складе", receipt.storeCount], ["Отгружено", receipt.releaseCount]]) {
+  for (const [label, value] of [["Отказано", receipt.refusalCount], ["В пути", receipt.storeCount], ["Отгружено", receipt.releaseCount]]) {
     if (Number.isSafeInteger(value) && value >= 0 && value <= receipt.quantity) add(label, value);
   }
   add("Состояние", receipt.stateTxt, true);
@@ -64,21 +65,27 @@ const forumAutoReceiptNode = (receipt, orderIds, acceptedQuantity) => {
   heading.textContent = `Forum Auto · заказ № ${receipt.orderId}`;
   card.append(heading);
   const details = document.createElement("dl");
-  const add = (label, value, status = false) => {
+  const add = (label, value, status = false, highlightDate = false) => {
     if (typeof value !== "string" && typeof value !== "number") return;
     if (typeof value === "string" && (!value || value.length > 500)
       || typeof value === "number" && !Number.isFinite(value)) return;
     const term = document.createElement("dt");
     term.textContent = label;
     const description = document.createElement("dd");
-    description.textContent = String(value);
+    description.textContent = status ? formatOrderStatus(String(value)) : String(value);
+    if (highlightDate) {
+      const date = document.createElement("span");
+      date.className = "delivery-date--warning";
+      date.textContent = String(value);
+      description.replaceChildren(date);
+    }
     if (status) description.className = "cart-forum-receipt__state";
     details.append(term, description);
   };
   add("Номер документа", receipt.documentNumber);
   add("Статус", receipt.status, true);
   add("Создан", formatOrderDate(receipt.createdAt));
-  add("Доставка", formatOrderDate(receipt.deliveryAt));
+  add("Доставка", formatOrderDate(receipt.deliveryAt), false, hasSupplierWeekendDelivery("forum-auto", receipt.deliveryAt));
   add("Товар", [receipt.article, receipt.brand, receipt.title].filter((value) => typeof value === "string" && value.length <= 500 && value).join(" · "));
   add("Заказано", `${receipt.orderedQuantity} шт.`);
   for (const [label, value] of [["Забронировано", receipt.reservedQuantity], ["Подтверждено", receipt.confirmedQuantity]]) {
@@ -107,7 +114,7 @@ const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity,
     const term = document.createElement("dt");
     term.textContent = label;
     const description = document.createElement("dd");
-    description.textContent = String(value);
+    description.textContent = status ? formatOrderStatus(String(value)) : String(value);
     if (status) description.className = "cart-supplier-receipt__state";
     details.append(term, description);
   };
@@ -356,7 +363,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       return `<tr data-cart-item-id="${escapeHtml(item.id)}" class="${selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || unresolved ? "disabled" : ""}></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
         <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : ""}${unresolved && result.supplier === "forum-auto" ? `<button type="button" class="cart-resolve-button" ${locked ? "disabled" : ""}>Заказа нет? Снять блокировку</button>` : ""}</td>
         ${activeSupplier === "all" ? `<td class="cart-item-supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
-        <td class="cart-item-delivery"><span class="${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span>${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
+        <td class="cart-item-delivery"><span class="${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span>${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
         <td class="cart-item-price">${renderPrices(result)}</td>
         <td class="cart-item-quantity"><input class="cart-quantity" type="number" min="1" max="${maximumQuantity(result)}" step="1" value="${item.quantity}" inputmode="numeric"
           aria-label="Количество для ${escapeHtml(result.article)}" ${locked || unresolved ? "disabled" : ""}><span class="cart-item-stock">из ${maximumQuantity(result)}</span></td>
@@ -623,7 +630,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
             ${group.map(({ result, quantity }) => `<tr><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span>
               <span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td><td class="cart-item-name">${escapeHtml(result.title)}
               <span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>
-              <span class="cart-item-warehouse"><span class="${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span></span></td>
+              <span class="cart-item-warehouse"><span class="${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span></span></td>
               <td class="cart-item-quantity" data-label="Кол-во">${quantity}</td><td class="cart-item-price" data-label="Цена, ₽">${renderPrices(result)}</td>
               <td class="cart-item-sum" data-label="Стоимость, ₽">${renderPrices(result, quantity)}</td></tr>`).join("")}
           </tbody></table></div><p class="cart-order-delivery">Дата поставки с учётом всех товаров: ${escapeHtml(formatCartLatestDeliveryDate(group))}</p></section>`;

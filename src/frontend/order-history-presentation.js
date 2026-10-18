@@ -1,5 +1,12 @@
-// Keep transport states intact; present confirmed quantities as separate rows.
+export function formatOrderStatus(value) {
+  return typeof value === "string"
+    ? value.replace(/(^\s*|[.;:]\s*)на складе(?:\s+филиала)?(?=$|[\s.,:;!?])/giu, "$1В пути")
+    : value;
+}
+
+// Keep supplier states intact in transport; unify transit and split confirmed quantities for display.
 export function historyItemRows(item) {
+  item = { ...item, fulfillment: item.fulfillment === "ready" ? "in_transit" : item.fulfillment, status: formatOrderStatus(item.status) };
   if (!["partial", "partially_cancelled"].includes(item.fulfillment)) return [item];
   const delivered = item.fulfillmentQuantities?.delivered ?? item.deliveredQuantity ?? 0;
   const cancelled = item.fulfillmentQuantities?.cancelled ?? item.cancelledQuantity ?? 0;

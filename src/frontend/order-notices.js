@@ -1,7 +1,7 @@
 import { deliveryCalendarDay } from "./delivery-dates.js";
 
-export function hasPartKomWeekendDelivery(supplier, valueFrom, valueTo = null) {
-  if (supplier !== "part-kom") return false;
+export function hasSupplierWeekendDelivery(supplier, valueFrom, valueTo = null) {
+  if (supplier !== "part-kom" && supplier !== "forum-auto") return false;
   const from = deliveryCalendarDay(valueFrom ?? valueTo);
   const to = deliveryCalendarDay(valueTo ?? valueFrom);
   if (from === null || to === null || to < from) return false;
@@ -12,8 +12,8 @@ export function hasPartKomWeekendDelivery(supplier, valueFrom, valueTo = null) {
   return [0, 6].includes(lastWeekday) && to - from <= maximumSpan;
 }
 
-export function hasPartKomOfferDeliveryWarning(supplier, valueFrom, valueTo = null, now = Date.now()) {
-  if (hasPartKomWeekendDelivery(supplier, valueFrom, valueTo)) return true;
+export function hasOfferDeliveryWarning(supplier, valueFrom, valueTo = null, now = Date.now()) {
+  if (hasSupplierWeekendDelivery(supplier, valueFrom, valueTo)) return true;
   if (supplier !== "part-kom") return false;
   const from = deliveryCalendarDay(valueFrom);
   const to = deliveryCalendarDay(valueTo ?? valueFrom);

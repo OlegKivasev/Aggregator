@@ -3,6 +3,7 @@ import { formatDeliveryDate } from "./supplier-search-summary.js";
 import { applySavedColumnWidths, restoreLocalColumnWidths, saveColumnWidths, applyColumnAlignment, fitOfferColumnWidths, restoreLocalColumnAlignments } from "./table-column-widths.js";
 import { setupTableColumnSettings } from "./table-column-settings-ui.js";
 import { garageDeliveryWarning, garageCartWarning } from "./garage-offer-presentation.js";
+import { hasOfferDeliveryWarning } from "./order-notices.js";
 
 const api = async (path, options = {}, allowConflict = false) => {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
@@ -827,6 +828,8 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch, addToCart, onVi
         if (column === "deliveryDate" && garageDeliveryWarning(item)) {
           cell.append(element("strong", garageDeliveryWarning(item), "garage-delivery-warning"));
           if (item.deliveryDate) cell.append(element("small", `Было: ${value}`, "garage-delivery-previous"));
+        } else if (column === "deliveryDate" && hasOfferDeliveryWarning(item.supplier, item.deliveryDate, item.deliveryDateTo)) {
+          cell.append(element("span", value, "delivery-date delivery-date--warning"));
         } else if (column === "article" || column === "title") {
           appendOfferLink(cell, item, value, column === "title");
         } else {

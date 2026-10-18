@@ -915,6 +915,83 @@ for (const returnDays of [14, 0]) {
   });
 }
 
+test("Forum Auto weekend delivery is highlighted in offers, analogs, garage, cart and order confirmation", async () => {
+  const forumReference = { supplier: "forum-auto", warehouse: "Тестовый склад", gid: "fixture-gid" };
+  const analogOffers = [
+    offer("forum-auto", 3, forumReference, { article: "AN-WEEKEND", deliveryDate: "2026-10-18", isAnalog: true }),
+    offer("forum-auto", 3, forumReference, { article: "AN-WEEKDAY", deliveryDate: "2026-10-19", isAnalog: true }),
+  ];
+  await withCartPage(async (page, { orderCalls }) => {
+    const forum = page.locator("#results-body .main-result-row").filter({ has: page.locator('[data-column="supplier"]', { hasText: "Forum" }) });
+    const warning = forum.locator(".delivery-date--warning");
+    assert.equal(await warning.textContent(), "Послезавтра");
+    assert.equal(await warning.evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(255, 244, 204)");
+    assert.equal(await page.locator("#results-body .delivery-date--warning").count(), 1);
+    await openOfferAnalogs(page, forum);
+    assert.equal(await page.locator("#analogs-source-delivery").evaluate((node) => node.classList.contains("delivery-date--warning")), true);
+    assert.equal(await page.locator("#analogs-results-body tr").filter({ hasText: "AN-WEEKEND" }).locator(".delivery-date--warning").count(), 1);
+    assert.equal(await page.locator("#analogs-results-body tr").filter({ hasText: "AN-WEEKDAY" }).locator(".delivery-date--warning").count(), 0);
+    await page.locator("button[data-close-analogs-modal]").click();
+    await forum.locator(".cart-offer-button").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    assert.equal(await page.locator("#cart-items .delivery-date--warning").textContent(), "Послезавтра");
+    await openCheckout(page);
+    assert.equal(await page.locator("#cart-order-groups .delivery-date--warning").count(), 1);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+    assert.equal(await page.locator(".cart-forum-receipt .delivery-date--warning").textContent(), "18.10.2026 09:00");
+    assert.equal(await page.locator(".cart-forum-receipt__state").textContent(), "В пути");
+    assert.equal(orderCalls.length, 1);
+    await openGarageWithFirstOffer(page, { all: true });
+    const garageForum = page.locator("#garage-items tr[data-garage-item-id]").filter({ has: page.locator('[data-garage-column="supplier"]', { hasText: "forum-auto" }) });
+    assert.equal(await garageForum.locator(".delivery-date--warning").textContent(), "Послезавтра");
+  }, { fixedTime: "2026-10-16T12:00:00Z", allSuppliers: true, analogOffers,
+    deliveries: { armtek: { deliveryDate: "2026-10-18" }, partkom: { deliveryDate: "2026-10-19" },
+      forum: { deliveryDate: "2026-10-18" }, rossko: { deliveryDate: "2026-10-18" } },
+    forumAutoReceipt: { status: "На складе", deliveryAt: "2026-10-18 09:00:00" } });
+});
+
+test("warehouse states merge into one transit badge for every supplier and Forum Auto history warns only on active expected weekends", async () => {
+  let showDateCases = false;
+  const item = (fulfillment, expectedDate = "2026-10-18", status = "На складе филиала") => ({
+    article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: 100, status, fulfillment,
+    expectedDate, guaranteedDate: "2026-10-21", warehouse: null,
+  });
+  const history = (supplier) => ({ limited: false, orders: [{ number: `${supplier}-TRANSIT`, date: "2026-10-15",
+    items: [item("ready"), item("in_transit", "2026-10-18", "В пути")] }] });
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.locator("#history-tab-all").click();
+    await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 4);
+    for (const card of await page.locator(".history-card").all()) {
+      assert.equal(await card.getAttribute("data-fulfillment"), "in_transit");
+      assert.equal(await card.locator(".history-card__states .history-status").count(), 1);
+      assert.match(await card.locator(".history-card__states").innerText(), /В пути/);
+      assert.doesNotMatch(await card.innerText(), /На складе|на складе/);
+    }
+    await page.locator("#history-tab-forum-auto").click();
+    await page.waitForFunction(() => document.querySelector(".history-card h3")?.textContent === "Заказ № forum-auto-TRANSIT");
+    assert.equal(await page.locator("#history-results .delivery-date--warning").count(), 2);
+    showDateCases = true;
+    await page.locator("#history-reload").click();
+    await page.waitForFunction(() => document.querySelectorAll(".history-card tbody tr").length === 8);
+    const rows = page.locator(".history-card tbody tr");
+    for (let index = 0; index < 8; index++) {
+      assert.equal(await rows.nth(index).locator(".delivery-date--warning").count(), index < 3 ? 1 : 0);
+      assert.equal(await rows.nth(index).locator("time.delivery-date--warning").count(), 0);
+    }
+  }, { allSuppliers: true, partKomOrderHistory: async () => history("part-kom"),
+    supplierOrderHistory: async (query) => {
+      if (query.supplier !== "forum-auto" || !showDateCases) return history(query.supplier);
+      return { limited: false, orders: [{ number: "FORUM-DATES", date: "2026-10-15", items: [
+        ...["ready", "processing", "in_transit", "delivered", "cancelled", "returned"].map((state) => item(state)),
+        { ...item("ready", "2026-10-19"), guaranteedDate: "2026-10-18" },
+        { ...item("ready", null), guaranteedDate: "2026-10-18" },
+      ] }] };
+    } });
+});
+
 test("PartKOM weekend delivery stays unchanged and shows an amber warning throughout checkout and active history", async () => {
   await withCartPage(async (page) => {
     const partKomRow = page.locator("#results-body tr").nth(1);
@@ -1332,7 +1409,8 @@ test("PartKOM ready Sunday is highlighted despite a weekday guarantee, but missi
       assert.equal(await row.locator("time").textContent(), "21.10.2026 07:01");
       assert.equal(await row.locator("time.delivery-date--warning").count(), 0);
     }
-    assert.match(await rows.first().innerText(), /На складе/);
+    assert.match(await rows.first().innerText(), /В пути/);
+    assert.doesNotMatch(await rows.first().innerText(), /На складе/);
     assert.equal(await rows.nth(6).locator(".delivery-date--warning").count(), 0, "a weekend guarantee must not highlight a weekday expectation");
     assert.equal(await rows.nth(7).locator(".delivery-date--warning").count(), 0, "an absent expectation must not borrow its guarantee");
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "partkom-sunday-ready.png") });
@@ -2479,14 +2557,15 @@ test("history highlights fulfillment in every supplier and preserves mixed and p
     const inbound = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: /^Заказ № INBOUND$/ }) });
     assert.equal(await inbound.getAttribute("data-fulfillment"), "in_transit");
     assert.match(await inbound.locator(".history-card__states").innerText(), /В пути/);
-    assert.match(await page.locator('.history-card[data-fulfillment="ready"] .history-card__states').innerText(), /На складе/);
+    assert.equal(await page.locator('.history-card[data-fulfillment="ready"]').count(), 0);
     const partial = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: /^Заказ № PARTIAL$/ }) });
     assert.equal(await partial.locator("tbody tr").count(), 2);
     assert.match(await partial.locator(".history-card__states").innerText(), /В обработке/);
     assert.match(await partial.locator(".history-card__states").innerText(), /Получен/);
     assert.equal(await page.locator("#history-status-partial").count(), 0);
     assert.doesNotMatch(await page.locator("#history-results").innerText(), /Частичная поставка/);
-    const ready = page.locator('.history-card[data-fulfillment="ready"]');
+    const ready = page.locator('.history-card[data-fulfillment="in_transit"]').filter({ has: page.locator("h3", { hasText: /^Заказ № READY$/ }) });
+    assert.match(await ready.locator(".history-card__states").innerText(), /В пути/);
     const moving = page.locator('.history-card[data-fulfillment="in_transit"]').first();
     assert.equal(await ready.evaluate((node) => getComputedStyle(node).borderLeftColor), "rgb(40, 116, 187)");
     assert.equal(await ready.locator(".history-status").first().evaluate((node) => getComputedStyle(node).color), "rgb(27, 95, 159)");

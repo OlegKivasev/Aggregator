@@ -15,7 +15,7 @@ import { openSearchStream } from "./search-stream.js";
 import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { bootstrapCart, renderCartOfferControls } from "./cart-ui.js";
 import { bootstrapOrderHistory } from "./order-history-ui.js";
-import { hasPartKomOfferDeliveryWarning } from "./order-notices.js";
+import { hasOfferDeliveryWarning } from "./order-notices.js";
 import { deliveryCalendarDay, isOfferDueSoon } from "./delivery-dates.js";
 import {
   isStpartsWarehouseVisible,
@@ -1251,7 +1251,7 @@ const renderResults = () => {
         <td data-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
         <td data-column="title"><div class="result-title-cell">${renderOfferLink(result, result.title)}${photoSearchButtonMarkup}</div></td>
-        <td data-column="deliveryDate"><span class="delivery-date${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
+        <td data-column="deliveryDate"><span class="delivery-date${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, settings)))}</span>${showPurchasePrice(markupSettings) ? `<span class="main-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>` : ""}${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         ${renderCartOfferControls(result)}
@@ -2136,7 +2136,7 @@ const renderAnalogSource = (result) => {
   analogsSourceDelivery.textContent = result.supplier === "mladov" && !result.deliveryDate
     ? "-"
     : formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo);
-  analogsSourceDelivery.classList.toggle("delivery-date--warning", hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo));
+  analogsSourceDelivery.classList.toggle("delivery-date--warning", hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo));
   analogsSourceWarehouse.textContent = formatWarehouse(result.warehouse);
   analogsSourceWarehouse.title = formatWarehouse(result.warehouse);
 };
@@ -2229,7 +2229,7 @@ const renderAnalogRows = () => {
         <td data-analog-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-analog-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
         <td class="analogs-result-title" data-analog-column="title"><div class="result-title-cell">${renderOfferLink(result, result.title)}${photoSearchButtonMarkup}</div></td>
-        <td data-analog-column="deliveryDate"><span class="delivery-date${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
+        <td data-analog-column="deliveryDate"><span class="delivery-date${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${showPurchasePrice(markupSettings) ? `<span class="analogs-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>` : ""}${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
         ${renderCartOfferControls(result)}

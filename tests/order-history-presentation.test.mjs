@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { historyItemRows } from "../src/frontend/order-history-presentation.js";
+import { formatOrderStatus, historyItemRows } from "../src/frontend/order-history-presentation.js";
 
 const item = { article: "TEST-1", quantity: 10, price: 100.5, status: "Состояние поставщика", fulfillment: "partial" };
 const summary = (rows) => rows.map(({ quantity, fulfillment, status }) => ({ quantity, fulfillment, status }));
@@ -43,8 +43,20 @@ test("history shows only confirmed terminal quantities and retains unknown parti
 });
 
 test("ordinary supplier states stay unchanged in the history projection", () => {
-  for (const fulfillment of ["processing", "in_transit", "ready", "delivered", "cancelled", "returned", "unknown"]) {
+  for (const fulfillment of ["processing", "in_transit", "delivered", "cancelled", "returned", "unknown"]) {
     const original = { ...item, fulfillment };
     assert.deepEqual(historyItemRows(original), [original]);
   }
+});
+
+test("warehouse states display as transit without changing supplier data or losing quantity details", () => {
+  const original = { ...item, fulfillment: "ready", status: "На складе 4 из 10 шт." };
+  assert.deepEqual(summary(historyItemRows(original)), [{ quantity: 10, fulfillment: "in_transit", status: "В пути 4 из 10 шт." }]);
+  assert.equal(original.fulfillment, "ready");
+  assert.equal(original.status, "На складе 4 из 10 шт.");
+  assert.equal(formatOrderStatus("На складе филиала"), "В пути");
+  assert.equal(formatOrderStatus("  НА СКЛАДЕ "), "  В пути ");
+  assert.equal(formatOrderStatus("Выдано 1 из 2 шт.; На складе: 1 шт."), "Выдано 1 из 2 шт.; В пути: 1 шт.");
+  assert.equal(formatOrderStatus("Ожидаем товар на складе"), "Ожидаем товар на складе");
+  assert.equal(formatOrderStatus(null), null);
 });

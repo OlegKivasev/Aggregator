@@ -1,5 +1,5 @@
 import { formatOrderDate } from "./order-date-formatting.js";
-import { armtekReturnSource, formatArmtekReturnDays, hasPartKomWeekendDelivery } from "./order-notices.js";
+import { armtekReturnSource, formatArmtekReturnDays, hasSupplierWeekendDelivery } from "./order-notices.js";
 import { historyItemRows } from "./order-history-presentation.js";
 
 const suppliers = [
@@ -9,19 +9,19 @@ const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB
 const cancellationDate = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const fulfillmentLabels = new Map([
   ["processing", ["В обработке", "◷"]], ["in_transit", ["В пути", "→"]],
-  ["ready", ["На складе", "▣"]], ["delivered", ["Получен", "✓"]],
+  ["delivered", ["Получен", "✓"]],
   ["cancelled", ["Отменён", "×"]],
   ["returned", ["Возвращён", "↶"]],
   ["unknown", ["Статус не уточнён", "?"]],
 ]);
 const fulfillmentPriority = new Map([
-  ["processing", 0], ["in_transit", 1], ["ready", 1],
+  ["processing", 0], ["in_transit", 1],
   ["cancelled", 3], ["delivered", 4], ["returned", 5], ["unknown", 6],
 ]);
-const acceptedFulfillments = new Set([...fulfillmentLabels.keys(), "partial", "partially_cancelled"]);
+const acceptedFulfillments = new Set([...fulfillmentLabels.keys(), "ready", "partial", "partially_cancelled"]);
 const statusGroups = new Map([
   ["", { label: "Все заказы", states: [] }],
-  ["active", { label: "В работе", states: ["processing", "in_transit", "ready"] }],
+  ["active", { label: "В работе", states: ["processing", "in_transit"] }],
   ["today", { label: "Придут сегодня", states: [] }],
   ["cancelled", { label: "Отменено", states: ["cancelled"] }],
   ["delivered", { label: "Получено", states: ["delivered"] }],
@@ -158,7 +158,7 @@ function renderOrder(order, limited, supplierName, supplier) {
     if (item.title) part.append(element("span", "", item.title));
     const delivery = element("td");
     const active = !["delivered", "cancelled", "returned"].includes(item.fulfillment);
-    const highlightDelivery = active && hasPartKomWeekendDelivery(supplier, item.expectedDate);
+    const highlightDelivery = active && hasSupplierWeekendDelivery(supplier, item.expectedDate);
     delivery.append(element("strong", highlightDelivery && item.expectedDate ? "delivery-date--warning" : "", formatOrderDate(item.expectedDate) ?? "Не указана"));
     if (item.guaranteedDate && item.guaranteedDate !== item.expectedDate) {
       const guaranteed = element("span", "", "Гарантировано: ");
