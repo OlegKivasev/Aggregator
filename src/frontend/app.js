@@ -155,11 +155,7 @@ const renameTabButton = document.querySelector("#rename-tab-button");
 const warehouseTooltip = document.querySelector("#warehouse-tooltip");
 const showAnalogsButton = document.querySelector("#show-analogs-button");
 const findImagesButton = document.querySelector("#find-images-button");
-const imageSearchDialog = document.querySelector("#image-search-dialog");
-const imageSearchSubject = document.querySelector("#image-search-subject");
-const photoSearchButtonMarkup = '<button type="button" class="photo-search-button" aria-label="Найти изображения" title="Найти изображения" aria-haspopup="dialog" aria-controls="image-search-dialog"><span aria-hidden="true"></span></button>';
-let imageSearchQuery = "";
-let imageSearchAnchor = null;
+const photoSearchButtonMarkup = '<button type="button" class="photo-search-button" aria-label="Найти изображения" title="Найти изображения"><span aria-hidden="true"></span></button>';
 const analogsModal = document.querySelector("#analogs-modal");
 const analogsSourceBrand = document.querySelector("#analogs-source-brand");
 const analogsSourceArticle = document.querySelector("#analogs-source-article");
@@ -2473,42 +2469,15 @@ const startArticleBrandSearch = () => {
   };
 };
 
-const showImageSearchChoice = (result, anchor) => {
+const openImageSearch = (result) => {
   const article = typeof result?.article === "string" ? result.article.trim() : "";
   if (!article) return;
   const brand = typeof result.brand === "string" ? result.brand.trim() : "";
-  imageSearchQuery = brand ? `${brand} ${article}` : article;
-  imageSearchAnchor = anchor;
-  imageSearchSubject.textContent = imageSearchQuery;
+  const url = new URL("https://www.google.com/search");
+  url.search = new URLSearchParams({ tbm: "isch", q: brand ? `${brand} ${article}` : article }).toString();
   hideResultContextMenu();
-  if (!imageSearchDialog.open) imageSearchDialog.showModal();
-};
-
-imageSearchDialog.querySelector("[data-image-search-close]").addEventListener("click", () => imageSearchDialog.close());
-imageSearchDialog.addEventListener("keydown", (event) => {
-  event.stopPropagation();
-  if (event.key !== "Tab") return;
-  const buttons = [...imageSearchDialog.querySelectorAll("button:not([disabled])")];
-  const first = buttons[0]; const last = buttons.at(-1);
-  if (event.shiftKey && document.activeElement === first || !event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    (event.shiftKey ? last : first)?.focus();
-  }
-});
-imageSearchDialog.addEventListener("close", () => {
-  imageSearchQuery = "";
-  if (imageSearchAnchor?.isConnected) imageSearchAnchor.focus({ preventScroll: true });
-  imageSearchAnchor = null;
-});
-imageSearchDialog.querySelectorAll("[data-image-search-engine]").forEach((button) => button.addEventListener("click", () => {
-  if (!imageSearchQuery || !imageSearchDialog.open) return;
-  const engine = button.dataset.imageSearchEngine;
-  if (engine !== "google" && engine !== "yandex") return;
-  const url = new URL(engine === "google" ? "https://www.google.com/search" : "https://yandex.ru/images/search/");
-  url.search = new URLSearchParams(engine === "google" ? { tbm: "isch", q: imageSearchQuery } : { text: imageSearchQuery }).toString();
-  imageSearchDialog.close();
   window.open(url.href, "_blank", "noopener,noreferrer");
-}));
+};
 
 const registerResultActions = (body, resolveResult, canShowAnalogs) => {
   body.addEventListener("click", (event) => {
@@ -2516,7 +2485,7 @@ const registerResultActions = (body, resolveResult, canShowAnalogs) => {
     if (!button) return;
     const row = button.closest(".results-table__row");
     const result = row ? resolveResult(row) : null;
-    if (result) showImageSearchChoice(result, button);
+    if (result) openImageSearch(result);
   });
   body.addEventListener("contextmenu", (event) => {
     const row = event.target.closest(".results-table__row");
@@ -2578,8 +2547,7 @@ showAnalogsButton.addEventListener("click", () => {
 
 findImagesButton.addEventListener("click", () => {
   const result = contextMenuResult;
-  const anchor = contextMenuAnchor;
-  if (result) showImageSearchChoice(result, anchor);
+  if (result) openImageSearch(result);
 });
 
 analogsTableSearch.addEventListener("input", () => {
