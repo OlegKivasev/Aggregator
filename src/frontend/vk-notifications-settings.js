@@ -84,7 +84,7 @@ const paint = () => {
   chatLabel.hidden = !state.configured || state.chats.length === 0 || state.chats.length === 1 && state.peerId !== null;
   enabled.checked = state.enabled;
   const testMessage = state.testMessage === "sent" ? "Тестовое сообщение отправлено. " : state.testMessage === "pending" ? "Тестовое сообщение ожидает отправки. " : state.testMessage === "failed" ? "Не удалось отправить тестовое сообщение. Проверьте права бота и сохраните ключ повторно. " : "";
-  status.textContent = state.error ?? (!state.configured ? "" : `${testMessage}${state.enabled ? "Уведомления включены." : "Уведомления о заказах выключены."} Последняя проверка: ${date(state.lastCheckAt)}.${state.enabled && state.nextCheckAt ? ` Следующая: ${date(state.nextCheckAt)}.` : ""} В очереди: ${state.pending}. Ошибок отправки: ${state.failed}.${state.checking ? " Проверяем заказы…" : ""}`);
+  status.textContent = state.error ?? (!state.configured ? "" : `${testMessage}${state.enabled ? "Отправка в ВК включена." : "Отправка в ВК выключена. Уведомления на сайте продолжают накапливаться."} Последняя проверка: ${date(state.lastCheckAt)}.${state.enabled && state.nextCheckAt ? ` Следующая: ${date(state.nextCheckAt)}.` : ""} В очереди: ${state.pending}. Ошибок отправки: ${state.failed}.${state.checking ? " Проверяем заказы…" : ""}`);
   status.dataset.error = String(!!state.error || state.failed > 0);
   supplierList.hidden = !state.configured;
   supplierList.replaceChildren(...state.suppliers.map((item) => {

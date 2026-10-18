@@ -1640,14 +1640,15 @@ input {
   min-width: 0;
 }
 
-.price-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 2px 6px; }
-.price-heading > .table-sort, .price-heading > .analogs-sort { flex: 0 1 auto; width: auto !important; }
+.price-heading { display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 4px; }
+.price-heading > .table-sort, .price-heading > .analogs-sort { flex: 0 1 auto; width: auto !important; gap: 3px; }
 .markup-settings-trigger { display: inline-grid; flex: 0 0 27px; width: 27px; height: 27px; padding: 0; place-items: center; border: 1px solid #dce3ea; border-radius: 50%; color: var(--muted); background: #fff; font-size: 14px; font-weight: 700; cursor: pointer; }
 .markup-settings-trigger:hover, .markup-settings-trigger[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); background: #fff0ea; }
 .markup-settings-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .table-column-context-menu { border: 1px solid var(--line); background: #fff; box-shadow: 0 6px 20px rgba(25,40,60,.14); }
-.table-column-settings-dialog { width: min(480px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 18px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: #fff; box-shadow: 0 8px 30px rgba(25,40,60,.18); font-size: 12px; }
-.table-column-settings-dialog::backdrop { background: rgba(23,32,42,.25); }
+.table-column-settings-dialog { width: min(480px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); margin: auto 12px 12px auto; padding: 18px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: #fff; box-shadow: 0 8px 30px rgba(25,40,60,.18); font-size: 12px; }
+.table-column-settings-dialog::backdrop { background: rgba(23,32,42,.08); }
+.results-data-table th[data-column="markupPrice"], .analogs-results th[data-analog-column="markupPrice"] { padding-inline: 2px !important; }
 .table-column-settings-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .table-column-settings-dialog h2 { margin: 0; font-size: 18px; font-weight: 750; }
 .table-column-settings-dialog header button { padding: 0 3px; border: 0; color: var(--muted); background: transparent; font-size: 23px; cursor: pointer; }

@@ -234,8 +234,8 @@ test("table column width preferences persist safely across clients", async () =>
   assert.deepEqual(await invalid.json(), { message: "Garage request is invalid" });
 
   const savedWidths = {
-    main: { supplier: 24, title: 420 },
-    analogs: { quantity: 140 },
+    main: { supplier: 24, title: 420, quantity: 140 },
+    analogs: { supplier: 24, title: 420, quantity: 140 },
     garage: { deliveryDate: 220, sum: 130 },
   };
   const save = await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`, {
@@ -244,7 +244,7 @@ test("table column width preferences persist safely across clients", async () =>
     body: JSON.stringify({ widths: savedWidths, alignments: { main: { supplier: "right" }, analogs: { quantity: "center" } } }),
   });
   assert.equal(save.status, 200);
-  const savedAlignments = { main: { supplier: "right" }, analogs: { quantity: "center" } };
+  const savedAlignments = { main: { supplier: "right", quantity: "center" }, analogs: { supplier: "right", quantity: "center" } };
   assert.deepEqual(await save.json(), { widths: savedWidths, alignments: savedAlignments });
 
   const restored = await fetch(`${baseUrl}/api/ui-preferences/table-column-widths`);

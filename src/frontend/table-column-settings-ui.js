@@ -17,7 +17,7 @@ export const setupTableColumnSettings = ({ table, columnAttribute, widths, align
   dialog.id = `table-column-settings-${name}`;
   dialog.setAttribute("aria-labelledby", `${dialog.id}-title`);
   dialog.innerHTML = `<form novalidate><header><h2></h2><button type="button" data-column-settings-cancel aria-label="Закрыть настройки столбцов">×</button></header>
-    <p class="table-column-settings-dialog__hint">Задайте ширину от 24 до 800 px и выберите выравнивание. Свободное место занимает «Наименование», а если оно скрыто — самый широкий видимый столбец. Для него заданная ширина — минимальная.</p>
+    <p class="table-column-settings-dialog__hint">Изменения сразу видны в проценке и аналогах. «Применить» сохраняет их, «Отмена» возвращает прежний вид. Ширина — от 24 до 800 px. Свободное место занимает «Наименование», а если оно скрыто — самый широкий столбец: его ширина считается минимальной.</p>
     <div class="table-column-settings-dialog__fields"></div><p class="table-column-settings-dialog__error" role="alert" hidden></p>
     <footer><button type="button" class="btn btn-light" data-column-settings-cancel>Отмена</button><button type="submit" class="btn btn-primary">Применить</button></footer></form>`;
   const heading = dialog.querySelector("h2");
@@ -27,6 +27,7 @@ export const setupTableColumnSettings = ({ table, columnAttribute, widths, align
   const fields = dialog.querySelector(".table-column-settings-dialog__fields");
   const error = dialog.querySelector('[role="alert"]');
   let returnFocus = null;
+  let original = null;
   const hideMenu = (restoreFocus = false) => {
     menu.hidden = true;
     if (restoreFocus) returnFocus?.focus({ preventScroll: true });
@@ -56,6 +57,7 @@ export const setupTableColumnSettings = ({ table, columnAttribute, widths, align
   });
   settingsButton.addEventListener("click", () => {
     hideMenu(); fields.replaceChildren(); error.hidden = true;
+    original = { widths: { ...widths }, alignments: { ...alignments } };
     for (const [column, width] of Object.entries(widths)) {
       const header = table.querySelector(`th[${columnAttribute}="${column}"]`);
       const label = document.createElement("label");
@@ -94,11 +96,30 @@ export const setupTableColumnSettings = ({ table, columnAttribute, widths, align
       if (!["left", "center", "right"].includes(select.value)) { error.textContent = "Выберите выравнивание каждого столбца."; error.hidden = false; return; }
       nextAlignments[select.dataset.alignmentColumn] = select.value;
     }
-    Object.assign(widths, nextWidths); Object.assign(alignments, nextAlignments); apply(); save(); dialog.close();
+    Object.assign(widths, nextWidths); Object.assign(alignments, nextAlignments); apply(); save(); original = null; dialog.close();
   });
-  fields.addEventListener("input", () => { error.hidden = true; });
-  dialog.querySelectorAll("[data-column-settings-cancel]").forEach((button) => button.addEventListener("click", () => dialog.close()));
-  dialog.addEventListener("close", () => returnFocus?.focus({ preventScroll: true }));
+  const preview = () => {
+    if (!dialog.open || !original) return;
+    error.hidden = true;
+    for (const input of fields.querySelectorAll("input")) {
+      const value = Number(input.value);
+      if (input.value.trim() && Number.isInteger(value) && value >= minimumColumnWidth && value <= maximumColumnWidth) widths[input.dataset.widthColumn] = value;
+    }
+    for (const select of fields.querySelectorAll("select")) if (["left", "center", "right"].includes(select.value)) alignments[select.dataset.alignmentColumn] = select.value;
+    apply();
+  };
+  fields.addEventListener("input", preview);
+  fields.addEventListener("change", preview);
+  const discardPreview = () => {
+    if (original) { Object.assign(widths, original.widths); Object.assign(alignments, original.alignments); original = null; apply(); }
+  };
+  const cancel = () => { discardPreview(); dialog.close(); };
+  dialog.querySelectorAll("[data-column-settings-cancel]").forEach((button) => button.addEventListener("click", cancel));
+  dialog.addEventListener("cancel", (event) => { event.preventDefault(); cancel(); });
+  dialog.addEventListener("close", () => {
+    discardPreview();
+    returnFocus?.focus({ preventScroll: true });
+  });
   dialog.addEventListener("keydown", (event) => {
     if (event.key === "Escape" || event.key === "Tab") event.stopPropagation();
   });

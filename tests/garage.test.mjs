@@ -20,8 +20,13 @@ test("table preferences migrate legacy widths and persist validated alignments a
   let service = new GarageApplicationService(repository, { findOffers: async () => ({ results: [], failed: false }) });
   try {
     repository.setUiPreference("table-column-widths-v1", JSON.stringify({ main: { supplier: 100 } }));
-    assert.deepEqual(service.getTablePreferences(), { widths: { main: { supplier: 100 } }, alignments: {} });
-    const saved = { widths: { main: { supplier: 24 }, analogs: { brand: 64 } }, alignments: { main: { supplier: "right" }, analogs: { brand: "center" } } };
+    assert.deepEqual(service.getTablePreferences(), { widths: { main: { supplier: 100 }, analogs: { supplier: 100 } }, alignments: {} });
+    repository.setUiPreference("table-column-settings-v2", JSON.stringify({ widths: { main: { supplier: 60 }, analogs: { supplier: 200, title: 480 } },
+      alignments: { main: { supplier: "left" }, analogs: { supplier: "right", title: "center" } } }));
+    assert.deepEqual(service.getTablePreferences(), { widths: { main: { supplier: 60, title: 480 }, analogs: { supplier: 60, title: 480 } },
+      alignments: { main: { supplier: "left", title: "center" }, analogs: { supplier: "left", title: "center" } } });
+    const saved = { widths: { main: { supplier: 24, brand: 64 }, analogs: { supplier: 24, brand: 64 } },
+      alignments: { main: { supplier: "right", brand: "center" }, analogs: { supplier: "right", brand: "center" } } };
     assert.deepEqual(service.setTablePreferences(saved.widths, saved.alignments), saved);
     assert.throws(() => service.setTablePreferences({ main: { supplier: 60 } }, { main: { supplier: "justify" } }), GarageValidationError);
     assert.deepEqual(service.getTablePreferences(), saved);

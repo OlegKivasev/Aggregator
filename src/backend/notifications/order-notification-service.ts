@@ -67,6 +67,14 @@ export class OrderNotificationService {
       testMessage: current?.peerId ? this.repository.welcomeState(`${current.groupId}:${current.peerId}`) : null,
       ...(current?.peerId ? this.repository.counts(`${current.groupId}:${current.peerId}`) : { pending: 0, failed: 0 }) };
   }
+  orderFeed(before: number | null = null) { return this.repository.feed(before); }
+  markOrdersSeen(payload: unknown) {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new NotificationSettingsError("Неверный запрос прочтения уведомлений.");
+    const { throughId, ...rest } = payload as { throughId?: unknown };
+    if (Object.keys(rest).length || typeof throughId !== "number" || !Number.isSafeInteger(throughId) || throughId < 0
+      || !this.repository.markFeedSeen(throughId, this.now())) throw new NotificationSettingsError("Неверный номер уведомления.");
+    return this.orderFeed();
+  }
   beginForegroundOperation(): () => void {
     this.foregroundOperations++;
     let released = false;
@@ -241,33 +249,31 @@ export class OrderNotificationService {
   runOnce(): Promise<void> {
     if (this.work) return this.work;
     const config = this.settings.get();
-    if (this.stopped || this.mutating || !config || config.peerId === null) return Promise.resolve();
-    if (!config.enabled && !this.repository.pending(`${config.groupId}:${config.peerId}`, this.now(), true)) return Promise.resolve();
+    if (this.stopped || this.mutating) return Promise.resolve();
     const now = this.now();
-    const allowed = nextOrderCheckTime(now, config.quietHours);
+    const allowed = nextOrderCheckTime(now, config?.quietHours ?? defaultOrderQuietHours);
     if (allowed > now) {
-      this.nextCheckAt = config.enabled ? new Date(allowed).toISOString() : null;
+      this.nextCheckAt = config?.enabled ? new Date(allowed).toISOString() : null;
       if (this.timer) this.armTimer(allowed);
       return Promise.resolve();
     }
     this.deferred = false;
     this.controller = new AbortController();
     const signal = this.controller.signal;
-    if (!this.timer) this.nextCheckAt = config.enabled ? new Date(nextOrderCheckTime(now + orderCheckIntervalMs, config.quietHours)).toISOString() : null;
-    const operation = config.enabled ? this.cycle(config, config.peerId, signal) : this.sendPending(config, config.peerId, signal, true);
+    if (!this.timer) this.nextCheckAt = config?.enabled ? new Date(nextOrderCheckTime(now + orderCheckIntervalMs, config.quietHours)).toISOString() : null;
+    const operation = this.cycle(config, config?.peerId ?? null, signal);
     this.work = operation.catch(() => {
       if (!signal.aborted) this.error = "Не удалось завершить проверку уведомлений. Повторим через 10 минут.";
     }).finally(() => { this.work = null; });
     return this.work;
   }
-  private async cycle(config: VkSettings, peerId: number, signal: AbortSignal, manual = false): Promise<void> {
-    const target = `${config.groupId}:${peerId}`;
+  private async cycle(config: VkSettings | null, peerId: number | null, signal: AbortSignal, manual = false): Promise<void> {
     const observations: Array<{ supplier: OrderHistorySupplier; histories: OrderHistory[] }> = [];
     this.error = null;
     for (const check of this.checks) {
       signal.throwIfAborted();
       const now = this.now();
-      if (!manual && nextOrderCheckTime(now, config.quietHours) > now) break;
+      if (!manual && nextOrderCheckTime(now, config?.quietHours ?? defaultOrderQuietHours) > now) break;
       if (!this.source.available(check.supplier)) { check.error = "Поставщик не подключён."; continue; }
       if (!manual && (this.nextSupplierCheck.get(check.supplier) ?? 0) > this.now()) continue;
       if (this.foregroundOperations > 0) { if (!manual) this.deferred = true; check.error = "Проверка отложена: поставщик занят."; continue; }
@@ -291,9 +297,12 @@ export class OrderNotificationService {
       } finally { bounded.dispose(); }
     }
     signal.throwIfAborted();
-    if (observations.length) this.repository.observe(target, observations, this.now());
+    if (observations.length) {
+      this.repository.observeFeed(observations, this.now());
+      if (config && peerId !== null && (config.enabled || manual)) this.repository.observe(`${config.groupId}:${peerId}`, observations, this.now());
+    }
     this.lastCheckAt = new Date(this.now()).toISOString();
-    await this.sendPending(config, peerId, signal, false, manual);
+    if (config && peerId !== null) await this.sendPending(config, peerId, signal, !config.enabled && !manual, manual);
   }
   private async sendPending(config: VkSettings, peerId: number, signal: AbortSignal, welcomeOnly = false, manual = false): Promise<void> {
     const target = `${config.groupId}:${peerId}`;

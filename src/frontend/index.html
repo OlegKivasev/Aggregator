@@ -15,6 +15,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/order-notifications.css" />
   </head>
   <body>
     <main class="page container-fluid py-4 py-lg-5">
@@ -28,6 +29,9 @@
       <nav class="search-tabs card border-0 shadow-sm mb-4" id="search-tabs" aria-label="Поисковые вкладки">
         <div class="search-tabs__list" id="search-tabs-list" role="tablist"></div>
         <button type="button" class="new-tab-button btn btn-light" id="new-tab-button" aria-label="Открыть новую вкладку">+</button>
+        <button type="button" class="order-notifications-trigger" id="order-notifications-trigger" aria-label="Уведомления о заказах" title="Уведомления о заказах" aria-haspopup="dialog" aria-expanded="false" aria-controls="order-notifications-panel">
+          <img src="/notification-bell.png" width="23" height="23" alt=""><span id="order-notifications-count" class="order-notifications-count" hidden></span>
+        </button>
       </nav>
       <header class="garage-titlebar card border-0 shadow-sm mb-4" id="garage-titlebar" hidden>
         <button type="button" class="btn btn-light garage-titlebar__back" id="garage-back" aria-label="Вернуться к поиску" title="Вернуться к поиску">←</button>
@@ -419,7 +423,7 @@
               <p class="settings-drawer__hint" id="vk-notifications-quiet-summary"></p>
               <div class="auth-actions"><button class="btn btn-primary" type="submit" id="vk-notifications-schedule-save">Сохранить расписание</button></div>
             </form>
-            <p class="settings-drawer__hint">После подключения в выбранную беседу придёт тестовое сообщение. Уведомления о заказах включаются отдельно. Первый запуск запоминает текущую историю; далее сообщает о новых изменениях.</p>
+            <p class="settings-drawer__hint">После подключения в выбранную беседу придёт тестовое сообщение. Отправка в ВК включается отдельно; лента уведомлений на сайте работает независимо. Первый запуск запоминает текущую историю; далее сообщает о новых изменениях.</p>
             <p class="vk-notifications-settings__status" id="vk-notifications-status" role="status" aria-live="polite"></p>
             <ul class="vk-notifications-settings__suppliers" id="vk-notifications-suppliers" hidden></ul>
             <p class="settings-drawer__hint">Если заказ Forum Auto исчезнет из полного списка активных, бот сообщит об этом отдельно. Причину нужно проверить у поставщика: заказ мог быть получен или отменён.</p>
@@ -1033,5 +1037,6 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
     <script type="module" src="/applicability.js"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
+    <script type="module" src="/order-notifications-ui.js"></script>
   </body>
 </html>

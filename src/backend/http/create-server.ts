@@ -46,6 +46,7 @@ import { SqliteOrderCancellationRepository } from "../purchasing/sqlite-order-ca
 import type { OrderHistorySupplier } from "../purchasing/order-cancellation-contract.ts";
 import type { OrderNotificationService } from "../notifications/order-notification-service.ts";
 import { serveVkNotifications } from "./vk-notifications.ts";
+import { serveOrderNotifications } from "./order-notifications.ts";
 
 export interface AggregatorApplication {
   testCartOrder?: TestOrder;
@@ -241,6 +242,7 @@ export function createAggregatorServer({
     const url = new URL(request.url, "http://127.0.0.1");
 
     if (await serveVkNotifications(request, response, url, notifications)) return;
+    if (await serveOrderNotifications(request, response, url, notifications)) return;
     if (/^\/api\/(?:search|cart|order-history|suppliers)(?:\/|$)/.test(url.pathname)) {
       const release = notifications?.beginForegroundOperation();
       if (release) response.once("close", release);

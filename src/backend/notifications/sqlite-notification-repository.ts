@@ -27,10 +27,22 @@ export class SqliteNotificationRepository {
       CREATE TABLE IF NOT EXISTS vk_forum_active_orders (
         target TEXT PRIMARY KEY, numbers TEXT NOT NULL
       ) STRICT;
+      CREATE TABLE IF NOT EXISTS order_notification_feed (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, payload TEXT NOT NULL, seen_at TEXT
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS order_notification_feed_unread ON order_notification_feed(seen_at,id);
     `); } catch (error) { this.database.close(); throw error; }
   }
 
   observe(target: string, batches: Array<{ supplier: OrderHistorySupplier; histories: OrderHistory[] }>, now: number): void {
+    this.recordObservations(target, batches, now, false);
+  }
+
+  observeFeed(batches: Array<{ supplier: OrderHistorySupplier; histories: OrderHistory[] }>, now: number): void {
+    this.recordObservations("aggregator-order-feed", batches, now, true);
+  }
+
+  private recordObservations(target: string, batches: Array<{ supplier: OrderHistorySupplier; histories: OrderHistory[] }>, now: number, feed: boolean): void {
     const prepared = batches.map(({ supplier, histories }) => ({ supplier, orders: this.combine(histories), complete: histories.length > 0 && histories.every((history) => !history.limited) }));
     this.database.exec("BEGIN IMMEDIATE");
     try {
@@ -50,10 +62,38 @@ export class SqliteNotificationRepository {
         }
         if (!baseline) this.database.prepare("INSERT INTO vk_order_monitor_baseline VALUES (?,?,?)").run(target, supplier, new Date(now).toISOString().slice(0, 10));
       }
-      for (const message of formatOrderEvents(events)) this.database.prepare("INSERT INTO vk_order_notification_outbox(random_id,target,text) VALUES (?,?,?)")
-        .run(randomInt(1, 2_147_483_647), target, message);
+      if (feed) {
+        for (const event of events) this.database.prepare("INSERT INTO order_notification_feed(created_at,payload) VALUES (?,?)")
+          .run(new Date(now).toISOString(), JSON.stringify(event));
+      } else {
+        for (const message of formatOrderEvents(events)) this.database.prepare("INSERT INTO vk_order_notification_outbox(random_id,target,text) VALUES (?,?,?)")
+          .run(randomInt(1, 2_147_483_647), target, message);
+      }
       this.database.exec("COMMIT");
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+  }
+
+  feed(before: number | null = null) {
+    const rows = before === null
+      ? this.database.prepare("SELECT id,created_at,payload,seen_at FROM order_notification_feed ORDER BY id DESC LIMIT 31").all()
+      : this.database.prepare("SELECT id,created_at,payload,seen_at FROM order_notification_feed WHERE id<? ORDER BY id DESC LIMIT 31").all(before);
+    const counts = this.database.prepare(`SELECT
+      (SELECT COUNT(*) FROM order_notification_feed WHERE seen_at IS NULL) AS unread,
+      (SELECT MAX(id) FROM order_notification_feed) AS latest`).get();
+    const entries = rows.slice(0, 30).map((row) => {
+      const event = JSON.parse(String(row.payload)) as OrderEvent;
+      return { ...event, items: event.items.slice(0, 100), remainingItems: Math.max(0, event.items.length - 100),
+        id: Number(row.id), createdAt: String(row.created_at), read: row.seen_at !== null };
+    });
+    return { entries, unreadCount: Number(counts?.unread ?? 0), latestId: Number(counts?.latest ?? 0),
+      nextBefore: rows.length > 30 ? entries.at(-1)?.id ?? null : null };
+  }
+
+  markFeedSeen(throughId: number, now: number): boolean {
+    const latest = this.database.prepare("SELECT MAX(id) AS latest FROM order_notification_feed").get();
+    if (throughId > Number(latest?.latest ?? 0)) return false;
+    this.database.prepare("UPDATE order_notification_feed SET seen_at=? WHERE id<=? AND seen_at IS NULL").run(new Date(now).toISOString(), throughId);
+    return true;
   }
 
   private observeForumActiveOrders(target: string, orders: MonitoredOrder[]): OrderEvent[] {

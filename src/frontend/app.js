@@ -255,7 +255,7 @@ Object.assign(tableColumnWidths, restoreLocalColumnWidths("main", tableColumnWid
 const cartActionColumnWidth = 104;
 const defaultOfferColumnAlignments = { supplier: "left", brand: "left", article: "left", title: "left", deliveryDate: "left", quantity: "center", markupPrice: "center" };
 const tableColumnAlignments = restoreLocalColumnAlignments("main", defaultOfferColumnAlignments);
-const analogTableColumnAlignments = restoreLocalColumnAlignments("analogs", defaultOfferColumnAlignments);
+const analogTableColumnAlignments = tableColumnAlignments;
 let visibleTableColumns = new Set(tableColumnIds);
 let visibleStpartsWarehouses = new Set(["green"]);
 let showArmtekNonReturnable = false;
@@ -333,16 +333,7 @@ const getAveragePrice = (items, getPrice) => {
   const prices = items.map(getPrice).filter((price) => Number.isFinite(price) && price > 0);
   return prices.length ? prices.reduce((total, price) => total + price, 0) / prices.length : null;
 };
-const analogTableColumnWidths = {
-  supplier: 100,
-  brand: 125,
-  article: 140,
-  title: 323,
-  deliveryDate: 180,
-  quantity: 120,
-  markupPrice: 120,
-};
-Object.assign(analogTableColumnWidths, restoreLocalColumnWidths("analogs", analogTableColumnWidths));
+const analogTableColumnWidths = tableColumnWidths;
 const analogTableColumnIds = Object.keys(analogTableColumnWidths);
 
 const renderAveragePrices = (container, items) => {
@@ -3008,10 +2999,11 @@ const cartUi = bootstrapCart({ getMarkupPrice, showPurchasePrice: () => showPurc
 bootstrapMarkupSettings({ getSettings: () => markupSettings, applySettings: setMarkupSettings });
 bootstrapOrderHistory();
 
+const applyOfferTableColumns = () => { applyTableColumns(); applyAnalogTableColumns(); };
 setupTableColumnSettings({ table: resultsTable, columnAttribute: "data-column", widths: tableColumnWidths, alignments: tableColumnAlignments,
-  name: "main", title: "Столбцы проценки", apply: applyTableColumns, save: () => saveColumnWidths("main", tableColumnWidths, tableColumnAlignments) });
+  name: "main", title: "Столбцы проценки и аналогов", apply: applyOfferTableColumns, save: () => saveColumnWidths("main", tableColumnWidths, tableColumnAlignments) });
 setupTableColumnSettings({ table: analogsResults, columnAttribute: "data-analog-column", widths: analogTableColumnWidths, alignments: analogTableColumnAlignments,
-  name: "analogs", title: "Столбцы аналогов", apply: applyAnalogTableColumns, save: () => saveColumnWidths("analogs", analogTableColumnWidths, analogTableColumnAlignments) });
+  name: "analogs", title: "Столбцы проценки и аналогов", apply: applyOfferTableColumns, save: () => saveColumnWidths("analogs", analogTableColumnWidths, analogTableColumnAlignments) });
 
 const offerTableResizeObserver = new ResizeObserver((entries) => {
   for (const entry of entries) {
@@ -3023,10 +3015,8 @@ offerTableResizeObserver.observe(resultsTable);
 offerTableResizeObserver.observe(analogsResults);
 
 loadSharedColumnWidths().then((savedWidths) => {
-  Object.assign(tableColumnWidths, applySavedColumnWidths(tableColumnWidths, savedWidths.main));
-  Object.assign(analogTableColumnWidths, applySavedColumnWidths(analogTableColumnWidths, savedWidths.analogs));
+  Object.assign(tableColumnWidths, applySavedColumnWidths(tableColumnWidths, { ...savedWidths.analogs, ...savedWidths.main }));
   Object.assign(tableColumnAlignments, restoreLocalColumnAlignments("main", defaultOfferColumnAlignments));
-  Object.assign(analogTableColumnAlignments, restoreLocalColumnAlignments("analogs", defaultOfferColumnAlignments));
   garageUi.applyColumnWidths(savedWidths.garage);
   renderResults();
   if (!analogsModal.hidden) renderAnalogRowsNow();

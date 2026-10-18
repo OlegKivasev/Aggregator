@@ -107,12 +107,12 @@ test("VK UI saves only a token, renders supplier text safely, remains paused and
     assert.equal(await page.evaluate((key) => JSON.stringify(localStorage).includes(key), fixtureToken), false);
     assert.equal(sends.length, 1);
     assert.match(sends[0].get("message"), /Агрегатор автозапчастей подключён/);
-    assert.match(await page.locator("#vk-notifications-status").textContent(), /Тестовое сообщение отправлено[\s\S]*Уведомления о заказах выключены/);
+    assert.match(await page.locator("#vk-notifications-status").textContent(), /Тестовое сообщение отправлено[\s\S]*Отправка в ВК выключена/);
     await page.getByRole("button", { name: "Проверить сейчас" }).click();
     await page.waitForFunction(() => !document.querySelector("#vk-notifications-refresh").disabled);
     assert.equal(sends.length, 1);
     await page.locator("#vk-notifications-enabled").check();
-    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Уведомления включены"));
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Отправка в ВК включена"));
     assert.equal(settings.get().enabled, true);
     await page.getByRole("button", { name: "Отключить ВК" }).click();
     await page.waitForFunction(() => document.querySelector("#vk-notifications-connection").textContent === "ВК пока не подключён.");
@@ -311,7 +311,7 @@ test("VK UI manually checks and sends changes without shifting the next automati
     await page.locator("#vk-notifications-token").fill(fixtureToken); await page.getByRole("button", { name: "Сохранить ключ", exact: true }).click();
     await page.waitForFunction(() => !document.querySelector("#vk-notifications-enabled").disabled);
     await page.locator("#vk-notifications-enabled").check();
-    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Уведомления включены"));
+    await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Отправка в ВК включена"));
     await service.runOnce(); const next = service.state().nextCheckAt;
     setHistory(fixtureHistory("cancelled")); block = true;
     await page.getByRole("button", { name: "Проверить сейчас", exact: true }).click();

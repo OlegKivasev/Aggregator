@@ -37,7 +37,11 @@ export const applySavedColumnWidths = (defaults, savedWidths) => {
   ]));
 };
 
-export const restoreLocalColumnWidths = (table, defaults) => applySavedColumnWidths(defaults, readStoredWidths()[table]);
+const commonOfferPreferences = (saved) => ({ ...saved.analogs, ...saved.main });
+export const restoreLocalColumnWidths = (table, defaults) => {
+  const saved = readStoredWidths();
+  return applySavedColumnWidths(defaults, table === "main" || table === "analogs" ? commonOfferPreferences(saved) : saved[table]);
+};
 
 export const fitOfferColumnWidths = (widths, visibleColumns, availableWidth, actionWidth) => {
   const fittedWidths = Object.fromEntries(visibleColumns.map((column) => [column, widths[column]]));
@@ -61,7 +65,10 @@ const writeStoredAlignments = (alignments) => {
 export const applySavedColumnAlignments = (defaults, saved) => Object.fromEntries(Object.entries(defaults).map(([column, alignment]) => [
   column, isRecord(saved) && ["left", "center", "right"].includes(saved[column]) ? saved[column] : alignment,
 ]));
-export const restoreLocalColumnAlignments = (table, defaults) => applySavedColumnAlignments(defaults, readStoredAlignments()[table]);
+export const restoreLocalColumnAlignments = (table, defaults) => {
+  const saved = readStoredAlignments();
+  return applySavedColumnAlignments(defaults, table === "main" || table === "analogs" ? commonOfferPreferences(saved) : saved[table]);
+};
 export const applyColumnAlignment = (cell, alignment) => {
   cell.style.textAlign = alignment;
   const justify = alignment === "left" ? "flex-start" : alignment === "right" ? "flex-end" : "center";
@@ -71,9 +78,14 @@ export const applyColumnAlignment = (cell, alignment) => {
 export const saveColumnWidths = (table, widths, alignments) => {
   const storedWidths = readStoredWidths();
   storedWidths[table] = widths;
+  if (table === "main" || table === "analogs") storedWidths.main = storedWidths.analogs = widths;
   writeStoredWidths(storedWidths);
   const storedAlignments = readStoredAlignments();
-  if (alignments) { storedAlignments[table] = alignments; writeStoredAlignments(storedAlignments); }
+  if (alignments) {
+    storedAlignments[table] = alignments;
+    if (table === "main" || table === "analogs") storedAlignments.main = storedAlignments.analogs = alignments;
+    writeStoredAlignments(storedAlignments);
+  }
 
   void fetch("/api/ui-preferences/table-column-widths", {
     method: "PUT",

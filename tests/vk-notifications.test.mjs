@@ -103,6 +103,78 @@ async function withCancellationHistoryServer(t, supplier, getHistory, options = 
   return { ...f, origin: `http://127.0.0.1:${server.address().port}` };
 }
 
+test("website events persist, paginate without gaps and keep arrivals after a read snapshot unread", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "aggregator-order-feed-"));
+  const path = join(directory, "orders.sqlite");
+  let repository = new SqliteNotificationRepository(path);
+  t.after(async () => { repository.close(); await rm(directory, { recursive: true, force: true }); });
+  const update = (value) => repository.observeFeed([{ supplier: "armtek", histories: [value] }], now);
+  update(history()); assert.equal(repository.feed().entries.length, 0);
+  for (let index = 1; index <= 35; index++) update(history([part()], `NEW-${index}`));
+  const first = repository.feed();
+  assert.equal(first.unreadCount, 35); assert.equal(first.entries.length, 30);
+  const second = repository.feed(first.nextBefore);
+  assert.equal(second.entries.length, 5); assert.equal(second.nextBefore, null);
+  assert.equal(new Set([...first.entries, ...second.entries].map((entry) => entry.id)).size, 35);
+  const changed = history([part({ fulfillment: "partial", cancelledQuantity: 2, deliveredQuantity: 3 })]);
+  update(changed); repository.markFeedSeen(first.latestId, now);
+  const pending = repository.feed();
+  assert.equal(pending.unreadCount, 2);
+  assert.deepEqual(pending.entries.slice(0, 2).map((entry) => [entry.kind, entry.items[0].quantity]), [["received", 3], ["cancelled", 2]]);
+  assert.deepEqual(repository.counts(target), { pending: 0, failed: 0 }, "website events never enter the VK outbox");
+  repository.close(); repository = new SqliteNotificationRepository(path);
+  update(changed);
+  assert.deepEqual(repository.feed(), pending, "restart and repeated responses cannot duplicate a website event");
+});
+
+test("the website monitor works without a VK key and respects the same night pause", async (t) => {
+  const f = await fixture(t);
+  await f.service.runOnce(); assert.equal(f.loads.length, 1); assert.equal(f.service.orderFeed().unreadCount, 0);
+  f.advance(); f.setHistory(history([part({ fulfillment: "partial", cancelledQuantity: 2, deliveredQuantity: 3 })]));
+  await f.service.runOnce(); assert.equal(f.loads.length, 2); assert.equal(f.service.orderFeed().unreadCount, 2);
+  assert.equal(f.calls.length, 0); assert.equal(f.service.state().configured, false);
+  f.setTime(Date.parse("2026-10-17T19:00:00Z")); await f.service.runOnce(); assert.equal(f.loads.length, 2);
+  f.setTime(Date.parse("2026-10-18T03:00:00Z")); await f.service.runOnce(); assert.equal(f.loads.length, 3);
+  assert.equal(f.service.orderFeed().entries.length, 2);
+});
+
+test("reading the website feed cannot consume a queued VK event or reset its retry identity", async (t) => {
+  let unavailable = true;
+  const f = await fixture(t, { send: async (params) => {
+    if (unavailable) throw new Error("Fixture network failure");
+    return response([{ peer_id: Number(params.get("peer_ids")), message_id: 0, conversation_message_id: 42 }]);
+  } });
+  f.settings.set(settingsValue({ enabled: true })); await f.service.runOnce();
+  f.advance(); f.setHistory(history([part({ fulfillment: "cancelled" })])); await f.service.runOnce();
+  const id = f.calls.at(-1).params.get("random_id");
+  assert.equal(f.service.orderFeed().unreadCount, 1); assert.equal(f.repository.counts(target).pending, 1);
+  f.service.markOrdersSeen({ throughId: f.service.orderFeed().latestId });
+  unavailable = false; f.advance(); await f.service.runOnce();
+  assert.equal(f.service.orderFeed().unreadCount, 0); assert.equal(f.service.orderFeed().entries.length, 1);
+  assert.equal(f.calls.at(-1).params.get("random_id"), id); assert.equal(f.repository.counts(target).pending, 0);
+});
+
+test("website feed HTTP validates cursors and acknowledgements and never checks suppliers on a read", async (t) => {
+  const f = await withCancellationHistoryServer(t, "armtek", () => history());
+  f.repository.observeFeed([{ supplier: "armtek", histories: [history()] }], now);
+  f.repository.observeFeed([{ supplier: "armtek", histories: [history([part({ fulfillment: "cancelled" })])] }], now);
+  const url = `${f.origin}/api/notifications/orders`;
+  const first = await fetch(url); assert.equal(first.status, 200); assert.equal(first.headers.get("cache-control"), "no-store");
+  const view = await first.json(); assert.equal(view.unreadCount, 1); assert.equal(f.loads.length, 0); assert.equal(f.calls.length, 0);
+  for (const query of ["?bad=1", "?before=-1", "?before=1&before=2", "?before=9007199254740992", "?before=1.2"]) assert.equal((await fetch(url + query)).status, 400);
+  const post = (payload, headers = {}) => fetch(`${url}/seen`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(payload) });
+  for (const payload of [{ throughId: "1" }, { throughId: 1, bad: true }, { throughId: view.latestId + 1 }, []]) assert.equal((await post(payload)).status, 400);
+  assert.equal((await post({ throughId: view.latestId }, { "Sec-Fetch-Site": "cross-site" })).status, 403);
+  assert.equal((await fetch(`${url}/seen`)).status, 405);
+  f.repository.observeFeed([{ supplier: "rossko", histories: [history()] }], now);
+  f.repository.observeFeed([{ supplier: "rossko", histories: [history([part()], "NEW-ROSSKO")] }], now);
+  const read = await post({ throughId: view.latestId }); assert.equal(read.status, 200);
+  const result = await read.json(); assert.equal(result.unreadCount, 1);
+  assert.equal(result.entries.find((entry) => entry.id === view.latestId).read, true);
+  assert.equal(result.entries[0].read, false);
+  assert.equal(f.loads.length, 0); assert.equal(f.calls.length, 0);
+});
+
 test("monitor initializes each supplier without announcing old orders or terminal states", () => {
   const repository = new SqliteNotificationRepository(":memory:");
   try {
@@ -362,11 +434,11 @@ test("legacy encrypted VK settings without quiet hours keep the agreed 23:00–0
   assert.equal(restored.get().peerId, chats[0].id); assert.equal(restored.get().token, token);
 });
 
-test("connecting sends one welcome but leaves supplier checks and order notifications disabled", async (t) => {
+test("connecting sends one welcome and leaves VK delivery disabled while the website feed is checked", async (t) => {
   const f = await fixture(t);
   const state = await f.service.connect(token, new AbortController().signal);
   assert.equal(state.peerId, chats[0].id); assert.equal(state.enabled, false);
-  await f.service.runOnce(); assert.equal(f.loads.length, 0);
+  await f.service.runOnce(); assert.equal(f.loads.length, 1);
   assert.deepEqual(f.calls.map((call) => call.method), ["groups.getTokenPermissions", "groups.getById", "messages.getConversations", "messages.send"]);
   assert.equal(state.testMessage, "sent");
   const message = f.calls.at(-1).params.get("message");
@@ -675,7 +747,7 @@ test("an aborted chat lookup cannot return a late empty response as a paired cha
   await ready; controller.abort(); release(response({ count: 0, items: [] })); await rejected;
 });
 
-test("a pending welcome retries while paused without sending queued order updates or querying suppliers", async (t) => {
+test("a pending welcome retries while VK is paused without sending queued order updates", async (t) => {
   let unavailable = true;
   const f = await fixture(t, { send: async (params) => {
     if (unavailable) throw new Error(token);
@@ -689,7 +761,7 @@ test("a pending welcome retries while paused without sending queued order update
   await f.service.runOnce(); assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 1);
   unavailable = false; f.advance(); await f.service.runOnce();
   assert.equal(f.service.state().testMessage, "sent"); assert.equal(f.service.state().error, null);
-  assert.equal(f.service.state().pending, 1); assert.equal(f.loads.length, 0);
+  assert.equal(f.service.state().pending, 1); assert.equal(f.loads.length, 2);
   assert.equal(f.calls.at(-1).params.get("random_id"), first);
   assert.match(f.calls.at(-1).params.get("message"), /Агрегатор автозапчастей подключён/);
 });
@@ -725,7 +797,7 @@ test("a permanent welcome failure is visible and saving the repaired connection 
   assert.equal(f.calls.filter((call) => call.method === "messages.send").length, 1);
   denied = false;
   assert.equal((await f.service.connect(token, new AbortController().signal)).testMessage, "sent");
-  assert.equal(f.calls.at(-1).params.get("random_id"), first); assert.equal(f.loads.length, 0);
+  assert.equal(f.calls.at(-1).params.get("random_id"), first); assert.equal(f.loads.length, 1);
 });
 
 test("disconnect aborts a pending welcome and cannot resurrect its destination or message", async (t) => {

@@ -91,6 +91,7 @@ function normalizeTableColumnWidths(value: unknown): TableWidthPreferences {
     preferences[table] = widths;
   }
   if (Object.keys(value).some((table) => !(table in tableColumns))) throw new GarageValidationError("table column widths are invalid");
+  if (preferences.main || preferences.analogs) preferences.main = preferences.analogs = { ...preferences.analogs, ...preferences.main };
   return preferences;
 }
 
@@ -111,6 +112,7 @@ function normalizeTableAlignments(value: unknown): TableAlignmentPreferences {
     preferences[table] = alignments;
   }
   if (Object.keys(value).some((table) => !Object.hasOwn(tableColumns, table))) throw new GarageValidationError("table column alignments are invalid");
+  if (preferences.main || preferences.analogs) preferences.main = preferences.analogs = { ...preferences.analogs, ...preferences.main };
   return preferences;
 }
 

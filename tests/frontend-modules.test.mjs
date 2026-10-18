@@ -807,7 +807,7 @@ test("main results use the same comparison-oriented table controls as analogs", 
   assert.match(app, /const tableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+deliveryDate: 180,\s+quantity: 120,\s+markupPrice: 120,/s);
   assert.match(app, /--results-table-min-width/);
   assert.match(app, /\$\{layout\.widths\[header\.dataset\.column\]\}px/);
-  assert.match(app, /const analogTableColumnWidths = \{\s+supplier: 100,\s+brand: 125,\s+article: 140,\s+title: 323,\s+deliveryDate: 180,\s+quantity: 120,\s+markupPrice: 120,/s);
+  assert.match(app, /const analogTableColumnWidths = tableColumnWidths;/);
   assert.match(app, /const applyAnalogTableColumns = \(\) =>/);
   assert.match(app, /--analogs-results-table-min-width/);
   assert.match(app, /analogFiltersResize\.addEventListener\("pointerdown"/);

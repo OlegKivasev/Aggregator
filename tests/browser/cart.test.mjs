@@ -353,7 +353,7 @@ test("offer tables fill the viewport through the title while other pixels and co
   }, { extraOffers, title: "Тестовый фильтр" });
 });
 
-test("table header settings validate, apply and persist separate main and analog column widths", async () => {
+test("table header settings preview live, cancel safely and persist shared main and analog columns", async () => {
   await withCartPage(async (page) => {
     await page.setViewportSize({ width: 1990, height: 1000 });
     const openSettings = async (table, name) => {
@@ -367,8 +367,24 @@ test("table header settings validate, apply and persist separate main and analog
     const storedBefore = await page.evaluate(() => localStorage.getItem("autoservice.tableColumnWidths.v1"));
     await main.locator('[data-width-column="title"]').fill("480");
     await main.locator('[data-width-column="supplier"]').fill("70");
+    await main.locator('[data-width-column="markupPrice"]').fill("80");
     await main.locator('[data-alignment-column="supplier"]').selectOption("right");
     await main.locator('[data-alignment-column="brand"]').selectOption("center");
+    assert.equal(await main.isVisible(), true);
+    assert.ok(Math.abs((await page.locator('#results-table th[data-column="supplier"]').boundingBox()).width - 70) <= 1);
+    assert.equal(await page.locator('#results-body [data-column="supplier"]').first().evaluate((node) => getComputedStyle(node).textAlign), "right");
+    assert.equal(await page.evaluate(() => localStorage.getItem("autoservice.tableColumnWidths.v1")), storedBefore, "preview must not save before Apply");
+    const checkPriceHeading = async (selector) => {
+      const bounds = await page.locator(selector).evaluate((header) => {
+        const cell = header.getBoundingClientRect();
+        const icon = header.querySelector(".markup-settings-trigger").getBoundingClientRect();
+        const caption = header.querySelector(".table-sort, .analogs-sort").getBoundingClientRect();
+        return { left: icon.left - cell.left, right: cell.right - caption.right, gap: caption.left - icon.right,
+          vertical: Math.abs(icon.top + icon.height / 2 - caption.top - caption.height / 2) };
+      });
+      assert.ok(bounds.left >= -1 && bounds.right >= -1 && bounds.gap >= 0 && bounds.vertical <= 1, JSON.stringify(bounds));
+    };
+    await checkPriceHeading('#results-table th[data-column="markupPrice"]');
     for (const invalid of ["23", "801", "24.5", ""]) {
       await main.locator('[data-width-column="quantity"]').fill(invalid);
       await main.getByRole("button", { name: "Применить", exact: true }).click();
@@ -390,7 +406,13 @@ test("table header settings validate, apply and persist separate main and analog
     await openSettings("#results-table", "main");
     assert.equal(await main.locator('[data-width-column="title"]').inputValue(), "480");
     await main.locator('[data-width-column="title"]').fill("300");
+    await main.locator('[data-width-column="supplier"]').fill("48");
+    await main.locator('[data-alignment-column="supplier"]').selectOption("left");
+    assert.ok(Math.abs((await page.locator('#results-table th[data-column="supplier"]').boundingBox()).width - 48) <= 1);
     await page.keyboard.press("Escape");
+    await main.waitFor({ state: "hidden" });
+    assert.ok(Math.abs((await page.locator('#results-table th[data-column="supplier"]').boundingBox()).width - 70) <= 1);
+    assert.equal(await page.locator('#results-body [data-column="supplier"]').first().evaluate((node) => getComputedStyle(node).textAlign), "right");
     await openSettings("#results-table", "main");
     assert.equal(await main.locator('[data-width-column="title"]').inputValue(), "480", "Escape discards the draft");
     await main.getByRole("button", { name: "Отмена", exact: true }).click();
@@ -402,7 +424,8 @@ test("table header settings validate, apply and persist separate main and analog
     assert.equal(await page.locator("#table-column-menu-analogs").isVisible(), false);
     assert.equal(await page.locator("#analogs-modal").isVisible(), true);
     const analogs = await openSettings("#analogs-results", "analogs");
-    assert.equal(await analogs.locator('[data-width-column="title"]').inputValue(), "323");
+    await checkPriceHeading('#analogs-results th[data-analog-column="markupPrice"]');
+    assert.equal(await analogs.locator('[data-width-column="title"]').inputValue(), "480");
     await analogs.locator('[data-width-column="title"]').fill("550");
     await analogs.locator('[data-alignment-column="brand"]').selectOption("right");
     await page.setViewportSize({ width: 390, height: 850 });
@@ -414,17 +437,19 @@ test("table header settings validate, apply and persist separate main and analog
     assert.equal((await savedAnalogs).status(), 200);
     assert.equal(await page.locator("#analogs-modal").isVisible(), true);
     const preferences = await page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.tableColumnWidths.v1")));
-    assert.deepEqual({ title: preferences.main.title, supplier: preferences.main.supplier, quantity: preferences.main.quantity }, { title: 480, supplier: 70, quantity: 150 });
+    assert.deepEqual({ title: preferences.main.title, supplier: preferences.main.supplier, quantity: preferences.main.quantity }, { title: 550, supplier: 70, quantity: 150 });
+    assert.deepEqual(preferences.main, preferences.analogs);
     assert.equal(preferences.analogs.title, 550);
     const alignments = await page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.tableColumnAlignments.v1")));
     assert.equal(alignments.main.supplier, "right");
-    assert.equal(alignments.main.brand, "center");
+    assert.equal(alignments.main.brand, "right");
+    assert.deepEqual(alignments.main, alignments.analogs);
     assert.equal(alignments.analogs.brand, "right");
     await page.setViewportSize({ width: 1990, height: 1000 });
     await page.reload();
     await page.locator("#results-body .main-result-row").first().waitFor();
     await openSettings("#results-table", "main");
-    assert.equal(await main.locator('[data-width-column="title"]').inputValue(), "480");
+    assert.equal(await main.locator('[data-width-column="title"]').inputValue(), "550");
     assert.equal(await main.locator('[data-alignment-column="supplier"]').inputValue(), "right");
     await page.keyboard.press("Escape");
     await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
@@ -1292,8 +1317,9 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     await page.waitForFunction(() => document.querySelector("#cart-toggle").hidden);
     assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 0 шт. Выбрано к заказу: 0 шт.");
     assert.equal(await page.locator("#cart-clear").isDisabled(), true);
+    const restoredCart = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/cart" && response.request().method() === "GET");
     await page.reload();
-    await page.waitForLoadState("networkidle");
+    assert.equal((await restoredCart).status(), 200);
     assert.equal(await page.locator("#cart-toggle").isVisible(), false);
   }, { title: "Сайлентблок балки моста", reducedMotion: "reduce", deliveries: {
     armtek: { deliveryDate: "2028-03-10T12:00:00Z", deliveryDateTo: "2028-03-12T12:00:00Z" },
@@ -1940,6 +1966,7 @@ test("combined history discards an older Armtek date response while retaining th
     await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 1);
     assert.equal(await page.locator(".history-card__identity > small:first-child").innerText(), "PartKOM");
     await page.locator("#history-close").click();
+    await page.locator("#history-modal").waitFor({ state: "detached" });
     assert.equal(await page.locator("#history-modal").count(), 0);
   }, { fixedTime: "2026-10-15T12:00:00Z", partKomOrderHistory: async () => history("PARTKOM"),
     supplierOrderHistory: async (query) => history(query.supplier) });
