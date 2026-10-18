@@ -15,7 +15,7 @@ export function deliveryCalendarDay(value) {
 }
 
 export function isOfferDueSoon(result, now = Date.now()) {
-  if (!result || typeof result !== "object" || typeof result.supplier !== "string") return false;
+  if (!result || typeof result !== "object" || typeof result.supplier !== "string" || result.deliveryDateApproximate) return false;
   const from = deliveryCalendarDay(result.deliveryDate);
   const to = deliveryCalendarDay(result.deliveryDateTo ?? result.deliveryDate);
   const today = new Date(now);

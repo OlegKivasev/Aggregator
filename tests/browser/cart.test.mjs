@@ -965,9 +965,48 @@ test("near-term tabs filter both tables and dynamically recalculate sidebar face
     assert.equal(searchCalls.length, 2);
   }, { fixedTime: "2026-10-12T12:00:00Z", allSuppliers: true, deliveries: {
     armtek: { deliveryDate: date(13) }, partkom: { deliveryDate: date(13) },
-    forum: { deliveryDate: date(14), deliveryDateApproximate: true }, rossko: { deliveryDate: date(12) },
+    forum: { deliveryDate: date(14), deliveryDateApproximate: false }, rossko: { deliveryDate: date(12) },
   }, extraOffers: [extra("LATER", 900, date(15)), extra("BROAD", 800, date(13), date(15)), extra("UNKNOWN", 700, null),
     extra("RANGE", 150, date(13), date(14)), extra("TODAY", 750, date(12))] });
+});
+
+test("near-term tabs exclude approximate dates and their facets in both tables while all offers retain them", async () => {
+  const date = (day) => `2026-10-${day}T09:00:00Z`;
+  const approximate = (from, to, index) => offer("armtek", 3, { supplier: "armtek", keyzak: `APPROX-${index}` }, {
+    brand: "APPROX", warehouse: "Неточный склад", price: 1, deliveryDate: from, deliveryDateTo: to, deliveryDateApproximate: true,
+  }, "Тестовая деталь с приблизительным сроком");
+  await withCartPage(async (page, { searchCalls }) => {
+    assert.match(await page.locator("#results-body").innerText(), /~Завтра/);
+    assert.match(await page.locator("#results-body").innerText(), /~Послезавтра/);
+    await page.locator('#results-delivery-tabs [data-delivery-window="soon"]').click();
+    assert.equal(await page.locator("#results-body .main-result-row").count(), 2);
+    assert.equal(await page.locator("#result-count").textContent(), "2");
+    assert.doesNotMatch(await page.locator("#results-body").innerText(), /~/);
+    assert.deepEqual(await page.locator('[data-filter-values="brand"] button').allTextContents(), ["Test"]);
+    assert.doesNotMatch(await page.locator('[data-filter-values="supplier"]').innerText(), /Forum|Rossko/);
+    assert.doesNotMatch(await page.locator('[data-filter-values="warehouse"]').textContent(), /Неточный/);
+    assert.match(await page.locator('[data-filter-values="markupPrice"] .filters-sidebar__averages').textContent(), /110,00/);
+    await page.locator('#results-delivery-tabs [data-delivery-window="all"]').click();
+    assert.equal(await page.locator("#results-body .main-result-row").count(), 7);
+    assert.match(await page.locator("#results-body").innerText(), /~/);
+    await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
+    await page.waitForFunction(() => document.querySelectorAll("#analogs-results-body tr").length === 7);
+    await page.locator('#analogs-delivery-tabs [data-delivery-window="soon"]').click();
+    assert.equal(await page.locator("#analogs-results-body tr").count(), 2);
+    assert.equal(await page.locator("#analogs-count").textContent(), "2");
+    assert.doesNotMatch(await page.locator("#analogs-results-body").innerText(), /~/);
+    assert.deepEqual(await page.locator('[data-analog-filter-values="brand"] button').allTextContents(), ["Test"]);
+    assert.doesNotMatch(await page.locator('[data-analog-filter-values="supplier"]').innerText(), /Forum|Rossko/);
+    assert.doesNotMatch(await page.locator('[data-analog-filter-values="warehouse"]').textContent(), /Неточный/);
+    assert.match(await page.locator('[data-analog-filter-values="markupPrice"] .filters-sidebar__averages').textContent(), /110,00/);
+    await page.locator('#analogs-delivery-tabs [data-delivery-window="all"]').click();
+    assert.equal(await page.locator("#analogs-results-body tr").count(), 7);
+    assert.match(await page.locator("#analogs-results-body").innerText(), /~/);
+    assert.equal(searchCalls.length, 2, "filtering must not query suppliers again");
+  }, { fixedTime: "2026-10-12T12:00:00Z", allSuppliers: true, deliveries: {
+    armtek: { deliveryDate: date(13) }, partkom: { deliveryDate: date(13) },
+    forum: { deliveryDate: date(13), deliveryDateApproximate: true }, rossko: { deliveryDate: date(14), deliveryDateApproximate: true },
+  }, extraOffers: [approximate(date(13), null, 1), approximate(date(14), null, 2), approximate(date(13), date(14), 3)] });
 });
 
 test("an empty near-term tab stays a filter after refreshing and does not start unrelated analog discovery", async () => {

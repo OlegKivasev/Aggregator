@@ -10,7 +10,7 @@ test("near-term offers include tomorrow and the following day with a weekday-tom
     for (const day of [13, 14]) assert.equal(isOfferDueSoon(offer(date(day), null, supplier), now), true);
   }
   assert.equal(isOfferDueSoon(offer(date(13), date(14)), now), true);
-  assert.equal(isOfferDueSoon({ ...offer(date(14)), deliveryDateApproximate: true }, now), true);
+  assert.equal(isOfferDueSoon({ ...offer(date(14)), deliveryDateApproximate: true }, now), false);
   assert.equal(isOfferDueSoon(offer(date(13), null, "part-kom"), now), true);
   assert.equal(isOfferDueSoon(offer(date(13), date(13), "part-kom"), now), true);
   for (const value of [
@@ -19,6 +19,17 @@ test("near-term offers include tomorrow and the following day with a weekday-tom
     offer(null), offer("invalid"), offer("2026-02-30"), offer(date(13), "invalid"), null, {},
   ]) assert.equal(isOfferDueSoon(value, now), false, JSON.stringify(value));
   assert.equal(isOfferDueSoon(offer(date(13)), NaN), false);
+});
+
+test("near-term delivery excludes approximate tomorrow, the following day and ranges for every supplier", () => {
+  const now = new Date(2026, 9, 12, 12).getTime();
+  for (const supplier of ["armtek", "part-kom", "forum-auto", "rossko"]) {
+    for (const [deliveryDate, deliveryDateTo] of [["2026-10-13", null], ["2026-10-14", null], ["2026-10-13", "2026-10-14"]]) {
+      const offer = { supplier, deliveryDate, deliveryDateTo, deliveryDateApproximate: true };
+      assert.equal(isOfferDueSoon(offer, now), false, JSON.stringify(offer));
+      assert.equal(offer.deliveryDateApproximate, true, "filtering must preserve the offer's delivery data");
+    }
+  }
 });
 
 test("PartKOM near-term delivery allows Friday and Monday but excludes Saturday and Sunday", () => {
