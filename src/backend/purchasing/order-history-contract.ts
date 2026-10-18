@@ -24,6 +24,8 @@ export interface OrderHistoryItem {
 
 export interface OrderHistoryOrder {
   number: string;
+  /** Supplier document reference, separate from the stable order number. */
+  documentNumber?: string;
   date: string | null;
   items: OrderHistoryItem[];
 }

@@ -135,6 +135,17 @@ const armtekRow = { ORDER: "0000000001", ORDER_DATE: "20261015123000", PIN: "A1"
   KWMENG: "2.000", PRICE: "100.50", CURRENCY: "RUB", STATUS: "позиция частично поставлена", DLVRD: "20261020120000" };
 const forumRow = { did: 123, nr: null, dtc: "15.10.2026 12:30:00", status: "Подтвержден", mdt: "20.10.2026 00:00:00",
   arTovs: [{ nr: "A1", brand: "TEST", tovname: "Деталь", k1: 2, k3: 0, price: 100.5 }] };
+
+test("Forum Auto keeps did as the stable order number when a document appears or changes", () => {
+  for (const nr of [null, "DOC-1", "DOC-2", "123", 42, " ", "x".repeat(101)]) {
+    const order = parseForumAutoOrderHistory([{ ...forumRow, nr, statusId: 50, status: "На комплектации" }]).orders[0];
+    assert.equal(order.number, "123");
+    assert.equal(order.documentNumber, ["DOC-1", "DOC-2"].includes(nr) ? nr : undefined);
+    assert.equal(order.items[0].fulfillment, "processing");
+  }
+  const separate = parseForumAutoOrderHistory([forumRow, { ...forumRow, did: 456, nr: "123" }]);
+  assert.deepEqual(separate.orders.map((order) => order.number), ["123", "456"]);
+});
 const rosskoXml = (orders, success = "true", message = "") => `<Envelope><Body><GetOrdersResponse><OrdersResult>
   <success>${success}</success>${message ? `<message>${message}</message>` : ""}<OrdersList>${orders}</OrdersList>
   </OrdersResult></GetOrdersResponse></Body></Envelope>`;

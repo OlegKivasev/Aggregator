@@ -48,19 +48,22 @@ export class SqliteNotificationRepository {
     try {
       const events: OrderEvent[] = [];
       for (const { supplier, orders, complete } of prepared) {
-        if (supplier === "forum-auto" && complete) events.push(...this.observeForumActiveOrders(target, orders));
-        const baseline = this.database.prepare("SELECT day FROM vk_order_monitor_baseline WHERE target=? AND supplier=?").get(target, supplier);
+        // Legacy Forum Auto snapshots used mutable document numbers and cannot be matched safely.
+        // A new observation namespace establishes a quiet baseline once, independently for each destination.
+        const observationTarget = supplier === "forum-auto" ? `${target}:forum-did-v1` : target;
+        if (supplier === "forum-auto" && complete) events.push(...this.observeForumActiveOrders(observationTarget, orders));
+        const baseline = this.database.prepare("SELECT day FROM vk_order_monitor_baseline WHERE target=? AND supplier=?").get(observationTarget, supplier);
         for (const order of orders) {
-          const row = this.database.prepare("SELECT payload FROM vk_order_monitor_snapshot WHERE target=? AND supplier=? AND number=?").get(target, supplier, order.number);
+          const row = this.database.prepare("SELECT payload FROM vk_order_monitor_snapshot WHERE target=? AND supplier=? AND number=?").get(observationTarget, supplier, order.number);
           const previous = row ? JSON.parse(String(row.payload)) as MonitoredOrder : null;
           // Newly exposed old archive pages are history, not newly placed orders.
           const announceNew = !!baseline && (!order.date || order.date.slice(0, 10) >= String(baseline.day));
           const changes = orderChanges(supplier, order, previous, announceNew);
           events.push(...changes.events);
           this.database.prepare(`INSERT INTO vk_order_monitor_snapshot VALUES (?,?,?,?)
-            ON CONFLICT(target,supplier,number) DO UPDATE SET payload=excluded.payload`).run(target, supplier, order.number, JSON.stringify(changes.snapshot));
+            ON CONFLICT(target,supplier,number) DO UPDATE SET payload=excluded.payload`).run(observationTarget, supplier, order.number, JSON.stringify(changes.snapshot));
         }
-        if (!baseline) this.database.prepare("INSERT INTO vk_order_monitor_baseline VALUES (?,?,?)").run(target, supplier, new Date(now).toISOString().slice(0, 10));
+        if (!baseline) this.database.prepare("INSERT INTO vk_order_monitor_baseline VALUES (?,?,?)").run(observationTarget, supplier, new Date(now).toISOString().slice(0, 10));
       }
       if (feed) {
         for (const event of events) this.database.prepare("INSERT INTO order_notification_feed(created_at,payload) VALUES (?,?)")

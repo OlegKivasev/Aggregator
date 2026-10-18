@@ -1818,6 +1818,36 @@ test("history filters all suppliers by inclusive order dates and any item status
     supplierOrderHistory: async (query) => { calls.push(query); return history; } });
 });
 
+test("Forum Auto history retains the order ID through document and status changes and searches both references", async () => {
+  const row = { did: 123, nr: null, dtc: "17.10.2026 12:30:00", statusId: 30, status: "Подтвержден",
+    arTovs: [{ nr: "A1", brand: "TEST", tovname: "Фильтр", k1: 2, k3: 0, price: 100 }] };
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.locator("#history-tab-forum-auto").click();
+    const loaded = () => page.waitForFunction(() => !document.querySelector(".history-loading")
+      && document.querySelector(".history-card__identity > small:first-child")?.textContent === "Forum Auto");
+    await loaded();
+    assert.equal(await page.locator(".history-card h3").textContent(), "Заказ № 123");
+    assert.equal(await page.locator(".history-document-number").count(), 0);
+    for (const document of ["DOC-1", "DOC-2 <img src=x onerror=window.docXss=1>"]) {
+      Object.assign(row, { nr: document, statusId: 50, status: "На комплектации" });
+      await page.locator("#history-reload").click(); await loaded();
+      assert.equal(await page.locator(".history-card").count(), 1);
+      assert.equal(await page.locator(".history-card h3").textContent(), "Заказ № 123");
+      assert.equal(await page.locator(".history-document-number").textContent(), `Документ № ${document}`);
+      assert.equal(await page.locator(".history-card__states").textContent(), "◷В обработке");
+      assert.equal(await page.locator(".history-document-number img").count(), 0);
+      assert.equal(await page.evaluate(() => window.docXss), undefined);
+      for (const query of [document, "123"]) {
+        await page.locator("#history-search").fill(query);
+        assert.equal(await page.locator(".history-card").count(), 1);
+      }
+      await page.locator("#history-search").fill("");
+    }
+  }, { allSuppliers: true, fixedTime: "2026-10-17T12:00:00Z",
+    supplierOrderHistory: async (query) => query.supplier === "forum-auto" ? parseForumAutoOrderHistory([row]) : { orders: [], limited: false } });
+});
+
 test("history search filters loaded orders by number and parts across supplier views without new requests", async () => {
   const calls = [];
   const part = (article, brand, title, fulfillment = "in_transit") => ({ article, brand, title, fulfillment, quantity: 1, price: 100,
@@ -2117,7 +2147,7 @@ test("history totals remain visible for every supplier with limited results and 
     await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 12);
     const card = (number) => page.locator(".history-card").filter({ has: page.locator("h3", { hasText: new RegExp(`^Заказ № ${number}$`) }) });
     for (const supplier of Object.keys(histories)) {
-      const total = card(`TOTAL-${supplier}`);
+      const total = card(supplier === "forum-auto" ? "123" : `TOTAL-${supplier}`);
       assert.equal(await total.locator(".history-card__total").innerText(), money.format(201));
       assert.equal(await total.locator("tbody tr td").last().innerText(), money.format(201));
       assert.equal(await total.locator(".history-card__total-note").count(), supplier === "armtek" ? 0 : 1);

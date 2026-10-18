@@ -33,7 +33,7 @@ const dateValue = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1)
 function orderMatchesFilters(order, values, today) {
   const terms = values.query.trim().toLocaleLowerCase("ru-RU").split(/\s+/).filter(Boolean);
   if (terms.length) {
-    const text = [order.number, ...order.items.flatMap((item) => [item.article, item.brand, item.title])]
+    const text = [order.number, order.documentNumber, ...order.items.flatMap((item) => [item.article, item.brand, item.title])]
       .filter((value) => typeof value === "string").join(" ").toLocaleLowerCase("ru-RU");
     if (!terms.every((term) => text.includes(term))) return false;
   }
@@ -62,6 +62,7 @@ function element(tag, className, value) {
 function validHistory(value) {
   return value && typeof value === "object" && Array.isArray(value.orders) && value.orders.length <= 500
     && typeof value.limited === "boolean" && value.orders.every((order) => order && typeof order.number === "string"
+      && (order.documentNumber === undefined || typeof order.documentNumber === "string" && order.documentNumber.length > 0 && order.documentNumber.length <= 100)
       && (order.date === null || typeof order.date === "string") && Array.isArray(order.items) && order.items.length > 0
       && order.items.every((item) => item && typeof item.article === "string" && Number.isFinite(item.quantity)
         && acceptedFulfillments.has(item.fulfillment)
@@ -112,6 +113,7 @@ function renderOrder(order, limited, supplierName, supplier) {
   const header = element("header", "history-card__header");
   const heading = element("div", "history-card__identity");
   heading.append(element("small", "", supplierName), element("h3", "", `Заказ № ${order.number}`));
+  if (order.documentNumber) heading.append(element("small", "history-document-number", `Документ № ${order.documentNumber}`));
   const states = new Map();
   const rows = order.items.flatMap(historyItemRows);
   for (const item of rows) states.set(item.fulfillment, (states.get(item.fulfillment) ?? 0) + 1);

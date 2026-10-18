@@ -348,7 +348,11 @@ export function parseForumAutoOrderHistory(payload: unknown): OrderHistory {
     if (id === null || !Number.isSafeInteger(id) || id <= 0 || !Array.isArray(row.arTovs) || !row.arTovs.length) {
       throw new SupplierIntegrationError("Forum-Auto history order is incomplete");
     }
-    return { number: historyText(row.nr, 100) ?? String(id), date: historyDate(row.dtc, "russian"), items: row.arTovs.map((entry) => {
+    // did identifies the order; nr is a document reference that can appear/change later.
+    const number = String(id);
+    const documentNumber = historyText(row.nr, 100);
+    return { number, ...(documentNumber && documentNumber !== number ? { documentNumber } : {}),
+      date: historyDate(row.dtc, "russian"), items: row.arTovs.map((entry) => {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new SupplierIntegrationError("Forum-Auto history item is invalid");
       const item = entry as Record<string, unknown>;
       const article = historyText(item.nr, 128);

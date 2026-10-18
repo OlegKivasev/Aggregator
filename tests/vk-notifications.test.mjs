@@ -14,6 +14,7 @@ import { monitoredOrders, formatOrderEvents } from "../src/backend/notifications
 import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 import { parsePartKomOrderHistory } from "../src/backend/suppliers/part-kom/part-kom-order.ts";
 import { parseArmtekOrderHistory } from "../src/backend/suppliers/armtek/armtek-order.ts";
+import { parseForumAutoOrderHistory } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { SupplierAuthError, SupplierTimeoutError } from "../src/backend/errors.ts";
 import { nextOrderCheckTime } from "../src/backend/notifications/order-check-schedule.ts";
 import { OrderCancellationService } from "../src/backend/purchasing/order-cancellation-service.ts";
@@ -281,6 +282,72 @@ test("malformed supplier responses cannot establish a baseline or consume an eve
     observe(repository, history([part({ fulfillment: "cancelled" })]));
     assert.match(repository.pending(target, now).text, /ОТМЕНЕНО/);
   } finally { repository.close(); }
+});
+
+test("Forum Auto document and status changes never announce disappearance or new orders in either destination", () => {
+  const repository = new SqliteNotificationRepository(":memory:");
+  const row = { did: 123, nr: null, dtc: "17.10.2026 12:30:00", statusId: 30, status: "Подтвержден",
+    arTovs: [{ nr: "A1", brand: "TEST", tovname: "Фильтр", k1: 2, k3: 0, price: 100 }] };
+  const record = (rows) => {
+    const histories = [parseForumAutoOrderHistory(rows)];
+    repository.observe(target, [{ supplier: "forum-auto", histories }], now);
+    repository.observeFeed([{ supplier: "forum-auto", histories }], now);
+  };
+  try {
+    record([row, { ...row, did: 456 }]);
+    for (const nr of ["DOC-1", "DOC-2", null]) {
+      record([{ ...row, nr, statusId: 50, status: "На комплектации" }, { ...row, did: 456, nr }]);
+      assert.equal(repository.pending(target, now), null);
+      assert.equal(repository.feed().unreadCount, 0);
+    }
+    record([{ ...row, did: 456 }]);
+    assert.match(repository.pending(target, now).text, /ТРЕБУЕТ ПРОВЕРКИ · Forum Auto\nЗаказ № 123\n/);
+    assert.doesNotMatch(repository.pending(target, now).text, /Заказ № 456|НОВЫЙ ЗАКАЗ/);
+    assert.deepEqual(repository.feed().entries.map(({ number, kind }) => [number, kind]), [["123", "missing"]]);
+    repository.sent(repository.pending(target, now).id);
+    record([{ ...row, did: 456 }]);
+    assert.equal(repository.pending(target, now), null);
+    assert.equal(repository.feed().entries.length, 1);
+  } finally { repository.close(); }
+});
+
+test("legacy Forum Auto document snapshots are rebaselined quietly for VK and the feed without resetting other suppliers", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "aggregator-forum-identity-upgrade-"));
+  const path = join(directory, "orders.sqlite");
+  let repository = new SqliteNotificationRepository(path);
+  t.after(async () => { repository.close(); await rm(directory, { recursive: true, force: true }); });
+  const record = (supplier, value) => {
+    repository.observe(target, [{ supplier, histories: [value] }], now);
+    repository.observeFeed([{ supplier, histories: [value] }], now);
+  };
+  record("armtek", history());
+  repository.close();
+  const legacy = new DatabaseSync(path);
+  try {
+    for (const destination of [target, "aggregator-order-feed"]) {
+      legacy.prepare("INSERT INTO vk_order_monitor_baseline VALUES (?, 'forum-auto', '2026-10-15')").run(destination);
+      for (const number of ["123", "OLD-DOC"]) {
+        const snapshot = monitoredOrders(history([part()], number))[0];
+        legacy.prepare("INSERT INTO vk_order_monitor_snapshot VALUES (?, 'forum-auto', ?, ?)").run(destination, number, JSON.stringify(snapshot));
+      }
+      legacy.prepare("INSERT INTO vk_forum_active_orders VALUES (?, ?)").run(destination, JSON.stringify(["123", "OLD-DOC"]));
+    }
+  } finally { legacy.close(); }
+  repository = new SqliteNotificationRepository(path);
+  const current = parseForumAutoOrderHistory([123, 456].map((did) => ({ did, nr: "NEW-DOC", dtc: "17.10.2026 12:30:00",
+    statusId: 50, status: "На комплектации", arTovs: [{ nr: "A1", k1: 10, price: 100 }] })));
+  record("forum-auto", current);
+  assert.equal(repository.pending(target, now), null);
+  assert.equal(repository.feed().unreadCount, 0);
+  repository.close(); repository = new SqliteNotificationRepository(path);
+  record("forum-auto", current);
+  assert.equal(repository.pending(target, now), null);
+  record("armtek", history([part({ fulfillment: "cancelled" })]));
+  assert.match(repository.pending(target, now).text, /ОТМЕНЕНО · Armtek/);
+  repository.sent(repository.pending(target, now).id);
+  record("forum-auto", { ...current, orders: current.orders.slice(0, 1) });
+  assert.match(repository.pending(target, now).text, /ТРЕБУЕТ ПРОВЕРКИ · Forum Auto\nЗаказ № 456/);
+  assert.deepEqual(repository.feed().entries.map(({ number, kind }) => [number, kind]), [["456", "missing"], ["ORDER-1", "cancelled"]]);
 });
 
 test("Forum Auto disappearance requires manual review and reports each last-known product without inventing a terminal status", () => {

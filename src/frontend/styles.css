@@ -220,6 +220,7 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .history-card__quantity { grid-area: quantity; }
 .history-card__header h3 { margin: 3px 0 0; font-size: 20px; font-weight: 700; overflow-wrap: anywhere; }
 .history-card__header small, .history-card__meta span { display: block; color: var(--muted); font-size: 12px; }
+.history-document-number { margin-top: 4px; overflow-wrap: anywhere; }
 .history-card__meta { min-width: 0; }
 .history-card__meta strong { display: block; margin-top: 4px; overflow-wrap: anywhere; font-size: 13px; font-variant-numeric: tabular-nums; }
 .history-card__total-wrap { grid-area: total; min-width: 0; text-align: right; }

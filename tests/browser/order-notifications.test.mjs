@@ -91,6 +91,11 @@ test("bell shows safe colored order cards, multiple products and fits mobile wit
     assert.equal(await order.locator(".order-notification-products li").count(), 4);
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "order-notifications-desktop.png") });
     await page.setViewportSize({ width: 390, height: 850 });
+    // Viewport resizing may complete before the resize listener repositions the panel.
+    await page.waitForFunction(() => {
+      const bounds = document.querySelector("#order-notifications-panel").getBoundingClientRect();
+      return bounds.x >= 0 && bounds.right <= 390 && bounds.bottom <= 850;
+    });
     const bounds = await panel.boundingBox(); assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390 && bounds.y + bounds.height <= 850);
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "order-notifications-mobile.png") });
     await page.keyboard.press("Escape"); assert.equal(await panel.isVisible(), false);
