@@ -6,12 +6,71 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { GarageApplicationService, GarageConflictError, GarageOfferExpiredError, GarageValidationError } from "../src/backend/garage/garage-application-service.ts";
 import { SqliteGarageRepository } from "../src/backend/garage/sqlite-garage-repository.ts";
+import { CartApplicationService } from "../src/backend/purchasing/cart-application-service.ts";
+import { SqliteCartRepository } from "../src/backend/purchasing/sqlite-cart-repository.ts";
+import { attachPurchaseReference } from "../src/backend/purchasing/purchase-offer.ts";
 
 const offer = {
   supplier: "rossko", brand: "Toyota", article: "ABC-123", title: "Фильтр", price: 100,
   quantity: 4, warehouse: "Основной", deliveryDate: "2026-09-11", deliveryDateTo: "2026-09-13", deliveryDateApproximate: true,
   link: "https://rossko.ru/product/123",
 };
+
+test("garage prepares only fresh confirmed cart offers and retains missing or failed positions", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autoservice-garage-cart-"));
+  const path = join(directory, "garage.sqlite");
+  const offers = new Map();
+  let duringLookup = null;
+  const service = new GarageApplicationService(new SqliteGarageRepository(path), {
+    findOffers: async (article) => {
+      if (duringLookup) duringLookup();
+      return { results: offers.has(article) ? [offers.get(article)] : [], failed: article === "FAILED" };
+    },
+  });
+  const cart = new CartApplicationService(new SqliteCartRepository(path), async () => []);
+  try {
+    const vehicle = service.createVehicle("Тестовый автомобиль");
+    const ids = new Map();
+    for (const article of ["READY", "MISSING", "FAILED", "LOW", "UNKNOWN", "EXPIRED", "FRACTION", "UNSUPPORTED"]) {
+      const current = { ...offer, article, deliveryDate: null, deliveryDateTo: null, deliveryDateApproximate: false };
+      const item = service.addOffer(vehicle.id, service.getVehicle(vehicle.id).revision, service.registerSearchOffer(current), 35, article === "FRACTION" ? .5 : 2);
+      ids.set(article, item.id);
+      if (article === "MISSING" || article === "FAILED") continue;
+      offers.set(article, attachPurchaseReference({ ...current, price: 150,
+        quantity: article === "LOW" ? 1 : article === "UNKNOWN" ? null : 4,
+        ...(article === "EXPIRED" ? { deliveryDate: "2000-01-01" } : {}) },
+      { supplier: "rossko", partGuid: article, stockId: "fixture-stock" }));
+      if (article === "UNSUPPORTED") offers.set(article, { ...current });
+    }
+    const prepared = await service.prepareCartOffers(vehicle.id, service.getVehicle(vehicle.id).revision, undefined,
+      new AbortController().signal, cart.registerOffer.bind(cart));
+    assert.equal(prepared.vehicle.items.length, 8);
+    assert.deepEqual(prepared.offers.map(({ itemId, quantity }) => ({ itemId, quantity })), [{ itemId: ids.get("READY"), quantity: 2 }]);
+    assert.equal(prepared.vehicle.items.find((item) => item.article === "MISSING").availabilityStatus, "not_found");
+    assert.equal(prepared.vehicle.items.find((item) => item.article === "FAILED").availabilityStatus, "supplier_error");
+    assert.equal(cart.view().count, 0, "preparing offers must never add or place an order");
+    const added = cart.mutate("add", { revision: 0, offers: prepared.offers });
+    assert.equal(added.count, 2);
+    assert.equal(added.items[0].result.price, 150);
+    assert.equal(added.items[0].result.article, "READY");
+    assert.equal(JSON.stringify(prepared).includes("fixture-stock"), false, "routing references stay on the server");
+    const one = await service.prepareCartOffers(vehicle.id, prepared.vehicle.revision, ids.get("READY"), new AbortController().signal, cart.registerOffer.bind(cart));
+    assert.equal(one.offers.length, 1);
+    await assert.rejects(service.prepareCartOffers(vehicle.id, one.vehicle.revision, "bad-id", new AbortController().signal, cart.registerOffer.bind(cart)), GarageValidationError);
+    await assert.rejects(service.prepareCartOffers(vehicle.id, 1, undefined, new AbortController().signal, cart.registerOffer.bind(cart)), GarageConflictError);
+    duringLookup = () => {
+      const item = service.getVehicle(vehicle.id).items.find((item) => item.article === "READY");
+      service.updateItem(item.id, item.revision, 3, "Изменено во время проверки", item.groupId);
+    };
+    const concurrent = await service.prepareCartOffers(vehicle.id, one.vehicle.revision, ids.get("READY"), new AbortController().signal, cart.registerOffer.bind(cart));
+    assert.deepEqual(concurrent.offers, []);
+    assert.equal(concurrent.vehicle.items.find((item) => item.article === "READY").requiredQuantity, 3);
+    duringLookup = null;
+    const abort = new AbortController();
+    duringLookup = () => abort.abort(new Error("cancelled"));
+    await assert.rejects(service.prepareCartOffers(vehicle.id, concurrent.vehicle.revision, ids.get("READY"), abort.signal, cart.registerOffer.bind(cart)), /cancelled/);
+  } finally { service.close(); cart.close(); await rm(directory, { recursive: true, force: true }); }
+});
 
 test("table preferences migrate legacy widths and persist validated alignments atomically", async () => {
   const directory = await mkdtemp(join(tmpdir(), "autoservice-table-preferences-"));

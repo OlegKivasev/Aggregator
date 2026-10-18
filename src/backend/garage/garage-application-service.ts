@@ -241,20 +241,49 @@ export class GarageApplicationService {
   }
 
   async refreshVehicle(id: string, revision: unknown, signal: AbortSignal): Promise<GarageVehicleDetails> {
+    return (await this.refreshVehicleOffers(id, revision, signal)).vehicle;
+  }
+
+  async prepareCartOffers(id: string, revision: unknown, itemId: unknown, signal: AbortSignal,
+    registerOffer: (id: string, result: NormalizedSearchResult) => boolean) {
+    if (itemId !== undefined && (typeof itemId !== "string" || !/^[0-9a-f-]{36}$/.test(itemId))) {
+      throw new GarageValidationError("itemId is invalid");
+    }
+    const { vehicle, matched } = await this.refreshVehicleOffers(id, revision, signal, itemId);
+    const offers: { itemId: string; offerId: string; quantity: number }[] = [];
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Samara", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    for (const item of vehicle.items) {
+      const match = matched.get(item.id);
+      const end = item.deliveryDateTo ?? item.deliveryDate;
+      if (!match || match.revision !== item.revision || item.availabilityStatus !== "available"
+        || !Number.isSafeInteger(item.requiredQuantity) || item.requiredQuantity < 1
+        || end !== null && end.slice(0, 10) < today) continue;
+      const offerId = randomUUID();
+      if (registerOffer(offerId, match.result)) offers.push({ itemId: item.id, offerId, quantity: item.requiredQuantity });
+    }
+    return { vehicle, offers };
+  }
+
+  private async refreshVehicleOffers(id: string, revision: unknown, signal: AbortSignal, itemId?: string) {
     const vehicle = this.getVehicle(id);
     if (vehicle.revision !== normalizeRevision(revision)) throw new GarageConflictError();
+    if (itemId !== undefined && !vehicle.items.some((item) => item.id === itemId)) throw new GarageNotFoundError();
+    const items = itemId === undefined ? vehicle.items : vehicle.items.filter((item) => item.id === itemId);
+    const matched = new Map<string, { result: NormalizedSearchResult; revision: number }>();
     const limit = 3;
     let cursor = 0;
-    const workers = Array.from({ length: Math.min(limit, vehicle.items.length) }, async () => {
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
       while (!signal.aborted) {
-        const item = vehicle.items[cursor++];
+        const item = items[cursor++];
         if (!item) return;
-        await this.refreshItem(item, signal);
+        const result = await this.refreshItem(item, signal);
+        const saved = this.repository.findItem(item.id);
+        if (result && saved?.revision === item.revision + 1) matched.set(item.id, { result, revision: saved.revision });
       }
     });
     await Promise.all(workers);
     if (signal.aborted) throw signal.reason;
-    return this.getVehicle(id);
+    return { vehicle: this.getVehicle(id), matched };
   }
 
   getTablePreferences(): { widths: TableWidthPreferences; alignments: TableAlignmentPreferences } {
@@ -323,29 +352,30 @@ export class GarageApplicationService {
     };
   }
 
-  private async refreshItem(item: GarageItem, signal: AbortSignal): Promise<void> {
+  private async refreshItem(item: GarageItem, signal: AbortSignal): Promise<NormalizedSearchResult | null> {
     const checkedAt = now();
     const lookup = await this.offerLookup.findOffers(item.article, item.supplier, signal);
     signal.throwIfAborted();
     if (lookup.failed) {
       this.repository.refreshItem({ ...item, lastCheckedAt: checkedAt, availabilityStatus: "supplier_error" }, checkedAt);
-      return;
+      return null;
     }
     const candidates = lookup.results.filter((result) => result.supplier === item.supplier && sameText(result.brand, item.brand) && sameArticle(result.article, item.article));
     const sameWarehouse = candidates.filter((result) => result.warehouse === item.warehouse);
     const matches = sameWarehouse.length === 1 ? sameWarehouse : candidates.length === 1 ? candidates : [];
     if (matches.length !== 1) {
       this.repository.refreshItem({ ...item, lastCheckedAt: checkedAt, availabilityStatus: "not_found" }, checkedAt);
-      return;
+      return null;
     }
     const offer = matches[0];
     const quantity = typeof offer.quantity === "number" && Number.isFinite(offer.quantity) && offer.quantity >= 0 ? offer.quantity : null;
-    this.repository.refreshItem({
+    const updated = this.repository.refreshItem({
       ...item, brand: offer.brand, article: offer.article, title: offer.title, warehouse: offer.warehouse, deliveryDate: offer.deliveryDate,
       deliveryDateTo: offer.deliveryDateTo ?? null, deliveryDateApproximate: offer.deliveryDateApproximate,
       link: safeLink(offer.link), supplierQuantity: quantity, purchasePrice: offer.price,
       regularPrice: regularPrice(offer.price, item.markupPercent), lastCheckedAt: checkedAt,
       availabilityStatus: availability(quantity, item.requiredQuantity),
     }, checkedAt);
+    return updated ? offer : null;
   }
 }

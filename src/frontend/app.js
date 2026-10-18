@@ -3014,12 +3014,12 @@ setSearchUiState(false);
 renderTabs();
 renderResults();
 loadSessions().catch(() => undefined);
-const garageUi = bootstrapGarage({ getMarkupPercent: (offerId) => {
+const cartUi = bootstrapCart({ getMarkupPrice, showPurchasePrice: () => showPurchasePrice(markupSettings, true) });
+const garageUi = bootstrapGarage({ addToCart: cartUi.addOffers, onViewChanged: cartUi.renderPrices, getMarkupPercent: (offerId) => {
   const offer = [...results, ...analogSearchResults].find((result) => result.offerId === offerId);
   if (!offer) throw new Error("Предложение устарело. Повторите поиск перед добавлением в гараж.");
   return markupPercentForPrice(offer.price, markupSettings);
 }, startSearch: startSearchForArticle });
-const cartUi = bootstrapCart({ getMarkupPrice, showPurchasePrice: () => showPurchasePrice(markupSettings, true) });
 bootstrapMarkupSettings({ getSettings: () => markupSettings, applySettings: setMarkupSettings });
 bootstrapOrderHistory();
 

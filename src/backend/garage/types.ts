@@ -69,7 +69,7 @@ export interface GarageRepository {
   incrementItem(id: string, revision: number, increment: number, updatedAt: string): GarageItem | "conflict" | "missing";
   updateItem(id: string, revision: number, requiredQuantity: number, comment: string, groupId: string | null, updatedAt: string): GarageItem | "conflict" | "missing";
   deleteItem(id: string, revision: number, updatedAt: string): "deleted" | "conflict" | "missing";
-  refreshItem(item: GarageItem, updatedAt: string): void;
+  refreshItem(item: GarageItem, updatedAt: string): boolean;
   getUiPreference(key: string): string | null;
   setUiPreference(key: string, value: string): void;
   close(): void;

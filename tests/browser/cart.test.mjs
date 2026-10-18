@@ -52,6 +52,10 @@ async function withCartPage(check, options = {}) {
           emit({ type: "supplier_status", supplier: options.failedSearchSupplier, status: "error" });
           emit({ type: "search_completed", article: query.article }); return;
         }
+        if (query.suppliers?.length === 1 && options.missingSearchSuppliers?.includes(query.suppliers[0])) {
+          emit({ type: "supplier_status", supplier: query.suppliers[0], status: "completed" });
+          emit({ type: "search_completed", article: query.article }); return;
+        }
         if (query.mode === "analogs" && options.analogOffers) {
           for (const result of options.analogOffers) emit({ type: "result", result });
           for (const supplier of suppliers) emit({ type: "supplier_status", supplier, status: "completed" });
@@ -138,22 +142,29 @@ async function openCheckout(page) {
   await page.waitForFunction(() => document.querySelector("#cart-order-confirm").open);
 }
 
-async function openGarageWithFirstOffer(page) {
+async function openGarageWithFirstOffer(page, { all = false, quantity = 1, beforeOpen } = {}) {
   const origin = new URL(page.url()).origin;
   const created = await page.request.post(`${origin}/api/garage/vehicles`, { data: { name: "Гранта" } });
   assert.equal(created.status(), 201);
   const { vehicle } = await created.json();
-  const offerId = await page.locator('#results-body tr[data-result-index="0"] .garage-offer-button').getAttribute("data-garage-offer-id");
-  const added = await page.request.post(`${origin}/api/garage/vehicles/${vehicle.id}/items`, {
-    data: { vehicleRevision: vehicle.revision, offerId, markupPercent: 35, requiredQuantity: 1 },
-  });
-  assert.equal(added.status(), 201);
+  const buttons = page.locator("#results-body .garage-offer-button");
+  for (let index = 0; index < (all ? await buttons.count() : 1); index++) {
+    const offerId = await buttons.nth(index).getAttribute("data-garage-offer-id");
+    const current = await (await page.request.get(`${origin}/api/garage/vehicles/${vehicle.id}`)).json();
+    const added = await page.request.post(`${origin}/api/garage/vehicles/${vehicle.id}/items`, {
+      data: { vehicleRevision: current.vehicle.revision, offerId, markupPercent: 35, requiredQuantity: quantity },
+    });
+    assert.equal(added.status(), 201);
+  }
+  await beforeOpen?.();
   await page.reload();
   const button = page.locator(`.garage-vehicles__button[data-vehicle-id="${vehicle.id}"]`);
   await button.waitFor({ state: "attached" });
   if (!await button.isVisible()) await page.locator("#garage-toggle").click();
   await button.click();
-  await page.locator('#garage-items td[data-garage-column="article"]').waitFor();
+  await page.locator('#garage-items td[data-garage-column="article"]').first().waitFor();
+  await page.waitForFunction(() => document.querySelector("#garage-view").getAttribute("aria-busy") === "false");
+  return vehicle.id;
 }
 
 test("garage title fills the panel and column settings preview, cancel, persist and align exact pixel widths", async () => {
@@ -235,6 +246,82 @@ test("garage refresh updates real delivery dates and clearly flags failed or exp
     assert.equal((await refresh()).deliveryDate, "2026-10-05", "expired supplier dates must never be replaced with invented dates");
     assert.match(await delivery.innerText(), /Срок доставки устарел/);
     assert.match(await page.locator("#garage-status").innerText(), /Не подтверждены/);
+  }, options);
+});
+
+test("garage automatically checks saved offers, greys missing positions and adds only confirmed quantities", async () => {
+  const options = { fixedTime: "2026-10-18T10:00:00Z", title: "Механизм замка двери" };
+  await withCartPage(async (page, { origin, orderCalls }) => {
+    await openGarageWithFirstOffer(page, { all: true, quantity: 2, beforeOpen: () => { options.missingSearchSuppliers = ["part-kom"]; } });
+    const rows = page.locator("#garage-items tr[data-garage-item-id]");
+    assert.equal(await rows.count(), 2);
+    const missing = rows.filter({ has: page.locator('td[data-garage-column="supplier"]', { hasText: "part-kom" }) });
+    assert.equal(await missing.evaluate((row) => row.classList.contains("garage-item--unconfirmed")), true);
+    assert.equal(await missing.locator(".garage-cart-button").isDisabled(), true);
+    assert.match(await missing.innerText(), /Предложение не подтверждено/);
+    assert.equal(await page.locator("#garage-tools #cart-toggle").isVisible(), true, "empty cart is accessible in the garage");
+    assert.equal(await page.locator("#garage-tools #history-toggle").isVisible(), true);
+    assert.equal(await page.locator("#garage-tools #order-notifications-trigger").isVisible(), true);
+    const initial = await (await page.request.get(`${origin}/api/cart`)).json();
+    assert.equal(initial.count, 0);
+    await page.locator("#garage-cart-all").click();
+    await page.waitForFunction(() => document.querySelector("#garage-view").getAttribute("aria-busy") === "false"
+      && document.querySelector("#garage-status").textContent.includes("Добавлено позиций"));
+    const cart = await (await page.request.get(`${origin}/api/cart`)).json();
+    assert.equal(cart.count, 2);
+    assert.equal(cart.items.length, 1);
+    assert.equal(cart.items[0].result.supplier, "armtek");
+    assert.match(await page.locator("#garage-status").innerText(), /Пропущено неподтверждённых: 1/);
+    assert.equal(await rows.count(), 2, "missing offers remain visible");
+    assert.deepEqual(orderCalls, [], "adding must not order anything at the supplier");
+    if (process.env.TEST_CAPTURE_DIR) {
+      // External Bootstrap is blocked in fixtures; restore its hidden rule for visual review.
+      await page.addStyleTag({ content: "[hidden] { display: none !important; }" });
+      await page.locator("#garage-titlebar").scrollIntoViewIfNeeded();
+      await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "garage-cart.png") });
+    }
+    await page.locator("#cart-toggle").click();
+    assert.equal(await page.locator("#cart-modal").isVisible(), true);
+    await page.waitForFunction(() => !document.querySelector("#cart-modal").classList.contains("is-refreshing"));
+    await page.locator("#cart-close").click();
+    await page.locator("#history-toggle").click();
+    assert.equal(await page.locator("#history-modal").isVisible(), true);
+    await page.locator("#history-close").click();
+    await page.locator("#order-notifications-trigger").click();
+    assert.equal(await page.locator("#order-notifications-panel").isVisible(), true);
+    await page.keyboard.press("Escape");
+    await page.locator("#garage-back").click();
+    assert.equal(await page.locator(".search-toolbar #cart-toggle").isVisible(), true);
+    assert.equal(await page.locator(".search-toolbar #history-toggle").isVisible(), true);
+    assert.equal(await page.locator("#search-tabs #order-notifications-trigger").isVisible(), true);
+  }, options);
+});
+
+test("garage supports individual and all-supplier cart additions and rechecks stock before adding", async () => {
+  const options = { fixedTime: "2026-10-18T10:00:00Z", title: "Фильтр", allSuppliers: true };
+  await withCartPage(async (page, { origin, orderCalls }) => {
+    await openGarageWithFirstOffer(page, { all: true, quantity: 2 });
+    const armtek = page.locator('#garage-items tr[data-garage-item-id]').filter({ has: page.locator('td[data-garage-column="supplier"]', { hasText: "armtek" }) });
+    const done = async () => page.waitForFunction(() => document.querySelector("#garage-view").getAttribute("aria-busy") === "false"
+      && document.querySelector("#garage-status").textContent.includes("Добавлено позиций"));
+    await armtek.locator(".garage-cart-button").click();
+    await done();
+    assert.equal((await (await page.request.get(`${origin}/api/cart`)).json()).count, 2);
+    await page.locator("#garage-filter-supplier").getByRole("button", { name: "armtek", exact: true }).click();
+    assert.equal(await page.locator("#garage-items tr[data-garage-item-id]").count(), 1);
+    await page.locator("#garage-cart-all").click();
+    await done();
+    const cart = await (await page.request.get(`${origin}/api/cart`)).json();
+    assert.equal(cart.count, 10);
+    assert.equal(cart.items.length, 4);
+    assert.deepEqual(cart.items.map((item) => item.result.supplier).sort(), ["armtek", "forum-auto", "part-kom", "rossko"]);
+    options.stock = 1;
+    await armtek.locator(".garage-cart-button").click();
+    await page.waitForFunction(() => document.querySelector("#garage-view").getAttribute("aria-busy") === "false"
+      && document.querySelector("#garage-status").textContent.includes("Нет подтверждённых"));
+    assert.equal(await armtek.locator(".garage-cart-button").isDisabled(), true);
+    assert.equal((await (await page.request.get(`${origin}/api/cart`)).json()).count, 10);
+    assert.deepEqual(orderCalls, []);
   }, options);
 });
 

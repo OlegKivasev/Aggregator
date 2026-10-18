@@ -326,7 +326,7 @@ export function createAggregatorServer({
     }
 
     const cartItemMatch = /^\/api\/cart\/items\/([0-9a-f-]{36})$/.exec(url.pathname);
-    if (url.pathname === "/api/cart" || url.pathname === "/api/cart/items" || url.pathname === "/api/cart/test-order"
+    if (url.pathname === "/api/cart" || url.pathname === "/api/cart/items" || url.pathname === "/api/cart/items/batch" || url.pathname === "/api/cart/test-order"
       || url.pathname === "/api/cart/order-options" || url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh"
       || url.pathname === "/api/cart/uncertain/resolve" || cartItemMatch) {
       response.setHeader("Cache-Control", "no-store");
@@ -344,9 +344,10 @@ export function createAggregatorServer({
         } else if (url.pathname === "/api/cart/items" && (request.method === "POST" || request.method === "DELETE")
           || cartItemMatch && (request.method === "PATCH" || request.method === "DELETE")
           || (url.pathname === "/api/cart/test-order" || url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh"
+            || url.pathname === "/api/cart/items/batch"
             || url.pathname === "/api/cart/uncertain/resolve"
             || url.pathname === "/api/cart/order-options") && request.method === "POST") {
-          const payload = await readJsonBody(request);
+          const payload = await readJsonBody(request, url.pathname === "/api/cart/items/batch" ? 64 * 1024 : undefined);
           if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new CartError("Неверные параметры корзины.");
           const fields = payload as Record<string, unknown>;
           if (url.pathname === "/api/cart/order-options") {
@@ -547,7 +548,7 @@ export function createAggregatorServer({
       return;
     }
 
-    const vehicleMatch = /^\/api\/garage\/vehicles\/([0-9a-f-]{36})(?:\/(items|refresh|groups))?$/.exec(url.pathname);
+    const vehicleMatch = /^\/api\/garage\/vehicles\/([0-9a-f-]{36})(?:\/(items|refresh|groups|cart-offers))?$/.exec(url.pathname);
     if (vehicleMatch) {
       const [, vehicleId, action] = vehicleMatch;
       try {
@@ -577,12 +578,14 @@ export function createAggregatorServer({
           serveJson(response, 201, { group: garage.createGroup(vehicleId, payload.vehicleRevision, payload.name) });
           return;
         }
-        if (action === "refresh" && request.method === "POST") {
+        if ((action === "refresh" || action === "cart-offers") && request.method === "POST") {
           const payload = garagePayload(await readJsonBody(request));
           const controller = new AbortController();
           response.once("close", () => controller.abort(new Error("Client disconnected")));
-          const vehicle = await garage.refreshVehicle(vehicleId, payload.revision, controller.signal);
-          if (!controller.signal.aborted) serveJson(response, 200, { vehicle });
+          const result = action === "cart-offers"
+            ? await garage.prepareCartOffers(vehicleId, payload.revision, payload.itemId, controller.signal, cart.registerOffer.bind(cart))
+            : { vehicle: await garage.refreshVehicle(vehicleId, payload.revision, controller.signal) };
+          if (!controller.signal.aborted) serveJson(response, 200, result);
           return;
         }
       } catch (error) { serveGarageError(response, error, reportError, "garage-vehicle"); return; }

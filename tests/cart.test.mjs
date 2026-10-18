@@ -40,6 +40,31 @@ const withCart = async (check, testOrder = async () => [], realOrder = null) => 
   finally { service.close(); rmSync(directory, { recursive: true, force: true }); }
 };
 
+test("batch cart additions validate every offer before saving, merge quantities and preserve revision guards", async () => {
+  await withCart((cart) => {
+    const first = randomUUID();
+    const second = randomUUID();
+    assert.equal(cart.registerOffer(first, result("armtek", 4)), true);
+    assert.equal(cart.registerOffer(second, result("part-kom", 3)), true);
+    const additions = [{ offerId: first, quantity: 2 }, { offerId: second, quantity: 1 }];
+    assert.throws(() => cart.mutate("add", { revision: 0, offers: [...additions, { offerId: randomUUID(), quantity: 1 }] }), /устарело/);
+    assert.equal(cart.view().revision, 0);
+    assert.equal(cart.view().count, 0);
+    const added = cart.mutate("add", { revision: 0, offers: additions });
+    assert.equal(added.revision, 1);
+    assert.equal(added.count, 3);
+    assert.throws(() => cart.mutate("add", { revision: 0, offers: additions }), /изменилась/);
+    assert.throws(() => cart.mutate("add", { revision: 1, offers: [{ offerId: second, quantity: 1 }, { offerId: first, quantity: 3 }] }), /Количество/);
+    assert.equal(cart.view().revision, 1);
+    assert.equal(cart.view().count, 3);
+    for (const offers of [[], null, [null], [false], [[]], [{ offerId: first, quantity: .5 }], Array(501).fill(additions[0])]) {
+      assert.throws(() => cart.mutate("add", { revision: 1, offers }));
+    }
+    assert.equal(cart.view().count, 3);
+    assert.equal(cart.mutate("add", { revision: 1, offers: [{ offerId: first, quantity: 1 }, { offerId: first, quantity: 1 }] }).count, 5);
+  });
+});
+
 test("Armtek return periods accept documented integers and do not change offer identity", async () => {
   for (const [value, expected] of [[14, 14], [" 0014 ", 14], [0, 0], ["0000", 0], [9999, 9999]]) {
     assert.equal(parseArmtekReturnDays(value), expected);

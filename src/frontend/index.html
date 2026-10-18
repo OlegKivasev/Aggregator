@@ -36,7 +36,11 @@
       <header class="garage-titlebar card border-0 shadow-sm mb-4" id="garage-titlebar" hidden>
         <button type="button" class="btn btn-light garage-titlebar__back" id="garage-back" aria-label="Вернуться к поиску" title="Вернуться к поиску">←</button>
         <div class="garage-titlebar__heading"><span>Товары для автомобиля</span><h1 id="garage-vehicle-name"></h1></div>
-        <button type="button" class="btn btn-primary" id="garage-refresh">Актуализировать предложения</button>
+        <div class="garage-titlebar__actions">
+          <button type="button" class="btn btn-primary" id="garage-refresh">Актуализировать предложения</button>
+          <button type="button" class="garage-cart-all" id="garage-cart-all" aria-label="Добавить все подтверждённые позиции в корзину" title="Добавить все подтверждённые позиции автомобиля в корзину" disabled><img src="/shopping-cart.png" alt="" aria-hidden="true"></button>
+          <div class="garage-tools" id="garage-tools"></div>
+        </div>
       </header>
 
       <details class="supplier-notice" id="supplier-notice" hidden>
@@ -244,7 +248,7 @@
               <th scope="col" data-garage-column="quantity" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="quantity">Количество<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="price" aria-sort="ascending"><button type="button" class="table-sort is-active" data-garage-sort-key="price">Цена<span class="table-sort__icon" aria-hidden="true"></span></button></th>
               <th scope="col" data-garage-column="sum" aria-sort="none"><button type="button" class="table-sort" data-garage-sort-key="sum">Сумма<span class="table-sort__icon" aria-hidden="true"></span></button></th>
-              <th scope="col" class="garage-actions-column"><span class="visually-hidden">Удалить товар</span></th>
+              <th scope="col" class="garage-actions-column"><span class="visually-hidden">Добавить в корзину и действия с товаром</span></th>
               </tr></thead>
               <tbody id="garage-items"></tbody>
             </table>

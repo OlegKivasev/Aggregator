@@ -9,3 +9,13 @@ export const garageDeliveryWarning = (item, now = Date.now()) => {
   }
   return null;
 };
+
+export const garageCartWarning = (item, now = Date.now()) => {
+  const deliveryWarning = garageDeliveryWarning(item, now);
+  if (deliveryWarning) return deliveryWarning;
+  if (!["armtek", "part-kom", "forum-auto", "rossko"].includes(item.supplier)) return "Поставщик не поддерживает корзину";
+  if (item.availabilityStatus === "unknown" || !Number.isFinite(item.supplierQuantity)) return "Нет подтверждённого остатка";
+  if (!Number.isSafeInteger(item.requiredQuantity) || item.requiredQuantity < 1) return "Для корзины укажите целое количество";
+  if (!["available", "insufficient"].includes(item.availabilityStatus) || item.supplierQuantity < item.requiredQuantity) return "Недостаточно товара у поставщика";
+  return null;
+};

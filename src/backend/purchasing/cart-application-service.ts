@@ -98,16 +98,17 @@ export class CartApplicationService {
     this.realOrder = realOrder;
   }
 
-  registerOffer(id: string, result: NormalizedSearchResult): void {
+  registerOffer(id: string, result: NormalizedSearchResult): boolean {
     const now = Date.now();
     for (const [key, offer] of this.offers) if (offer.expires <= now) this.offers.delete(key);
     const reference = getPurchaseReference(result);
-    if (!reference || stock(result) < 1) return;
-    if (reference.supplier === "forum-auto" && !reference.gid) return;
+    if (!reference || stock(result) < 1) return false;
+    if (reference.supplier === "forum-auto" && !reference.gid) return false;
     const line = { id, result, reference, quantity: 1 };
-    if (!validLine(line)) return;
+    if (!validLine(line)) return false;
     if (this.offers.size >= 10_000) this.offers.delete(this.offers.keys().next().value!);
     this.offers.set(id, { line: structuredClone(line), expires: now + 5 * 60_000 });
+    return true;
   }
 
   private load() {
@@ -137,18 +138,25 @@ export class CartApplicationService {
     const cart = this.load();
     if (payload.revision !== cart.revision) throw new CartError("Корзина изменилась. Обновите её и повторите действие.", 409);
     if (action === "add") {
-      const offer = typeof payload.offerId === "string" ? this.offers.get(payload.offerId) : undefined;
-      if (!offer || offer.expires <= Date.now()) throw new CartError("Предложение устарело или не поддерживает заказ. Повторите поиск.", 409);
-      const existing = cart.lines.find((line) => purchaseOfferKey(line.result, line.reference) === purchaseOfferKey(offer.line.result, offer.line.reference));
-      const quantity = validateQuantity(payload.quantity, stock(offer.line.result));
-      if (existing) {
-        if (this.repository.pendingLineIds().includes(existing.id)) throw new CartError("Статус заказа этой позиции нужно сверить с поставщиком.", 409);
-        existing.quantity = validateQuantity(existing.quantity + quantity, stock(offer.line.result));
-        existing.result = structuredClone(offer.line.result);
-        existing.reference = structuredClone(offer.line.reference);
-      } else {
-        if (cart.lines.length >= 500) throw new CartError("В корзине может быть не больше 500 позиций.");
-        cart.lines.push({ ...structuredClone(offer.line), id: randomUUID(), quantity });
+      const additions = payload.offers === undefined ? [payload] : payload.offers;
+      if (!Array.isArray(additions) || !additions.length || additions.length > 500
+        || additions.some((item) => !item || typeof item !== "object" || Array.isArray(item))) {
+        throw new CartError("Выберите от 1 до 500 предложений для корзины.");
+      }
+      for (const addition of additions as Record<string, unknown>[]) {
+        const offer = typeof addition.offerId === "string" ? this.offers.get(addition.offerId) : undefined;
+        if (!offer || offer.expires <= Date.now()) throw new CartError("Предложение устарело или не поддерживает заказ. Повторите поиск.", 409);
+        const existing = cart.lines.find((line) => purchaseOfferKey(line.result, line.reference) === purchaseOfferKey(offer.line.result, offer.line.reference));
+        const quantity = validateQuantity(addition.quantity, stock(offer.line.result));
+        if (existing) {
+          if (this.repository.pendingLineIds().includes(existing.id)) throw new CartError("Статус заказа этой позиции нужно сверить с поставщиком.", 409);
+          existing.quantity = validateQuantity(existing.quantity + quantity, stock(offer.line.result));
+          existing.result = structuredClone(offer.line.result);
+          existing.reference = structuredClone(offer.line.reference);
+        } else {
+          if (cart.lines.length >= 500) throw new CartError("В корзине может быть не больше 500 позиций.");
+          cart.lines.push({ ...structuredClone(offer.line), id: randomUUID(), quantity });
+        }
       }
     } else {
       const index = cart.lines.findIndex((line) => line.id === payload.id);

@@ -245,12 +245,14 @@ export class SqliteGarageRepository implements GarageRepository {
     return "deleted";
   }
 
-  refreshItem(item: GarageItem, updatedAt: string): void {
-    this.database.prepare(`UPDATE garage_items SET supplier = ?, brand = ?, article = ?, title = ?, warehouse = ?, delivery_date = ?, delivery_date_to = ?, delivery_date_approximate = ?, link = ?,
-      supplier_quantity = ?, purchase_price = ?, markup_percent = ?, regular_price = ?, last_checked_at = ?, availability_status = ?, revision = revision + 1 WHERE id = ?`)
+  refreshItem(item: GarageItem, updatedAt: string): boolean {
+    const updated = this.database.prepare(`UPDATE garage_items SET supplier = ?, brand = ?, article = ?, title = ?, warehouse = ?, delivery_date = ?, delivery_date_to = ?, delivery_date_approximate = ?, link = ?,
+      supplier_quantity = ?, purchase_price = ?, markup_percent = ?, regular_price = ?, last_checked_at = ?, availability_status = ?, revision = revision + 1 WHERE id = ? AND revision = ?`)
       .run(item.supplier, item.brand, item.article, item.title, item.warehouse, item.deliveryDate, item.deliveryDateTo, Number(item.deliveryDateApproximate), item.link, item.supplierQuantity,
-        item.purchasePrice, item.markupPercent, item.regularPrice, item.lastCheckedAt, item.availabilityStatus, item.id);
+        item.purchasePrice, item.markupPercent, item.regularPrice, item.lastCheckedAt, item.availabilityStatus, item.id, item.revision);
+    if (!updated.changes) return false;
     this.database.prepare("UPDATE garage_vehicles SET revision = revision + 1, updated_at = ? WHERE id = ?").run(updatedAt, item.vehicleId);
+    return true;
   }
 
   getUiPreference(key: string): string | null {

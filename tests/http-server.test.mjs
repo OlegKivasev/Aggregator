@@ -147,6 +147,19 @@ test("cart HTTP validates server offers and quantities, hides routing and cannot
     assert.equal(unaffected.count, 2);
     assert.equal((await send("/api/cart/items", { revision: added.revision, supplier: "part-kom" }, "DELETE")).status, 200);
     assert.equal((await (await fetch(`${baseUrl}/api/cart`)).json()).count, 0);
+    const empty = await (await fetch(`${baseUrl}/api/cart`)).json();
+    assert.equal((await fetch(`${baseUrl}/api/cart/items/batch`)).status, 405);
+    assert.equal((await send("/api/cart/items/batch", { revision: empty.revision, offers: [] })).status, 400);
+    const oversizedBatch = await fetch(`${baseUrl}/api/cart/items/batch`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ offers: "x".repeat(66_000) }) });
+    assert.equal(oversizedBatch.status, 413);
+    const largeBatch = await send("/api/cart/items/batch", { revision: empty.revision,
+      offers: Array.from({ length: 500 }, () => ({ offerId: "00000000-0000-4000-8000-000000000000", quantity: 1 })) });
+    assert.equal(largeBatch.status, 409, "a bounded batch may exceed 16 KB but still needs valid server offers");
+    assert.equal((await send("/api/cart/items/batch", { revision: empty.revision, offers: [{ offerId, quantity: 1 }, { offerId: "fake", quantity: 1 }] })).status, 409);
+    assert.equal((await (await fetch(`${baseUrl}/api/cart`)).json()).count, 0);
+    assert.equal((await send("/api/cart/items/batch", { revision: empty.revision, offers: [{ offerId, quantity: 1 }] })).status, 201);
+    assert.equal((await (await fetch(`${baseUrl}/api/cart`)).json()).count, 1);
   } finally {
     if (server?.listening) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); openServers.delete(server); }
     if (previousPath === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previousPath;

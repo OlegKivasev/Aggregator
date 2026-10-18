@@ -2,7 +2,7 @@ import { formatArticle, formatBrand, formatPrice, formatQuantity, getSafeResultL
 import { formatDeliveryDate } from "./supplier-search-summary.js";
 import { applySavedColumnWidths, restoreLocalColumnWidths, saveColumnWidths, applyColumnAlignment, fitOfferColumnWidths, restoreLocalColumnAlignments } from "./table-column-widths.js";
 import { setupTableColumnSettings } from "./table-column-settings-ui.js";
-import { garageDeliveryWarning } from "./garage-offer-presentation.js";
+import { garageDeliveryWarning, garageCartWarning } from "./garage-offer-presentation.js";
 
 const api = async (path, options = {}, allowConflict = false) => {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
@@ -18,7 +18,7 @@ const element = (tag, text, className) => {
   return node;
 };
 
-export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
+export const bootstrapGarage = ({ getMarkupPercent, startSearch, addToCart, onViewChanged }) => {
   const sidebar = document.querySelector("#garage-sidebar");
   const toggle = document.querySelector("#garage-toggle");
   const vehiclesList = document.querySelector("#garage-vehicles");
@@ -75,6 +75,14 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   };
   const back = document.querySelector("#garage-back");
   const refresh = document.querySelector("#garage-refresh");
+  const addAllToCart = document.querySelector("#garage-cart-all");
+  const garageTools = document.querySelector("#garage-tools");
+  const sharedTools = ["#history-toggle", "#cart-toggle", "#order-notifications-trigger"].map((selector) => {
+    const button = document.querySelector(selector);
+    const anchor = document.createComment("shared toolbar button");
+    button.before(anchor);
+    return { button, anchor };
+  });
   const garageSortButtons = [...document.querySelectorAll("[data-garage-sort-key]")];
   const resize = document.querySelector("#garage-resize");
   const modal = document.querySelector("#garage-add-modal");
@@ -96,6 +104,9 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   const workspace = document.querySelector(".workspace");
   let vehicles = [];
   let selectedVehicle = null;
+  let vehicleRequest = 0;
+  let garageBusy = false;
+  let checkingController = null;
   let selectedAddVehicleId = null;
   let pendingOfferId = null;
   let pendingOfferQuantity = null;
@@ -126,7 +137,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   Object.assign(garageColumnWidths, restoreLocalColumnWidths("garage", garageColumnWidths));
   const defaultGarageAlignments = { supplier: "left", brand: "left", article: "left", title: "left", deliveryDate: "left", quantity: "center", price: "center", sum: "center" };
   const garageAlignments = restoreLocalColumnAlignments("garage", defaultGarageAlignments);
-  const garageActionColumnWidth = 52;
+  const garageActionColumnWidth = 80;
 
   const setStatus = (message) => { status.textContent = message; };
   const appendOfferLink = (cell, item, text, isTitle = false) => {
@@ -264,10 +275,28 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
       return null;
     }
   };
-  const showSearch = () => { clearSelectedVehicle(); garageWorkspace.hidden = true; titlebar.hidden = true; workspace.hidden = false; searchShell.hidden = false; searchTabs.hidden = false; };
-  const showVehicle = async (id) => {
+  const placeSharedTools = (inGarage) => {
+    for (const { button, anchor } of sharedTools) {
+      if (inGarage) garageTools.append(button); else anchor.after(button);
+    }
+    onViewChanged();
+  };
+  const showSearch = () => {
+    vehicleRequest++;
+    checkingController?.abort();
+    checkingController = null;
+    garageBusy = false;
+    clearSelectedVehicle(); garageWorkspace.hidden = true; titlebar.hidden = true; workspace.hidden = false; searchShell.hidden = false; searchTabs.hidden = false;
+    placeSharedTools(false);
+  };
+  const showVehicle = async (id, checkOffers = false) => {
+    const request = ++vehicleRequest;
+    checkingController?.abort();
+    checkingController = null;
+    garageBusy = false;
     const isAnotherVehicle = selectedVehicle?.id !== id;
     const { payload } = await api(`/api/garage/vehicles/${encodeURIComponent(id)}`);
+    if (request !== vehicleRequest) return;
     selectedVehicle = payload.vehicle;
     saveSelectedVehicle(selectedVehicle.id);
     if (isAnotherVehicle || (typeof selectedGroupId === "string" && !selectedVehicle.groups.some((group) => group.id === selectedGroupId))) selectedGroupId = undefined;
@@ -278,8 +307,10 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
     titlebar.hidden = false;
     garageWorkspace.hidden = false;
     setFiltersOpen(true);
+    placeSharedTools(true);
     setStatus("");
     renderItems();
+    if (checkOffers && selectedVehicle.items.length) await runGarageAction("refresh");
     await loadVehicles();
   };
   const loadVehicles = async () => {
@@ -306,7 +337,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
       const button = element("button", vehicle.name, "garage-vehicles__button");
       button.type = "button";
       button.dataset.vehicleId = vehicle.id;
-      button.addEventListener("click", () => showVehicle(vehicle.id).catch((error) => setStatus(error.message)));
+      button.addEventListener("click", () => showVehicle(vehicle.id, true).catch((error) => setStatus(error.message)));
       button.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         showContextMenu(vehicle, event.clientX, event.clientY, button);
@@ -748,6 +779,9 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
   };
   const renderItems = () => {
     itemsBody.replaceChildren();
+    refresh.disabled = garageBusy;
+    addAllToCart.disabled = garageBusy || !selectedVehicle.items.some((item) => !garageCartWarning(item));
+    view.setAttribute("aria-busy", String(garageBusy));
     updateGarageSortHeaders();
     const groupedItems = selectedGroupId === undefined
       ? selectedVehicle.items
@@ -772,7 +806,8 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
     for (const group of groupItems(visibleItems)) {
       appendGroupSummary(group.name, group.items);
       for (const item of [...group.items].sort(compareGarageItems)) {
-      const row = element("tr", undefined, item.availabilityStatus === "available" || item.availabilityStatus === "unknown" ? "" : "garage-item--problem");
+      const row = element("tr", undefined, garageCartWarning(item) ? "garage-item--unconfirmed" : "");
+      row.dataset.garageItemId = item.id;
       row.tabIndex = 0;
       row.setAttribute("aria-label", `Действия с «${item.title}»`);
       row.addEventListener("contextmenu", (event) => {
@@ -801,6 +836,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
       }
       const requiredCell = document.createElement("td"); requiredCell.dataset.garageColumn = "quantity";
       const requiredDisplay = element("button", formatQuantity(item.requiredQuantity), "garage-quantity-display"); requiredDisplay.type = "button"; requiredDisplay.setAttribute("aria-label", `Изменить количество: ${item.title}`);
+      requiredDisplay.disabled = garageBusy;
       const stockDisplay = element("span", `Остаток: ${formatQuantity(item.supplierQuantity)}`, "garage-stock-quantity");
       const restoreQuantityDisplay = () => requiredCell.replaceChildren(requiredDisplay, stockDisplay);
       requiredDisplay.addEventListener("click", () => {
@@ -844,6 +880,15 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
       row.append(regularPriceCell);
       const sumCell = element("td", formatPrice(item.regularPrice * item.requiredQuantity)); sumCell.dataset.garageColumn = "sum"; row.append(sumCell);
       const actions = document.createElement("td"); actions.className = "garage-actions-cell";
+      const cartButton = element("button", undefined, "garage-cart-button");
+      cartButton.type = "button";
+      const warning = garageCartWarning(item);
+      cartButton.disabled = garageBusy || Boolean(warning);
+      cartButton.title = warning ?? "Добавить в корзину";
+      cartButton.setAttribute("aria-label", `Добавить в корзину: ${item.title}`);
+      const cartImage = document.createElement("img"); cartImage.src = "/shopping-cart.png"; cartImage.alt = ""; cartImage.setAttribute("aria-hidden", "true");
+      cartButton.append(cartImage);
+      cartButton.addEventListener("click", () => runGarageAction("cart-offers", item.id));
       const menu = element("button", "⋮", "garage-item-menu-toggle");
       menu.type = "button";
       menu.draggable = true;
@@ -858,7 +903,9 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
         event.dataTransfer.setData("application/x-garage-item", item.id);
         setGroupsOpen(true);
       });
-      actions.append(menu); row.append(actions); itemsBody.append(row);
+      const controls = element("div", undefined, "garage-item-actions");
+      controls.append(cartButton, menu);
+      actions.append(controls); row.append(actions); itemsBody.append(row);
       }
     }
     applyGarageTableColumns();
@@ -1161,17 +1208,47 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
       : { key, direction: "ascending" };
     renderItems();
   }));
-  refresh.addEventListener("click", async () => {
-    refresh.disabled = true;
+  const runGarageAction = async (action, itemId) => {
+    if (garageBusy || !selectedVehicle) return;
+    const vehicle = selectedVehicle;
+    const request = vehicleRequest;
+    const controller = new AbortController();
+    checkingController = controller;
+    garageBusy = true;
+    setStatus(action === "refresh" ? "Проверяем предложения…" : "Проверяем позиции для корзины…");
+    renderItems();
     try {
-      const { payload } = await api(`/api/garage/vehicles/${selectedVehicle.id}/refresh`, { method: "POST", body: JSON.stringify({ revision: selectedVehicle.revision }) });
-      selectedVehicle = payload.vehicle; renderItems(); await loadVehicles();
-      const unconfirmed = selectedVehicle.items.filter((item) => garageDeliveryWarning(item)).length;
-      const message = unconfirmed ? `Проверка завершена. Не подтверждены предложения или сроки: ${unconfirmed}. Подробности — в столбце «Доставка».` : `Проверено предложений: ${selectedVehicle.items.length}.`;
+      const { payload } = await api(`/api/garage/vehicles/${vehicle.id}/${action}`, { method: "POST", signal: controller.signal,
+        body: JSON.stringify({ revision: vehicle.revision, ...(itemId ? { itemId } : {}) }) });
+      if (request !== vehicleRequest) return;
+      selectedVehicle = payload.vehicle; renderItems();
+      if (action === "cart-offers") {
+        const source = itemId ? itemsBody.querySelector(`[data-garage-item-id="${CSS.escape(itemId)}"] .garage-cart-button`) : addAllToCart;
+        const added = payload.offers.length > 0 && await addToCart(payload.offers, source);
+        if (request !== vehicleRequest) return;
+        const skipped = (itemId ? 1 : selectedVehicle.items.length) - payload.offers.length;
+        const message = added ? `Добавлено позиций в корзину: ${payload.offers.length}.${skipped ? ` Пропущено неподтверждённых: ${skipped}.` : ""}`
+          : payload.offers.length ? "Не удалось добавить позиции. Подробности — в сообщении корзины." : "Нет подтверждённых позиций для корзины.";
+        setStatus(message); showToast(message, added ? "success" : "error");
+        await loadVehicles();
+        return;
+      }
+      await loadVehicles();
+      if (request !== vehicleRequest) return;
+      const unconfirmed = selectedVehicle.items.filter((item) => garageCartWarning(item)).length;
+      const message = unconfirmed ? `Проверка завершена. Не подтверждены предложения, сроки или количество: ${unconfirmed}. Причина — в подсказке кнопки корзины.` : `Проверено предложений: ${selectedVehicle.items.length}.`;
       setStatus(message); showToast(message, unconfirmed ? "error" : "success");
-    } catch (error) { setStatus(error.message); showToast(error.message, "error"); }
-    finally { refresh.disabled = false; }
-  });
+    } catch (error) { if (!controller.signal.aborted && request === vehicleRequest) { setStatus(error.message); showToast(error.message, "error"); } }
+    finally {
+      if (checkingController === controller) {
+        checkingController = null;
+        garageBusy = false;
+        if (selectedVehicle && !garageWorkspace.hidden) renderItems();
+      }
+    }
+  };
+  refresh.addEventListener("click", () => runGarageAction("refresh"));
+  addAllToCart.addEventListener("click", () => runGarageAction("cart-offers"));
   modal.querySelectorAll("[data-garage-close]").forEach((button) => button.addEventListener("click", closeModal));
   const addOfferToVehicle = async (duplicateStrategy) => {
     const vehicle = vehicles.find((item) => item.id === selectedAddVehicleId);
@@ -1245,7 +1322,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch }) => {
       clearSelectedVehicle();
       return;
     }
-    await showVehicle(vehicleId);
+    await showVehicle(vehicleId, true);
   }).catch((error) => setStatus(error.message));
   setupTableColumnSettings({
     table: garageTable,

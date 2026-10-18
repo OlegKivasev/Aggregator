@@ -341,7 +341,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     modal.querySelector(".cart-table").classList.toggle("is-supplier-view", activeSupplier !== "all");
     badge.textContent = String(cart.count);
     badge.hidden = cart.count === 0;
-    toggle.hidden = cart.count === 0;
+    toggle.hidden = cart.count === 0 && !toggle.closest("#garage-tools");
     toggle.setAttribute("aria-label", `Открыть корзину: ${cart.count} шт.`);
     modal.querySelector("#cart-summary").textContent = `Количество: ${count} шт. Выбрано к заказу: ${selected.reduce((sum, item) => sum + item.quantity, 0)} шт.`;
     modal.querySelector("#cart-total").innerHTML = renderTotals(selected);
@@ -400,7 +400,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     animation.finished.catch(() => {}).finally(() => flying.remove()); // Cancellation is normal when the page closes.
   };
   const mutate = async (path, method, fields, source) => {
-    if (busy || checking || cart?.testing) { notify("Дождитесь завершения действия в корзине."); return; }
+    if (busy || checking || cart?.testing) { notify("Дождитесь завершения действия в корзине."); return false; }
     busy = true;
     if (source) source.disabled = true;
     try {
@@ -408,10 +408,12 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       cart = validateCart(await api(path, { method, body: JSON.stringify({ revision: cart.revision, ...fields }) }));
       status.textContent = "";
       if (source?.matches(".cart-offer-button")) { flyToCart(source); notify("Товар добавлен в корзину."); }
+      return true;
     } catch (error) {
       notify(error.message, true);
       status.textContent = error.message;
       try { await refresh(); } catch { /* The original actionable error remains visible. */ }
+      return false;
     } finally { busy = false; if (source) source.disabled = false; render(); }
   };
 
@@ -769,5 +771,9 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   });
   document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy && !checking) void refresh().catch(() => {}); }); // Background refresh is optional.
   void refresh().catch(() => { badge.hidden = true; }); // Opening the cart shows any loading error.
-  return { renderPrices: render };
+  return { renderPrices: render, async addOffers(offers, source) {
+    const added = await mutate("/api/cart/items/batch", "POST", { offers: offers.map(({ offerId, quantity }) => ({ offerId, quantity })) }, source);
+    if (added && source) flyToCart(source);
+    return added;
+  } };
 };
