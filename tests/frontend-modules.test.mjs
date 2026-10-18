@@ -313,8 +313,8 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(html, /id="analogs-count" tabindex="0"/);
   assert.equal((html.match(/id="results-body"/g) ?? []).length, 1);
   assert.doesNotMatch(html, /id="results-view-toggle"/);
-  assert.match(app, /registerResultContextMenu\(resultsBody/);
-  assert.match(app, /registerResultContextMenu\(analogsResultsBody/);
+  assert.match(app, /registerResultActions\(resultsBody/);
+  assert.match(app, /registerResultActions\(analogsResultsBody/);
   assert.match(app, /const setAnalogFiltersSidebarOpen = \(open\) =>/);
   assert.match(app, /const setAnalogSearchUiState = \(isSearching\) =>/);
   assert.match(app, /analogsSearchLoading\.hidden = !isSearching;/);

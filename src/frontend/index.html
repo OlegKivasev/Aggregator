@@ -697,6 +697,14 @@
       <button type="button" id="show-analogs-button" role="menuitem">Показать аналоги</button>
       <button type="button" id="find-images-button" role="menuitem">Найти изображения</button>
     </div>
+    <dialog class="image-search-dialog" id="image-search-dialog" aria-labelledby="image-search-title" aria-describedby="image-search-subject">
+      <header><h2 id="image-search-title">Где искать изображения?</h2><button type="button" data-image-search-close aria-label="Закрыть выбор поисковика">×</button></header>
+      <p id="image-search-subject"></p>
+      <div class="image-search-dialog__actions">
+        <button type="button" data-image-search-engine="yandex">Яндекс</button>
+        <button type="button" data-image-search-engine="google">Google</button>
+      </div>
+    </dialog>
     <div class="tab-context-menu card border-0 shadow" id="tab-context-menu" role="menu" hidden>
       <button type="button" id="rename-tab-button" role="menuitem">Переименовать вкладку</button>
       <div class="tab-close-control">

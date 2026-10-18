@@ -155,6 +155,11 @@ const renameTabButton = document.querySelector("#rename-tab-button");
 const warehouseTooltip = document.querySelector("#warehouse-tooltip");
 const showAnalogsButton = document.querySelector("#show-analogs-button");
 const findImagesButton = document.querySelector("#find-images-button");
+const imageSearchDialog = document.querySelector("#image-search-dialog");
+const imageSearchSubject = document.querySelector("#image-search-subject");
+const photoSearchButtonMarkup = '<button type="button" class="photo-search-button" aria-label="Найти изображения" title="Найти изображения" aria-haspopup="dialog" aria-controls="image-search-dialog"><span aria-hidden="true"></span></button>';
+let imageSearchQuery = "";
+let imageSearchAnchor = null;
 const analogsModal = document.querySelector("#analogs-modal");
 const analogsSourceBrand = document.querySelector("#analogs-source-brand");
 const analogsSourceArticle = document.querySelector("#analogs-source-article");
@@ -1249,7 +1254,7 @@ const renderResults = () => {
         <td data-column="supplier">${escapeHtml(supplierName)}</td>
         <td data-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
-        <td data-column="title"><div class="result-title-cell">${renderOfferLink(result, result.title)}</div></td>
+        <td data-column="title"><div class="result-title-cell">${renderOfferLink(result, result.title)}${photoSearchButtonMarkup}</div></td>
         <td data-column="deliveryDate"><span class="delivery-date${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, settings)))}</span>${showPurchasePrice(markupSettings) ? `<span class="main-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>` : ""}${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
@@ -2227,7 +2232,7 @@ const renderAnalogRows = () => {
         <td data-analog-column="supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}</td>
         <td data-analog-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-analog-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
-        <td class="analogs-result-title" data-analog-column="title">${renderOfferLink(result, result.title)}</td>
+        <td class="analogs-result-title" data-analog-column="title"><div class="result-title-cell">${renderOfferLink(result, result.title)}${photoSearchButtonMarkup}</div></td>
         <td data-analog-column="deliveryDate"><span class="delivery-date${hasPartKomOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${showPurchasePrice(markupSettings) ? `<span class="analogs-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>` : ""}${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
@@ -2468,7 +2473,51 @@ const startArticleBrandSearch = () => {
   };
 };
 
-const registerResultContextMenu = (body, resolveResult, canShowAnalogs) => {
+const showImageSearchChoice = (result, anchor) => {
+  const article = typeof result?.article === "string" ? result.article.trim() : "";
+  if (!article) return;
+  const brand = typeof result.brand === "string" ? result.brand.trim() : "";
+  imageSearchQuery = brand ? `${brand} ${article}` : article;
+  imageSearchAnchor = anchor;
+  imageSearchSubject.textContent = imageSearchQuery;
+  hideResultContextMenu();
+  if (!imageSearchDialog.open) imageSearchDialog.showModal();
+};
+
+imageSearchDialog.querySelector("[data-image-search-close]").addEventListener("click", () => imageSearchDialog.close());
+imageSearchDialog.addEventListener("keydown", (event) => {
+  event.stopPropagation();
+  if (event.key !== "Tab") return;
+  const buttons = [...imageSearchDialog.querySelectorAll("button:not([disabled])")];
+  const first = buttons[0]; const last = buttons.at(-1);
+  if (event.shiftKey && document.activeElement === first || !event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    (event.shiftKey ? last : first)?.focus();
+  }
+});
+imageSearchDialog.addEventListener("close", () => {
+  imageSearchQuery = "";
+  if (imageSearchAnchor?.isConnected) imageSearchAnchor.focus({ preventScroll: true });
+  imageSearchAnchor = null;
+});
+imageSearchDialog.querySelectorAll("[data-image-search-engine]").forEach((button) => button.addEventListener("click", () => {
+  if (!imageSearchQuery || !imageSearchDialog.open) return;
+  const engine = button.dataset.imageSearchEngine;
+  if (engine !== "google" && engine !== "yandex") return;
+  const url = new URL(engine === "google" ? "https://www.google.com/search" : "https://yandex.ru/images/search/");
+  url.search = new URLSearchParams(engine === "google" ? { tbm: "isch", q: imageSearchQuery } : { text: imageSearchQuery }).toString();
+  imageSearchDialog.close();
+  window.open(url.href, "_blank", "noopener,noreferrer");
+}));
+
+const registerResultActions = (body, resolveResult, canShowAnalogs) => {
+  body.addEventListener("click", (event) => {
+    const button = event.target.closest(".photo-search-button");
+    if (!button) return;
+    const row = button.closest(".results-table__row");
+    const result = row ? resolveResult(row) : null;
+    if (result) showImageSearchChoice(result, button);
+  });
   body.addEventListener("contextmenu", (event) => {
     const row = event.target.closest(".results-table__row");
     const result = row ? resolveResult(row) : null;
@@ -2494,8 +2543,8 @@ const registerResultContextMenu = (body, resolveResult, canShowAnalogs) => {
   });
 };
 
-registerResultContextMenu(resultsBody, (row) => results[Number(row.dataset.resultIndex)], true);
-registerResultContextMenu(analogsResultsBody, (row) => analogSearchResults[Number(row.dataset.analogResultIndex)], false);
+registerResultActions(resultsBody, (row) => results[Number(row.dataset.resultIndex)], true);
+registerResultActions(analogsResultsBody, (row) => analogSearchResults[Number(row.dataset.analogResultIndex)], false);
 
 const startSearchForArticle = (value) => {
   const article = typeof value === "string" ? value.trim() : "";
@@ -2529,13 +2578,8 @@ showAnalogsButton.addEventListener("click", () => {
 
 findImagesButton.addEventListener("click", () => {
   const result = contextMenuResult;
-  hideResultContextMenu();
-  const article = typeof result?.article === "string" ? result.article.trim() : "";
-  if (!article) return;
-  const brand = typeof result.brand === "string" ? result.brand.trim() : "";
-  const url = new URL("https://www.google.com/search");
-  url.search = new URLSearchParams({ tbm: "isch", q: brand ? `${brand} ${article}` : article }).toString();
-  window.open(url.href, "_blank", "noopener,noreferrer");
+  const anchor = contextMenuAnchor;
+  if (result) showImageSearchChoice(result, anchor);
 });
 
 analogsTableSearch.addEventListener("input", () => {

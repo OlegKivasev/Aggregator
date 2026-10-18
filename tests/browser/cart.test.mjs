@@ -134,37 +134,75 @@ async function openCheckout(page) {
   await page.waitForFunction(() => document.querySelector("#cart-order-confirm").open);
 }
 
-test("image search opens Google Images in a separate safe tab with the selected offer or analog brand and article", async () => {
+test("camera and context menus ask for Yandex or Google and open safe image search tabs for offers and analogs", async () => {
   const analogOffers = ["armtek", "part-kom"].map((supplier) => ({ ...offer(supplier, 2, supplier === "armtek"
     ? { supplier, keyzak: "TEST01" } : { supplier, makerId: "101", providerId: "202" }), brand: "Бренд & Co", article: "AN/2 +#", isAnalog: true }));
   await withCartPage(async (page, { searchCalls }) => {
     const imageRequests = [];
     page.on("request", (request) => { if (new URL(request.url()).pathname.startsWith("/api/part-images")) imageRequests.push(request.url()); });
-    await page.context().route("https://www.google.com/search?**", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Тест перехода к изображениям</title>" }));
-    const checkTab = async (expectedQuery) => {
+    await page.context().route(/^https:\/\/(?:www\.google\.com\/search|yandex\.ru\/images\/search\/)\?/, (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Тест перехода к изображениям</title>" }));
+    const choice = page.getByRole("dialog", { name: "Где искать изображения?", exact: true });
+    const checkTab = async (engine, expectedQuery) => {
       const before = searchCalls.length;
+      assert.equal(await choice.isVisible(), true);
+      assert.equal(await page.locator("#image-search-subject").textContent(), expectedQuery);
+      assert.equal(page.context().pages().length, 1, "choosing a provider must precede opening a tab");
       const opened = page.context().waitForEvent("page");
-      await page.getByRole("menuitem", { name: "Найти изображения", exact: true }).click();
+      await choice.getByRole("button", { name: engine === "google" ? "Google" : "Яндекс", exact: true }).click();
       const tab = await opened;
-      await tab.waitForURL((url) => url.origin === "https://www.google.com" && url.pathname === "/search", { waitUntil: "domcontentloaded" });
+      const origin = engine === "google" ? "https://www.google.com" : "https://yandex.ru";
+      await tab.waitForURL((url) => url.origin === origin, { waitUntil: "domcontentloaded" });
       const url = new URL(tab.url());
-      assert.equal(url.origin, "https://www.google.com"); assert.equal(url.pathname, "/search");
-      assert.equal(url.searchParams.get("tbm"), "isch"); assert.equal(url.searchParams.get("q"), expectedQuery);
+      assert.equal(url.pathname, engine === "google" ? "/search" : "/images/search/");
+      if (engine === "google") assert.equal(url.searchParams.get("tbm"), "isch");
+      assert.equal(url.searchParams.get(engine === "google" ? "q" : "text"), expectedQuery);
       assert.equal(await tab.evaluate(() => window.opener === null), true);
       assert.equal(await tab.evaluate(() => document.referrer), "");
       assert.equal(searchCalls.length, before, "opening images must not query suppliers");
       await tab.close(); await page.bringToFront();
+      assert.equal(await choice.isVisible(), false);
       assert.equal(await page.locator("#part-images-dialog").count(), 0);
     };
+    const cameraFits = async (button) => {
+      assert.equal(await button.evaluate((node) => {
+        const icon = node.getBoundingClientRect(); const cell = node.closest("td").getBoundingClientRect();
+        const title = node.previousElementSibling.getBoundingClientRect();
+        return icon.left >= title.right && icon.right <= cell.right && icon.top >= cell.top && icon.bottom <= cell.bottom;
+      }), true);
+    };
     const source = page.locator("#results-body .results-table__row").first();
-    await source.click({ button: "right" }); await checkTab("TEST A1");
+    const camera = source.getByRole("button", { name: "Найти изображения", exact: true });
+    await cameraFits(camera);
+    await camera.hover();
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "photo-camera-offers.png") });
+    await camera.click();
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "photo-search-choice.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await choice.evaluate((node) => node.scrollWidth <= node.clientWidth && node.getBoundingClientRect().right <= innerWidth), true);
+    await checkTab("yandex", "TEST A1");
+    await page.setViewportSize({ width: 1366, height: 850 });
+    await source.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Найти изображения", exact: true }).click();
+    await checkTab("google", "TEST A1");
     assert.equal(await page.locator("#results-body .results-table__row").count(), 2);
     await openOfferAnalogs(page, source);
     const analog = page.locator("#analogs-results-body .analogs-result-row").first();
-    await analog.focus(); await analog.press("Shift+F10"); await checkTab("Бренд & Co AN/2 +#");
+    const analogCamera = analog.getByRole("button", { name: "Найти изображения", exact: true });
+    await cameraFits(analogCamera); await analogCamera.click();
+    for (let step = 0; step < 4; step++) {
+      await page.keyboard.press("Tab"); assert.equal(await choice.evaluate((node) => node.contains(document.activeElement)), true);
+    }
+    await page.keyboard.press("Escape"); await choice.waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.matches("#analogs-results-body .photo-search-button"));
+    assert.equal(await page.locator("#analogs-modal").isVisible(), true);
+    assert.equal(page.context().pages().length, 1);
+    await analogCamera.click(); await checkTab("google", "Бренд & Co AN/2 +#");
+    await analog.focus(); await analog.press("Shift+F10");
+    await page.getByRole("menuitem", { name: "Найти изображения", exact: true }).click();
+    await checkTab("yandex", "Бренд & Co AN/2 +#");
     assert.equal(await page.locator("#analogs-modal").isVisible(), true);
     assert.deepEqual(imageRequests, []);
-  }, { analogOffers });
+  }, { analogOffers, title: "Фильтр салона угольный Lada Vesta / X-Ray" });
 });
 
 test("markup popup applies fixed, tiered and no markup consistently in offers, analogs and cart", async () => {
