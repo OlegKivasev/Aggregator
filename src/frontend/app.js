@@ -16,6 +16,7 @@ import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { bootstrapCart, renderCartOfferControls } from "./cart-ui.js";
 import { bootstrapOrderHistory } from "./order-history-ui.js";
 import { hasOfferDeliveryWarning } from "./order-notices.js";
+import { readArticleVariants, articleVariantNotice } from "./article-search-notice.js";
 import { deliveryCalendarDay, isOfferDueSoon } from "./delivery-dates.js";
 import {
   isStpartsWarehouseVisible,
@@ -145,6 +146,8 @@ const mladovSessionPill = document.querySelector("#mladov-session-pill");
 const mladovAuthFeedback = document.querySelector("#mladov-auth-feedback");
 const searchToast = document.querySelector("#garage-toast");
 const supplierNotice = document.querySelector("#supplier-notice");
+const articleNotice = document.querySelector("#article-variant-notice");
+const articleNoticeText = document.querySelector("#article-variant-notice-text");
 const supplierNoticeSummary = document.querySelector("#supplier-notice-summary");
 const supplierNoticeList = document.querySelector("#supplier-notice-list");
 const passwordFields = [...document.querySelectorAll(".password-field")];
@@ -690,6 +693,7 @@ const createSearchTab = (data = {}) => ({
   markupSettings: restoreMarkupSettings(data.markupSettings, data.markupPercent),
   supplierStatuses: {},
   supplierStatusDetails: {},
+  articleVariants: readArticleVariants(data.articleVariants),
   supplierSearchStartedAt: {},
   supplierSearchDurations: {},
   source: null,
@@ -1081,6 +1085,7 @@ const saveSearchState = () => {
           status: tab.status,
           results: tab.results.map(withoutOfferId),
           hasSearched: tab.hasSearched,
+          articleVariants: tab.articleVariants,
           markupSettings: tab.markupSettings,
         })),
       }),
@@ -1225,6 +1230,9 @@ const renderOfferLink = (result, text, title = text) => {
 };
 
 const renderResults = () => {
+  const notice = articleVariantNotice(getActiveTab()?.articleVariants);
+  articleNotice.hidden = !notice;
+  articleNoticeText.textContent = notice;
   tableColumnIds.filter((column) => !visibleTableColumns.has(column)).forEach((column) => {
     selectedFilterValuesByColumn.delete(column);
     filterRangesByColumn.delete(column);
@@ -2800,6 +2808,9 @@ const startSearch = (article, enabledSuppliers) => {
   tab.status = `Ищем по артикулу ${article}`;
   tab.supplierStatuses = {};
   tab.supplierStatusDetails = {};
+  tab.articleVariants = [];
+  articleNotice.hidden = true;
+  articleNoticeText.textContent = "";
   tab.supplierSearchStartedAt = {};
   tab.supplierSearchDurations = {};
   tab.searchStartedAt = Date.now();
@@ -2825,6 +2836,16 @@ const startSearch = (article, enabledSuppliers) => {
     }
 
     const payload = JSON.parse(messageEvent.data);
+
+    if (payload.type === "search_started") {
+      tab.articleVariants = readArticleVariants(payload.articleVariants);
+      if (tab.id === activeTabId) {
+        articleNoticeText.textContent = articleVariantNotice(tab.articleVariants);
+        articleNotice.hidden = !articleNoticeText.textContent;
+      }
+      saveSearchState();
+      return;
+    }
 
     if (payload.type === "supplier_status") {
       tab.supplierStatuses[payload.supplier] = payload.status;

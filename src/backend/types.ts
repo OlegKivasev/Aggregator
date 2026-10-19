@@ -118,6 +118,12 @@ export interface SearchStartedEvent {
   type: "search_started";
   article: string;
   suppliers: SupplierId[];
+  articleVariants?: ArticleSearchVariant[];
+}
+
+export interface ArticleSearchVariant {
+  article: string;
+  form: "short" | "full";
 }
 
 export interface SearchCompletedEvent {

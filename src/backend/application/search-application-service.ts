@@ -2,6 +2,7 @@ import type { SupplierSessionManager } from "../session/session-manager.ts";
 import { runSupplierSearch } from "../suppliers/run-supplier-search.ts";
 import type { SupplierAdapter } from "../suppliers/supplier-adapter.ts";
 import type { SearchStreamEvent, SupplierId, SupplierSearchQuery } from "../types.ts";
+import { additionalArticleVariants } from "../article-search-variants.ts";
 
 export function selectSupplierAdapters(adapters: SupplierAdapter[], suppliers?: SupplierId[]): SupplierAdapter[] {
   return suppliers ? adapters.filter((adapter) => suppliers.includes(adapter.id)) : adapters;
@@ -34,10 +35,12 @@ export class SearchApplicationService {
         ? selectedAdapters.filter((adapter) => adapter.searchBrands)
         : selectedAdapters;
 
+    const articleVariants = "mode" in query ? [] : additionalArticleVariants(query.article);
     emit({
       type: "search_started",
       article: query.article,
       suppliers: currentAdapters.map((adapter) => adapter.id),
+      ...(articleVariants.length ? { articleVariants } : {}),
     });
 
     await Promise.all(

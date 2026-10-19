@@ -3,6 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { SearchApplicationService } from "../../src/backend/application/search-application-service.ts";
+import { SupplierSessionManager } from "../../src/backend/session/session-manager.ts";
 import { chromium } from "playwright";
 import { createAggregatorServer } from "../../src/backend/http/create-server.ts";
 import { attachPurchaseReference } from "../../src/backend/purchasing/purchase-offer.ts";
@@ -45,8 +47,9 @@ async function withCartPage(check, options = {}) {
         usage: { requestCount: 0 }, directUsage: { requestCount: 0, secondsUntilReset: null } }),
       getApplicabilityCachedBrands: () => [],
       listApplicabilitySavedArticles: () => ({ articles: [], brandCounts: [], hasMore: false }),
-      streamSearch: async (query, emit) => {
+      streamSearch: async (query, emit, signal) => {
         searchCalls.push(structuredClone(query));
+        if (options.streamSearch) return options.streamSearch(query, emit, signal);
         emit({ type: "search_started", article: query.article, suppliers });
         if (options.failedSearchSupplier && query.suppliers?.length === 1 && query.suppliers[0] === options.failedSearchSupplier) {
           emit({ type: "supplier_status", supplier: options.failedSearchSupplier, status: "error" });
@@ -166,6 +169,59 @@ async function openGarageWithFirstOffer(page, { all = false, quantity = 1, befor
   await page.waitForFunction(() => document.querySelector("#garage-view").getAttribute("aria-busy") === "false");
   return vehicle.id;
 }
+
+test("main pricing searches both VAZ spellings, keeps original offers and scopes the yellow notice to its persisted tab", async () => {
+  const sessions = new SupplierSessionManager();
+  const adapterCalls = [];
+  const spellings = { armtek: "2109-6205012-10", "part-kom": "21090-6205012-10" };
+  const adapters = Object.keys(spellings).map((supplier) => {
+    sessions.markAuthorized(supplier);
+    return { id: supplier, displayName: supplier, timeoutMs: 1000,
+      ensureSession: async () => sessions.getSession(supplier),
+      search: async (query, _context, onResult) => {
+        adapterCalls.push({ supplier, article: query.article });
+        if (query.article !== "A1" && query.article !== spellings[supplier]) return;
+        onResult(offer(supplier, 3, supplier === "armtek" ? { supplier, keyzak: "TEST01" }
+          : { supplier, makerId: "101", providerId: "202" }, { article: query.article }));
+      } };
+  });
+  const service = new SearchApplicationService(adapters, sessions, (supplier) => sessions.markUnauthorized(supplier));
+  await withCartPage(async (page, { origin, orderCalls }) => {
+    const notice = page.locator("#article-variant-notice");
+    assert.equal(await notice.isVisible(), false);
+    const search = async (article) => {
+      await page.locator("#article-input").fill(article);
+      await page.locator("#submit-button").click();
+      await page.waitForFunction(() => document.querySelector("#results-panel").getAttribute("aria-busy") === "false");
+      assert.equal(await page.locator("#results-body .main-result-row").count(), 2);
+    };
+    await search("2109-6205012-10");
+    const firstTab = await page.locator("#search-tabs-list .active").getAttribute("data-tab-id");
+    assert.equal(await notice.isVisible(), true);
+    assert.match(await notice.innerText(), /полному.*21090-6205012-10/);
+    assert.equal(await notice.evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(255, 248, 231)");
+    assert.deepEqual((await page.locator('#results-body [data-column="article"]').allTextContents()).map((value) => value.trim()).sort(), Object.values(spellings).sort());
+    assert.equal(adapterCalls.length, 6, "initial ordinary query plus two sequential spellings per supplier");
+    const fullOffer = page.locator("#results-body .main-result-row").filter({ has: page.locator('[data-column="article"]', { hasText: "21090-6205012-10" }) });
+    await fullOffer.locator(".cart-offer-button").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    const cart = await (await page.request.get(`${origin}/api/cart`)).json();
+    assert.equal(cart.items[0].result.article, "21090-6205012-10");
+    assert.equal(cart.items[0].result.supplier, "part-kom");
+    assert.deepEqual(orderCalls, []);
+    await page.locator("#new-tab-button").click();
+    assert.equal(await notice.isVisible(), false);
+    await search("21090-6205012-10");
+    assert.match(await notice.innerText(), /сокращённому.*2109-6205012-10/);
+    await page.locator(`#search-tabs-list [data-tab-id="${firstTab}"]`).click();
+    assert.match(await notice.innerText(), /полному.*21090-6205012-10/);
+    await page.reload();
+    await page.locator("#results-body .main-result-row").first().waitFor();
+    assert.match(await notice.innerText(), /полному.*21090-6205012-10/);
+    await search("A1");
+    assert.equal(await notice.isVisible(), false);
+  }, { preserveSearchState: true, streamSearch: service.streamSearch.bind(service) });
+});
 
 test("garage title fills the panel and column settings preview, cancel, persist and align exact pixel widths", async () => {
   await withCartPage(async (page) => {

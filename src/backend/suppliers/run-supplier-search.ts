@@ -1,6 +1,8 @@
 import { SupplierAuthError, SupplierIntegrationError, SupplierSessionInvalidatedError, SupplierTimeoutError } from "./errors.ts";
 import type { SupplierAdapter } from "./supplier-adapter.ts";
 import type { SupplierSessionManager } from "../session/session-manager.ts";
+import { additionalArticleVariants } from "../article-search-variants.ts";
+import { getPurchaseReference } from "../purchasing/purchase-offer.ts";
 import type {
   SearchStreamEvent,
   SearchSupplierStatusEvent,
@@ -101,6 +103,10 @@ export async function runSupplierSearch({
   }, adapter.timeoutMs);
   let validResultCount = 0;
   let invalidResultCount = 0;
+  const articles = "mode" in query ? [query.article] : [query.article, ...additionalArticleVariants(query.article).map((variant) => variant.article)];
+  const articleKeys = articles.map((article) => article.replace(/[^\p{L}\p{N}]/gu, "").toUpperCase());
+  const seenOffers = new Map<string, number>();
+  let articleIndex = 0;
 
   try {
     const session = await adapter.ensureSession(sessionManager);
@@ -114,11 +120,21 @@ export async function runSupplierSearch({
       timeoutMs: adapter.timeoutMs,
     };
     const onResult = (result: NormalizedSearchResult) => {
-      if (!operation.isCurrent()) {
+      if (!operation.isCurrent() || controller.signal.aborted) {
         return;
       }
       if (isValidResult(result, adapter.id)) {
         validResultCount += 1;
+        if (articles.length > 1) {
+          const article = result.article.replace(/[^\p{L}\p{N}]/gu, "").toUpperCase();
+          const reference = getPurchaseReference(result);
+          const key = JSON.stringify([result.supplier, result.brand, articleKeys.includes(article) ? articleKeys[0] : article, result.title, result.price, result.quantity,
+            result.warehouse, result.warehouseFull, result.warehouseColor, result.warehouseRating, result.deliveryDate,
+            result.deliveryDateTo, result.deliveryDateApproximate, result.isReturnable, reference ? null : result.link, result.isAnalog, reference]);
+          const firstQuery = seenOffers.get(key);
+          if (firstQuery !== undefined && firstQuery !== articleIndex) return;
+          seenOffers.set(key, articleIndex);
+        }
         emit({ type: "result", result });
       } else {
         invalidResultCount += 1;
@@ -147,7 +163,24 @@ export async function runSupplierSearch({
       }
       await adapter.searchBrands(query, context, onBrands, sessionManager);
     } else {
-      await adapter.search(query, context, onResult, sessionManager);
+      const variantErrors: unknown[] = [];
+      for (const article of articles) {
+        controller.signal.throwIfAborted();
+        const validBefore = validResultCount;
+        const invalidBefore = invalidResultCount;
+        try {
+          await adapter.search({ ...query, article }, context, onResult, sessionManager);
+          controller.signal.throwIfAborted();
+          if (invalidResultCount > invalidBefore && validResultCount === validBefore) {
+            throw new SupplierIntegrationError("Supplier returned only invalid search results");
+          }
+        } catch (error) {
+          if (articles.length === 1 || controller.signal.aborted || error instanceof SupplierAuthError || error instanceof SupplierSessionInvalidatedError) throw error;
+          variantErrors.push(error);
+        }
+        articleIndex++;
+      }
+      if (variantErrors.length) throw variantErrors[0];
     }
 
     if (!("mode" in query && query.mode === "brands") && invalidResultCount > 0 && validResultCount === 0) {
