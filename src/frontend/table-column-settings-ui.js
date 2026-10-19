@@ -23,7 +23,7 @@ export const setupTableColumnSettings = ({ table, columnAttribute, widths, align
   const heading = dialog.querySelector("h2");
   heading.id = `${dialog.id}-title`;
   heading.textContent = title;
-  dialog.querySelector(".table-column-settings-dialog__hint").textContent = `${previewText} «Применить» сохраняет их, «Отмена» возвращает прежний вид. Ширина — от 24 до 800 px. Свободное место занимает «Наименование», а если оно скрыто — самый широкий столбец: его ширина считается минимальной.`;
+  dialog.querySelector(".table-column-settings-dialog__hint").textContent = `${previewText} «Применить» сохраняет их, «Отмена» возвращает прежний вид. Ширина — от 24 до 800 px. «Наименование» подстраивается под окно: на узком экране сужается до 200 px или меньшей заданной ширины. Если оно скрыто, свободное место занимает самый широкий столбец.`;
   document.body.append(dialog);
   const fields = dialog.querySelector(".table-column-settings-dialog__fields");
   const error = dialog.querySelector('[role="alert"]');

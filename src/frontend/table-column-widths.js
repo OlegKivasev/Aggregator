@@ -49,9 +49,13 @@ export const fitOfferColumnWidths = (widths, visibleColumns, availableWidth, act
   const expandingColumn = visibleColumns.includes("title") ? "title" : visibleColumns.reduce(
     (widest, column) => widest === null || widths[column] > widths[widest] ? column : widest, null,
   );
-  const extraWidth = expandingColumn === null ? 0 : Math.max(0, availableWidth - configuredWidth);
-  if (expandingColumn !== null) fittedWidths[expandingColumn] += extraWidth;
-  return { widths: fittedWidths, totalWidth: configuredWidth + extraWidth };
+  let widthAdjustment = expandingColumn === null ? 0 : Math.max(0, availableWidth - configuredWidth);
+  if (expandingColumn === "title" && availableWidth > 0 && availableWidth < configuredWidth) {
+    const minimumTitleWidth = Math.min(widths.title, 200);
+    widthAdjustment = -Math.min(configuredWidth - availableWidth, widths.title - minimumTitleWidth);
+  }
+  if (expandingColumn !== null) fittedWidths[expandingColumn] += widthAdjustment;
+  return { widths: fittedWidths, totalWidth: configuredWidth + widthAdjustment };
 };
 
 const readStoredAlignments = () => {

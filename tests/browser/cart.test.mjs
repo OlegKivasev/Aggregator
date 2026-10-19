@@ -605,14 +605,24 @@ test("offer tables fill the viewport through the title while other pixels and co
   const extraOffers = Array.from({ length: 24 }, (_, index) => offer("armtek", 4,
     { supplier: "armtek", keyzak: `WIDTH${index}` }, { warehouse: `Тестовый склад ${index}` }, `Тестовая позиция ${index + 1}`));
   await withCartPage(async (page, { searchCalls }) => {
+    await page.setViewportSize({ width: 3440, height: 1440 });
+    await page.locator('#results-table th[data-column="supplier"]').click({ button: "right" });
+    await page.locator("#table-column-menu-main").getByRole("menuitem", { name: "Настройки", exact: true }).click();
+    const settings = page.locator("#table-column-settings-main");
+    const configured = { supplier: 100, brand: 160, article: 140, title: 800, deliveryDate: 160, quantity: 100, markupPrice: 100 };
+    for (const [column, width] of Object.entries(configured)) await settings.locator(`[data-width-column="${column}"]`).fill(String(width));
+    const saved = page.waitForResponse((response) => response.url().endsWith("/api/ui-preferences/table-column-widths") && response.request().method() === "PUT");
+    await settings.getByRole("button", { name: "Применить", exact: true }).click();
+    assert.equal((await saved).status(), 200);
+    const storedWidths = await page.evaluate(() => localStorage.getItem("autoservice.tableColumnWidths.v1"));
     const check = async (table, attribute) => {
       await page.waitForFunction((table) => {
         const viewport = document.querySelector(table);
-        return Math.abs(viewport.querySelector("table").getBoundingClientRect().width - Math.max(1212, viewport.clientWidth)) <= 1;
+        return Math.abs(viewport.querySelector("table").getBoundingClientRect().width - Math.max(1064, viewport.clientWidth)) <= 1;
       }, table);
       assert.equal(await page.locator(`${table} .table-column-resize`).count(), 0);
       const availableWidth = await page.locator(table).evaluate((viewport) => viewport.clientWidth);
-      for (const [column, width] of [["supplier", 100], ["brand", 125], ["article", 140], ["title", Math.max(323, availableWidth - 889)], ["deliveryDate", 180], ["quantity", 120], ["markupPrice", 120]]) {
+      for (const [column, width] of Object.entries({ ...configured, title: Math.max(200, availableWidth - 864) })) {
         const header = await page.locator(`${table} th[${attribute}="${column}"]`).boundingBox();
         const cell = await page.locator(`${table} tbody tr`).first().locator(`[${attribute}="${column}"]`).boundingBox();
         assert.ok(Math.abs(header.width - width) <= 1, `${table} ${column}: ${header.width} instead of ${width}`);
@@ -626,15 +636,23 @@ test("offer tables fill the viewport through the title while other pixels and co
       });
       assert.ok(Math.abs(geometry.actionWidth - 104) <= 1, JSON.stringify(geometry));
       assert.ok(Math.abs(geometry.endGap) <= 1, JSON.stringify(geometry));
-      if (availableWidth >= 1212) {
+      if (availableWidth >= 1064) {
         assert.ok(geometry.overflow <= 1, "filling the viewport must exclude the vertical scrollbar");
         assert.equal(geometry.verticalScroll, true);
       }
+      assert.equal(await page.evaluate(() => localStorage.getItem("autoservice.tableColumnWidths.v1")), storedWidths, "adapting to another screen must not overwrite the configured pixels");
     };
-    for (const width of [2504, 1990, 1366, 390]) {
-      await page.setViewportSize({ width, height: 1000 });
+    const screens = [{ width: 3440, height: 1440 }, { width: 1920, height: 1080 }, { width: 1654, height: 1080 },
+      { width: 1366, height: 1000 }, { width: 390, height: 850 }, { width: 3440, height: 1440 }];
+    for (const screen of screens) {
+      await page.setViewportSize(screen);
       await check("#results-table", "data-column");
+      if (process.env.TEST_CAPTURE_DIR && [1920, 3440].includes(screen.width)) await page.locator("#results-panel").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, `responsive-main-${screen.width}.png`) });
     }
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.reload();
+    await page.locator("#results-body .main-result-row").first().waitFor();
+    await check("#results-table", "data-column");
     await page.setViewportSize({ width: 1990, height: 1000 });
     await page.locator("#filters-resize").focus();
     await page.keyboard.press("ArrowRight");
@@ -644,15 +662,16 @@ test("offer tables fill the viewport through the title while other pixels and co
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "table-fills-main.png") });
     await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
     await page.waitForFunction(() => document.querySelectorAll("#analogs-results-body .cart-add-cell").length === 26);
-    for (const width of [2504, 1990, 1366, 390]) {
-      await page.setViewportSize({ width, height: 1000 });
+    for (const screen of screens) {
+      await page.setViewportSize(screen);
       await check("#analogs-results", "data-analog-column");
+      if (process.env.TEST_CAPTURE_DIR && [1920, 3440].includes(screen.width)) await page.locator("#analogs-results").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, `responsive-analogs-${screen.width}.png`) });
     }
     await page.setViewportSize({ width: 1990, height: 1000 });
     await check("#analogs-results", "data-analog-column");
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "table-fills-analogs.png") });
     assert.equal(searchCalls.length, 2, "layout changes must not repeat supplier searches");
-  }, { extraOffers, title: "Тестовый фильтр" });
+  }, { extraOffers, title: "Тестовый фильтр", preserveSearchState: true });
 });
 
 test("table header settings preview live, cancel safely and persist shared main and analog columns", async () => {
