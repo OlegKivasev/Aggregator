@@ -111,12 +111,17 @@ async function withCartPage(check, options = {}) {
     await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
     const origin = `http://127.0.0.1:${server.address().port}`;
     browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER_EXECUTABLE_PATH });
-    const page = await browser.newPage({ viewport: { width: 1366, height: 850 }, reducedMotion: options.reducedMotion ?? "no-preference",
+    const page = await browser.newPage({ viewport: options.viewport ?? { width: 1366, height: 850 }, reducedMotion: options.reducedMotion ?? "no-preference",
       timezoneId: options.timezoneId ?? (options.fixedTime ? "UTC" : undefined) });
     if (options.fixedTime) await page.clock.setFixedTime(new Date(options.fixedTime));
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    await page.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+    await page.route("**/*", (route) => {
+      if (process.env.TEST_BOOTSTRAP_CSS && route.request().url() === "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css") {
+        return route.fulfill({ path: process.env.TEST_BOOTSTRAP_CSS, contentType: "text/css" });
+      }
+      return new URL(route.request().url()).origin === origin ? route.continue() : route.abort();
+    });
     await page.addInitScript(({ suppliers, preserve, legacyMarkup }) => {
       if (preserve && sessionStorage.getItem("markup-test-initialized")) return;
       localStorage.setItem("autoservice.supplierVisibility", JSON.stringify(suppliers));
@@ -559,6 +564,12 @@ test("markup restores legacy values, persists applied tiers and validates the dr
 test("main and analog action columns stay compact on wide screens, after resizing and on mobile", async () => {
   await withCartPage(async (page) => {
     const measure = async (selector) => {
+      if (page.viewportSize().width <= 800) {
+        const controls = page.locator(selector).first().locator(".cart-offer-controls");
+        assert.equal(await controls.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+        assert.equal((await controls.locator(".cart-offer-button").boundingBox()).width, 44);
+        return;
+      }
       await page.waitForFunction((selector) => Math.abs(document.querySelector(selector).querySelector(".cart-add-cell").getBoundingClientRect().width - 104) <= 1, selector);
       const dimensions = await page.locator(selector).first().evaluate((row) => {
         const cell = row.querySelector(".cart-add-cell").getBoundingClientRect();
@@ -616,6 +627,11 @@ test("offer tables fill the viewport through the title while other pixels and co
     assert.equal((await saved).status(), 200);
     const storedWidths = await page.evaluate(() => localStorage.getItem("autoservice.tableColumnWidths.v1"));
     const check = async (table, attribute) => {
+      if (page.viewportSize().width <= 800) {
+        assert.equal(await page.locator(table).evaluate((viewport) => viewport.scrollWidth <= viewport.clientWidth + 1), true);
+        assert.equal(await page.locator(`${table} tbody tr`).first().evaluate((row) => getComputedStyle(row).display), "grid");
+        return;
+      }
       await page.waitForFunction((table) => {
         const viewport = document.querySelector(table);
         return Math.abs(viewport.querySelector("table").getBoundingClientRect().width - Math.max(1064, viewport.clientWidth)) <= 1;
@@ -672,6 +688,78 @@ test("offer tables fill the viewport through the title while other pixels and co
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "table-fills-analogs.png") });
     assert.equal(searchCalls.length, 2, "layout changes must not repeat supplier searches");
   }, { extraOffers, title: "Тестовый фильтр", preserveSearchState: true });
+});
+
+test("mobile offers show prices, full titles and actions without horizontal scrolling", async () => {
+  const title = "Тестовый фильтр с длинным названием ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const extraOffers = Array.from({ length: 6 }, (_, index) => offer("armtek", 4,
+    { supplier: "armtek", keyzak: `MOBILE${index}` }, {}, `${title} ${index + 1}`));
+  await withCartPage(async (page, { searchCalls }) => {
+    const checkCards = async (scope, attribute) => {
+      const row = page.locator(`${scope} tbody tr`).first();
+      await row.scrollIntoViewIfNeeded();
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      assert.equal(await page.locator(scope).evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true);
+      const clipped = await row.evaluate((node) => [...node.querySelectorAll("td")].filter((cell) => {
+        const box = cell.getBoundingClientRect();
+        return box.left < 0 || box.right > innerWidth || cell.scrollWidth > cell.clientWidth + 1;
+      }).map((cell) => cell.outerHTML));
+      assert.deepEqual(clipped, []);
+      assert.equal(await row.locator(`[${attribute}="title"] a`).innerText(), title);
+      const price = await row.locator(`[${attribute}="markupPrice"]`).boundingBox();
+      const brand = await row.locator(`[${attribute}="brand"]`).boundingBox();
+      assert.ok(Math.abs(price.y - brand.y) < 1, "price belongs at the top of the card");
+      await row.locator(".cart-offer-button").click();
+      await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+      const lastAction = page.locator(`${scope} tbody tr`).last().locator(".cart-offer-button");
+      await lastAction.scrollIntoViewIfNeeded();
+      assert.equal(await lastAction.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return box.top >= 0 && box.bottom <= innerHeight && node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+      }), true, "the last offer can be reached and its action is not clipped");
+    };
+    assert.equal(await page.locator("#filters-sidebar").isVisible(), false);
+    await page.locator("#filters-toggle").click();
+    assert.equal(await page.locator("#filters-sidebar").isVisible(), true);
+    assert.equal(await page.locator("#filters-resize").isVisible(), false);
+    await page.locator("#filters-toggle").click();
+    for (const width of [320, 390, 430, 768]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.evaluate(() => scrollTo(0, 0));
+      const price = await page.locator('#results-body tr:first-child [data-column="markupPrice"]').boundingBox();
+      assert.ok(price.y + price.height < 844, `the first price is visible at ${width}px`);
+      await checkCards("#results-table", "data-column");
+      await page.locator("#cart-toggle").click();
+      await page.locator("#cart-clear").click();
+      await page.locator("#cart-clear-confirm").getByRole("button", { name: "Очистить", exact: true }).click();
+      await page.locator("#cart-close").click();
+      if (process.env.TEST_CAPTURE_DIR) {
+        await page.evaluate(() => scrollTo(0, 0));
+        await page.locator(".cart-toast").waitFor({ state: "hidden" });
+        await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, `mobile-offers-${width}.png`) });
+      }
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('[data-sort-key="markupPrice"]').click();
+    assert.equal(await page.locator('th[data-column="markupPrice"]').getAttribute("aria-sort"), "descending");
+    await page.locator("#results-body tr .mobile-offer-menu").first().click();
+    await page.locator("#show-analogs-button").click();
+    await page.locator("#analogs-results-body tr").nth(1).waitFor();
+    assert.equal(await page.locator("#analogs-filters-sidebar").isVisible(), false);
+    await checkCards("#analogs-results", "data-analog-column");
+    await page.locator("#analogs-filters-toggle").click();
+    assert.equal(await page.locator("#analogs-filters-sidebar").isVisible(), true);
+    await page.locator("#analogs-filters-toggle").click();
+    if (process.env.TEST_CAPTURE_DIR) {
+      await page.locator("#analogs-results").evaluate((node) => { node.scrollTop = 0; });
+      await page.locator(".cart-toast").waitFor({ state: "hidden" });
+      await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "mobile-offer-analogs.png") });
+    }
+    await page.locator("button[data-close-analogs-modal]").click();
+    await page.setViewportSize({ width: 1366, height: 850 });
+    assert.equal(await page.locator("#results-body tr").first().evaluate((row) => getComputedStyle(row).display), "table-row");
+    assert.equal(searchCalls.length, 2, "layout changes do not repeat searches");
+  }, { viewport: { width: 390, height: 844 }, title, extraOffers });
 });
 
 test("table header settings preview live, cancel safely and persist shared main and analog columns", async () => {
@@ -1589,7 +1677,8 @@ test("cart toolbar hides an empty cart, uses a separate circle and keeps the lar
       const badgeBounds = await badge.boundingBox();
       const toolbarBounds = await toolbar.boundingBox();
       assert.ok(badgeBounds.x >= toolbarBounds.x && badgeBounds.y >= toolbarBounds.y);
-      assert.ok(badgeBounds.x + badgeBounds.width <= width && badgeBounds.y + badgeBounds.height <= toolbarBounds.y + toolbarBounds.height);
+      assert.ok(badgeBounds.x + badgeBounds.width <= width && badgeBounds.y + badgeBounds.height <= toolbarBounds.y + toolbarBounds.height,
+        JSON.stringify({ width, badgeBounds, toolbarBounds }));
       assert.equal(await badge.evaluate((node) => getComputedStyle(node).fontSize), "11px");
       assert.equal(await toggle.evaluate((node) => getComputedStyle(node, "::before").borderRadius), "50%");
       assert.equal(await toggle.locator("img").evaluate((node) => node.complete && node.naturalWidth > 0), true);

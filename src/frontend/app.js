@@ -159,6 +159,7 @@ const warehouseTooltip = document.querySelector("#warehouse-tooltip");
 const showAnalogsButton = document.querySelector("#show-analogs-button");
 const findImagesButton = document.querySelector("#find-images-button");
 const photoSearchButtonMarkup = '<button type="button" class="photo-search-button" aria-label="Найти изображения" title="Найти изображения"><span aria-hidden="true"></span></button>';
+const mobileOfferMenuMarkup = '<button type="button" class="mobile-offer-menu" aria-label="Действия с предложением" aria-haspopup="menu" aria-controls="result-context-menu">⋯</button>';
 const analogsModal = document.querySelector("#analogs-modal");
 const analogsSourceBrand = document.querySelector("#analogs-source-brand");
 const analogsSourceArticle = document.querySelector("#analogs-source-article");
@@ -596,6 +597,8 @@ const setFiltersSidebarOpen = (open) => {
   filtersToggle.setAttribute("aria-label", open ? "Скрыть фильтры" : "Открыть фильтры");
   filtersToggle.title = open ? "Скрыть фильтры" : "Открыть фильтры";
 };
+
+const mobileOfferLayout = window.matchMedia("(max-width: 800px)");
 
 const setFiltersSidebarWidth = (value) => {
   const width = Number(value);
@@ -1255,13 +1258,13 @@ const renderResults = () => {
 
     return `
       <tr class="results-table__row main-result-row${isBestPrice ? " is-best-price" : ""}" data-result-index="${results.indexOf(result)}" tabindex="${isSearching ? "-1" : "0"}" aria-disabled="${isSearching}" aria-label="Действия для ${escapeHtml(result.title)}">
-        <td data-column="supplier">${escapeHtml(supplierName)}</td>
-        <td data-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
-        <td data-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
-        <td data-column="title"><div class="result-title-cell">${renderOfferLink(result, result.title)}${photoSearchButtonMarkup}</div></td>
-        <td data-column="deliveryDate"><span class="delivery-date${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
-        <td data-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
-        <td data-column="markupPrice"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, settings)))}</span>${showPurchasePrice(markupSettings) ? `<span class="main-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>` : ""}${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
+        <td data-column="supplier" data-label="Поставщик">${escapeHtml(supplierName)}</td>
+        <td data-column="brand" data-label="Бренд">${escapeHtml(formatBrand(result.brand))}</td>
+        <td data-column="article" data-label="Артикул">${renderOfferLink(result, formatArticle(result.article))}</td>
+        <td data-column="title" data-label="Наименование"><div class="result-title-cell">${renderOfferLink(result, result.title)}${photoSearchButtonMarkup}${mobileOfferMenuMarkup}</div></td>
+        <td data-column="deliveryDate" data-label="Доставка"><span class="delivery-date${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
+        <td data-column="quantity" data-label="Остаток">${escapeHtml(formatQuantity(result.quantity))}</td>
+        <td data-column="markupPrice" data-label="Цена"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, settings)))}</span>${showPurchasePrice(markupSettings) ? `<span class="main-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>` : ""}${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
         ${renderCartOfferControls(result)}
       </tr>
     `;
@@ -1578,6 +1581,12 @@ const clearAuthInputs = (...inputs) => {
 settingsToggle.addEventListener("click", openSettings);
 settingsClose.addEventListener("click", closeSettings);
 settingsBackdrop.addEventListener("click", closeSettings);
+const syncOfferFilterLayout = () => {
+  setFiltersSidebarOpen(!mobileOfferLayout.matches);
+  setAnalogFiltersSidebarOpen(!mobileOfferLayout.matches && analogSearchCompleted);
+};
+syncOfferFilterLayout();
+mobileOfferLayout.addEventListener("change", syncOfferFilterLayout);
 filtersToggle.addEventListener("click", () => setFiltersSidebarOpen(filtersSidebar.hidden));
 analogFiltersToggle.addEventListener("click", () => setAnalogFiltersSidebarOpen(analogFiltersSidebar.hidden));
 passwordFields.forEach((passwordField) => {
@@ -2233,13 +2242,13 @@ const renderAnalogRows = () => {
     const isBestPrice = result === bestPrice;
     return `
       <tr class="results-table__row analogs-result-row${isBestPrice ? " is-best-price" : ""}" data-analog-result-index="${analogSearchResults.indexOf(result)}" tabindex="0" aria-label="Действия для ${escapeHtml(result.title)}">
-        <td data-analog-column="supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}</td>
-        <td data-analog-column="brand">${escapeHtml(formatBrand(result.brand))}</td>
-        <td data-analog-column="article">${renderOfferLink(result, formatArticle(result.article))}</td>
-        <td class="analogs-result-title" data-analog-column="title"><div class="result-title-cell">${renderOfferLink(result, result.title)}${photoSearchButtonMarkup}</div></td>
-        <td data-analog-column="deliveryDate"><span class="delivery-date${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
-        <td data-analog-column="quantity">${escapeHtml(formatQuantity(result.quantity))}</td>
-        <td data-analog-column="markupPrice"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${showPurchasePrice(markupSettings) ? `<span class="analogs-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>` : ""}${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
+        <td data-analog-column="supplier" data-label="Поставщик">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}</td>
+        <td data-analog-column="brand" data-label="Бренд">${escapeHtml(formatBrand(result.brand))}</td>
+        <td data-analog-column="article" data-label="Артикул">${renderOfferLink(result, formatArticle(result.article))}</td>
+        <td class="analogs-result-title" data-analog-column="title" data-label="Наименование"><div class="result-title-cell">${renderOfferLink(result, result.title)}${photoSearchButtonMarkup}${mobileOfferMenuMarkup}</div></td>
+        <td data-analog-column="deliveryDate" data-label="Доставка"><span class="delivery-date${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
+        <td data-analog-column="quantity" data-label="Остаток">${escapeHtml(formatQuantity(result.quantity))}</td>
+        <td data-analog-column="markupPrice" data-label="Цена"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${showPurchasePrice(markupSettings) ? `<span class="analogs-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>` : ""}${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>
         ${renderCartOfferControls(result)}
       </tr>`;
   }).join("");
@@ -2256,7 +2265,7 @@ const finishAnalogSearch = () => {
   analogSearchCompleted = true;
   setAnalogSearchUiState(false);
   renderAnalogRowsNow();
-  setAnalogFiltersSidebarOpen(true);
+  setAnalogFiltersSidebarOpen(!mobileOfferLayout.matches);
 };
 
 const completeAnalogSearchSource = (source) => {
@@ -2489,6 +2498,17 @@ const openImageSearch = (result) => {
 
 const registerResultActions = (body, resolveResult, canShowAnalogs) => {
   body.addEventListener("click", (event) => {
+    const menuButton = event.target.closest(".mobile-offer-menu");
+    if (menuButton) {
+      const row = menuButton.closest(".results-table__row");
+      const result = row ? resolveResult(row) : null;
+      if (result) {
+        event.stopPropagation();
+        const bounds = menuButton.getBoundingClientRect();
+        showResultContextMenu(result, bounds.left, bounds.bottom, menuButton, canShowAnalogs, !canShowAnalogs);
+      }
+      return;
+    }
     const button = event.target.closest(".photo-search-button");
     if (!button) return;
     const row = button.closest(".results-table__row");

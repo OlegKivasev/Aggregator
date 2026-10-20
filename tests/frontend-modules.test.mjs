@@ -331,7 +331,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /setAnalogSearchUiState\(true\);/);
   assert.match(app, /setAnalogSearchUiState\(false\);/);
   assert.match(app, /analogSearchCompleted = false;\s+setAnalogSearchUiState\(false\);\s+setAnalogFiltersSidebarOpen\(false\);/s);
-  assert.match(app, /analogSearchCompleted = true;\s+setAnalogSearchUiState\(false\);\s+renderAnalogRowsNow\(\);\s+setAnalogFiltersSidebarOpen\(true\);/s);
+  assert.match(app, /analogSearchCompleted = true;\s+setAnalogSearchUiState\(false\);\s+renderAnalogRowsNow\(\);\s+setAnalogFiltersSidebarOpen\(!mobileOfferLayout\.matches\);/s);
   assert.match(app, /renderAveragePrices\(container, getFilteredAnalogResults\(visibleResults\)\);/);
   assert.doesNotMatch(app, /renderAveragePrices\(container, getFilteredAnalogResults\(visibleResults\), showPurchasePrices\)/);
   assert.match(app, /analogFiltersToggle\.addEventListener\("click", \(\) => setAnalogFiltersSidebarOpen\(analogFiltersSidebar\.hidden\)\)/);
