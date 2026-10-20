@@ -161,6 +161,10 @@
               <button type="button" role="tab" data-delivery-window="all" aria-selected="true" aria-controls="results-table">Все предложения</button>
               <button type="button" role="tab" data-delivery-window="soon" aria-selected="false" aria-controls="results-table" tabindex="-1">В ближайшие дни</button>
             </div>
+            <div class="mobile-offer-tools">
+              <label class="mobile-offer-sort" for="results-mobile-sort"><span>Сортировка</span><select id="results-mobile-sort"></select></label>
+              <button type="button" class="markup-settings-trigger" data-markup-settings aria-label="Настроить клиентскую наценку" aria-haspopup="dialog" aria-controls="markup-settings-dialog" aria-expanded="false">%</button>
+            </div>
             <div class="results-empty" id="results-empty">Выполните поиск товара</div>
 
             <div class="search-loading" id="search-loading" role="status" aria-live="polite" hidden>
@@ -203,7 +207,7 @@
           </div>
         </section>
         <aside class="garage-sidebar card border-0 shadow-sm" id="garage-sidebar" hidden aria-label="Гараж">
-          <header class="garage-sidebar__header"><strong>Гараж</strong><button type="button" class="new-tab-button btn btn-light garage-create" id="garage-create" aria-label="Создать автомобиль" title="Создать автомобиль">+</button></header>
+          <header class="garage-sidebar__header"><strong>Гараж</strong><button type="button" class="new-tab-button btn btn-light garage-create" id="garage-create" aria-label="Создать автомобиль" title="Создать автомобиль">+</button><button type="button" class="garage-sidebar__close" id="garage-close" aria-label="Скрыть гараж">×</button></header>
           <form class="garage-search-form search-row" id="garage-search-form">
             <label class="visually-hidden" for="garage-search">Поиск автомобиля</label>
             <input class="search-input" id="garage-search" type="search" placeholder="Поиск автомобиля" autocomplete="off" />
@@ -813,6 +817,10 @@
             <div class="offer-delivery-tabs" id="analogs-delivery-tabs" role="tablist" aria-label="Срок доставки аналогов">
               <button type="button" role="tab" data-delivery-window="all" aria-selected="true" aria-controls="analogs-results">Все предложения</button>
               <button type="button" role="tab" data-delivery-window="soon" aria-selected="false" aria-controls="analogs-results" tabindex="-1">В ближайшие дни</button>
+            </div>
+            <div class="mobile-offer-tools">
+              <label class="mobile-offer-sort" for="analogs-mobile-sort"><span>Сортировка</span><select id="analogs-mobile-sort"></select></label>
+              <button type="button" class="markup-settings-trigger" data-markup-settings aria-label="Настроить клиентскую наценку в аналогах" aria-haspopup="dialog" aria-controls="markup-settings-dialog" aria-expanded="false">%</button>
             </div>
             <div class="search-loading analogs-search-loading" id="analogs-search-loading" role="status" aria-live="polite" hidden>
               <div class="search-loading__content">

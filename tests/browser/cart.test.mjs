@@ -740,9 +740,11 @@ test("mobile offers show prices, full titles and actions without horizontal scro
       }
     }
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.locator('[data-sort-key="markupPrice"]').click();
+    await page.locator('#results-mobile-sort').selectOption("markupPrice:descending");
     assert.equal(await page.locator('th[data-column="markupPrice"]').getAttribute("aria-sort"), "descending");
     await page.locator("#results-body tr .mobile-offer-menu").first().click();
+    await page.evaluate(() => window.dispatchEvent(new Event("scroll")));
+    assert.equal(await page.locator("#result-context-menu").isVisible(), true, "a queued scroll notification does not close a newly opened menu");
     await page.locator("#show-analogs-button").click();
     await page.locator("#analogs-results-body tr").nth(1).waitFor();
     assert.equal(await page.locator("#analogs-filters-sidebar").isVisible(), false);
@@ -760,6 +762,118 @@ test("mobile offers show prices, full titles and actions without horizontal scro
     assert.equal(await page.locator("#results-body tr").first().evaluate((row) => getComputedStyle(row).display), "table-row");
     assert.equal(searchCalls.length, 2, "layout changes do not repeat searches");
   }, { viewport: { width: 390, height: 844 }, title, extraOffers });
+});
+
+test("mobile card sorting replaces headers, orders results and stays synchronized with desktop and delivery tabs", async () => {
+  const extraOffers = [
+    offer("armtek", 8, { supplier: "armtek", keyzak: "MOBILE-SORT-1" }, { price: 80, brand: "Zulu", deliveryDate: "2026-10-22T12:00:00.000Z" }, "Я фильтр"),
+    offer("armtek", 2, { supplier: "armtek", keyzak: "MOBILE-SORT-2" }, { price: 200, brand: "Alpha", deliveryDate: "2026-10-21T12:00:00.000Z" }, "А фильтр"),
+  ];
+  await withCartPage(async (page, { searchCalls }) => {
+    const exercise = async (scope, selectId, attribute, deliveryTabs) => {
+      const select = page.locator(selectId);
+      assert.equal(await page.locator(`${scope} thead`).isVisible(), false);
+      assert.equal(await select.isVisible(), true);
+      for (const [choice, column, expected] of [
+        ["markupPrice:ascending", "brand", "Zulu"], ["markupPrice:descending", "brand", "Alpha"],
+        ["deliveryDate:ascending", "brand", "Alpha"], ["quantity:descending", "quantity", "8"],
+        ["quantity:ascending", "quantity", "2"], ["brand:ascending", "brand", "Alpha"],
+        ["brand:descending", "brand", "Zulu"], ["supplier:descending", "supplier", "PartKOM"],
+        ["title:ascending", "brand", "Alpha"], ["title:descending", "brand", "Zulu"],
+      ]) {
+        await select.selectOption(choice);
+        await page.waitForFunction(({ scope, attribute, column, expected }) =>
+          document.querySelector(`${scope} tbody tr [${attribute}="${column}"]`)?.textContent === expected,
+        { scope, attribute, column, expected });
+      }
+      await select.selectOption("quantity:descending");
+      await page.locator(`${deliveryTabs} [data-delivery-window="soon"]`).click();
+      assert.equal(await select.inputValue(), "deliveryDate:ascending");
+      await page.locator(`${deliveryTabs} [data-delivery-window="all"]`).click();
+      assert.equal(await select.inputValue(), "quantity:descending");
+      await page.setViewportSize({ width: 1366, height: 850 });
+      assert.equal(await select.isVisible(), false);
+      assert.equal(await page.locator(`${scope} thead`).isVisible(), true);
+      await page.locator(`${scope} th[${attribute}="markupPrice"] button`).last().click();
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert.equal(await select.inputValue(), "markupPrice:ascending");
+      const tools = select.locator("xpath=ancestor::div[contains(@class, 'mobile-offer-tools')]");
+      await tools.locator("[data-markup-settings]").click();
+      assert.equal(await page.locator("#markup-settings-dialog").isVisible(), true);
+      await page.keyboard.press("Escape");
+      assert.equal(await select.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+    };
+    await exercise("#results-table", "#results-mobile-sort", "data-column", "#results-delivery-tabs");
+    await page.locator("#results-body .mobile-offer-menu").first().click();
+    await page.locator("#show-analogs-button").click();
+    await page.locator("#analogs-results-body tr").nth(3).waitFor();
+    await exercise("#analogs-results", "#analogs-mobile-sort", "data-analog-column", "#analogs-delivery-tabs");
+    assert.equal(searchCalls.length, 2, "sorting uses loaded offers without repeating supplier searches");
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "mobile-card-sorting-analogs.png") });
+    await page.locator("#analogs-mobile-sort").locator("xpath=ancestor::div[contains(@class, 'mobile-offer-tools')]").locator("[data-markup-settings]").click();
+    const markup = page.locator("#markup-settings-dialog");
+    await markup.locator('[data-markup-mode="tiered"]').click();
+    await markup.locator("#markup-add-tier").click();
+    await markup.locator("[data-tier-price]").fill("100");
+    await markup.locator("[data-tier-percent]").fill("200");
+    await markup.locator("#markup-fallback-percent").fill("0");
+    await markup.locator("#markup-apply").click();
+    await page.locator("button[data-close-analogs-modal]").click();
+    await page.locator("#results-body .mobile-offer-menu").first().click();
+    await page.locator("#show-analogs-button").click();
+    await page.locator("#analogs-results-body tr").nth(3).waitFor();
+    assert.equal(await page.locator("#analogs-mobile-sort").inputValue(), "markupPrice:ascending");
+    assert.equal(await page.locator('#analogs-results-body tr:first-child [data-analog-column="supplier"]').textContent(), "PartKOM",
+      "default mobile sorting uses the displayed price even when tiers reverse purchase-price order");
+  }, { viewport: { width: 390, height: 844 }, extraOffers, fixedTime: "2026-10-20T12:00:00.000Z" });
+});
+
+test("mobile garage expands in the page and can be hidden by its toggle, close button and Escape", async () => {
+  await withCartPage(async (page, { origin }) => {
+    for (let index = 1; index <= 8; index++) {
+      const response = await page.request.post(`${origin}/api/garage/vehicles`, { data: { name: `Тестовый автомобиль ${index}` } });
+      assert.equal(response.status(), 201);
+    }
+    await page.reload();
+    await page.locator("#garage-vehicles .garage-vehicles__button").nth(7).waitFor({ state: "attached" });
+    const toggle = page.locator("#garage-toggle");
+    const sidebar = page.locator("#garage-sidebar");
+    for (const width of [320, 390, 768]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.locator("#filters-toggle").click();
+      await toggle.click();
+      assert.equal(await toggle.isVisible(), true);
+      assert.equal(await sidebar.evaluate((node) => getComputedStyle(node).position), "static");
+      const bounds = await sidebar.boundingBox();
+      const filterBounds = await page.locator("#filters-sidebar").boundingBox();
+      const searchBounds = await page.locator(".search-toolbar").boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width && bounds.height <= 844 * .45 + 1);
+      assert.ok(bounds.y >= filterBounds.y + filterBounds.height && searchBounds.y >= bounds.y + bounds.height);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      assert.equal(await page.locator("#garage-resize").isVisible(), false);
+      const filterToggle = await page.locator("#filters-toggle").boundingBox();
+      const garageToggle = await toggle.boundingBox();
+      assert.ok(filterToggle.x + filterToggle.width <= garageToggle.x, "both toggles remain separate when expanded");
+      await toggle.click();
+      assert.equal(await sidebar.isVisible(), false);
+      await toggle.click();
+      await page.locator("#garage-close").click();
+      assert.equal(await sidebar.isVisible(), false);
+      assert.equal(await toggle.evaluate((node) => node === document.activeElement), true);
+      await toggle.click();
+      await page.locator("#garage-search").fill("автомобиль 8");
+      await page.waitForFunction(() => document.querySelectorAll("#garage-vehicles .garage-vehicles__button").length === 1);
+      if (process.env.TEST_CAPTURE_DIR && width === 390) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "mobile-garage-expanded.png") });
+      await page.locator("#garage-search").press("Escape");
+      assert.equal(await sidebar.isVisible(), false);
+      await page.locator("#filters-toggle").click();
+    }
+    await page.setViewportSize({ width: 1366, height: 850 });
+    await toggle.click();
+    assert.equal(await sidebar.evaluate((node) => getComputedStyle(node).position), "relative");
+    assert.equal(await page.locator("#garage-resize").isVisible(), true);
+    assert.equal(await page.locator("#garage-close").isVisible(), false);
+  }, { viewport: { width: 390, height: 844 }, preserveSearchState: true });
 });
 
 test("table header settings preview live, cancel safely and persist shared main and analog columns", async () => {
@@ -1674,8 +1788,10 @@ test("cart toolbar hides an empty cart, uses a separate circle and keeps the lar
       await page.setViewportSize({ width, height: 850 });
       const badge = page.locator("#cart-badge");
       const toolbar = page.locator(".search-toolbar");
-      const badgeBounds = await badge.boundingBox();
-      const toolbarBounds = await toolbar.boundingBox();
+      const { badgeBounds, toolbarBounds } = await toolbar.evaluate((node) => ({
+        badgeBounds: node.querySelector("#cart-badge").getBoundingClientRect().toJSON(),
+        toolbarBounds: node.getBoundingClientRect().toJSON(),
+      }));
       assert.ok(badgeBounds.x >= toolbarBounds.x && badgeBounds.y >= toolbarBounds.y);
       assert.ok(badgeBounds.x + badgeBounds.width <= width && badgeBounds.y + badgeBounds.height <= toolbarBounds.y + toolbarBounds.height,
         JSON.stringify({ width, badgeBounds, toolbarBounds }));

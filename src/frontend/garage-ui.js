@@ -960,6 +960,16 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch, addToCart, onVi
     renderModalGroups();
   };
   toggle.addEventListener("click", () => setSidebarOpen(sidebar.hidden));
+  const closeSidebar = () => {
+    setSidebarOpen(false);
+    toggle.focus({ preventScroll: true });
+  };
+  document.querySelector("#garage-close").addEventListener("click", closeSidebar);
+  sidebar.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    closeSidebar();
+  });
   sidebar.addEventListener("dragenter", (event) => { event.preventDefault(); sidebar.classList.add("is-drop-target"); });
   sidebar.addEventListener("dragover", (event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; });
   sidebar.addEventListener("dragleave", (event) => { if (!sidebar.contains(event.relatedTarget)) sidebar.classList.remove("is-drop-target"); });

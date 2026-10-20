@@ -198,6 +198,7 @@ let mainSortBeforeSoon = null;
 let analogSortBeforeSoon = null;
 let contextMenuResult = null;
 let contextMenuAnchor = null;
+let contextMenuAnchorPosition = null;
 let contextMenuTabId = null;
 let contextMenuTabAnchor = null;
 let analogSearchSources = new Set();
@@ -905,6 +906,46 @@ const updateSortHeaders = (buttons, state) => {
   });
 };
 
+const setupMobileOfferSort = (select, onChange) => {
+  const labels = {
+    markupPrice: ["Цена: сначала дешевле", "Цена: сначала дороже"],
+    deliveryDate: ["Доставка: сначала ближайшие", "Доставка: сначала поздние"],
+    quantity: ["Остаток: сначала больше", "Остаток: сначала меньше"],
+    supplier: ["Поставщик: А–Я", "Поставщик: Я–А"],
+    brand: ["Бренд: А–Я", "Бренд: Я–А"],
+    article: ["Артикул: А–Я", "Артикул: Я–А"],
+    title: ["Название: А–Я", "Название: Я–А"],
+  };
+  const states = new Map();
+  for (const [key, choices] of Object.entries(labels)) {
+    choices.forEach((label, index) => {
+      const direction = (key === "quantity" ? index === 1 : index === 0) ? "ascending" : "descending";
+      const value = `${key}:${direction}`;
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      select.append(option);
+      states.set(value, { key, direction });
+    });
+  }
+  select.addEventListener("change", () => {
+    const state = states.get(select.value);
+    if (state) onChange({ ...state });
+  });
+  return (state) => {
+    select.value = `${state.key}:${state.direction}`;
+  };
+};
+const syncMobileMainSort = setupMobileOfferSort(document.querySelector("#results-mobile-sort"), (state) => {
+  sortState = state;
+  renderResults();
+});
+const syncMobileAnalogSort = setupMobileOfferSort(document.querySelector("#analogs-mobile-sort"), (state) => {
+  analogSortState = state;
+  analogVisibleLimit = 200;
+  renderAnalogRowsNow();
+});
+
 const updateResultCount = (items) => {
   const supplierCounts = items.reduce((counts, result) => {
     counts[result.supplier] = (counts[result.supplier] ?? 0) + 1;
@@ -1249,6 +1290,7 @@ const renderResults = () => {
     .reduce((best, result) => !best || getMarkupPrice(result, markupSettings) < getMarkupPrice(best, markupSettings) ? result : best, null);
   const isSearching = Boolean(getActiveTab()?.source);
   updateSortHeaders(sortButtons, sortState);
+  syncMobileMainSort(sortState);
   const renderResult = (result, settings) => {
     const supplierName = supplierNames[result.supplier] ?? result.supplier;
     const deliveryDate = result.supplier === "mladov" && !result.deliveryDate
@@ -2081,14 +2123,16 @@ const hideResultContextMenu = (restoreFocus = false) => {
   resultContextMenu.hidden = true;
   contextMenuResult = null;
   if (restoreFocus && contextMenuAnchor?.isConnected) {
-    contextMenuAnchor.focus();
+    contextMenuAnchor.focus({ preventScroll: true });
   }
   contextMenuAnchor = null;
+  contextMenuAnchorPosition = null;
 };
 
 const showResultContextMenu = (result, clientX, clientY, anchor, canShowAnalogs, canSearchResult) => {
   contextMenuResult = result;
   contextMenuAnchor = anchor;
+  contextMenuAnchorPosition = anchor.getBoundingClientRect();
   showAnalogsButton.hidden = !canShowAnalogs;
   searchResultButton.hidden = !canSearchResult;
   resultContextMenu.hidden = false;
@@ -2224,6 +2268,7 @@ const renderAnalogRows = () => {
   analogsCount.dataset.tooltip = supplierBreakdown;
   analogsCount.setAttribute("aria-label", supplierBreakdown ? `По поставщикам:\n${supplierBreakdown}` : "Нет аналогов");
   updateAnalogSortHeaders();
+  syncMobileAnalogSort(analogSortState);
   renderAnalogFilterValues();
 
   if (!rows.length) {
@@ -2304,7 +2349,7 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
     const selected = button.dataset.deliveryWindow === "all";
     button.setAttribute("aria-selected", String(selected)); button.tabIndex = selected ? 0 : -1;
   });
-  analogSortState = { key: "price", direction: "ascending" };
+  analogSortState = { key: mobileOfferLayout.matches ? "markupPrice" : "price", direction: "ascending" };
   analogSearchSuppliers = analogSupplierIds.filter(isSupplierVisible);
   analogVisibleLimit = 200;
   analogSearchCompleted = false;
@@ -2623,7 +2668,13 @@ window.addEventListener("resize", () => {
   hideTabContextMenu(true);
 });
 window.addEventListener("scroll", () => {
-  hideResultContextMenu(true);
+  if (contextMenuAnchor && contextMenuAnchorPosition) {
+    const bounds = contextMenuAnchor.getBoundingClientRect();
+    // A queued scroll event may arrive after opening a menu at its final position.
+    if (!contextMenuAnchor.isConnected || bounds.top !== contextMenuAnchorPosition.top || bounds.left !== contextMenuAnchorPosition.left) {
+      hideResultContextMenu(true);
+    }
+  }
   hideTabContextMenu(true);
 }, true);
 window.addEventListener("resize", hideWarehouseTooltip);
@@ -3078,6 +3129,12 @@ const offerTableResizeObserver = new ResizeObserver((entries) => {
 });
 offerTableResizeObserver.observe(resultsTable);
 offerTableResizeObserver.observe(analogsResults);
+mobileOfferLayout.addEventListener("change", () => {
+  if (mobileOfferLayout.matches && analogSortState.key === "price") {
+    analogSortState = { ...analogSortState, key: "markupPrice" };
+    renderAnalogRowsNow();
+  }
+});
 
 loadSharedColumnWidths().then((savedWidths) => {
   Object.assign(tableColumnWidths, applySavedColumnWidths(tableColumnWidths, { ...savedWidths.analogs, ...savedWidths.main }));
