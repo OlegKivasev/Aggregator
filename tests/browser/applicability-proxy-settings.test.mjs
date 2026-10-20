@@ -48,7 +48,6 @@ test("PartsAPI proxy settings save secrets securely, switch automatically and al
     page.on("pageerror", (error) => errors.push(error.message));
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
     await page.goto(baseUrl);
-    await page.waitForLoadState("networkidle");
     await page.locator("#applicability-function-tab").click();
     const indicator = page.locator("#applicability-route-indicator");
     await page.waitForFunction(() => document.querySelector("#applicability-route-indicator").textContent.includes("прямое соединение"));
@@ -142,7 +141,6 @@ test("PartsAPI proxy settings save secrets securely, switch automatically and al
     await first.getByRole("button", { name: "Удалить", exact: true }).click();
     await page.waitForFunction(() => ![...document.querySelectorAll(".applicability-proxy-route")].some((row) => row.textContent.includes("8.8.8.8")));
     await page.reload();
-    await page.waitForLoadState("networkidle");
     await page.waitForFunction(() => document.querySelector("#applicability-route-indicator").textContent.includes("edge-9-9-9-9.proxy.example.org"));
     assert.deepEqual(errors, []);
   } finally {
@@ -189,8 +187,8 @@ test("repeated file imports grow beyond 100 proxies and preserve automatic switc
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await page.waitForLoadState("networkidle");
     await page.locator("#applicability-function-tab").click();
+    await page.waitForFunction(() => document.querySelector("#applicability-route-indicator").textContent.includes("прямое соединение"));
     await page.locator("#applicability-route-indicator").click();
     const file = (text) => ({ name: "fictional-proxies.txt", mimeType: "text/plain", buffer: Buffer.from(text) });
     await page.locator("#applicability-proxy-import-file").setInputFiles(file("8.8.8.8:8080:user:secret\n127.0.0.1:8080:user:secret"));
