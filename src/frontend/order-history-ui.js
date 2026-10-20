@@ -153,10 +153,11 @@ function renderOrder(order, limited, supplierName, supplier) {
   const tbody = element("tbody");
   for (const item of rows) {
     const row = element("tr");
-    const part = element("td");
+    const part = element("td", "history-item-part");
     part.append(element("strong", "", [item.brand, item.article].filter(Boolean).join(" ")));
     if (item.title) part.append(element("span", "", item.title));
-    const delivery = element("td");
+    const delivery = element("td", "history-item-delivery");
+    delivery.dataset.label = "Доставка";
     const active = !["delivered", "cancelled", "returned"].includes(item.fulfillment);
     const highlightDelivery = active && hasSupplierWeekendDelivery(supplier, item.expectedDate);
     delivery.append(element("strong", highlightDelivery && item.expectedDate ? "delivery-date--warning" : "", formatOrderDate(item.expectedDate) ?? "Не указана"));
@@ -167,6 +168,7 @@ function renderOrder(order, limited, supplierName, supplier) {
     }
     if (item.warehouse) delivery.append(element("span", "", item.warehouse));
     const status = element("td", "history-item-status");
+    status.dataset.label = "Статус";
     status.append(fulfillmentBadge(item.fulfillment));
     if (item.status) status.append(element("span", "history-status-detail", item.status));
     if (supplier === "armtek") {
@@ -177,9 +179,11 @@ function renderOrder(order, limited, supplierName, supplier) {
       }
       status.append(terms);
     }
-    const price = element("td", "history-number");
+    const price = element("td", "history-number history-item-price");
+    price.dataset.label = "Цена × кол-во";
     price.append(element("strong", "", item.price === null ? "—" : money.format(item.price)), element("span", "", `${item.quantity} шт.`));
-    const sum = element("td", "history-number", item.price === null ? "—" : money.format(item.price * item.quantity));
+    const sum = element("td", "history-number history-item-sum", item.price === null ? "—" : money.format(item.price * item.quantity));
+    sum.dataset.label = "Сумма";
     row.append(part, delivery, status, price, sum);
     tbody.append(row);
   }

@@ -367,6 +367,101 @@ body:has(.cart-modal[open]) { overflow: hidden; }
   .cart-order-table td[data-label]::before { display: block; margin-bottom: 4px; color: var(--muted); font-size: 11px; font-weight: 400; content: attr(data-label); }
 }
 body:has(.garage-add-modal:not([hidden])) { overflow: hidden; }
+.cart-mobile-label { display: none; }
+@media (max-width: 800px) {
+  #cart-modal, #history-modal, #cart-order-confirm {
+    position: fixed;
+    inset: 0;
+    width: calc(100% - 16px);
+    max-width: none;
+    max-height: calc(100dvh - 16px);
+    min-height: 0;
+    margin: auto;
+    overflow: hidden;
+    border-radius: 12px;
+  }
+  :is(#cart-modal, #history-modal, #cart-order-confirm) .analogs-modal__header { flex: 0 0 auto; padding: 12px; gap: 8px; }
+  :is(#cart-modal, #history-modal, #cart-order-confirm) .analogs-modal__header h2 { min-width: 0; font-size: 20px; overflow-wrap: anywhere; }
+  :is(#cart-modal, #history-modal, #cart-order-confirm) .cart-tabs { flex: 0 0 auto; padding-inline: 12px; }
+  #cart-modal .cart-tabs { flex-wrap: wrap; overflow: visible; }
+  :is(#cart-modal, #history-modal, #cart-order-confirm) .cart-content { flex: 1 1 auto; min-width: 0; min-height: 0; padding: 12px; overflow: auto; }
+  :is(#cart-modal, #history-modal, #cart-order-confirm) .cart-footer { min-width: 0; padding: 12px; gap: 12px; }
+  #cart-modal .cart-footer__summary { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
+  #cart-modal .cart-footer__summary > * { min-width: 0; overflow-wrap: anywhere; }
+  #cart-modal .cart-footer strong { font-size: 20px; }
+  #cart-modal .cart-footer > .btn { width: 100%; margin-left: 0; min-height: 44px; }
+  #cart-modal .cart-table-scroll, #cart-order-confirm .cart-table-scroll { overflow: visible; }
+  #cart-modal .cart-table, #cart-order-confirm .cart-order-table { display: block; width: 100%; min-width: 0; }
+  #cart-modal .cart-table thead, #cart-modal .cart-table thead tr { display: block; }
+  #cart-modal .cart-table th:not(.cart-select-column) { display: none; }
+  #cart-modal .cart-table th.cart-select-column { display: block; width: auto; padding: 4px 12px; }
+  #cart-modal .cart-selection { display: inline-flex; min-height: 44px; align-items: center; gap: 8px; margin: 0; font-size: 13px; cursor: pointer; }
+  #cart-modal .cart-mobile-label { display: inline; }
+  #cart-modal .cart-table input[type="checkbox"] { width: 20px; height: 20px; }
+  #cart-modal .cart-table tbody { display: grid; gap: 12px; padding: 10px; background: var(--page); }
+  #cart-modal tr[data-cart-item-id] {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "select remove" "part sum" "name name" "supplier supplier" "delivery delivery" "price quantity";
+    align-items: start;
+    gap: 10px 12px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+  }
+  #cart-modal tr[data-cart-item-id].is-selected { border-color: #ffc3b0; background: #fff8f4; }
+  #cart-modal .cart-table td, #cart-order-confirm .cart-order-table td {
+    display: block;
+    width: auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    background: transparent;
+    box-shadow: none;
+    text-align: left;
+  }
+  #cart-modal .cart-select-cell { grid-area: select; }
+  #cart-modal .cart-item-remove { grid-area: remove; justify-self: end; }
+  #cart-modal .cart-item-part { grid-area: part; font-weight: 700; }
+  #cart-modal .cart-item-name { grid-area: name; }
+  #cart-modal .cart-item-supplier { grid-area: supplier; }
+  #cart-modal .cart-item-delivery { grid-area: delivery; }
+  #cart-modal .cart-item-price { grid-area: price; }
+  #cart-modal .cart-item-quantity { grid-area: quantity; }
+  #cart-modal .cart-item-sum { grid-area: sum; }
+  #cart-modal .cart-item-sum .cart-price { font-size: 18px; }
+  #cart-modal td[data-label]::before, #history-modal td[data-label]::before,
+  #cart-order-confirm td[data-label]::before { display: block; margin-bottom: 4px; color: var(--muted); font-size: 11px; font-weight: 400; content: attr(data-label); }
+  #cart-modal .cart-quantity { width: 84px; max-width: 100%; min-height: 44px; font-size: 16px; }
+  #cart-modal .cart-item-stock { white-space: normal; }
+  #cart-modal .cart-remove { width: 44px; height: 44px; }
+  #cart-modal .cart-empty { grid-column: 1 / -1; }
+  #cart-order-confirm .cart-order-table thead, #history-modal .history-card thead,
+  #history-modal .history-card colgroup { display: none; }
+  #cart-order-confirm .cart-order-table tbody { display: block; }
+  #cart-order-confirm .cart-order-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px; border-bottom: 1px solid var(--line); }
+  #cart-order-confirm .cart-order-table .cart-item-part, #cart-order-confirm .cart-order-table .cart-item-name,
+  #cart-order-confirm .cart-order-table .cart-item-sum { grid-column: 1 / -1; }
+  #cart-order-confirm .cart-order-group-header { flex-wrap: wrap; }
+  #cart-order-confirm .cart-order-group-total { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  #cart-order-confirm .cart-confirm-actions { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  #cart-order-confirm .cart-confirm-actions .btn { min-width: 0; min-height: 44px; padding: 8px; white-space: normal; }
+  #history-modal .history-card__table-wrap { overflow: visible; }
+  #history-modal .history-card table { display: block; min-width: 0; width: 100%; }
+  #history-modal .history-card tbody { display: block; }
+  #history-modal .history-card tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 14px 12px; border-top: 1px solid var(--line); }
+  #history-modal .history-card td { display: block; min-width: 0; padding: 0; border: 0; text-align: left; }
+  #history-modal .history-item-part, #history-modal .history-item-delivery, #history-modal .history-item-status { grid-column: 1 / -1; }
+  #history-modal .history-item-sum { font-weight: 700; }
+  #history-modal .history-toolbar button, #history-modal .history-status-tab { min-height: 44px; }
+  #history-modal .history-period { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr); }
+  #history-modal .history-period label { justify-content: space-between; }
+  #history-modal .history-period input, #history-modal .history-search { min-height: 44px; font-size: 16px; }
+  #history-modal .history-actions { margin-left: 0; }
+}
 .garage-add-modal { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; }
 .garage-add-modal[hidden] { display: none; }
 .garage-add-modal__backdrop { position: absolute; inset: 0; background: rgba(17, 24, 32, .64); backdrop-filter: blur(5px); }

@@ -150,6 +150,23 @@ async function openCheckout(page) {
   await page.waitForFunction(() => document.querySelector("#cart-order-confirm").open);
 }
 
+async function assertMobileDialogFits(page, selector) {
+  const clipped = await page.locator(selector).evaluate((dialog) => {
+    const outer = dialog.getBoundingClientRect();
+    const problems = [];
+    if (outer.left < 0 || outer.right > innerWidth || outer.top < 0 || outer.bottom > innerHeight + 1) problems.push({ dialog: outer.toJSON(), width: innerWidth, height: innerHeight });
+    for (const node of [dialog, ...dialog.querySelectorAll(".cart-content, .cart-table-scroll, table, td, input, select, button, .history-card")]) {
+      if (!node.getClientRects().length) continue;
+      const box = node.getBoundingClientRect();
+      if (box.left < outer.left || box.right > outer.right + 1 || node.scrollWidth > node.clientWidth + 1) {
+        problems.push({ tag: node.tagName, className: node.className, text: node.textContent.slice(0, 80) });
+      }
+    }
+    return problems;
+  });
+  assert.deepEqual(clipped, [], `${selector} must fit without horizontal scrolling`);
+}
+
 async function openGarageWithFirstOffer(page, { all = false, quantity = 1, beforeOpen } = {}) {
   const origin = new URL(page.url()).origin;
   const created = await page.request.post(`${origin}/api/garage/vehicles`, { data: { name: "Гранта" } });
@@ -1435,8 +1452,10 @@ test("analog cart controls use shared quantities, merge additions and order the 
     await openOfferAnalogs(page, page.locator("#results-body tr").first());
     await page.waitForFunction(() => document.querySelectorAll("#analogs-results-body .cart-offer-button").length === 4);
     const armtek = page.locator("#analogs-results-body tr").filter({ hasText: "AN-ARM" });
-    const cartBounds = await armtek.locator(".cart-offer-button").boundingBox();
-    const garageBounds = await armtek.locator(".garage-offer-button").boundingBox();
+    const { cartBounds, garageBounds } = await armtek.evaluate((row) => ({
+      cartBounds: row.querySelector(".cart-offer-button").getBoundingClientRect().toJSON(),
+      garageBounds: row.querySelector(".garage-offer-button").getBoundingClientRect().toJSON(),
+    }));
     assert.ok(Math.abs(cartBounds.x - garageBounds.x) <= 1); assert.ok(garageBounds.y >= cartBounds.y + cartBounds.height + 2);
     assert.equal(await armtek.locator(".garage-offer-button").getAttribute("aria-disabled"), "false");
     assert.equal(await armtek.locator(".garage-offer-button").getAttribute("data-garage-offer-id"), await armtek.locator(".cart-offer-button").getAttribute("data-cart-offer-id"));
@@ -1742,6 +1761,106 @@ test("a definite Forum Auto refusal keeps the item selectable and names the fail
   }, { allSuppliers: true, reducedMotion: "reduce", forumAutoRefusal: "Forum Auto отклонил заказ: превышен доступный лимит." });
 });
 
+test("mobile cart and checkout show complete item cards with working selection, quantity and removal", async () => {
+  const title = "Комплект сцепления с выжимным подшипником ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  await withCartPage(async (page, { orderCalls }) => {
+    for (let index = 0; index < 4; index++) {
+      await page.locator("#results-body .cart-offer-button").nth(index).click();
+      await page.waitForFunction((count) => document.querySelector("#cart-badge").textContent === String(count), index + 1);
+    }
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#cart-refresh-overlay").hidden && document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 4);
+    for (const viewport of [{ width: 320, height: 740 }, { width: 390, height: 844 }, { width: 768, height: 600 }]) {
+      await page.setViewportSize(viewport);
+      await assertMobileDialogFits(page, "#cart-modal");
+      assert.equal(await page.locator("#cart-items .cart-item-name").first().innerText(), title);
+      assert.equal(await page.locator("#cart-modal th").filter({ hasText: "Наименование" }).isVisible(), false);
+      const button = await page.locator("#cart-test-order").boundingBox();
+      assert.ok(button.y >= 0 && button.y + button.height <= viewport.height);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator("#cart-select-all").check();
+    assert.equal(await page.locator("#cart-items .cart-item-select:checked").count(), 4);
+    await page.locator("#cart-select-all").uncheck();
+    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    await page.locator("#cart-select-all").check();
+    const first = page.locator("#cart-items tr[data-cart-item-id]").first();
+    await first.locator(".cart-quantity").fill("3");
+    await first.locator(".cart-quantity").press("Tab");
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "6");
+    assert.equal(await first.locator(".cart-item-sum .cart-price").textContent(), "405,00");
+    if (process.env.TEST_CAPTURE_DIR) {
+      await page.locator("#cart-modal .cart-content").evaluate((node) => { node.scrollTop = 0; });
+      await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "mobile-cart-cards.png") });
+    }
+    await page.locator("#cart-tab-part-kom").click();
+    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 1);
+    await assertMobileDialogFits(page, "#cart-modal");
+    await page.locator("#cart-tab-all").click();
+    await openCheckout(page);
+    assert.equal(await page.locator(".cart-order-group").count(), 4);
+    for (const width of [320, 390, 768]) {
+      await page.setViewportSize({ width, height: 740 });
+      await assertMobileDialogFits(page, "#cart-order-confirm");
+      assert.equal(await page.locator("#cart-order-confirm thead").first().isVisible(), false);
+      const button = await page.locator("#cart-order-accept").boundingBox();
+      assert.ok(button.y >= 0 && button.y + button.height <= 740);
+    }
+    if (process.env.TEST_CAPTURE_DIR) {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.locator("#cart-order-confirm .cart-content").evaluate((node) => { node.scrollTop = 0; });
+      await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "mobile-checkout-cards.png") });
+    }
+    await page.locator("#cart-order-cancel").click();
+    assert.equal(orderCalls.length, 0, "reviewing the mobile layout never submits an order");
+    await page.locator("#cart-items .cart-remove").last().click();
+    await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 3);
+    await page.setViewportSize({ width: 1366, height: 850 });
+    assert.equal(await page.locator("#cart-modal table").evaluate((node) => getComputedStyle(node).display), "table");
+    assert.equal(await page.locator("#cart-modal th").filter({ hasText: "Наименование" }).isVisible(), true);
+  }, { allSuppliers: true, viewport: { width: 390, height: 844 }, title });
+});
+
+test("mobile order history shows full item details and retains supplier, status and search filters", async () => {
+  const title = "Комплект сцепления с выжимным подшипником ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const history = { limited: false, orders: [{ number: "MOBILE-ORDER-0123456789", date: "2026-10-15 12:30:00", items: [
+    { article: "A1", brand: "TEST", title, quantity: 2, price: 1234.5, status: "Ожидается поставка на основной склад поставщика",
+      fulfillment: "processing", expectedDate: "2026-10-22", guaranteedDate: "2026-10-23", warehouse: "Тестовый склад с длинным названием", returnDays: 14 },
+    { article: "A2", brand: "TEST", title: "Тестовая деталь", quantity: 1, price: null, status: "Получено", fulfillment: "delivered",
+      expectedDate: null, guaranteedDate: null, warehouse: null, returnDays: null },
+  ] }] };
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.locator(".history-card").waitFor();
+    for (const supplier of ["part-kom", "armtek", "forum-auto", "rossko", "all"]) {
+      await page.locator(`#history-tab-${supplier}`).click();
+      await page.waitForFunction((count) => document.querySelectorAll(".history-card").length === count && !document.querySelector(".history-loading"), supplier === "all" ? 4 : 1);
+      for (const width of [320, 390, 768]) {
+        await page.setViewportSize({ width, height: 740 });
+        await assertMobileDialogFits(page, "#history-modal");
+        const card = page.locator(".history-card").first();
+        assert.equal(await card.locator("thead").isVisible(), false);
+        assert.match(await card.locator(".history-item-part").first().innerText(), new RegExp(title));
+        assert.match(await card.locator(".history-item-delivery").first().innerText(), /22.10.2026/);
+        assert.match(await card.locator(".history-item-status").first().innerText(), /Ожидается поставка/);
+        assert.equal(await card.locator(".history-item-price").last().innerText(), "—\n1 шт.");
+      }
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator("#history-search").fill("A1");
+    assert.equal(await page.locator(".history-card").count(), 4);
+    if (process.env.TEST_CAPTURE_DIR) {
+      await page.locator("#history-modal .cart-content").evaluate((node) => { node.scrollTop = 0; });
+      await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "mobile-history-cards.png") });
+    }
+    await page.setViewportSize({ width: 1366, height: 850 });
+    assert.equal(await page.locator(".history-card thead").first().isVisible(), true);
+    assert.equal(await page.locator(".history-card table").first().evaluate((node) => getComputedStyle(node).display), "table");
+    await page.locator("#history-close").click();
+    assert.equal(await page.locator("#history-toggle").evaluate((node) => node === document.activeElement), true);
+  }, { allSuppliers: true, viewport: { width: 390, height: 844 }, partKomOrderHistory: async () => history, supplierOrderHistory: async () => history });
+});
+
 test("cart honors reduced motion, constrains focus and fits mobile viewport", async () => {
   await withCartPage(async (page) => {
     await page.locator("#history-toggle").click();
@@ -1890,7 +2009,7 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     assert.equal(await page.locator("#cart-modal header #cart-summary").count(), 0);
     assert.equal(await page.locator(".cart-test-note").count(), 0);
     assert.equal(await page.locator("#cart-items a").count(), 0);
-    assert.deepEqual(await page.locator("#cart-modal .cart-table th").allTextContents(), ["", "Запчасть", "Наименование", "Поставщик", "Доставка", "Цена, ₽", "Кол-во", "Стоимость, ₽", "Удалить"]);
+    assert.deepEqual(await page.locator("#cart-modal .cart-table th").allInnerTexts(), ["", "Запчасть", "Наименование", "Поставщик", "Доставка", "Цена, ₽", "Кол-во", "Стоимость, ₽", "Удалить"]);
     assert.equal(await page.locator("#cart-items .cart-item-name").first().textContent(), "Сайлентблок балки моста");
     const firstRow = page.locator("#cart-items tr[data-cart-item-id]").first();
     assert.equal(await firstRow.locator(".cart-item-price .cart-price").textContent(), "135,00");
@@ -3304,6 +3423,11 @@ test("history sorts every supplier newest first regardless of item status and al
   const expected = ["UNAVAILABLE", "RECEIVED", "CANCELLED-MIXED", "PARTIAL-MIXED", "PROCESSING-NEW", "RETURNED",
     "READY", "MOVING-MIXED", "UNKNOWN", "PROCESSING-MIXED", "PROCESSING-OLD", "UNPRICED"].map((number) => `Заказ № ${number}`);
   const alignedColumns = async (page) => {
+    if (page.viewportSize().width <= 800) {
+      await assertMobileDialogFits(page, "#history-modal");
+      assert.equal(await page.locator(".history-card tbody tr").evaluateAll((rows) => rows.every((row) => getComputedStyle(row).display === "grid")), true);
+      return;
+    }
     const cards = await page.locator(".history-card").evaluateAll((nodes) => nodes.map((node) => {
       const rect = (element) => { const { x, width } = element.getBoundingClientRect(); return { x, width }; };
       return { columns: [...node.querySelectorAll("thead th")].map(rect),

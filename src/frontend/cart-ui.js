@@ -225,7 +225,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     <div class="cart-tabs" id="cart-tabs" role="tablist" aria-label="Поставщики в корзине"></div>
     <div class="cart-content" id="cart-tab-panel" role="tabpanel" aria-labelledby="cart-tab-all">
       <div class="cart-table-scroll"><table class="table align-middle cart-table"><thead><tr>
-        <th class="cart-select-column"><input id="cart-select-all" type="checkbox" aria-label="Выбрать все товары вкладки" title="Выбрать все товары вкладки"></th><th>Запчасть</th><th>Наименование</th><th id="cart-supplier-column">Поставщик</th><th>Доставка</th><th class="cart-price-column">Цена, ₽</th><th class="cart-quantity-column">Кол-во</th><th class="cart-price-column">Стоимость, ₽</th><th><span class="visually-hidden">Удалить</span></th>
+        <th class="cart-select-column"><label class="cart-selection"><input id="cart-select-all" type="checkbox" aria-label="Выбрать все товары вкладки" title="Выбрать все товары вкладки"><span class="cart-mobile-label">Выбрать все</span></label></th><th>Запчасть</th><th>Наименование</th><th id="cart-supplier-column">Поставщик</th><th>Доставка</th><th class="cart-price-column">Цена, ₽</th><th class="cart-quantity-column">Кол-во</th><th class="cart-price-column">Стоимость, ₽</th><th><span class="visually-hidden">Удалить</span></th>
       </tr></thead><tbody id="cart-items"></tbody></table></div>
       <p id="cart-summary"></p>
       <p class="cart-status" id="cart-status" role="status" aria-live="polite"></p></div>
@@ -360,15 +360,15 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     body.innerHTML = items.length ? items.map((item) => {
       const result = item.result;
       const unresolved = pending.has(item.id);
-      return `<tr data-cart-item-id="${escapeHtml(item.id)}" class="${selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || unresolved ? "disabled" : ""}></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
+      return `<tr data-cart-item-id="${escapeHtml(item.id)}" class="${selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><label class="cart-selection"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || unresolved ? "disabled" : ""}><span class="cart-mobile-label">К заказу</span></label></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
         <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : ""}${unresolved && result.supplier === "forum-auto" ? `<button type="button" class="cart-resolve-button" ${locked ? "disabled" : ""}>Заказа нет? Снять блокировку</button>` : ""}</td>
-        ${activeSupplier === "all" ? `<td class="cart-item-supplier">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
-        <td class="cart-item-delivery"><span class="${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span>${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
-        <td class="cart-item-price">${renderPrices(result)}</td>
-        <td class="cart-item-quantity"><input class="cart-quantity" type="number" min="1" max="${maximumQuantity(result)}" step="1" value="${item.quantity}" inputmode="numeric"
+        ${activeSupplier === "all" ? `<td class="cart-item-supplier" data-label="Поставщик / склад">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
+        <td class="cart-item-delivery" data-label="Доставка"><span class="${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span>${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
+        <td class="cart-item-price" data-label="Цена, ₽">${renderPrices(result)}</td>
+        <td class="cart-item-quantity" data-label="Количество"><input class="cart-quantity" type="number" min="1" max="${maximumQuantity(result)}" step="1" value="${item.quantity}" inputmode="numeric"
           aria-label="Количество для ${escapeHtml(result.article)}" ${locked || unresolved ? "disabled" : ""}><span class="cart-item-stock">из ${maximumQuantity(result)}</span></td>
-        <td class="cart-item-sum">${renderPrices(result, item.quantity)}</td>
-        <td><button type="button" class="cart-remove btn btn-light" aria-label="Удалить ${escapeHtml(result.article)}" title="Удалить" ${locked || unresolved ? "disabled" : ""}>×</button></td></tr>`;
+        <td class="cart-item-sum" data-label="Стоимость, ₽">${renderPrices(result, item.quantity)}</td>
+        <td class="cart-item-remove"><button type="button" class="cart-remove btn btn-light" aria-label="Удалить ${escapeHtml(result.article)}" title="Удалить" ${locked || unresolved ? "disabled" : ""}>×</button></td></tr>`;
     }).join("") : `<tr><td colspan="${activeSupplier === "all" ? 9 : 8}" class="cart-empty">Корзина пуста. Добавьте товары из таблицы предложений.</td></tr>`;
     testButton.disabled = locked || !selected.length;
     testButton.textContent = checking ? "Оформляем…" : activeSupplier === "all" ? "Оформить заказы" : "Оформить заказ";
