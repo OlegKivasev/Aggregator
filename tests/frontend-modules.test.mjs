@@ -574,7 +574,7 @@ test("garage uses a centered car icon and mirrors the filter resize control", as
   assert.match(garage, /const filtersWidthStorageKey = "autoservice-garage-filters-width-v1";/);
   assert.match(garage, /filtersResize\.addEventListener\("pointerdown"/);
   assert.match(garage, /setFiltersOpen\(false\);/);
-  assert.match(garage, /garageWorkspace\.hidden = false;\s+setFiltersOpen\(true\);/s);
+  assert.match(garage, /garageWorkspace\.hidden = false;\s+setFiltersOpen\(!mobileLayout\.matches\);/s);
   assert.match(styles, /\.garage-workspace\s*\{[^}]*grid-template-columns: auto minmax\(0, 1fr\) auto;/s);
   assert.match(styles, /\.garage-groups-sidebar\s*\{[^}]*grid-column: 3;/s);
   assert.match(styles, /\.garage-filters-control:has\(\.garage-filters-sidebar:not\(\[hidden\]\)\) \.garage-filters-toggle\s*\{[^}]*display: none;/s);

@@ -164,6 +164,7 @@ export const renderCartOfferControls = (result) => {
   const title = !supported ? "Корзина доступна для PartKOM, Armtek, Forum Auto и Rossko" : maximum < 1
     ? "Нет подтверждённого остатка" : !result.offerId ? "Повторите поиск для добавления в корзину" : "Добавить в корзину";
   return `<td class="cart-add-cell"><div class="cart-offer-controls">
+    <button type="button" class="mobile-offer-menu" aria-label="Действия с предложением" aria-haspopup="menu" aria-controls="result-context-menu">⋯</button>
     <input class="cart-quantity" type="number" min="1" max="${Math.max(1, maximum)}" step="1" value="1" inputmode="numeric"
       aria-label="Количество для ${escapeHtml(result.article)}" ${enabled ? "" : "disabled"}>
     <div class="cart-offer-actions">

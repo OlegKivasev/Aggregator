@@ -723,6 +723,28 @@ test("mobile offers show prices, full titles and actions without horizontal scro
       }).map((cell) => cell.outerHTML));
       assert.deepEqual(clipped, []);
       assert.equal(await row.locator(`[${attribute}="title"] a`).innerText(), title);
+      const actions = await row.evaluate((node) => {
+        const menu = node.querySelector(".mobile-offer-menu").getBoundingClientRect();
+        const quantity = node.querySelector(".cart-quantity").getBoundingClientRect();
+        const controls = node.querySelector(".cart-offer-controls").getBoundingClientRect();
+        const link = node.querySelector(".result-title-cell a");
+        const end = document.createRange();
+        end.selectNodeContents(link);
+        end.setStart(link.firstChild, link.firstChild.textContent.length - 1);
+        const text = end.getBoundingClientRect();
+        const camera = node.querySelector(".photo-search-button").getBoundingClientRect();
+        const title = node.querySelector(".result-title-cell").getBoundingClientRect();
+        return { menuLeft: menu.left, controlsLeft: controls.left, menuRight: menu.right, quantityLeft: quantity.left,
+          bottomGap: Math.abs(menu.bottom - quantity.bottom), photoGap: camera.left - text.right,
+          photoFitsLastLine: text.right + 6 + camera.width <= title.right, photoTop: camera.top, textBottom: text.bottom };
+      });
+      assert.ok(Math.abs(actions.menuLeft - actions.controlsLeft) <= 1 && actions.menuRight < actions.quantityLeft);
+      assert.ok(actions.bottomGap <= 1, "the menu belongs on the bottom left beside the quantity controls");
+      if (actions.photoFitsLastLine) assert.ok(Math.abs(actions.photoGap - 6) <= 1 && actions.photoTop < actions.textBottom,
+        "the photo button follows the final title text with a small gap");
+      if (process.env.TEST_CAPTURE_DIR && page.viewportSize().width === 390) await row.screenshot({
+        path: join(process.env.TEST_CAPTURE_DIR, scope === "#results-table" ? "mobile-offer-card-actions.png" : "mobile-analog-card-actions.png"),
+      });
       const price = await row.locator(`[${attribute}="markupPrice"]`).boundingBox();
       const brand = await row.locator(`[${attribute}="brand"]`).boundingBox();
       assert.ok(Math.abs(price.y - brand.y) < 1, "price belongs at the top of the card");
@@ -891,6 +913,71 @@ test("mobile garage expands in the page and can be hidden by its toggle, close b
     assert.equal(await page.locator("#garage-resize").isVisible(), true);
     assert.equal(await page.locator("#garage-close").isVisible(), false);
   }, { viewport: { width: 390, height: 844 }, preserveSearchState: true });
+});
+
+test("mobile garage item cards keep filters, groups, sorting and quantity editing usable", async () => {
+  const title = "Тестовый замок с длинным названием ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const extraOffers = [offer("armtek", 8, { supplier: "armtek", keyzak: "GARAGE-MOBILE" }, { price: 70, brand: "Alpha" }, title)];
+  await withCartPage(async (page) => {
+    await openGarageWithFirstOffer(page, { all: true });
+    const rows = page.locator("#garage-items tr[data-garage-item-id]");
+    assert.equal(await rows.count(), 3);
+    assert.equal(await page.locator("#garage-filters-sidebar").isVisible(), false);
+    for (const width of [320, 390, 768]) {
+      await page.setViewportSize({ width, height: 844 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      assert.equal(await page.locator("#garage-view thead").isVisible(), false);
+      const clipped = await rows.evaluateAll((nodes) => nodes.flatMap((row) => [...row.querySelectorAll("td")].filter((cell) => {
+        const bounds = cell.getBoundingClientRect();
+        return bounds.left < 0 || bounds.right > innerWidth || cell.scrollWidth > cell.clientWidth + 1;
+      }).map((cell) => cell.outerHTML)));
+      assert.deepEqual(clipped, []);
+      await page.locator("#garage-filters-toggle").click();
+      await page.locator("#garage-groups-toggle").click();
+      assert.equal(await page.locator("#garage-filters-toggle").isVisible(), true);
+      assert.equal(await page.locator("#garage-groups-toggle").isVisible(), true);
+      assert.equal(await page.locator("#garage-filters-toggle, #garage-groups-toggle").evaluateAll((nodes) => nodes.every((node) => {
+        const box = node.getBoundingClientRect();
+        return box.left >= 0 && box.right <= innerWidth && node.scrollWidth <= node.clientWidth + 1;
+      })), true, "expanded filter and group buttons fit the phone width");
+      const panels = await page.evaluate(() => ["garage-filters-sidebar", "garage-groups-sidebar"].map((id) => {
+        const node = document.getElementById(id); const box = node.getBoundingClientRect();
+        return { id, fits: box.left >= 0 && box.right <= innerWidth && box.height <= innerHeight * .4 + 1, position: getComputedStyle(node).position };
+      }));
+      assert.ok(panels.every((panel) => panel.fits && panel.position === "static"), JSON.stringify(panels));
+      if (process.env.TEST_CAPTURE_DIR && width === 390) {
+        await page.evaluate(() => scrollTo(0, 0));
+        await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "mobile-garage-items-filters.png") });
+      }
+      await page.locator("#garage-groups-toggle").click();
+      await page.locator("#garage-filters-toggle").click();
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator("#garage-mobile-sort").selectOption("price:descending");
+    assert.equal(await rows.first().locator('[data-garage-column="supplier"]').textContent(), "part-kom");
+    await page.locator("#garage-mobile-sort").selectOption("price:ascending");
+    assert.equal(await rows.first().locator('[data-garage-column="brand"]').textContent(), "Alpha");
+    assert.equal(await rows.first().locator('[data-garage-column="title"]').innerText(), title);
+    await page.locator("#garage-filters-toggle").click();
+    await page.locator("#garage-filter-brand").getByRole("button", { name: "Alpha", exact: true }).click();
+    assert.equal(await rows.count(), 1);
+    await page.locator("#garage-filters-reset").click();
+    assert.equal(await rows.count(), 3);
+    await page.locator("#garage-filters-toggle").click();
+    await rows.first().locator(".garage-quantity-display").click();
+    await page.locator(".garage-quantity-input").fill("2");
+    await page.locator(".garage-quantity-input").press("Tab");
+    await page.waitForFunction(() => document.querySelector("#garage-items tr[data-garage-item-id] .garage-quantity-display")?.textContent === "2");
+    assert.match(await rows.first().locator('[data-garage-column="sum"]').innerText(), /189,00/);
+    if (process.env.TEST_CAPTURE_DIR) {
+      await page.evaluate(() => scrollTo(0, 0));
+      await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "mobile-garage-items.png") });
+    }
+    await page.setViewportSize({ width: 1366, height: 850 });
+    assert.equal(await page.locator("#garage-mobile-sort").isVisible(), false);
+    assert.equal(await page.locator("#garage-view thead").isVisible(), true);
+    assert.equal(await page.locator("#garage-filters-sidebar").isVisible(), true);
+  }, { viewport: { width: 390, height: 844 }, title, extraOffers });
 });
 
 test("table header settings preview live, cancel safely and persist shared main and analog columns", async () => {

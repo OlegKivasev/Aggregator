@@ -159,7 +159,6 @@ const warehouseTooltip = document.querySelector("#warehouse-tooltip");
 const showAnalogsButton = document.querySelector("#show-analogs-button");
 const findImagesButton = document.querySelector("#find-images-button");
 const photoSearchButtonMarkup = '<button type="button" class="photo-search-button" aria-label="Найти изображения" title="Найти изображения"><span aria-hidden="true"></span></button>';
-const mobileOfferMenuMarkup = '<button type="button" class="mobile-offer-menu" aria-label="Действия с предложением" aria-haspopup="menu" aria-controls="result-context-menu">⋯</button>';
 const analogsModal = document.querySelector("#analogs-modal");
 const analogsSourceBrand = document.querySelector("#analogs-source-brand");
 const analogsSourceArticle = document.querySelector("#analogs-source-article");
@@ -1303,7 +1302,7 @@ const renderResults = () => {
         <td data-column="supplier" data-label="Поставщик">${escapeHtml(supplierName)}</td>
         <td data-column="brand" data-label="Бренд">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-column="article" data-label="Артикул">${renderOfferLink(result, formatArticle(result.article))}</td>
-        <td data-column="title" data-label="Наименование"><div class="result-title-cell">${renderOfferLink(result, result.title)}${photoSearchButtonMarkup}${mobileOfferMenuMarkup}</div></td>
+        <td data-column="title" data-label="Наименование"><div class="result-title-cell">${renderOfferLink(result, result.title)}${photoSearchButtonMarkup}</div></td>
         <td data-column="deliveryDate" data-label="Доставка"><span class="delivery-date${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-column="quantity" data-label="Остаток">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-column="markupPrice" data-label="Цена"><span class="main-result-price">${escapeHtml(formatPrice(getMarkupPrice(result, settings)))}</span>${showPurchasePrice(markupSettings) ? `<span class="main-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>` : ""}${isBestPrice ? '<span class="main-best-price">Лучшая цена</span>' : ""}</td>
@@ -2176,10 +2175,10 @@ const closeAnalogsModal = () => {
   }
   analogsModal.hidden = true;
   if (analogModalReturnFocus?.isConnected) {
-    analogModalReturnFocus.focus();
+    analogModalReturnFocus.focus({ preventScroll: true });
   } else if (analogReturnResult) {
     const resultIndex = results.indexOf(analogReturnResult);
-    resultsBody.querySelector(`[data-result-index="${resultIndex}"]`)?.focus();
+    resultsBody.querySelector(`[data-result-index="${resultIndex}"]`)?.focus({ preventScroll: true });
   }
   analogModalReturnFocus = null;
   analogReturnResult = null;
@@ -2290,7 +2289,7 @@ const renderAnalogRows = () => {
         <td data-analog-column="supplier" data-label="Поставщик">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}</td>
         <td data-analog-column="brand" data-label="Бренд">${escapeHtml(formatBrand(result.brand))}</td>
         <td data-analog-column="article" data-label="Артикул">${renderOfferLink(result, formatArticle(result.article))}</td>
-        <td class="analogs-result-title" data-analog-column="title" data-label="Наименование"><div class="result-title-cell">${renderOfferLink(result, result.title)}${photoSearchButtonMarkup}${mobileOfferMenuMarkup}</div></td>
+        <td class="analogs-result-title" data-analog-column="title" data-label="Наименование"><div class="result-title-cell">${renderOfferLink(result, result.title)}${photoSearchButtonMarkup}</div></td>
         <td data-analog-column="deliveryDate" data-label="Доставка"><span class="delivery-date${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? " delivery-date--warning" : ""}">${escapeHtml(deliveryDate)}</span>${renderDeliveryWarehouse(result)}</td>
         <td data-analog-column="quantity" data-label="Остаток">${escapeHtml(formatQuantity(result.quantity))}</td>
         <td data-analog-column="markupPrice" data-label="Цена"><span class="analogs-result-price">${escapeHtml(formatPrice(getMarkupPrice(result)))}</span>${showPurchasePrice(markupSettings) ? `<span class="analogs-result-purchase-price">${escapeHtml(formatPrice(result.price))}</span>` : ""}${isBestPrice ? '<span class="analogs-best-price">Лучшая цена</span>' : ""}</td>

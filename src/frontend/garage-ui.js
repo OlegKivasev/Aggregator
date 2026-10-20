@@ -85,6 +85,9 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch, addToCart, onVi
     return { button, anchor };
   });
   const garageSortButtons = [...document.querySelectorAll("[data-garage-sort-key]")];
+  const mobileSort = document.querySelector("#garage-mobile-sort");
+  const mobileLayout = window.matchMedia("(max-width: 800px)");
+  const columnLabels = Object.fromEntries(garageSortButtons.map((button) => [button.dataset.garageSortKey, button.textContent.trim()]));
   const resize = document.querySelector("#garage-resize");
   const modal = document.querySelector("#garage-add-modal");
   const modalTitle = document.querySelector("#garage-add-title");
@@ -307,7 +310,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch, addToCart, onVi
     searchTabs.hidden = true;
     titlebar.hidden = false;
     garageWorkspace.hidden = false;
-    setFiltersOpen(true);
+    setFiltersOpen(!mobileLayout.matches);
     placeSharedTools(true);
     setStatus("");
     renderItems();
@@ -597,6 +600,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch, addToCart, onVi
     return item[key] ?? "";
   };
   const updateGarageSortHeaders = () => {
+    mobileSort.value = `${garageSortState.key}:${garageSortState.direction}`;
     for (const button of garageSortButtons) {
       const active = button.dataset.garageSortKey === garageSortState.key;
       button.classList.toggle("is-active", active);
@@ -774,7 +778,8 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch, addToCart, onVi
     });
     garageTable.querySelectorAll("[data-garage-column]").forEach((cell) => {
       const column = cell.dataset.garageColumn;
-      cell.style.setProperty("padding-inline", `${Math.min(12, (garageColumnWidths[column] - 16) / 2)}px`, "important");
+      if (mobileLayout.matches) cell.style.removeProperty("padding-inline");
+      else cell.style.setProperty("padding-inline", `${Math.min(12, (garageColumnWidths[column] - 16) / 2)}px`, "important");
       applyColumnAlignment(cell, garageAlignments[column]);
     });
   };
@@ -908,7 +913,9 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch, addToCart, onVi
       });
       const controls = element("div", undefined, "garage-item-actions");
       controls.append(cartButton, menu);
-      actions.append(controls); row.append(actions); itemsBody.append(row);
+      actions.append(controls); row.append(actions);
+      row.querySelectorAll("[data-garage-column]").forEach((cell) => { cell.dataset.label = columnLabels[cell.dataset.garageColumn]; });
+      itemsBody.append(row);
       }
     }
     applyGarageTableColumns();
@@ -1213,6 +1220,17 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch, addToCart, onVi
     renderVehicles();
   });
   back.addEventListener("click", showSearch);
+  mobileSort.addEventListener("change", () => {
+    const [key, direction] = mobileSort.value.split(":");
+    if (!garageSortButtons.some((button) => button.dataset.garageSortKey === key) || !["ascending", "descending"].includes(direction)) return;
+    garageSortState = { key, direction };
+    if (selectedVehicle) renderItems();
+  });
+  mobileLayout.addEventListener("change", () => {
+    setFiltersOpen(!mobileLayout.matches);
+    if (mobileLayout.matches) setGroupsOpen(false);
+    applyGarageTableColumns();
+  });
   garageSortButtons.forEach((button) => button.addEventListener("click", () => {
     const key = button.dataset.garageSortKey;
     if (!key) return;
