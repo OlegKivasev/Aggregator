@@ -289,6 +289,18 @@ test("search streams a complete auth-error lifecycle for an unconfigured supplie
   ]);
 });
 
+test("production Rossko settings are wired and reject an unconnected account without exposing keys", async () => {
+  const url = `${baseUrl}/api/suppliers/rossko/order-settings`;
+  const response = await fetch(url);
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), { message: "Подключите Rossko с действующими ключами K1 и K2." });
+  const update = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ companyId: "buyer", deliveryId: "courier", addressId: "address", paymentId: "bank",
+      contactName: "Тестовый контакт", contactPhone: "+70000000000" }) });
+  assert.equal(update.status, 401);
+});
+
 test("session validation deduplicates suppliers and reports expired sessions", async () => {
   const response = await fetch(`${baseUrl}/api/suppliers/sessions/validate`, {
     method: "POST",

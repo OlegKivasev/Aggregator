@@ -37,8 +37,12 @@ async function withCartPage(check, options = {}) {
   const searchCalls = [];
   try {
     const suppliers = options.allSuppliers ? ["armtek", "part-kom", "forum-auto", "rossko"] : ["armtek", "part-kom"];
-    const sessions = suppliers.map((supplier) => ({ supplier, authorized: true, lastCheckedAt: null, lastAuthorizedAt: null }));
+    const sessions = suppliers.map((supplier) => ({ supplier, authorized: supplier === "rossko" ? options.rosskoAuthorized ?? true : true, lastCheckedAt: null, lastAuthorizedAt: null }));
     const application = {
+      getRosskoOrderSettings: options.rosskoSettings?.get,
+      saveRosskoOrderSettings: options.rosskoSettings?.save,
+      authorizeRossko: async () => { const session = sessions.find((item) => item.supplier === "rossko"); session.authorized = true; return session; },
+      logoutRossko: () => { const session = sessions.find((item) => item.supplier === "rossko"); session.authorized = false; options.rosskoSettings?.logout?.(); return session; },
       partKomOrderHistory: options.partKomOrderHistory ?? (async () => ({ orders: [], limited: false })),
       supplierOrderHistory: options.supplierOrderHistory ?? (async () => ({ orders: [], limited: false })),
       listSupplierSessions: () => sessions,
@@ -2447,6 +2451,91 @@ test("opening the cart shows a centered blocking refresh state until supplier of
       assert.equal(await page.locator("#cart-status").textContent(), "");
     }, { refreshGate: () => gate });
   } finally { release(); }
+});
+
+test("Rossko order settings appear after authorization, safely select account data and retain the contact after reload", async () => {
+  const buyerLabel = 'Тестовый покупатель <img src=x onerror=window.rosskoSettingsXss=1>';
+  const choices = { companies: [{ id: "buyer-1", label: "Другой покупатель" }, { id: "buyer-2", label: buyerLabel }],
+    deliveries: [{ id: "courier", addressId: "address-1", label: "Тестовый адрес 1" }, { id: "courier", addressId: "address-2", label: "Тестовый адрес 2" }],
+    payments: [{ id: "bank", label: "Через банк" }] };
+  let settings = null;
+  let saves = 0;
+  await withCartPage(async (page) => {
+    await page.locator("#settings-toggle").click();
+    await page.locator("#settings-drawer summary").getByText("Поставщики", { exact: true }).click();
+    const section = page.locator("#rossko-order-settings");
+    assert.equal(await section.isVisible(), false);
+    await page.locator("#rossko-key1").fill("fixture-key-one");
+    await page.locator("#rossko-key2").fill("fixture-key-two");
+    await page.locator("#rossko-connect-button").click();
+    await section.locator("fieldset:not(:disabled)").waitFor();
+    assert.equal(await page.locator('[data-supplier="rossko"] .auth-card__loading').isVisible(), false);
+    assert.equal(await section.isVisible(), true);
+    assert.equal(await section.locator('select[name="companyId"] option').last().textContent(), buyerLabel);
+    assert.equal(await section.locator("img").count(), 0);
+    assert.equal(await page.evaluate(() => window.rosskoSettingsXss), undefined);
+    await section.locator('[name="companyId"]').selectOption("buyer-2");
+    await section.locator('[name="delivery"]').selectOption("1");
+    assert.equal(await section.locator('[name="paymentId"]').inputValue(), "bank");
+    await section.locator('[name="contactName"]').fill("Тестовый контакт");
+    await section.locator('[name="contactPhone"]').fill("+7 (000) 123-45-67");
+    await section.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => document.querySelector("#rossko-order-settings [role=status]").textContent === "Настройки заказа сохранены.");
+    assert.equal(saves, 1);
+    assert.deepEqual(settings, { companyId: "buyer-2", deliveryId: "courier", addressId: "address-2", paymentId: "bank",
+      contactName: "Тестовый контакт", contactPhone: "+7 (000) 123-45-67" });
+    assert.equal(await page.evaluate(() => JSON.stringify(localStorage).includes("123-45-67")), false);
+    await page.reload();
+    await page.locator("#settings-toggle").click();
+    await page.locator("#settings-drawer summary").getByText("Поставщики", { exact: true }).click();
+    await section.locator("fieldset:not(:disabled)").waitFor();
+    assert.equal(await section.locator('[name="companyId"]').inputValue(), "buyer-2");
+    assert.equal(await section.locator('[name="delivery"]').inputValue(), "1");
+    assert.equal(await section.locator('[name="contactName"]').inputValue(), "Тестовый контакт");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await section.scrollIntoViewIfNeeded();
+    assert.equal(await section.evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "rossko-order-settings-mobile.png") });
+    await page.locator("#rossko-logout-button").click();
+    await section.waitFor({ state: "hidden" });
+    assert.equal(await section.locator('[name="contactPhone"]').inputValue(), "");
+    assert.equal(settings, null);
+  }, { allSuppliers: true, rosskoAuthorized: false, reducedMotion: "reduce", rosskoSettings: {
+    get: async () => ({ choices, settings, persistent: true }),
+    save: async (value) => { saves++; settings = value; return { choices, settings, persistent: true }; },
+    logout: () => { settings = null; },
+  } });
+});
+
+test("Rossko settings preserve a failed draft, retry loading and explain memory-only saves", async () => {
+  const choices = { companies: [{ id: "buyer", label: "Тестовый покупатель" }],
+    deliveries: [{ id: "delivery", addressId: "address", label: "Тестовый адрес" }], payments: [{ id: "bank", label: "Через банк" }] };
+  let loadFails = true;
+  let saveFails = true;
+  let settings = null;
+  await withCartPage(async (page) => {
+    await page.locator("#settings-toggle").click();
+    await page.locator("#settings-drawer summary").getByText("Поставщики", { exact: true }).click();
+    const section = page.locator("#rossko-order-settings");
+    await page.waitForFunction(() => document.querySelector("#rossko-order-settings [role=status]").textContent.includes("Тестовая ошибка загрузки"));
+    assert.equal(await section.locator("fieldset").evaluate((node) => node.disabled), true);
+    loadFails = false;
+    await section.locator("#rossko-order-reload").click();
+    await section.locator("fieldset:not(:disabled)").waitFor();
+    await section.locator('[name="contactName"]').fill("Тестовый контакт");
+    await section.locator('[name="contactPhone"]').fill("+70000000000");
+    await section.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => document.querySelector("#rossko-order-settings [role=status]").textContent.includes("Тестовая ошибка сохранения"));
+    assert.equal(await section.locator('[name="contactName"]').inputValue(), "Тестовый контакт");
+    assert.equal(settings, null);
+    saveFails = false;
+    await section.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => document.querySelector("#rossko-order-settings [role=status]").textContent.includes("до перезапуска сервера"));
+    assert.equal(settings.contactPhone, "+70000000000");
+  }, { allSuppliers: true, reducedMotion: "reduce", rosskoSettings: {
+    get: async () => { if (loadFails) throw new CartError("Тестовая ошибка загрузки", 502); return { choices, settings, persistent: false }; },
+    save: async (value) => { if (saveFails) throw new CartError("Тестовая ошибка сохранения", 502); settings = value; return { choices, settings, persistent: false }; },
+  } });
 });
 
 test("opening refresh greys only missing goods and allows only their removal without rechecking available goods", async () => {

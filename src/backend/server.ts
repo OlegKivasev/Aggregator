@@ -37,6 +37,8 @@ import {
   streamSearch,
   testCartOrder,
   realCartOrder,
+  getRosskoOrderSettings,
+  saveRosskoOrderSettings,
   validateSupplierSessions,
 } from "./search-service.ts";
 
@@ -47,6 +49,8 @@ const host = "127.0.0.1";
 const port = readPort();
 
 const application: AggregatorApplication = {
+  getRosskoOrderSettings,
+  saveRosskoOrderSettings,
   addApplicabilityProxy,
   importApplicabilityProxies,
   deleteApplicabilityProxy,

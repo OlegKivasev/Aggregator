@@ -12,6 +12,10 @@ import { getRosskoOrderChoices, listRosskoOrderHistory, placeRosskoOrder } from 
 import type { OrderHistory, SupplierOrderHistoryQuery } from "../purchasing/order-history-contract.ts";
 import { createBoundedAbortSignal } from "../abort.ts";
 import { additionalArticleVariants } from "../article-search-variants.ts";
+import type { SupplierCredentialRepository, StoredSupplierCredentials } from "../session/encrypted-credential-store.ts";
+import { decodeRosskoApiCredentials } from "./supplier-session-service.ts";
+import { parseRosskoOrderSettings, RosskoOrderSettingsValidationError, type RosskoOrderSettings, type RosskoOrderSettingsState } from "../purchasing/rossko-order-settings.ts";
+import type { RosskoApiCredentials } from "../types.ts";
 
 const validPhone = (value: unknown): value is string => typeof value === "string" && /^[+\d()\s-]{6,40}$/.test(value);
 const sameText = (left: string, right: string): boolean => left.trim().toLocaleUpperCase() === right.trim().toLocaleUpperCase();
@@ -76,6 +80,17 @@ function configuredRosskoOrderDefaults(options: RosskoOrderChoices): NonNullable
   });
 }
 
+function selectedRosskoOrderDetails(options: RosskoOrderChoices, settings: RosskoOrderSettings): NonNullable<CheckoutDetails["rossko"]> {
+  const allowed = allowedRosskoOrderChoices(options);
+  if (!allowed.companies.some((item) => item.id === settings.companyId)
+    || !allowed.deliveries.some((item) => item.id === settings.deliveryId && item.addressId === settings.addressId)
+    || !allowed.payments.some((item) => item.id === settings.paymentId)) {
+    throw new RosskoOrderSettingsValidationError("Rossko больше не подтверждает выбранного покупателя, адрес или оплату. Обновите настройки Rossko.");
+  }
+  return { deliveryId: settings.deliveryId, addressId: settings.addressId, paymentId: settings.paymentId,
+    companyId: settings.companyId, name: settings.contactName, phone: settings.contactPhone, deliveryParts: false };
+}
+
 function sameOffer(current: PurchaseLine, fresh: { result: PurchaseLine["result"]; reference: PurchaseReference }): boolean {
   if (!sameArticle(current.result.article, fresh.result.article) || !sameText(current.result.brand, fresh.result.brand)
     || current.reference.supplier !== fresh.reference.supplier) return false;
@@ -93,11 +108,58 @@ function sameOffer(current: PurchaseLine, fresh: { result: PurchaseLine["result"
 export class RealOrderApplicationService implements RealOrderGateway {
   private readonly sessions: SupplierSessionManager;
   private readonly search: (query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) => Promise<void>;
+  private readonly credentialRepository: SupplierCredentialRepository | null;
 
   constructor(sessions: SupplierSessionManager,
-    search: (query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) => Promise<void>) {
+    search: (query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) => Promise<void>,
+    credentialRepository: SupplierCredentialRepository | null = null) {
     this.sessions = sessions;
     this.search = search;
+    this.credentialRepository = credentialRepository;
+  }
+
+  private rosskoCredentialsRecord(credentials: RosskoApiCredentials): StoredSupplierCredentials | null {
+    const stored = this.credentialRepository?.get("rossko") ?? null;
+    const keys = decodeRosskoApiCredentials(stored);
+    return keys?.key1 === credentials.key1 && keys.key2 === credentials.key2 ? stored : null;
+  }
+
+  private rosskoOrderDetails(options: RosskoOrderChoices, credentials: RosskoApiCredentials): NonNullable<CheckoutDetails["rossko"]> {
+    const settings = this.rosskoCredentialsRecord(credentials)?.rosskoOrder;
+    if (!settings) return configuredRosskoOrderDefaults(options);
+    try { return selectedRosskoOrderDetails(options, settings); }
+    catch (error) {
+      if (error instanceof RosskoOrderSettingsValidationError) throw new CartError(error.message, 409);
+      throw error;
+    }
+  }
+
+  private async rosskoSettings(signal: AbortSignal, update?: RosskoOrderSettings): Promise<RosskoOrderSettingsState> {
+    const parsed = update ?? null;
+    const operation = this.sessions.beginOperation("rossko", signal);
+    try {
+      operation.signal.throwIfAborted();
+      const credentials = this.sessions.getRosskoApiCredentials();
+      if (!credentials || !this.sessions.getSession("rossko").authorized) throw new SupplierAuthError("Rossko API keys are missing");
+      const choices = allowedRosskoOrderChoices(await getRosskoOrderChoices(credentials, operation.signal));
+      if (!choices.companies.length) throw new SupplierIntegrationError("Rossko returned no buyers", {
+        publicMessage: "Rossko не вернул покупателей. Заполните реквизиты в личном кабинете Rossko и обновите данные.",
+      });
+      operation.signal.throwIfAborted();
+      if (!operation.isCurrent()) throw new SupplierAuthError("Rossko session changed");
+      const stored = this.rosskoCredentialsRecord(credentials);
+      if (parsed) {
+        selectedRosskoOrderDetails(choices, parsed);
+        if (!stored || !this.credentialRepository) throw new CartError("Повторно подключите Rossko перед сохранением настроек заказа.", 409);
+        this.credentialRepository.set("rossko", { ...stored, rosskoOrder: parsed });
+      }
+      return { choices, settings: parsed ?? stored?.rosskoOrder ?? null, persistent: this.credentialRepository?.persistent() ?? false };
+    } finally { operation.dispose(); }
+  }
+
+  getRosskoOrderSettings(signal: AbortSignal): Promise<RosskoOrderSettingsState> { return this.rosskoSettings(signal); }
+  saveRosskoOrderSettings(settings: unknown, signal: AbortSignal): Promise<RosskoOrderSettingsState> {
+    return this.rosskoSettings(signal, parseRosskoOrderSettings(settings));
   }
 
   async partKomOrderHistory(archive: boolean, signal: AbortSignal) {
@@ -182,7 +244,7 @@ export class RealOrderApplicationService implements RealOrderGateway {
       const credentials = this.sessions.getRosskoApiCredentials();
       if (!credentials) throw new SupplierAuthError("Rossko API keys are missing");
       result.rossko = allowedRosskoOrderChoices(await getRosskoOrderChoices(credentials, signal));
-      configuredRosskoOrderDefaults(result.rossko);
+      this.rosskoOrderDetails(result.rossko, credentials);
     }
     if (suppliers.includes("part-kom")) {
       const credentials = this.sessions.getPartKomCredentials();
@@ -230,7 +292,7 @@ export class RealOrderApplicationService implements RealOrderGateway {
       throw new SupplierIntegrationError("Rossko order reference is invalid");
     }
     const options = allowedRosskoOrderChoices(await getRosskoOrderChoices(credentials, signal));
-    const selected = configuredRosskoOrderDefaults(options);
+    const selected = this.rosskoOrderDetails(options, credentials);
     return (_attemptId: string, orderSignal: AbortSignal) => placeRosskoOrder(lines, credentials, { ...details, rossko: selected }, orderSignal);
   }
 }

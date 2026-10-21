@@ -85,7 +85,9 @@ const searchService = new SearchApplicationService(
   sessionManager,
   (supplier) => sessionService.disconnectSupplier(supplier),
 );
-export const realCartOrder = new RealOrderApplicationService(sessionManager, (query, emit, signal) => searchService.streamSearch(query, emit, signal));
+export const realCartOrder = new RealOrderApplicationService(sessionManager, (query, emit, signal) => searchService.streamSearch(query, emit, signal), credentialStore);
+export const getRosskoOrderSettings = (signal: AbortSignal) => realCartOrder.getRosskoOrderSettings(signal);
+export const saveRosskoOrderSettings = (settings: unknown, signal: AbortSignal) => realCartOrder.saveRosskoOrderSettings(settings, signal);
 const applicabilityProxyStore = new EncryptedPartsApiProxyStore(getStateFilePath("partsapi-proxies.enc.json"), supplierCredentialsEncryptionKey);
 const applicabilityService = new ApplicabilityApplicationService(
   new PartsApiRoutingClient(new PartsApiApplicabilityClient(), applicabilityProxyStore), applicabilityApiKeyStore, applicabilityCacheRepository,

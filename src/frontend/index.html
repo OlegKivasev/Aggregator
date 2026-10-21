@@ -527,6 +527,21 @@
             </form>
 
             <p class="auth-feedback" id="rossko-auth-feedback"></p>
+            <section id="rossko-order-settings" class="rossko-order-settings" aria-label="Параметры заказа Rossko" hidden>
+              <h4>Параметры заказа</h4>
+              <form id="rossko-order-settings-form">
+                <fieldset disabled>
+                  <label class="field"><span>Покупатель</span><select name="companyId" required></select></label>
+                  <label class="field"><span>Адрес доставки</span><select name="delivery" required></select></label>
+                  <label class="field"><span>Оплата</span><select name="paymentId" required></select></label>
+                  <label class="field"><span>Контактное лицо</span><input name="contactName" type="text" maxlength="100" autocomplete="name" required></label>
+                  <label class="field"><span>Телефон</span><input name="contactPhone" type="tel" maxlength="40" minlength="6" autocomplete="tel" required></label>
+                  <button type="submit" class="btn btn-primary">Сохранить параметры заказа</button>
+                </fieldset>
+              </form>
+              <button id="rossko-order-reload" type="button" class="btn btn-light">Обновить данные Rossko</button>
+              <p class="auth-feedback" role="status" aria-live="polite"></p>
+            </section>
           </article>
 
           <article class="auth-card" data-supplier="armtek">

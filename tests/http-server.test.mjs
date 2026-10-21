@@ -4,6 +4,7 @@ import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../src/backend/errors.ts";
+import { parseRosskoOrderSettings } from "../src/backend/purchasing/rossko-order-settings.ts";
 import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 import { PartsApiApplicabilityClient } from "../src/backend/applicability/partsapi-client.ts";
 import { ApplicabilityApplicationService } from "../src/backend/applicability/applicability-application-service.ts";
@@ -17,6 +18,42 @@ import { testPurchaseOrder } from "../src/backend/application/test-order-applica
 
 const publicDir = join(process.cwd(), "src", "frontend");
 const openServers = new Set();
+
+test("Rossko settings HTTP validates requests, prevents caching and sanitizes errors", async () => {
+  const choices = { companies: [{ id: "buyer", label: "Тестовый покупатель" }],
+    deliveries: [{ id: "courier", label: "Тестовый адрес", addressId: "address" }], payments: [{ id: "bank", label: "Через банк" }] };
+  let settings = null;
+  const application = createApplication({
+    getRosskoOrderSettings: async () => ({ choices, settings, persistent: true }),
+    saveRosskoOrderSettings: async (value) => { settings = parseRosskoOrderSettings(value); return { choices, settings, persistent: true }; },
+  });
+  const { baseUrl } = await listen(application);
+  const url = `${baseUrl}/api/suppliers/rossko/order-settings`;
+  const response = await fetch(url);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), { choices, settings: null, persistent: true });
+  const saved = { companyId: "buyer", deliveryId: "courier", addressId: "address", paymentId: "bank", contactName: "Тест", contactPhone: "+70000000000" };
+  const update = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(saved) });
+  assert.equal(update.status, 200);
+  assert.deepEqual((await update.json()).settings, saved);
+  for (const body of ["{", "null", "[]", JSON.stringify({ ...saved, contactPhone: "------" })]) {
+    const invalid = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+    assert.equal(invalid.status, 400);
+  }
+  assert.deepEqual(settings, saved);
+  assert.equal((await fetch(url, { method: "POST" })).status, 405);
+  assert.equal((await fetch(`${url}?key1=not-a-key`)).status, 400);
+  for (const [error, status] of [[new SupplierAuthError("private key"), 401], [new SupplierTimeoutError("private URL"), 504],
+    [new SupplierIntegrationError("private payload"), 502], [new Error("private path"), 500]]) {
+    application.getRosskoOrderSettings = async () => { throw error; };
+    const failed = await fetch(url);
+    assert.equal(failed.status, status);
+    assert.doesNotMatch(JSON.stringify(await failed.json()), /private/);
+  }
+  delete application.getRosskoOrderSettings;
+  assert.equal((await fetch(url)).status, 503);
+});
 
 test("PartKOM history HTTP forwards archive selection and hides supplier errors", async () => {
   const calls = [];

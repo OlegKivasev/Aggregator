@@ -77,7 +77,10 @@ export class SupplierSessionService {
   }
 
   private rememberCredentials(supplier: SupplierId, credentials: StoredSupplierCredentials): void {
-    this.credentialRepository?.set(supplier, { login: credentials.login.trim(), password: credentials.password });
+    const previous = this.credentialRepository?.get(supplier);
+    const keepOrder = supplier === "rossko" && previous?.login === credentials.login.trim() && previous.password === credentials.password;
+    this.credentialRepository?.set(supplier, { login: credentials.login.trim(), password: credentials.password,
+      ...(keepOrder && previous.rosskoOrder ? { rosskoOrder: previous.rosskoOrder } : {}) });
   }
 
   private forgetCredentials(supplier: SupplierId): void {
