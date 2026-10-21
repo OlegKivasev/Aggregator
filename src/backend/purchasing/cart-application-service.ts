@@ -89,7 +89,7 @@ export class CartApplicationService {
   private readonly realOrder: RealOrderGateway | null;
   private readonly offers = new Map<string, { line: PurchaseLine; expires: number }>();
   private testing = false;
-  private refreshed: { revision: number; supplier: "all" | OrderSupplier; lineIds: string; expires: number } | null = null;
+  private refreshed: { revision: number; lineIds: string[]; expires: number } | null = null;
   private readonly controller = new AbortController();
 
   constructor(repository: SqliteCartRepository, testOrder: TestOrder, realOrder: RealOrderGateway | null = null) {
@@ -203,13 +203,14 @@ export class CartApplicationService {
     return this.view();
   }
 
-  async refreshForOrder(revision: unknown, supplier: unknown, signal: AbortSignal) {
+  async refreshForOrder(revision: unknown, supplier: unknown, signal: AbortSignal, itemIds?: unknown) {
     if (!this.realOrder) throw new CartError("Оформление заказов не настроено.", 503);
     if (this.testing) throw new CartError("Дождитесь завершения действия в корзине.", 409);
     const scope = normalizeCartSupplier(supplier);
     const cart = this.load();
     if (revision !== cart.revision) throw new CartError("Корзина изменилась. Обновите её.", 409);
-    const lines = scope === "all" ? cart.lines : cart.lines.filter((line) => line.reference.supplier === scope);
+    const lines = itemIds === undefined ? scope === "all" ? cart.lines : cart.lines.filter((line) => line.reference.supplier === scope)
+      : selectedOrderLines(cart.lines, scope, itemIds);
     if (!lines.length) throw new CartError("Добавьте товары в выбранную вкладку корзины.");
     const pending = new Set(this.repository.pendingLineIds());
     if (lines.some((line) => pending.has(line.id))) throw new CartError("Статус предыдущего заказа нужно сверить с поставщиком.", 409);
@@ -232,8 +233,8 @@ export class CartApplicationService {
         if (!this.repository.save(next, cart.revision)) throw new CartError("Корзина изменилась. Проверьте её заново.", 409);
       }
       const current = this.load();
-      this.refreshed = { revision: current.revision, supplier: scope,
-        lineIds: JSON.stringify(updated.map((line) => line.id)), expires: Date.now() + 2 * 60_000 };
+      this.refreshed = { revision: current.revision,
+        lineIds: updated.map((line) => line.id), expires: Date.now() + 2 * 60_000 };
       this.testing = false;
       return this.view();
     } finally { this.testing = false; }
@@ -278,10 +279,9 @@ export class CartApplicationService {
     const lines = selectedOrderLines(cart.lines, scope, itemIds);
     const pending = new Set(this.repository.pendingLineIds());
     if (lines.some((line) => pending.has(line.id))) throw new CartError("Статус предыдущего заказа нужно сверить с поставщиком.", 409);
-    const refreshedLines = this.refreshed?.supplier === "all" ? cart.lines : cart.lines.filter((line) => line.reference.supplier === scope);
-    if (!this.refreshed || this.refreshed.revision !== cart.revision
-      || this.refreshed.supplier !== "all" && this.refreshed.supplier !== scope
-      || this.refreshed.lineIds !== JSON.stringify(refreshedLines.map((line) => line.id)) || this.refreshed.expires <= Date.now()) {
+    const refreshed = this.refreshed;
+    if (!refreshed || refreshed.revision !== cart.revision
+      || lines.some((line) => !refreshed.lineIds.includes(line.id)) || refreshed.expires <= Date.now()) {
       throw new CartError("Сначала обновите предложения и проверьте заказ заново.", 409);
     }
     if (!details || typeof details !== "object" || Array.isArray(details)) throw new CartError("Неверные параметры заказа.");

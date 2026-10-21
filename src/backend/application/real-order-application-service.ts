@@ -11,11 +11,16 @@ import { getPartKomOrderChoices, listPartKomOrderHistory, placePartKomOrder } fr
 import { getRosskoOrderChoices, listRosskoOrderHistory, placeRosskoOrder } from "../suppliers/rossko/rossko-api-adapter.ts";
 import type { OrderHistory, SupplierOrderHistoryQuery } from "../purchasing/order-history-contract.ts";
 import { createBoundedAbortSignal } from "../abort.ts";
+import { additionalArticleVariants } from "../article-search-variants.ts";
 
 const validPhone = (value: unknown): value is string => typeof value === "string" && /^[+\d()\s-]{6,40}$/.test(value);
 const sameText = (left: string, right: string): boolean => left.trim().toLocaleUpperCase() === right.trim().toLocaleUpperCase();
-const sameArticle = (left: string, right: string): boolean => left.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase()
-  === right.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase();
+const articleKey = (article: string): string => article.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase();
+const sameArticle = (left: string, right: string): boolean => [left, ...additionalArticleVariants(left).map((variant) => variant.article)]
+  .some((article) => articleKey(article) === articleKey(right));
+const supplierNames: Record<OrderSupplier, string> = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
+const refreshMessage = (line: PurchaseLine, message: string): string =>
+  `${supplierNames[line.reference.supplier]} · ${line.result.brand} ${line.result.article}${line.result.warehouse ? ` · ${line.result.warehouse}` : ""}: ${message}`;
 
 export function allowedRosskoOrderChoices(options: RosskoOrderChoices): RosskoOrderChoices {
   const deliveries = options.deliveries.filter((item) => item.addressId !== null);
@@ -144,7 +149,7 @@ export class RealOrderApplicationService implements RealOrderGateway {
       if (status === "auth_error") throw new SupplierAuthError("Supplier authorization is unavailable for order refresh");
       if (status === "timeout") throw new SupplierTimeoutError("Supplier order refresh timed out");
       if (status !== "completed") throw new SupplierIntegrationError("Supplier offer refresh failed", {
-        publicMessage: "Не удалось обновить предложение у поставщика. Заказ не отправлен.",
+        publicMessage: refreshMessage(line, "Не удалось обновить предложение у поставщика. Заказ не отправлен."),
       });
       found.set(key, offers);
     }
@@ -152,14 +157,14 @@ export class RealOrderApplicationService implements RealOrderGateway {
       const offers = found.get(JSON.stringify([line.reference.supplier, line.result.article])) ?? [];
       const matches = offers.filter((offer) => sameOffer(line, offer));
       if (matches.length !== 1) throw new SupplierIntegrationError("Supplier offer is missing or ambiguous", {
-        publicMessage: matches.length ? "Найдено несколько подходящих предложений. Заказ не отправлен."
-          : "Предложение больше не найдено у поставщика. Заказ не отправлен.",
+        publicMessage: refreshMessage(line, matches.length ? "Найдено несколько подходящих предложений. Заказ не отправлен."
+          : "Предложение больше не найдено у поставщика. Уберите позицию из выбранных или повторите поиск. Заказ не отправлен."),
       });
       const offer = matches[0];
       if (typeof offer.result.quantity !== "number" || !Number.isSafeInteger(offer.result.quantity)
         || offer.result.quantity < line.quantity) {
         throw new SupplierIntegrationError("Supplier offer has insufficient confirmed stock", {
-          publicMessage: "Остаток у поставщика меньше количества в корзине. Заказ не отправлен.",
+          publicMessage: refreshMessage(line, "Остаток у поставщика меньше количества в корзине. Уменьшите количество или уберите позицию из выбранных. Заказ не отправлен."),
         });
       }
       return { id: line.id, quantity: line.quantity, result: offer.result, reference: offer.reference };

@@ -84,7 +84,7 @@ async function withCartPage(check, options = {}) {
         return testPurchaseOrder(lines, signal);
       },
       realCartOrder: {
-        refresh: async (lines) => { refreshCalls.push(structuredClone(lines)); await options.refreshGate?.(); return lines.map((line) => ({ ...structuredClone(line),
+        refresh: async (lines) => { refreshCalls.push(structuredClone(lines)); await options.refreshGate?.(); if (options.refresh) return options.refresh(lines); return lines.map((line) => ({ ...structuredClone(line),
           result: { ...line.result, price: options.refreshedPrice ?? line.result.price } })); },
         choices: async () => ({ partKom: { deliveries: [{ id: "regular", label: "Обычная доставка", type: "regular" }] },
           rossko: { deliveries: [{ id: "delivery", label: "Доставка", addressId: null }],
@@ -2447,6 +2447,56 @@ test("opening the cart shows a centered blocking refresh state until supplier of
       assert.equal(await page.locator("#cart-status").textContent(), "");
     }, { refreshGate: () => gate });
   } finally { release(); }
+});
+
+test("checkout rechecks only selected lines after a missing offer blocked the initial cart refresh", async () => {
+  await withCartPage(async (page, { refreshCalls, orderCalls }) => {
+    for (const [button, count] of [[page.locator("#results-body .cart-offer-button").first(), "1"],
+      [page.locator("#results-body tr").filter({ hasText: "MISSING" }).locator(".cart-offer-button"), "2"]]) {
+      await button.click();
+      await page.waitForFunction((count) => document.querySelector("#cart-badge").textContent === count, count);
+    }
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#cart-status").textContent.includes("MISSING"));
+    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    assert.equal(await page.locator("#cart-items .cart-item-check").count(), 2);
+    const available = page.locator('#cart-items tr[data-cart-item-id]').filter({ hasText: "A1" });
+    const missing = page.locator('#cart-items tr[data-cart-item-id]').filter({ hasText: "MISSING" });
+    await available.locator(".cart-item-select").check();
+    await openCheckout(page);
+    assert.deepEqual(refreshCalls.map((lines) => lines.map((line) => line.result.article)), [["A1", "MISSING"], ["A1"]]);
+    assert.equal(await page.locator(".cart-order-table tbody tr").count(), 1);
+    await page.locator("#cart-order-cancel").click();
+    assert.equal(await available.locator(".cart-item-check").count(), 0);
+    assert.equal(await missing.locator(".cart-item-check").count(), 1);
+    await available.locator(".cart-item-select").uncheck();
+    await missing.locator(".cart-item-select").check();
+    await page.locator("#cart-test-order").click();
+    await page.waitForFunction(() => document.querySelector("#cart-status").textContent.includes("MISSING"));
+    assert.deepEqual(refreshCalls.at(-1).map((line) => line.result.article), ["MISSING"]);
+    assert.equal(await page.locator("#cart-order-confirm").isVisible(), false);
+    assert.equal(orderCalls.length, 0);
+    await missing.locator(".cart-item-select").uncheck();
+    await available.locator(".cart-item-select").check();
+    await openCheckout(page);
+    await page.locator("#cart-order-cancel").click();
+    const checks = refreshCalls.length;
+    await page.locator("#cart-tab-armtek").click();
+    await openCheckout(page);
+    assert.equal(refreshCalls.length, checks, "verified ids remain valid when changing the supplier tab");
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+    assert.deepEqual(orderCalls.flat().map((line) => line.result.article), ["A1"]);
+    await page.locator("#cart-order-cancel").click();
+    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 1);
+    assert.match(await page.locator("#cart-items").textContent(), /MISSING/);
+  }, { reducedMotion: "reduce", extraOffers: [offer("armtek", 4, { supplier: "armtek", keyzak: "MISSING" }, { article: "MISSING" })],
+    refresh: async (lines) => {
+      if (lines.some((line) => line.result.article === "MISSING")) {
+        throw new CartError("Armtek · TEST MISSING · Тестовый склад: Предложение больше не найдено у поставщика. Заказ не отправлен.", 502);
+      }
+      return structuredClone(lines);
+    } });
 });
 
 test("a failed cart refresh restores controls and shows a safe error", async () => {

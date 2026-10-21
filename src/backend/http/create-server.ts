@@ -354,7 +354,7 @@ export function createAggregatorServer({
             const choices = await cart.orderChoices(fields.revision, fields.supplier, controller.signal, fields.itemIds);
             if (!controller.signal.aborted) serveJson(response, 200, choices);
           } else if (url.pathname === "/api/cart/refresh") {
-            const result = await cart.refreshForOrder(fields.revision, fields.supplier, controller.signal);
+            const result = await cart.refreshForOrder(fields.revision, fields.supplier, controller.signal, fields.itemIds);
             if (!controller.signal.aborted) serveJson(response, 200, result);
           } else if (url.pathname === "/api/cart/uncertain/resolve") {
             serveJson(response, 200, cart.resolveUncertainLine(fields.id, fields.revision, fields.confirmedAbsent, fields.confirmedPlaced));

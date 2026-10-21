@@ -741,6 +741,108 @@ test("refresh failure keeps the cart unchanged and cannot authorize a real order
   }, undefined, gateway);
 });
 
+test("selected refresh ignores an unavailable unselected offer and authorizes only the verified ids", async () => {
+  const checked = [];
+  const submitted = [];
+  const gateway = { refresh: async (lines) => {
+    checked.push(lines.map((line) => line.result.article));
+    if (lines.some((line) => line.result.article === "MISSING")) throw new SupplierIntegrationError("Missing fixture offer");
+    return lines;
+  }, choices: async () => ({}), prepare: async (_supplier, lines) => async () => {
+    submitted.push(...lines.map((line) => line.id));
+    return { confirmed: lines.map((line) => ({ id: line.id, acceptedQuantity: line.quantity, orderIds: ["fixture-1"] })), rejected: [] };
+  } };
+  await withCart(async (cart) => {
+    for (const article of ["A1", "MISSING"]) {
+      const offerId = randomUUID();
+      const offer = result();
+      offer.article = article;
+      cart.registerOffer(offerId, offer);
+      cart.mutate("add", { offerId, quantity: 1, revision: cart.view().revision });
+    }
+    const [available, missing] = cart.view().items;
+    const signal = new AbortController().signal;
+    await assert.rejects(cart.refreshForOrder(2, "all", signal), /Missing fixture/);
+    for (const ids of [[], [available.id, available.id], [randomUUID()]]) {
+      await assert.rejects(cart.refreshForOrder(2, "all", signal, ids));
+    }
+    await assert.rejects(cart.refreshForOrder(2, "part-kom", signal, [available.id]), /Выбранные товары/);
+    await cart.refreshForOrder(2, "armtek", signal, [available.id]);
+    await assert.rejects(cart.order(2, "all", [available.id, missing.id], {}, signal), /Сначала обновите/);
+    assert.deepEqual(submitted, []);
+    const response = await cart.order(2, "all", [available.id], {}, signal);
+    assert.deepEqual(submitted, [available.id]);
+    assert.deepEqual(response.cart.items.map((item) => item.id), [missing.id]);
+    assert.deepEqual(checked, [["A1", "MISSING"], ["A1"]]);
+  }, undefined, gateway);
+});
+
+test("pending unselected orders do not block refreshing and ordering another cart line", async () => {
+  let submissions = 0;
+  const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async (_supplier, lines) => async () => {
+    if (++submissions === 1) throw new Error("Connection lost");
+    return { confirmed: lines.map((line) => ({ id: line.id, acceptedQuantity: line.quantity, orderIds: ["fixture-2"] })), rejected: [] };
+  } };
+  await withCart(async (cart) => {
+    for (const supplier of ["armtek", "part-kom"]) {
+      const offerId = randomUUID();
+      cart.registerOffer(offerId, result(supplier));
+      cart.mutate("add", { offerId, quantity: 1, revision: cart.view().revision });
+    }
+    const [uncertain, available] = cart.view().items;
+    const signal = new AbortController().signal;
+    await cart.refreshForOrder(2, "all", signal);
+    await cart.order(2, "armtek", [uncertain.id], {}, signal);
+    await assert.rejects(cart.refreshForOrder(2, "all", signal), /сверить/);
+    await cart.refreshForOrder(2, "all", signal, [available.id]);
+    const response = await cart.order(2, "all", [available.id], {}, signal);
+    assert.deepEqual(response.cart.pendingIds, [uncertain.id]);
+    assert.equal(submissions, 2);
+  }, undefined, gateway);
+});
+
+test("cart refresh accepts both supported VAZ article forms while retaining supplier, brand and warehouse identifiers", async () => {
+  for (const supplier of ["armtek", "part-kom"]) {
+    for (const [original, actual] of [["21211803027", "21210-1803027"], ["21210-1803027", "2121-1803027"]]) {
+      const oldLine = line(supplier);
+      oldLine.result.article = original;
+      const fresh = result(supplier);
+      fresh.article = actual;
+      const service = new RealOrderApplicationService(new SupplierSessionManager(), async (_query, emit) => {
+        emit({ type: "result", result: fresh });
+        emit({ type: "supplier_status", supplier, status: "completed" });
+      });
+      const [updated] = await service.refresh([oldLine], new AbortController().signal);
+      assert.equal(updated.result.article, actual);
+      assert.deepEqual(updated.reference, oldLine.reference);
+      for (const change of [() => { fresh.brand = "OTHER"; }, () => { fresh.brand = "TEST"; fresh.article = "21213-1803027"; }]) {
+        change();
+        await assert.rejects(service.refresh([oldLine], new AbortController().signal), /missing or ambiguous/);
+      }
+      fresh.article = actual;
+      attachPurchaseReference(fresh, supplier === "armtek" ? { supplier, keyzak: "OTHER" } : { supplier, makerId: "101", providerId: "999" });
+      await assert.rejects(service.refresh([oldLine], new AbortController().signal), /missing or ambiguous/);
+    }
+  }
+});
+
+test("offer refresh errors name the supplier, brand, article and warehouse without exposing upstream failures", async () => {
+  const item = line("armtek");
+  for (const mode of ["missing", "ambiguous", "insufficient", "failed"]) {
+    const service = new RealOrderApplicationService(new SupplierSessionManager(), async (_query, emit) => {
+      if (mode === "ambiguous") for (let index = 0; index < 2; index++) emit({ type: "result", result: result() });
+      if (mode === "insufficient") emit({ type: "result", result: result("armtek", 1) });
+      emit({ type: "supplier_status", supplier: "armtek", status: mode === "failed" ? "error" : "completed", details: "private supplier payload" });
+    });
+    await assert.rejects(service.refresh([item], new AbortController().signal), (error) => {
+      assert.match(error.publicMessage, /Armtek · TEST A1 · Тестовый склад/);
+      assert.match(error.publicMessage, /Заказ не отправлен/);
+      assert.doesNotMatch(error.publicMessage, /private supplier payload/);
+      return true;
+    });
+  }
+});
+
 test("supplier order parsers require matching real confirmations", () => {
   const armtek = line("armtek");
   assert.deepEqual(parseArmtekOrderResult({ ITEMS: [{ PIN: "A1", BRAND: "TEST", KEYZAK: "TEST01", REMAIN: "0",

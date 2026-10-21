@@ -305,7 +305,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   let returnFocus = toggle;
   let activeSupplier = "all";
   let refreshedRevision = null;
-  let refreshedScope = null;
+  let refreshedItemIds = new Set();
   let refreshedUntil = 0;
   const selectedIds = new Set();
 
@@ -365,8 +365,9 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     body.innerHTML = items.length ? items.map((item) => {
       const result = item.result;
       const unresolved = pending.has(item.id);
+      const unverified = refreshedRevision !== cart.revision || refreshedUntil <= Date.now() || !refreshedItemIds.has(item.id);
       return `<tr data-cart-item-id="${escapeHtml(item.id)}" class="${selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><label class="cart-selection"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || unresolved ? "disabled" : ""}><span class="cart-mobile-label">К заказу</span></label></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
-        <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : ""}${unresolved ? `<button type="button" class="cart-resolve-button" ${locked ? "disabled" : ""}>Сверить заказ</button>` : ""}</td>
+        <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : unverified ? '<span class="cart-item-check">Прежние данные. Перед заказом проверим выбранную позицию.</span>' : ""}${unresolved ? `<button type="button" class="cart-resolve-button" ${locked ? "disabled" : ""}>Сверить заказ</button>` : ""}</td>
         ${activeSupplier === "all" ? `<td class="cart-item-supplier" data-label="Поставщик / склад">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
         <td class="cart-item-delivery" data-label="Доставка"><span class="${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span>${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
         <td class="cart-item-price" data-label="Цена, ₽">${renderPrices(result)}</td>
@@ -444,7 +445,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       if (cart.items.length) {
         cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier: "all" }) }));
         refreshedRevision = cart.revision;
-        refreshedScope = "all";
+        refreshedItemIds = new Set(cart.items.map((item) => item.id));
         refreshedUntil = Date.now() + 110_000;
       }
       status.textContent = "";
@@ -623,14 +624,18 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       await refresh();
       if (!modal.open) return;
       if (cart.testing) throw new Error("Дождитесь завершения действия в корзине.");
+      const itemIds = (supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier))
+        .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id)).map((item) => item.id);
+      if (!itemIds.length) throw new Error("Выберите товары для заказа.");
       if (refreshedRevision !== cart.revision || refreshedUntil <= Date.now()
-        || refreshedScope !== "all" && refreshedScope !== supplier) {
+        || itemIds.some((id) => !refreshedItemIds.has(id))) {
+        refreshedRevision = null;
         setCartRefreshing(true);
         try {
-          cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier }) }));
+          cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier, itemIds }) }));
         } finally { setCartRefreshing(false); }
         refreshedRevision = cart.revision;
-        refreshedScope = supplier;
+        refreshedItemIds = new Set(itemIds);
         refreshedUntil = Date.now() + 110_000;
       }
       status.textContent = "";
@@ -638,7 +643,6 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       const items = (supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier))
         .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id));
       if (!items.length) throw new Error("Выберите товары для заказа.");
-      const itemIds = items.map((item) => item.id);
       const choices = await api("/api/cart/order-options", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier, itemIds }) });
       if (!modal.open) return;
       orderTarget = { supplier, revision: cart.revision, items: structuredClone(items), itemIds, choices };
@@ -701,6 +705,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     render();
     try {
       if (cart.revision !== revision) throw new Error("Корзина изменилась. Вернитесь в корзину и проверьте заказ заново.");
+      refreshedRevision = null;
       const result = await api("/api/cart/order", { method: "POST", body: JSON.stringify({ revision, supplier, itemIds, details }) });
       if (result.supplier !== supplier || !Array.isArray(result.results) || !result.results.length) {
         throw new Error("Не удалось подтвердить результат заказа.");
