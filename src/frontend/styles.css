@@ -292,6 +292,9 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-table tr:last-child td { border-bottom: 0; }
 .cart-item-warehouse, .cart-item-stock, .cart-item-check { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .cart-item-check { color: #b63822; }
+.cart-table tr.is-unavailable { background: #f0f2f4; }
+.cart-table tr.is-unavailable > td:not(.cart-item-remove) { opacity: .5; }
+.cart-table tr.is-unavailable .cart-item-check { color: var(--muted); }
 .cart-resolve-button { display: inline-block; margin-top: 6px; padding: 0; border: 0; color: #b42318; background: none; font: inherit; font-size: 11px; text-decoration: underline; cursor: pointer; }
 .cart-resolve-button:disabled { opacity: .5; cursor: default; }
 .cart-resolve-confirm { width: min(520px, calc(100vw - 24px)); padding: 24px; }

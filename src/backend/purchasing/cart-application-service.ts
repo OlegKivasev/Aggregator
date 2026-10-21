@@ -6,8 +6,15 @@ import { SqliteCartRepository } from "./sqlite-cart-repository.ts";
 import type { CheckoutDetails, OrderChoices, OrderGroupResult, OrderSupplier } from "./order-contract.ts";
 import type { OrderHistory } from "./order-history-contract.ts";
 
+export interface CartRefreshIssue {
+  reason: "not_found" | "insufficient_stock" | "check_failed";
+  message: string;
+}
+
+export type RefreshedPurchaseLine = PurchaseLine & { refreshIssue?: CartRefreshIssue };
+
 export interface RealOrderGateway {
-  refresh(lines: PurchaseLine[], signal: AbortSignal): Promise<PurchaseLine[]>;
+  refresh(lines: PurchaseLine[], signal: AbortSignal): Promise<RefreshedPurchaseLine[]>;
   choices(suppliers: OrderSupplier[], signal: AbortSignal): Promise<OrderChoices>;
   prepare(supplier: OrderSupplier, lines: PurchaseLine[], details: CheckoutDetails, signal: AbortSignal):
     Promise<(attemptId: string, signal: AbortSignal) => Promise<OrderGroupResult>>;
@@ -90,6 +97,7 @@ export class CartApplicationService {
   private readonly offers = new Map<string, { line: PurchaseLine; expires: number }>();
   private testing = false;
   private refreshed: { revision: number; lineIds: string[]; expires: number } | null = null;
+  private readonly refreshIssues = new Map<string, CartRefreshIssue>();
   private readonly controller = new AbortController();
 
   constructor(repository: SqliteCartRepository, testOrder: TestOrder, realOrder: RealOrderGateway | null = null) {
@@ -119,7 +127,8 @@ export class CartApplicationService {
 
   view() {
     const cart = this.load();
-    return { revision: cart.revision, items: cart.lines.map(({ id, result, quantity }) => ({ id, result, quantity })),
+    return { revision: cart.revision, items: cart.lines.map(({ id, result, quantity }) => ({ id, result, quantity,
+      unavailable: this.refreshIssues.get(id) ?? null })),
       count: cart.lines.reduce((sum, line) => sum + line.quantity, 0),
       total: cart.lines.reduce((sum, line) => sum + line.result.price * line.quantity, 0), testing: this.testing,
       pendingIds: this.repository.pendingLineIds() };
@@ -137,6 +146,7 @@ export class CartApplicationService {
     if (this.testing) throw new CartError("Дождитесь завершения проверки заказа.", 409);
     const cart = this.load();
     if (payload.revision !== cart.revision) throw new CartError("Корзина изменилась. Обновите её и повторите действие.", 409);
+    const invalidated = new Set<string>();
     if (action === "add") {
       const additions = payload.offers === undefined ? [payload] : payload.offers;
       if (!Array.isArray(additions) || !additions.length || additions.length > 500
@@ -150,6 +160,8 @@ export class CartApplicationService {
         const quantity = validateQuantity(addition.quantity, stock(offer.line.result));
         if (existing) {
           if (this.repository.pendingLineIds().includes(existing.id)) throw new CartError("Статус заказа этой позиции нужно сверить с поставщиком.", 409);
+          if (this.refreshIssues.has(existing.id)) throw new CartError("Недоступную позицию можно только удалить из корзины.", 409);
+          invalidated.add(existing.id);
           existing.quantity = validateQuantity(existing.quantity + quantity, stock(offer.line.result));
           existing.result = structuredClone(offer.line.result);
           existing.reference = structuredClone(offer.line.reference);
@@ -162,11 +174,15 @@ export class CartApplicationService {
       const index = cart.lines.findIndex((line) => line.id === payload.id);
       if (index < 0) throw new CartError("Позиция не найдена в корзине.", 404);
       if (this.repository.pendingLineIds().includes(cart.lines[index].id)) throw new CartError("Статус заказа этой позиции нужно сверить с поставщиком.", 409);
+      if (action === "update" && this.refreshIssues.has(cart.lines[index].id)) throw new CartError("Недоступную позицию можно только удалить из корзины.", 409);
       if (action === "remove") cart.lines.splice(index, 1);
       else cart.lines[index].quantity = validateQuantity(payload.quantity, stock(cart.lines[index].result));
     }
     if (!this.repository.save({ ...cart, revision: cart.revision + 1 }, cart.revision)) throw new CartError("Корзина изменилась. Повторите действие.", 409);
-    this.refreshed = null;
+    const ids = new Set(cart.lines.map((line) => line.id));
+    this.refreshed = this.refreshed?.revision === cart.revision ? { ...this.refreshed, revision: cart.revision + 1,
+      lineIds: this.refreshed.lineIds.filter((id) => ids.has(id) && !invalidated.has(id)) } : null;
+    for (const id of this.refreshIssues.keys()) if (!ids.has(id)) this.refreshIssues.delete(id);
     return this.view();
   }
 
@@ -182,6 +198,8 @@ export class CartApplicationService {
     }
     if (lines.length === cart.lines.length) return this.view();
     if (!this.repository.save({ lines, revision: cart.revision + 1 }, cart.revision)) throw new CartError("Корзина изменилась. Повторите действие.", 409);
+    const kept = new Set(lines.map((line) => line.id));
+    for (const id of this.refreshIssues.keys()) if (!kept.has(id)) this.refreshIssues.delete(id);
     this.refreshed = null;
     return this.view();
   }
@@ -209,22 +227,27 @@ export class CartApplicationService {
     const scope = normalizeCartSupplier(supplier);
     const cart = this.load();
     if (revision !== cart.revision) throw new CartError("Корзина изменилась. Обновите её.", 409);
-    const lines = itemIds === undefined ? scope === "all" ? cart.lines : cart.lines.filter((line) => line.reference.supplier === scope)
+    const candidates = itemIds === undefined ? scope === "all" ? cart.lines : cart.lines.filter((line) => line.reference.supplier === scope)
       : selectedOrderLines(cart.lines, scope, itemIds);
-    if (!lines.length) throw new CartError("Добавьте товары в выбранную вкладку корзины.");
+    if (!candidates.length) throw new CartError("Добавьте товары в выбранную вкладку корзины.");
     const pending = new Set(this.repository.pendingLineIds());
-    if (lines.some((line) => pending.has(line.id))) throw new CartError("Статус предыдущего заказа нужно сверить с поставщиком.", 409);
+    if (itemIds !== undefined && candidates.some((line) => pending.has(line.id))) throw new CartError("Статус предыдущего заказа нужно сверить с поставщиком.", 409);
+    const lines = candidates.filter((line) => !pending.has(line.id));
+    if (!lines.length) return this.view();
     this.testing = true;
     this.refreshed = null;
     try {
       const combinedSignal = AbortSignal.any([signal, this.controller.signal]);
-      const updated = await this.realOrder.refresh(structuredClone(lines), combinedSignal);
+      const checked = await this.realOrder.refresh(structuredClone(lines), combinedSignal);
       combinedSignal.throwIfAborted();
-      if (updated.length !== lines.length || updated.some((line, index) => line.id !== lines[index].id
+      if (checked.length !== lines.length || checked.some((line, index) => line.id !== lines[index].id
         || line.quantity !== lines[index].quantity || line.reference.supplier !== lines[index].reference.supplier
-        || !validLine(line) || line.reference.supplier === "forum-auto" && !line.reference.gid)) {
+        || !validLine(line) || !line.refreshIssue && line.reference.supplier === "forum-auto" && !line.reference.gid
+        || line.refreshIssue && (!["not_found", "insufficient_stock", "check_failed"].includes(line.refreshIssue.reason)
+          || typeof line.refreshIssue.message !== "string" || !line.refreshIssue.message || line.refreshIssue.message.length > 6000))) {
         throw new CartError("Не удалось проверить актуальные предложения. Заказ не отправлен.", 502);
       }
+      const updated = checked.map(({ refreshIssue: _issue, ...line }) => line);
       const changed = JSON.stringify(updated) !== JSON.stringify(lines);
       if (changed) {
         const replacements = new Map(updated.map((line) => [line.id, line]));
@@ -233,8 +256,12 @@ export class CartApplicationService {
         if (!this.repository.save(next, cart.revision)) throw new CartError("Корзина изменилась. Проверьте её заново.", 409);
       }
       const current = this.load();
+      for (const line of checked) {
+        if (line.refreshIssue) this.refreshIssues.set(line.id, line.refreshIssue);
+        else this.refreshIssues.delete(line.id);
+      }
       this.refreshed = { revision: current.revision,
-        lineIds: updated.map((line) => line.id), expires: Date.now() + 2 * 60_000 };
+        lineIds: checked.filter((line) => !line.refreshIssue).map((line) => line.id), expires: Date.now() + 2 * 60_000 };
       this.testing = false;
       return this.view();
     } finally { this.testing = false; }
@@ -267,6 +294,7 @@ export class CartApplicationService {
     if (!lines.length) throw new CartError("Добавьте товары в выбранную вкладку корзины.");
     const pending = new Set(this.repository.pendingLineIds());
     if (lines.some((line) => pending.has(line.id))) throw new CartError("Статус предыдущего заказа нужно сверить с поставщиком.", 409);
+    if (lines.some((line) => this.refreshIssues.has(line.id))) throw new CartError("Уберите недоступные позиции из выбранных товаров.", 409);
     return this.realOrder.choices([...new Set(lines.map((line) => line.reference.supplier))], AbortSignal.any([signal, this.controller.signal]));
   }
 
@@ -279,6 +307,7 @@ export class CartApplicationService {
     const lines = selectedOrderLines(cart.lines, scope, itemIds);
     const pending = new Set(this.repository.pendingLineIds());
     if (lines.some((line) => pending.has(line.id))) throw new CartError("Статус предыдущего заказа нужно сверить с поставщиком.", 409);
+    if (lines.some((line) => this.refreshIssues.has(line.id))) throw new CartError("Уберите недоступные позиции из выбранных товаров.", 409);
     const refreshed = this.refreshed;
     if (!refreshed || refreshed.revision !== cart.revision
       || lines.some((line) => !refreshed.lineIds.includes(line.id)) || refreshed.expires <= Date.now()) {
@@ -331,6 +360,7 @@ export class CartApplicationService {
   close(): void {
     this.controller.abort(new Error("Cart closed"));
     this.offers.clear();
+    this.refreshIssues.clear();
     this.repository.close();
   }
 }

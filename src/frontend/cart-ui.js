@@ -202,6 +202,11 @@ const validateCart = (value) => {
   if (!Array.isArray(value.pendingIds) || value.pendingIds.some((id) => typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id))) {
     throw new Error("Некорректный статус заказов в корзине.");
   }
+  if (value.items.some((item) => item.unavailable != null && (typeof item.unavailable !== "object"
+    || !["not_found", "insufficient_stock", "check_failed"].includes(item.unavailable.reason)
+    || typeof item.unavailable.message !== "string" || !item.unavailable.message || item.unavailable.message.length > 6000))) {
+    throw new Error("Некорректный результат обновления корзины.");
+  }
   return value;
 };
 
@@ -339,8 +344,9 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     const currentIds = new Set(cart.items.map((item) => item.id));
     for (const id of selectedIds) if (!currentIds.has(id)) selectedIds.delete(id);
     const pending = new Set(cart.pendingIds ?? []);
-    const selected = items.filter((item) => selectedIds.has(item.id) && !pending.has(item.id));
-    const selectable = items.filter((item) => !pending.has(item.id));
+    for (const item of cart.items) if (item.unavailable || pending.has(item.id)) selectedIds.delete(item.id);
+    const selected = items.filter((item) => selectedIds.has(item.id));
+    const selectable = items.filter((item) => !pending.has(item.id) && !item.unavailable);
     tabs.innerHTML = ["all", ...suppliers].map((supplier) => {
       const name = supplier === "all" ? "Все" : supplierNames[supplier];
       const tabCount = supplier === "all" ? cart.count : cart.items.filter((item) => item.result.supplier === supplier).reduce((sum, item) => sum + item.quantity, 0);
@@ -365,14 +371,14 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     body.innerHTML = items.length ? items.map((item) => {
       const result = item.result;
       const unresolved = pending.has(item.id);
-      const unverified = refreshedRevision !== cart.revision || refreshedUntil <= Date.now() || !refreshedItemIds.has(item.id);
-      return `<tr data-cart-item-id="${escapeHtml(item.id)}" class="${selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><label class="cart-selection"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || unresolved ? "disabled" : ""}><span class="cart-mobile-label">К заказу</span></label></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
-        <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : unverified ? '<span class="cart-item-check">Прежние данные. Перед заказом проверим выбранную позицию.</span>' : ""}${unresolved ? `<button type="button" class="cart-resolve-button" ${locked ? "disabled" : ""}>Сверить заказ</button>` : ""}</td>
+      const blocked = unresolved || Boolean(item.unavailable);
+      return `<tr data-cart-item-id="${escapeHtml(item.id)}" class="${item.unavailable ? "is-unavailable" : selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><label class="cart-selection"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || blocked ? "disabled" : ""}><span class="cart-mobile-label">К заказу</span></label></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
+        <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : item.unavailable ? `<span class="cart-item-check">${escapeHtml(item.unavailable.message)}</span>` : ""}${unresolved ? `<button type="button" class="cart-resolve-button" ${locked ? "disabled" : ""}>Сверить заказ</button>` : ""}</td>
         ${activeSupplier === "all" ? `<td class="cart-item-supplier" data-label="Поставщик / склад">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
         <td class="cart-item-delivery" data-label="Доставка"><span class="${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span>${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
         <td class="cart-item-price" data-label="Цена, ₽">${renderPrices(result)}</td>
         <td class="cart-item-quantity" data-label="Количество"><input class="cart-quantity" type="number" min="1" max="${maximumQuantity(result)}" step="1" value="${item.quantity}" inputmode="numeric"
-          aria-label="Количество для ${escapeHtml(result.article)}" ${locked || unresolved ? "disabled" : ""}><span class="cart-item-stock">из ${maximumQuantity(result)}</span></td>
+          aria-label="Количество для ${escapeHtml(result.article)}" ${locked || blocked ? "disabled" : ""}><span class="cart-item-stock">${item.unavailable ? "—" : `из ${maximumQuantity(result)}`}</span></td>
         <td class="cart-item-sum" data-label="Стоимость, ₽">${renderPrices(result, item.quantity)}</td>
         <td class="cart-item-remove"><button type="button" class="cart-remove btn btn-light" aria-label="Удалить ${escapeHtml(result.article)}" title="Удалить" ${locked || unresolved ? "disabled" : ""}>×</button></td></tr>`;
     }).join("") : `<tr><td colspan="${activeSupplier === "all" ? 9 : 8}" class="cart-empty">Корзина пуста. Добавьте товары из таблицы предложений.</td></tr>`;
@@ -418,7 +424,12 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     if (source) source.disabled = true;
     try {
       if (!cart) await refresh();
+      const previousRevision = cart.revision;
       cart = validateCart(await api(path, { method, body: JSON.stringify({ revision: cart.revision, ...fields }) }));
+      if (path.startsWith("/api/cart/items/") && (method === "DELETE" || method === "PATCH") && refreshedRevision === previousRevision) {
+        refreshedRevision = cart.revision;
+        refreshedItemIds = new Set(cart.items.filter((item) => !item.unavailable && refreshedItemIds.has(item.id)).map((item) => item.id));
+      }
       status.textContent = "";
       if (source?.matches(".cart-offer-button")) { flyToCart(source); notify("Товар добавлен в корзину."); }
       return true;
@@ -445,7 +456,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       if (cart.items.length) {
         cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier: "all" }) }));
         refreshedRevision = cart.revision;
-        refreshedItemIds = new Set(cart.items.map((item) => item.id));
+        refreshedItemIds = new Set(cart.items.filter((item) => !item.unavailable && !cart.pendingIds.includes(item.id)).map((item) => item.id));
         refreshedUntil = Date.now() + 110_000;
       }
       status.textContent = "";
@@ -600,7 +611,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   modal.querySelector("#cart-select-all").addEventListener("change", (event) => {
     const items = activeSupplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === activeSupplier);
     const pending = new Set(cart.pendingIds ?? []);
-    for (const item of items) if (!pending.has(item.id)) {
+    for (const item of items) if (!pending.has(item.id) && !item.unavailable) {
       if (event.target.checked) selectedIds.add(item.id); else selectedIds.delete(item.id);
     }
     render();
@@ -625,7 +636,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       if (!modal.open) return;
       if (cart.testing) throw new Error("Дождитесь завершения действия в корзине.");
       const itemIds = (supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier))
-        .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id)).map((item) => item.id);
+        .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id) && !item.unavailable).map((item) => item.id);
       if (!itemIds.length) throw new Error("Выберите товары для заказа.");
       if (refreshedRevision !== cart.revision || refreshedUntil <= Date.now()
         || itemIds.some((id) => !refreshedItemIds.has(id))) {
@@ -635,13 +646,15 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
           cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier, itemIds }) }));
         } finally { setCartRefreshing(false); }
         refreshedRevision = cart.revision;
-        refreshedItemIds = new Set(itemIds);
+        refreshedItemIds = new Set(cart.items.filter((item) => itemIds.includes(item.id) && !item.unavailable).map((item) => item.id));
         refreshedUntil = Date.now() + 110_000;
+        const unavailable = cart.items.find((item) => itemIds.includes(item.id) && item.unavailable);
+        if (unavailable) throw new Error(unavailable.unavailable.message);
       }
       status.textContent = "";
       render();
       const items = (supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier))
-        .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id));
+        .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id) && !item.unavailable);
       if (!items.length) throw new Error("Выберите товары для заказа.");
       const choices = await api("/api/cart/order-options", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier, itemIds }) });
       if (!modal.open) return;

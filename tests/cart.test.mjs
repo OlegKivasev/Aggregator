@@ -717,13 +717,13 @@ test("supplier refresh matches a legacy Forum Auto row and rejects ambiguous or 
     emit({ type: "result", result: result("forum-auto") });
     emit({ type: "supplier_status", supplier: "forum-auto", status: "completed" });
   });
-  await assert.rejects(ambiguous.refresh([oldLine], new AbortController().signal), /ambiguous/);
+  assert.equal((await ambiguous.refresh([oldLine], new AbortController().signal))[0].refreshIssue.reason, "check_failed");
   const scarce = result("forum-auto", 1);
   const insufficient = new RealOrderApplicationService(new SupplierSessionManager(), async (_query, emit) => {
     emit({ type: "result", result: scarce });
     emit({ type: "supplier_status", supplier: "forum-auto", status: "completed" });
   });
-  await assert.rejects(insufficient.refresh([oldLine], new AbortController().signal), /insufficient/);
+  assert.equal((await insufficient.refresh([oldLine], new AbortController().signal))[0].refreshIssue.reason, "insufficient_stock");
 });
 
 test("refresh failure keeps the cart unchanged and cannot authorize a real order", async () => {
@@ -793,7 +793,8 @@ test("pending unselected orders do not block refreshing and ordering another car
     const signal = new AbortController().signal;
     await cart.refreshForOrder(2, "all", signal);
     await cart.order(2, "armtek", [uncertain.id], {}, signal);
-    await assert.rejects(cart.refreshForOrder(2, "all", signal), /сверить/);
+    assert.deepEqual((await cart.refreshForOrder(2, "all", signal)).pendingIds, [uncertain.id]);
+    await assert.rejects(cart.refreshForOrder(2, "all", signal, [uncertain.id]), /сверить/);
     await cart.refreshForOrder(2, "all", signal, [available.id]);
     const response = await cart.order(2, "all", [available.id], {}, signal);
     assert.deepEqual(response.cart.pendingIds, [uncertain.id]);
@@ -817,16 +818,16 @@ test("cart refresh accepts both supported VAZ article forms while retaining supp
       assert.deepEqual(updated.reference, oldLine.reference);
       for (const change of [() => { fresh.brand = "OTHER"; }, () => { fresh.brand = "TEST"; fresh.article = "21213-1803027"; }]) {
         change();
-        await assert.rejects(service.refresh([oldLine], new AbortController().signal), /missing or ambiguous/);
+        assert.equal((await service.refresh([oldLine], new AbortController().signal))[0].refreshIssue.reason, "not_found");
       }
       fresh.article = actual;
       attachPurchaseReference(fresh, supplier === "armtek" ? { supplier, keyzak: "OTHER" } : { supplier, makerId: "101", providerId: "999" });
-      await assert.rejects(service.refresh([oldLine], new AbortController().signal), /missing or ambiguous/);
+      assert.equal((await service.refresh([oldLine], new AbortController().signal))[0].refreshIssue.reason, "not_found");
     }
   }
 });
 
-test("offer refresh errors name the supplier, brand, article and warehouse without exposing upstream failures", async () => {
+test("offer refresh records unavailable reasons per item without exposing upstream failures", async () => {
   const item = line("armtek");
   for (const mode of ["missing", "ambiguous", "insufficient", "failed"]) {
     const service = new RealOrderApplicationService(new SupplierSessionManager(), async (_query, emit) => {
@@ -834,13 +835,89 @@ test("offer refresh errors name the supplier, brand, article and warehouse witho
       if (mode === "insufficient") emit({ type: "result", result: result("armtek", 1) });
       emit({ type: "supplier_status", supplier: "armtek", status: mode === "failed" ? "error" : "completed", details: "private supplier payload" });
     });
-    await assert.rejects(service.refresh([item], new AbortController().signal), (error) => {
-      assert.match(error.publicMessage, /Armtek · TEST A1 · Тестовый склад/);
-      assert.match(error.publicMessage, /Заказ не отправлен/);
-      assert.doesNotMatch(error.publicMessage, /private supplier payload/);
-      return true;
-    });
+    const [checked] = await service.refresh([item], new AbortController().signal);
+    assert.equal(checked.refreshIssue.reason, mode === "missing" ? "not_found" : mode === "insufficient" ? "insufficient_stock" : "check_failed");
+    assert.ok(checked.refreshIssue.message);
+    assert.doesNotMatch(checked.refreshIssue.message, /private supplier payload/);
+    assert.deepEqual(checked.result, item.result);
   }
+});
+
+test("opening refresh preserves available items while missing and failed lines are delete-only on the server", async () => {
+  const searches = [];
+  const submitted = [];
+  const service = new RealOrderApplicationService(new SupplierSessionManager(), async (query, emit) => {
+    searches.push(query.article);
+    if (query.article !== "MISSING" && query.article !== "ERROR") {
+      const fresh = result(); fresh.article = query.article; fresh.price = 125;
+      emit({ type: "result", result: fresh });
+    }
+    emit({ type: "supplier_status", supplier: "armtek", status: query.article === "ERROR" ? "error" : "completed" });
+  });
+  const gateway = { refresh: service.refresh.bind(service), choices: async () => ({}), prepare: async (_supplier, lines) => async () => {
+    submitted.push(...lines.map((line) => line.result.article));
+    return { confirmed: lines.map((line) => ({ id: line.id, acceptedQuantity: line.quantity, orderIds: ["fixture-1"] })), rejected: [] };
+  } };
+  await withCart(async (cart) => {
+    for (const article of ["MISSING", "AVAILABLE", "ERROR"]) {
+      const offerId = randomUUID(); const offer = result(); offer.article = article;
+      cart.registerOffer(offerId, offer);
+      cart.mutate("add", { offerId, quantity: 1, revision: cart.view().revision });
+    }
+    const view = await cart.refreshForOrder(3, "all", new AbortController().signal);
+    const [missing, available, failed] = view.items;
+    assert.equal(missing.unavailable.reason, "not_found");
+    assert.equal(available.unavailable, null);
+    assert.equal(available.result.price, 125);
+    assert.equal(failed.unavailable.reason, "check_failed");
+    assert.equal(missing.result.price, 100);
+    for (const item of [missing, failed]) {
+      assert.throws(() => cart.mutate("update", { id: item.id, quantity: 2, revision: view.revision }), /только удалить/);
+      await assert.rejects(cart.orderChoices(view.revision, "all", new AbortController().signal, [item.id]), /недоступные/);
+      await assert.rejects(cart.order(view.revision, "all", [item.id], {}, new AbortController().signal), /недоступные/);
+    }
+    const afterRemove = cart.mutate("remove", { id: failed.id, revision: view.revision });
+    const afterQuantity = cart.mutate("update", { id: available.id, quantity: 2, revision: afterRemove.revision });
+    const ordered = await cart.order(afterQuantity.revision, "all", [available.id], {}, new AbortController().signal);
+    assert.deepEqual(submitted, ["AVAILABLE"]);
+    assert.deepEqual(ordered.cart.items.map((item) => item.id), [missing.id]);
+    assert.equal(ordered.cart.items[0].unavailable.reason, "not_found");
+    assert.deepEqual(searches, ["MISSING", "AVAILABLE", "ERROR"]);
+    assert.equal(cart.mutate("remove", { id: missing.id, revision: ordered.cart.revision }).count, 0);
+  }, undefined, gateway);
+});
+
+test("a later opening refresh can restore an unavailable line without persisting invented availability", async () => {
+  let present = false;
+  const service = new RealOrderApplicationService(new SupplierSessionManager(), async (_query, emit) => {
+    if (present) emit({ type: "result", result: result() });
+    emit({ type: "supplier_status", supplier: "armtek", status: "completed" });
+  });
+  await withCart(async (cart, reopen) => {
+    const offerId = randomUUID(); cart.registerOffer(offerId, result());
+    cart.mutate("add", { offerId, quantity: 1, revision: 0 });
+    assert.equal((await cart.refreshForOrder(1, "all", new AbortController().signal)).items[0].unavailable.reason, "not_found");
+    cart = reopen();
+    assert.equal((await cart.refreshForOrder(1, "all", new AbortController().signal)).items[0].unavailable.reason, "not_found");
+    present = true;
+    assert.equal((await cart.refreshForOrder(1, "all", new AbortController().signal)).items[0].unavailable, null);
+  }, undefined, { refresh: service.refresh.bind(service), choices: async () => ({}), prepare: async () => { throw new Error("not submitted"); } });
+});
+
+test("a partial refresh respects abort and never converts a supplier error to confirmed absence", async () => {
+  const items = [line(), line()]; items[1].result.article = "SECOND";
+  for (const status of ["auth_error", "timeout", "error"]) {
+    const service = new RealOrderApplicationService(new SupplierSessionManager(), async (query, emit) => {
+      emit({ type: "result", result: Object.assign(result(), { article: query.article }) });
+      emit({ type: "supplier_status", supplier: "armtek", status: query.article === "SECOND" ? "completed" : status });
+    });
+    const checked = await service.refresh(items, new AbortController().signal);
+    assert.equal(checked[0].refreshIssue.reason, "check_failed");
+    assert.equal(checked[1].refreshIssue, undefined);
+  }
+  const controller = new AbortController();
+  const aborted = new RealOrderApplicationService(new SupplierSessionManager(), async () => { controller.abort(new Error("fixture abort")); });
+  await assert.rejects(aborted.refresh(items, controller.signal), /fixture abort/);
 });
 
 test("supplier order parsers require matching real confirmations", () => {

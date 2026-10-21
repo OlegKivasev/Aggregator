@@ -1,4 +1,4 @@
-import { CartError, type RealOrderGateway } from "../purchasing/cart-application-service.ts";
+import { CartError, type CartRefreshIssue, type RealOrderGateway, type RefreshedPurchaseLine } from "../purchasing/cart-application-service.ts";
 import type { CheckoutDetails, OrderChoices, OrderSupplier, RosskoOrderChoices } from "../purchasing/order-contract.ts";
 import { getPurchaseReference, type PurchaseLine, type PurchaseReference } from "../purchasing/purchase-offer.ts";
 import type { SupplierSessionManager } from "../session/session-manager.ts";
@@ -19,8 +19,6 @@ const articleKey = (article: string): string => article.replace(/[^\p{L}\p{N}]/g
 const sameArticle = (left: string, right: string): boolean => [left, ...additionalArticleVariants(left).map((variant) => variant.article)]
   .some((article) => articleKey(article) === articleKey(right));
 const supplierNames: Record<OrderSupplier, string> = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
-const refreshMessage = (line: PurchaseLine, message: string): string =>
-  `${supplierNames[line.reference.supplier]} · ${line.result.brand} ${line.result.article}${line.result.warehouse ? ` · ${line.result.warehouse}` : ""}: ${message}`;
 
 export function allowedRosskoOrderChoices(options: RosskoOrderChoices): RosskoOrderChoices {
   const deliveries = options.deliveries.filter((item) => item.addressId !== null);
@@ -132,40 +130,46 @@ export class RealOrderApplicationService implements RealOrderGateway {
     } finally { bounded.dispose(); }
   }
 
-  async refresh(lines: PurchaseLine[], signal: AbortSignal): Promise<PurchaseLine[]> {
-    const found = new Map<string, Array<{ result: PurchaseLine["result"]; reference: PurchaseReference }>>();
+  async refresh(lines: PurchaseLine[], signal: AbortSignal): Promise<RefreshedPurchaseLine[]> {
+    const found = new Map<string, { offers: Array<{ result: PurchaseLine["result"]; reference: PurchaseReference }>; issue?: CartRefreshIssue }>();
     for (const line of lines) {
       const key = JSON.stringify([line.reference.supplier, line.result.article]);
       if (found.has(key)) continue;
       const offers: Array<{ result: PurchaseLine["result"]; reference: PurchaseReference }> = [];
       let status: string | null = null;
-      await this.search({ article: line.result.article, suppliers: [line.reference.supplier] }, (event) => {
-        if (event.type === "result") {
-          const reference = getPurchaseReference(event.result);
-          if (reference) offers.push({ result: event.result, reference });
-        } else if (event.type === "supplier_status" && event.supplier === line.reference.supplier) status = event.status;
-      }, signal);
-      signal.throwIfAborted();
-      if (status === "auth_error") throw new SupplierAuthError("Supplier authorization is unavailable for order refresh");
-      if (status === "timeout") throw new SupplierTimeoutError("Supplier order refresh timed out");
-      if (status !== "completed") throw new SupplierIntegrationError("Supplier offer refresh failed", {
-        publicMessage: refreshMessage(line, "Не удалось обновить предложение у поставщика. Заказ не отправлен."),
-      });
-      found.set(key, offers);
+      const failed = (message: string): void => { found.set(key, { offers: [], issue: { reason: "check_failed", message } }); };
+      try {
+        await this.search({ article: line.result.article, suppliers: [line.reference.supplier] }, (event) => {
+          if (event.type === "result") {
+            const reference = getPurchaseReference(event.result);
+            if (reference) offers.push({ result: event.result, reference });
+          } else if (event.type === "supplier_status" && event.supplier === line.reference.supplier) status = event.status;
+        }, signal);
+        signal.throwIfAborted();
+        if (status === "completed") found.set(key, { offers });
+        else if (status === "auth_error") failed(`Не удалось проверить товар: требуется авторизация ${supplierNames[line.reference.supplier]}.`);
+        else if (status === "timeout") failed("Не удалось проверить товар: поставщик не ответил вовремя.");
+        else failed("Не удалось проверить товар у поставщика.");
+      } catch (error) {
+        signal.throwIfAborted();
+        if (error instanceof SupplierAuthError) failed(`Не удалось проверить товар: требуется авторизация ${supplierNames[line.reference.supplier]}.`);
+        else if (error instanceof SupplierTimeoutError) failed("Не удалось проверить товар: поставщик не ответил вовремя.");
+        else if (error instanceof SupplierIntegrationError) failed("Не удалось проверить товар у поставщика.");
+        else throw error;
+      }
     }
     return lines.map((line) => {
-      const offers = found.get(JSON.stringify([line.reference.supplier, line.result.article])) ?? [];
-      const matches = offers.filter((offer) => sameOffer(line, offer));
-      if (matches.length !== 1) throw new SupplierIntegrationError("Supplier offer is missing or ambiguous", {
-        publicMessage: refreshMessage(line, matches.length ? "Найдено несколько подходящих предложений. Заказ не отправлен."
-          : "Предложение больше не найдено у поставщика. Уберите позицию из выбранных или повторите поиск. Заказ не отправлен."),
-      });
+      const lookup = found.get(JSON.stringify([line.reference.supplier, line.result.article]));
+      if (!lookup) throw new Error("Cart offer refresh result is missing");
+      if (lookup.issue) return { ...line, refreshIssue: lookup.issue };
+      const matches = lookup.offers.filter((offer) => sameOffer(line, offer));
+      if (matches.length !== 1) return { ...line, refreshIssue: matches.length
+        ? { reason: "check_failed", message: "Найдено несколько подходящих предложений. Товар недоступен для заказа." }
+        : { reason: "not_found", message: "Товара больше нет у поставщика." } };
       const offer = matches[0];
       if (typeof offer.result.quantity !== "number" || !Number.isSafeInteger(offer.result.quantity)
         || offer.result.quantity < line.quantity) {
-        throw new SupplierIntegrationError("Supplier offer has insufficient confirmed stock", {
-          publicMessage: refreshMessage(line, "Остаток у поставщика меньше количества в корзине. Уменьшите количество или уберите позицию из выбранных. Заказ не отправлен."),
-        });
+        return { ...line, refreshIssue: { reason: "insufficient_stock", message: "У поставщика недостаточно товара для этого количества." } };
       }
       return { id: line.id, quantity: line.quantity, result: offer.result, reference: offer.reference };
     });
