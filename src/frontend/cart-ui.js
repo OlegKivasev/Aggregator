@@ -249,13 +249,17 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   resolveDialog.id = "cart-resolve-confirm";
   resolveDialog.className = "cart-modal cart-resolve-confirm";
   resolveDialog.setAttribute("aria-labelledby", "cart-resolve-title");
-  resolveDialog.innerHTML = `<h3 id="cart-resolve-title">Снять блокировку заказа Forum Auto?</h3>
+  resolveDialog.innerHTML = `<h3 id="cart-resolve-title">Сверка заказа с поставщиком</h3>
     <p id="cart-resolve-description"></p>
+    <fieldset class="cart-resolve-options"><legend>Результат проверки в кабинете поставщика</legend>
+      <label><input type="radio" name="cart-resolution" value="placed">Заказ оформлен — убрать позицию из корзины</label>
+      <label><input type="radio" name="cart-resolution" value="missing">Заказа нет — разблокировать позицию</label></fieldset>
+    <p id="cart-resolve-consequence"></p>
     <label class="cart-resolve-acknowledgement"><input id="cart-resolve-checked" type="checkbox">
-      Я проверил кабинет Forum Auto: заказ с этой позицией не создан.</label>
+      <span id="cart-resolve-acknowledgement"></span></label>
     <p id="cart-resolve-status" role="status" aria-live="polite"></p>
     <div class="cart-confirm-actions"><button type="button" class="btn btn-light" id="cart-resolve-cancel" autofocus>Отмена</button>
-      <button type="button" class="btn btn-primary" id="cart-resolve-accept" disabled>Разблокировать</button></div>`;
+      <button type="button" class="btn btn-primary" id="cart-resolve-accept" disabled>Подтвердить сверку</button></div>`;
   document.body.append(resolveDialog);
   const orderDialog = document.createElement("dialog");
   orderDialog.id = "cart-order-confirm";
@@ -362,7 +366,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       const result = item.result;
       const unresolved = pending.has(item.id);
       return `<tr data-cart-item-id="${escapeHtml(item.id)}" class="${selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><label class="cart-selection"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || unresolved ? "disabled" : ""}><span class="cart-mobile-label">К заказу</span></label></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
-        <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : ""}${unresolved && result.supplier === "forum-auto" ? `<button type="button" class="cart-resolve-button" ${locked ? "disabled" : ""}>Заказа нет? Снять блокировку</button>` : ""}</td>
+        <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : ""}${unresolved ? `<button type="button" class="cart-resolve-button" ${locked ? "disabled" : ""}>Сверить заказ</button>` : ""}</td>
         ${activeSupplier === "all" ? `<td class="cart-item-supplier" data-label="Поставщик / склад">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
         <td class="cart-item-delivery" data-label="Доставка"><span class="${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span>${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
         <td class="cart-item-price" data-label="Цена, ₽">${renderPrices(result)}</td>
@@ -527,35 +531,56 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     const resolve = event.target.closest?.(".cart-resolve-button");
     if (resolve && !resolve.disabled) {
       const item = cart.items.find((candidate) => candidate.id === resolve.closest("tr").dataset.cartItemId);
-      if (!item || !cart.pendingIds.includes(item.id) || item.result.supplier !== "forum-auto") return;
+      if (busy || checking || cart.testing || !item || !cart.pendingIds.includes(item.id)) return;
       resolveTarget = { id: item.id, revision: cart.revision };
-      resolveDialog.querySelector("#cart-resolve-description").textContent = `${item.result.brand} ${item.result.article}. После разблокировки повторное оформление отправит новый заказ.`;
+      const supplier = supplierNames[item.result.supplier];
+      resolveDialog.querySelector("#cart-resolve-title").textContent = `Сверка заказа ${supplier}`;
+      resolveDialog.querySelector("#cart-resolve-description").textContent = `${item.result.brand} ${item.result.article} · ${item.quantity} шт. · ${item.result.warehouse ?? "Склад не указан"}. Проверьте товар и всё количество в кабинете ${supplier}.`;
+      resolveDialog.querySelector("#cart-resolve-acknowledgement").textContent = `Я проверил кабинет ${supplier} и подтверждаю выбранный результат для всех ${item.quantity} шт.`;
+      resolveDialog.querySelector("#cart-resolve-consequence").textContent = "Сверка сама по себе не отправляет и не отменяет заказ у поставщика.";
       resolveDialog.querySelector("#cart-resolve-status").textContent = "";
+      for (const choice of resolveDialog.querySelectorAll('[name="cart-resolution"]')) choice.checked = false;
       resolveChecked.checked = false;
       resolveAccept.disabled = true;
+      resolveAccept.textContent = "Подтвердить сверку";
       resolveDialog.showModal();
     }
   });
-  resolveChecked.addEventListener("change", () => { resolveAccept.disabled = !resolveChecked.checked; });
-  resolveDialog.querySelector("#cart-resolve-cancel").addEventListener("click", () => resolveDialog.close());
+  resolveDialog.addEventListener("change", (event) => {
+    const resolution = resolveDialog.querySelector('[name="cart-resolution"]:checked')?.value;
+    if (event.target.name === "cart-resolution") resolveChecked.checked = false;
+    resolveDialog.querySelector("#cart-resolve-consequence").textContent = resolution === "placed"
+      ? "Позиция будет убрана из корзины. Заказ у поставщика останется без изменений."
+      : resolution === "missing" ? "Позицию можно будет изменить или удалить. Повторное оформление отправит новый заказ."
+        : "Сверка сама по себе не отправляет и не отменяет заказ у поставщика.";
+    resolveAccept.textContent = resolution === "placed" ? "Убрать из корзины" : resolution === "missing" ? "Разблокировать" : "Подтвердить сверку";
+    resolveAccept.disabled = busy || !resolveChecked.checked || !resolution;
+  });
+  resolveDialog.querySelector("#cart-resolve-cancel").addEventListener("click", () => { if (!busy) resolveDialog.close(); });
+  resolveDialog.addEventListener("cancel", (event) => { if (busy) event.preventDefault(); });
   resolveAccept.addEventListener("click", async () => {
-    if (busy || checking || !resolveTarget || !resolveChecked.checked) return;
+    const resolution = resolveDialog.querySelector('[name="cart-resolution"]:checked')?.value;
+    if (busy || checking || !resolveTarget || !resolveChecked.checked || !resolution) return;
     busy = true;
     resolveAccept.disabled = true;
+    for (const control of resolveDialog.querySelectorAll("input, button")) control.disabled = true;
     try {
       cart = validateCart(await api("/api/cart/uncertain/resolve", { method: "POST", body: JSON.stringify({
-        ...resolveTarget, confirmedAbsent: true,
+        ...resolveTarget, ...(resolution === "placed" ? { confirmedPlaced: true } : { confirmedAbsent: true }),
       }) }));
       selectedIds.delete(resolveTarget.id);
       refreshedRevision = null;
-      status.textContent = "Блокировка снята после проверки кабинета Forum Auto. Позицию можно заказать заново.";
+      status.textContent = resolution === "placed"
+        ? "Позиция убрана из корзины после сверки. Заказ у поставщика не изменён."
+        : "Блокировка снята после сверки. Позицию можно изменить, удалить или заказать заново.";
       resolveDialog.close();
     } catch (error) {
       resolveDialog.querySelector("#cart-resolve-status").textContent = error.message;
       try { await refresh(); } catch { /* Keep the original action error visible. */ }
     } finally {
       busy = false;
-      resolveAccept.disabled = !resolveChecked.checked;
+      for (const control of resolveDialog.querySelectorAll("input, button")) control.disabled = false;
+      resolveAccept.disabled = !resolveChecked.checked || !resolveDialog.querySelector('[name="cart-resolution"]:checked');
       render();
     }
   });

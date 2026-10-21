@@ -357,7 +357,7 @@ export function createAggregatorServer({
             const result = await cart.refreshForOrder(fields.revision, fields.supplier, controller.signal);
             if (!controller.signal.aborted) serveJson(response, 200, result);
           } else if (url.pathname === "/api/cart/uncertain/resolve") {
-            serveJson(response, 200, cart.resolveUncertainForumAutoLine(fields.id, fields.revision, fields.confirmedAbsent));
+            serveJson(response, 200, cart.resolveUncertainLine(fields.id, fields.revision, fields.confirmedAbsent, fields.confirmedPlaced));
           } else if (url.pathname === "/api/cart/order") {
             const details = fields.details;
             if (!details || typeof details !== "object" || Array.isArray(details)) throw new CartError("Неверные параметры заказа.");

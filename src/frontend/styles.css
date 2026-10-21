@@ -297,6 +297,9 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-resolve-confirm { width: min(520px, calc(100vw - 24px)); padding: 24px; }
 .cart-resolve-confirm h3 { margin: 0 0 12px; }
 .cart-resolve-confirm p { margin: 0 0 16px; }
+.cart-resolve-options { display: grid; gap: 12px; margin: 0 0 16px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.cart-resolve-options label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.cart-resolve-options input { flex-shrink: 0; margin-top: 4px; }
 .cart-resolve-acknowledgement { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 16px; color: #b42318; font-weight: 700; }
 .cart-resolve-acknowledgement input { margin-top: 4px; }
 #cart-resolve-status:empty { display: none; }

@@ -167,6 +167,60 @@ test("cart HTTP validates server offers and quantities, hides routing and cannot
   }
 });
 
+test("cart HTTP reconciles placed and absent PartKOM orders without resubmitting", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "aggregator-cart-resolution-http-"));
+  const previousPath = process.env.GARAGE_DB_PATH;
+  process.env.GARAGE_DB_PATH = join(directory, "cart.sqlite");
+  let server;
+  let submissions = 0;
+  try {
+    const application = createApplication({
+      streamSearch: async (_query, emit) => emit({ type: "result", result: attachPurchaseReference({ supplier: "part-kom",
+        article: "A1", brand: "TEST", title: "Тестовая деталь", price: 100, quantity: 3, warehouse: "Тестовый склад",
+        deliveryDate: null, deliveryDateApproximate: false, link: "https://www.part-kom.ru/" },
+      { supplier: "part-kom", makerId: "101", providerId: "202" }) }),
+      realCartOrder: { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => {
+        submissions++; throw new Error("Private supplier failure after sending");
+      } },
+    });
+    const listening = await listen(application);
+    server = listening.server;
+    const { baseUrl } = listening;
+    const send = (path, body) => fetch(`${baseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    assert.equal((await fetch(`${baseUrl}/api/cart/uncertain/resolve`)).status, 405);
+    for (const placed of [true, false]) {
+      const initial = await (await fetch(`${baseUrl}/api/cart`)).json();
+      const events = parseSseEvents(await (await fetch(`${baseUrl}/api/search?article=A1&supplier=part-kom&stream=once`)).text());
+      const offerId = events.find((event) => event.type === "result").offerId;
+      const added = await (await send("/api/cart/items", { offerId, revision: initial.revision, quantity: 1 })).json();
+      await send("/api/cart/refresh", { revision: added.revision, supplier: "part-kom" });
+      const id = added.items[0].id;
+      const attempt = await (await send("/api/cart/order", { revision: added.revision, supplier: "part-kom", itemIds: [id], details: {} })).json();
+      assert.equal(attempt.results[0].status, "uncertain");
+      assert.ok(!JSON.stringify(attempt).includes("Private supplier"));
+      const target = { id, revision: attempt.cart.revision };
+      for (const flags of [{}, { confirmedPlaced: "true" }, { confirmedPlaced: true, confirmedAbsent: true }]) {
+        assert.equal((await send("/api/cart/uncertain/resolve", { ...target, ...flags })).status, 400);
+      }
+      assert.equal((await send("/api/cart/uncertain/resolve", { ...target, revision: target.revision - 1, confirmedPlaced: true })).status, 409);
+      const flags = placed ? { confirmedPlaced: true } : { confirmedAbsent: true };
+      const response = await send("/api/cart/uncertain/resolve", { ...target, ...flags });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      const resolved = await response.json();
+      assert.equal(resolved.count, placed ? 0 : 1);
+      assert.deepEqual(resolved.pendingIds, []);
+      assert.ok(!JSON.stringify(resolved).includes("providerId"));
+      assert.equal((await send("/api/cart/uncertain/resolve", { ...target, revision: resolved.revision, ...flags })).status, 409);
+      assert.equal(submissions, placed ? 1 : 2);
+    }
+  } finally {
+    if (server?.listening) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); openServers.delete(server); }
+    if (previousPath === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previousPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("cart order options return the safe supplier error without exposing upstream details", async () => {
   const directory = mkdtempSync(join(tmpdir(), "aggregator-cart-options-"));
   const previousPath = process.env.GARAGE_DB_PATH;

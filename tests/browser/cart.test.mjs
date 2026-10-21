@@ -578,6 +578,12 @@ test("markup restores legacy values, persists applied tiers and validates the dr
   }, { preserveSearchState: true, legacyMarkup: 17 });
 });
 
+async function resizeAndRender(page, viewport) {
+  await page.setViewportSize(viewport);
+  // Resize handlers schedule row replacement on the next animation frame.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
 test("main and analog action columns stay compact on wide screens, after resizing and on mobile", async () => {
   await withCartPage(async (page) => {
     const measure = async (selector) => {
@@ -597,10 +603,10 @@ test("main and analog action columns stay compact on wide screens, after resizin
       assert.ok(dimensions.gap <= 9 && dimensions.gap >= 7, JSON.stringify(dimensions));
     };
     for (const width of [2504, 1990, 1366, 390]) {
-      await page.setViewportSize({ width, height: 900 });
+      await resizeAndRender(page, { width, height: 900 });
       await measure("#results-body .main-result-row");
     }
-    await page.setViewportSize({ width: 1990, height: 1000 });
+    await resizeAndRender(page, { width: 1990, height: 1000 });
     assert.equal(await page.locator("#results-table .table-column-resize").count(), 0);
     await measure("#results-body .main-result-row");
     await page.locator("#settings-toggle").click();
@@ -611,10 +617,10 @@ test("main and analog action columns stay compact on wide screens, after resizin
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "compact-main-table.png") });
     await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
     for (const width of [2504, 1990, 1366, 390]) {
-      await page.setViewportSize({ width, height: 900 });
+      await resizeAndRender(page, { width, height: 900 });
       await measure("#analogs-results-body .analogs-result-row");
     }
-    await page.setViewportSize({ width: 1990, height: 1000 });
+    await resizeAndRender(page, { width: 1990, height: 1000 });
     assert.equal(await page.locator("#analogs-results .table-column-resize").count(), 0);
     await measure("#analogs-results-body .analogs-result-row");
     await page.locator('#analogs-results [data-markup-settings]').click();
@@ -976,7 +982,7 @@ test("mobile garage item cards keep filters, groups, sorting and quantity editin
     await page.setViewportSize({ width: 1366, height: 850 });
     assert.equal(await page.locator("#garage-mobile-sort").isVisible(), false);
     assert.equal(await page.locator("#garage-view thead").isVisible(), true);
-    assert.equal(await page.locator("#garage-filters-sidebar").isVisible(), true);
+    await page.locator("#garage-filters-sidebar").waitFor({ state: "visible" });
   }, { viewport: { width: 390, height: 844 }, title, extraOffers });
 });
 
@@ -1547,11 +1553,11 @@ test("analog cart controls use shared quantities, merge additions and order the 
     assert.equal(await armtek.locator(".garage-offer-button").getAttribute("aria-disabled"), "false");
     assert.equal(await armtek.locator(".garage-offer-button").getAttribute("data-garage-offer-id"), await armtek.locator(".cart-offer-button").getAttribute("data-cart-offer-id"));
     if (process.env.TEST_CAPTURE_DIR) await armtek.locator(".cart-offer-controls").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "analog-cart-controls-desktop.png") });
-    await page.setViewportSize({ width: 390, height: 850 });
+    await resizeAndRender(page, { width: 390, height: 850 });
     await armtek.locator(".cart-offer-controls").scrollIntoViewIfNeeded();
     assert.equal(await armtek.locator(".cart-offer-controls").evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true);
     if (process.env.TEST_CAPTURE_DIR) await armtek.locator(".cart-offer-controls").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "analog-cart-controls-mobile.png") });
-    await page.setViewportSize({ width: 1366, height: 850 });
+    await resizeAndRender(page, { width: 1366, height: 850 });
     await armtek.locator(".cart-quantity").fill("99"); assert.equal(await armtek.locator(".cart-quantity").inputValue(), "4");
     await armtek.locator(".cart-quantity").fill("2"); await armtek.locator(".cart-offer-button").click();
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
@@ -1821,6 +1827,7 @@ test("a verified absent Forum Auto order can be unlocked without sending another
     assert.equal(await page.locator("#cart-items .cart-item-select").isDisabled(), true);
     await page.locator(".cart-resolve-button").click();
     assert.equal(await page.locator("#cart-resolve-accept").isDisabled(), true);
+    await page.locator('[name="cart-resolution"][value="missing"]').check();
     await page.locator("#cart-resolve-checked").check();
     await page.locator("#cart-resolve-accept").click();
     await page.waitForFunction(() => !document.querySelector("#cart-resolve-confirm").open);
@@ -1829,6 +1836,45 @@ test("a verified absent Forum Auto order can be unlocked without sending another
     assert.equal(orderCalls.length, 1);
   }, { allSuppliers: true, reducedMotion: "reduce", testGate: async () => { throw new Error("Connection lost"); } });
 });
+
+for (const placed of [true, false]) {
+  test(`uncertain PartKOM order can be reconciled as ${placed ? "placed" : "missing"} without another submission`, async () => {
+    await withCartPage(async (page, { orderCalls, origin }) => {
+      await page.locator("#results-body .cart-offer-button").nth(1).click();
+      await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+      await page.locator("#cart-toggle").click();
+      await openCheckout(page);
+      await page.locator("#cart-order-accept").click();
+      await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-error"));
+      await page.locator("#cart-order-cancel").click();
+      await page.locator("#cart-close").click();
+      await page.reload();
+      await page.locator("#cart-toggle").click();
+      await page.locator(".cart-resolve-button").click();
+      assert.match(await page.locator("#cart-resolve-title").textContent(), /PartKOM/);
+      assert.equal(await page.locator("#cart-resolve-accept").isDisabled(), true);
+      await page.locator("#cart-resolve-checked").check();
+      assert.equal(await page.locator("#cart-resolve-accept").isDisabled(), true, "the reconciliation outcome must be chosen explicitly");
+      await page.locator(`[name="cart-resolution"][value="${placed ? "placed" : "missing"}"]`).check();
+      assert.equal(await page.locator("#cart-resolve-checked").isChecked(), false, "changing the outcome requires a fresh acknowledgement");
+      await page.locator("#cart-resolve-checked").check();
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert.equal(await page.locator("#cart-resolve-confirm").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+      await page.locator("#cart-resolve-accept").click();
+      await page.waitForFunction(() => !document.querySelector("#cart-resolve-confirm").open);
+      assert.equal(await page.locator(".cart-resolve-button").count(), 0);
+      const cart = await (await page.request.get(`${origin}/api/cart`)).json();
+      assert.equal(cart.count, placed ? 0 : 1);
+      assert.deepEqual(cart.pendingIds, []);
+      assert.equal(orderCalls.length, 1);
+      if (!placed) {
+        assert.equal(await page.locator("#cart-items .cart-quantity").isEnabled(), true);
+        await page.locator("#cart-items .cart-remove").click();
+        await page.waitForFunction(() => document.querySelectorAll("#cart-items [data-cart-item-id]").length === 0);
+      }
+    }, { reducedMotion: "reduce", testGate: async () => { throw new Error("Connection lost after sending"); } });
+  });
+}
 
 test("a definite Forum Auto refusal keeps the item selectable and names the failure", async () => {
   await withCartPage(async (page, { orderCalls }) => {

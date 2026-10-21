@@ -515,9 +515,9 @@ test("verified missing Forum Auto order can be unlocked while retaining the atte
     const attempt = await cart.order(1, "forum-auto", [itemId], {}, new AbortController().signal);
     assert.equal(attempt.results[0].status, "uncertain");
     assert.deepEqual(attempt.cart.pendingIds, [itemId]);
-    assert.throws(() => cart.resolveUncertainForumAutoLine(itemId, attempt.cart.revision, false), /Подтвердите/);
-    assert.throws(() => cart.resolveUncertainForumAutoLine(itemId, attempt.cart.revision - 1, true), /Корзина изменилась/);
-    const resolved = cart.resolveUncertainForumAutoLine(itemId, attempt.cart.revision, true);
+    assert.throws(() => cart.resolveUncertainLine(itemId, attempt.cart.revision, false), /Подтвердите/);
+    assert.throws(() => cart.resolveUncertainLine(itemId, attempt.cart.revision - 1, true), /Корзина изменилась/);
+    const resolved = cart.resolveUncertainLine(itemId, attempt.cart.revision, true);
     assert.equal(resolved.count, 1);
     assert.deepEqual(resolved.pendingIds, []);
     const restored = reopen();
@@ -527,8 +527,125 @@ test("verified missing Forum Auto order can be unlocked while retaining the atte
       assert.equal(database.prepare("SELECT COUNT(*) AS count FROM purchase_order_attempt WHERE state = 'uncertain'").get().count, 1);
       assert.equal(database.prepare("SELECT resolution FROM purchase_order_resolution").get().resolution, "customer_verified_missing");
     } finally { database.close(); }
-    assert.throws(() => restored.resolveUncertainForumAutoLine(itemId, resolved.revision, true), /Не найдена/);
+    assert.throws(() => restored.resolveUncertainLine(itemId, resolved.revision, true), /Не найдена/);
   }, undefined, gateway);
+});
+
+for (const supplier of suppliers) {
+  for (const placed of [true, false]) {
+    test(`manual ${placed ? "placed" : "missing"} reconciliation for ${supplier} persists without resubmitting`, async () => {
+      let submissions = 0;
+      const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => {
+        submissions++; throw new Error("Connection lost after sending");
+      } };
+      await withCart(async (cart, reopen, path) => {
+        const offerId = randomUUID();
+        cart.registerOffer(offerId, result(supplier));
+        cart.mutate("add", { offerId, quantity: 2, revision: 0 });
+        await cart.refreshForOrder(1, supplier, new AbortController().signal);
+        const itemId = cart.view().items[0].id;
+        await cart.order(1, supplier, [itemId], {}, new AbortController().signal);
+        cart = reopen();
+        for (const flags of [[undefined, undefined], [false, false], [true, true], ["true", false], [null, true]]) {
+          assert.throws(() => cart.resolveUncertainLine(itemId, 1, ...flags), /Подтвердите/);
+        }
+        assert.throws(() => cart.mutate("remove", { id: itemId, revision: 1 }), /сверить/);
+        assert.throws(() => cart.mutate("update", { id: itemId, quantity: 1, revision: 1 }), /сверить/);
+        assert.throws(() => cart.resolveUncertainLine(itemId, 0, !placed, placed), /Корзина изменилась/);
+        const resolved = cart.resolveUncertainLine(itemId, 1, !placed, placed);
+        assert.equal(resolved.revision, 2);
+        assert.equal(resolved.count, placed ? 0 : 2);
+        assert.deepEqual(resolved.pendingIds, []);
+        cart = reopen();
+        assert.deepEqual(cart.view(), resolved);
+        assert.throws(() => cart.resolveUncertainLine(itemId, 2, !placed, placed), /Не найдена/);
+        assert.equal(submissions, 1);
+        const database = new DatabaseSync(path);
+        try {
+          assert.equal(database.prepare("SELECT COUNT(*) AS count FROM purchase_order_attempt").get().count, 1);
+          const record = database.prepare("SELECT line_id, resolution FROM purchase_order_resolution").get();
+          assert.equal(record.line_id, itemId);
+          assert.equal(record.resolution, placed ? "customer_verified_placed" : "customer_verified_missing");
+        } finally { database.close(); }
+        if (!placed) {
+          cart.mutate("update", { id: itemId, quantity: 1, revision: 2 });
+          assert.equal(cart.mutate("remove", { id: itemId, revision: 3 }).count, 0);
+        }
+      }, undefined, gateway);
+    });
+  }
+}
+
+test("resolving one line of a grouped order leaves its other lines blocked", async () => {
+  const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => {
+    throw new Error("Connection lost");
+  } };
+  await withCart(async (cart, reopen) => {
+    for (const article of ["A1", "A2"]) {
+      const offerId = randomUUID();
+      const offer = result("armtek");
+      offer.article = article;
+      cart.registerOffer(offerId, offer);
+      cart.mutate("add", { offerId, quantity: 1, revision: cart.view().revision });
+    }
+    const [first, second] = cart.view().items;
+    await cart.refreshForOrder(2, "all", new AbortController().signal);
+    await cart.order(2, "all", [first.id, second.id], {}, new AbortController().signal);
+    cart.resolveUncertainLine(first.id, 2, false, true);
+    cart = reopen();
+    assert.deepEqual(cart.view().pendingIds, [second.id]);
+    assert.throws(() => cart.mutate("remove", { id: second.id, revision: 3 }), /сверить/);
+    assert.throws(() => cart.clear("all", 3), /сверить/);
+    assert.deepEqual(cart.resolveUncertainLine(second.id, 3, true).pendingIds, []);
+    assert.equal(cart.view().count, 1);
+  }, undefined, gateway);
+});
+
+test("manual reconciliation rejects active pending attempts and rolls back storage failures", async () => {
+  await withCart(async (cart, _reopen, path) => {
+    const offerId = randomUUID();
+    cart.registerOffer(offerId, result("part-kom"));
+    cart.mutate("add", { offerId, quantity: 1, revision: 0 });
+    const itemId = cart.view().items[0].id;
+    const repository = new SqliteCartRepository(path);
+    const attemptId = repository.beginOrder("part-kom", [itemId]);
+    try {
+      assert.throws(() => cart.resolveUncertainLine(itemId, 1, false, true), /Не найдена/);
+      repository.markOrderUncertain(attemptId);
+      const database = new DatabaseSync(path);
+      try {
+        database.exec("CREATE TRIGGER reject_cart_save BEFORE UPDATE ON purchase_cart BEGIN SELECT RAISE(ABORT, 'test failure'); END");
+        assert.throws(() => cart.resolveUncertainLine(itemId, 1, false, true), /test failure/);
+        assert.equal(cart.view().count, 1);
+        assert.deepEqual(cart.view().pendingIds, [itemId]);
+        assert.equal(database.prepare("SELECT COUNT(*) AS count FROM purchase_order_resolution").get().count, 0);
+      } finally { database.close(); }
+    } finally { repository.close(); }
+  });
+});
+
+test("legacy attempt resolutions migrate to individual lines without unlocking unresolved orders", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "aggregator-cart-migration-"));
+  const path = join(directory, "cart.sqlite");
+  const resolvedIds = [randomUUID(), randomUUID()];
+  const unresolvedId = randomUUID();
+  const database = new DatabaseSync(path);
+  try {
+    database.exec(`CREATE TABLE purchase_order_resolution (attempt_id TEXT PRIMARY KEY, resolved_at TEXT NOT NULL,
+      resolution TEXT NOT NULL CHECK (resolution = 'customer_verified_missing')) STRICT;
+      CREATE TABLE purchase_order_attempt (id TEXT PRIMARY KEY, supplier TEXT NOT NULL, line_ids TEXT NOT NULL,
+      started_at TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'uncertain'))) STRICT;`);
+    const insert = database.prepare("INSERT INTO purchase_order_attempt VALUES (?, 'forum-auto', ?, '2026-10-20T00:00:00Z', 'uncertain')");
+    insert.run("legacy-resolved", JSON.stringify(resolvedIds));
+    insert.run("legacy-unresolved", JSON.stringify([unresolvedId]));
+    database.prepare("INSERT INTO purchase_order_resolution VALUES ('legacy-resolved', '2026-10-20T01:00:00Z', 'customer_verified_missing')").run();
+    for (let index = 0; index < 2; index++) {
+      const repository = new SqliteCartRepository(path);
+      try { assert.deepEqual(repository.pendingLineIds(), [unresolvedId]); } finally { repository.close(); }
+    }
+    assert.deepEqual(database.prepare("SELECT line_id FROM purchase_order_resolution ORDER BY line_id").all().map((row) => row.line_id), resolvedIds.toSorted());
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM purchase_order_attempt").get().count, 2);
+  } finally { database.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("an uncertain Forum Auto fault exposes only its safe supplier code", async () => {

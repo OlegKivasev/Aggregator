@@ -186,14 +186,18 @@ export class CartApplicationService {
     return this.view();
   }
 
-  resolveUncertainForumAutoLine(id: unknown, revision: unknown, confirmedAbsent: unknown) {
+  resolveUncertainLine(id: unknown, revision: unknown, confirmedAbsent: unknown, confirmedPlaced: unknown = undefined) {
     if (this.testing) throw new CartError("Дождитесь завершения заказа.", 409);
-    if (confirmedAbsent !== true) throw new CartError("Подтвердите, что проверили отсутствие заказа в кабинете Forum Auto.");
+    if (confirmedAbsent !== undefined && typeof confirmedAbsent !== "boolean"
+      || confirmedPlaced !== undefined && typeof confirmedPlaced !== "boolean"
+      || (confirmedAbsent === true) === (confirmedPlaced === true)) {
+      throw new CartError("Подтвердите один результат сверки заказа в кабинете поставщика.");
+    }
     if (typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id)) throw new CartError("Позиция не найдена в корзине.");
     const cart = this.load();
     if (revision !== cart.revision) throw new CartError("Корзина изменилась. Обновите её и повторите действие.", 409);
-    if (!this.repository.resolveUncertainForumAutoLine(id, cart.revision)) {
-      throw new CartError("Не найдена неопределённая попытка заказа Forum Auto для этой позиции.", 409);
+    if (!this.repository.resolveUncertainLine(id, cart.revision, confirmedPlaced === true)) {
+      throw new CartError("Не найдена неопределённая попытка заказа для этой позиции. Обновите корзину.", 409);
     }
     this.refreshed = null;
     return this.view();
