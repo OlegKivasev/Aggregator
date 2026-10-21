@@ -2463,11 +2463,23 @@ test("opening refresh greys only missing goods and allows only their removal wit
     assert.equal(await page.locator("#cart-items .cart-item-check").count(), 1);
     const available = page.locator('#cart-items tr[data-cart-item-id]').filter({ hasText: "A1" });
     const missing = page.locator('#cart-items tr[data-cart-item-id]').filter({ hasText: "MISSING" });
+    // Exercise Bootstrap's cell backgrounds and inset overlay even with the CDN blocked.
+    await page.addStyleTag({ content: ".table > :not(caption) > * > * { background-color: #fff; box-shadow: inset 0 0 0 9999px #fff; }" });
+    const assertGreyRow = async () => {
+      assert.equal(await missing.evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(240, 242, 244)");
+      const cells = await missing.locator("td").evaluateAll((nodes) => nodes.map((node) => {
+        const style = getComputedStyle(node);
+        return { background: style.backgroundColor, shadow: style.boxShadow };
+      }));
+      for (const cell of cells) assert.deepEqual(cell, { background: "rgba(0, 0, 0, 0)", shadow: "none" });
+    };
     assert.equal(await missing.locator(".cart-item-select").isDisabled(), true);
     assert.equal(await missing.locator(".cart-quantity").isDisabled(), true);
     assert.equal(await missing.locator(".cart-remove").isEnabled(), true);
     assert.equal(await missing.locator(".cart-item-name").evaluate((node) => getComputedStyle(node).opacity), "0.5");
-    assert.equal(await missing.evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(240, 242, 244)");
+    await assertGreyRow();
+    await missing.hover();
+    await assertGreyRow();
     assert.equal(await available.locator(".cart-quantity").isEnabled(), true);
     assert.equal(await page.locator("#cart-status").textContent(), "");
     assert.doesNotMatch(await page.locator("#cart-items").textContent(), /Прежние данные|Перед заказом проверим/);
@@ -2481,6 +2493,7 @@ test("opening refresh greys only missing goods and allows only their removal wit
     assert.equal(await missing.locator(".cart-item-check").count(), 1);
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "cart-missing-grey.png") });
     await page.setViewportSize({ width: 390, height: 844 });
+    await assertGreyRow();
     assert.equal(await missing.locator(".cart-remove").isEnabled(), true);
     assert.equal(await missing.evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true);
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "cart-missing-grey-mobile.png") });
