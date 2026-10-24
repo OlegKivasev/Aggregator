@@ -4,6 +4,7 @@ import { bootstrapApplicabilityOemSidebar } from "./applicability-oem-sidebar.js
 import { applicabilityFileMaxBytes, decodeApplicabilityFile, parseApplicabilityFile } from "./applicability-file-import.js";
 import { createApplicabilityMakeMatcher } from "./applicability-make-aliases.js";
 import { setupTabCloseMenu } from "./tab-close-menu.js";
+import { setupSearchHistory } from "./search-history-ui.js";
 import { moveApplicabilityGroupRelative, moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, moveApplicabilityTabRelative, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "./applicability-tab-groups.js";
 
 const markupFunction = document.querySelector("#markup-function");
@@ -1894,6 +1895,16 @@ document.addEventListener("keydown", (event) => {
   if (!resultContextMenu.hidden) hideResultContextMenu(true);
 });
 
+const searchHistory = setupSearchHistory({
+  input: skuInput, form, kind: "applicability",
+  onSelect: (entry) => {
+    cancelCachedLookup();
+    makeInput.value = "";
+    closeMakeMenu();
+    setSelectedMakeNames(entry.brands);
+  },
+});
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (activeRequest) return;
@@ -1956,6 +1967,7 @@ form.addEventListener("submit", async (event) => {
       return;
     }
     if (controller.signal.aborted) return;
+    searchHistory.record({ query: skus.join(", "), brands: makes.map((make) => make.name) });
     tab.searches.push(...entries);
     setFeedback("", "notice");
     renderResults(tab);

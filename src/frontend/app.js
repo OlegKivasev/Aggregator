@@ -13,6 +13,7 @@ import {
 } from "./result-formatting.js";
 import { openSearchStream } from "./search-stream.js";
 import { setupTabCloseMenu } from "./tab-close-menu.js";
+import { setupSearchHistory } from "./search-history-ui.js";
 import { bootstrapCart, renderCartOfferControls } from "./cart-ui.js";
 import { bootstrapOrderHistory } from "./order-history-ui.js";
 import { hasOfferDeliveryWarning } from "./order-notices.js";
@@ -3024,6 +3025,8 @@ cancelSearchButton.addEventListener("click", () => {
   saveSearchState();
 });
 
+const searchHistory = setupSearchHistory({ input: articleInput, form, kind: "pricing", onSelect: saveSearchState });
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -3039,6 +3042,7 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
+  searchHistory.record({ query: article });
   startSearch(article, enabledSuppliers);
 });
 

@@ -97,16 +97,13 @@ const forumAutoReceiptNode = (receipt, orderIds, acceptedQuantity) => {
   return card;
 };
 
-const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity, item) => {
+const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity, item, existingCard) => {
   if (!receipt || typeof receipt !== "object" || typeof receipt.orderId !== "string"
     || !receipt.orderId || receipt.orderId.length > 100 || !orderIds.includes(receipt.orderId)
     || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1 || receipt.quantity > acceptedQuantity) return null;
-  const card = document.createElement("section");
+  const card = existingCard ?? document.createElement("section");
   card.className = supplier === "rossko" ? "cart-rossko-receipt" : "cart-armtek-receipt";
-  const heading = document.createElement("h4");
-  heading.textContent = `${supplierNames[supplier]} · заказ № ${receipt.orderId}`;
-  card.append(heading);
-  const details = document.createElement("dl");
+  let details = document.createElement("dl");
   const add = (label, value, status = false) => {
     if (typeof value !== "string" && typeof value !== "number") return;
     if (typeof value === "string" && (!value || value.length > 500)
@@ -118,14 +115,23 @@ const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity,
     if (status) description.className = "cart-supplier-receipt__state";
     details.append(term, description);
   };
-  add("Создан", formatOrderDate(receipt.createdAt));
-  add(supplier === "armtek" ? "Статус заказа" : "Статус позиции", receipt.status, true);
-  if (supplier === "armtek") add("Статус позиции", receipt.itemStatus, true);
+  if (!existingCard) {
+    const heading = document.createElement("h4");
+    heading.textContent = `${supplierNames[supplier]} · заказ № ${receipt.orderId}`;
+    card.append(heading);
+    add("Создан", formatOrderDate(receipt.createdAt));
+    if (supplier === "armtek") add("Статус заказа", receipt.status, true);
+    const orderTotal = supplier === "armtek" ? receipt.total : receipt.orderTotal;
+    if (Number.isFinite(orderTotal) && orderTotal > 0) add("Сумма заказа", formatPrice(orderTotal));
+    card.append(details);
+    details = document.createElement("dl");
+  }
+  details.className = "cart-supplier-receipt__item";
+  add("Статус позиции", supplier === "armtek" ? receipt.itemStatus : receipt.status, true);
   add("Товар", [item.result.article, item.result.brand, item.result.title].filter((value) => typeof value === "string" && value.length <= 500).join(" · "));
   add("Заказано", `${receipt.quantity} шт.`);
   if (Number.isFinite(receipt.price) && receipt.price > 0) add("Цена", formatPrice(receipt.price));
-  if (Number.isFinite(receipt.total) && receipt.total > 0) add(supplier === "armtek" ? "Сумма заказа" : "Сумма позиции", formatPrice(receipt.total));
-  if (supplier === "rossko" && Number.isFinite(receipt.orderTotal) && receipt.orderTotal > 0) add("Сумма заказа", formatPrice(receipt.orderTotal));
+  if (supplier === "rossko" && Number.isFinite(receipt.total) && receipt.total > 0) add("Сумма позиции", formatPrice(receipt.total));
   add("Срок доставки", formatOrderDate(receipt.deliveryAt ?? receipt.deliveryEnd ?? receipt.deliveryStart));
   add("Склад", receipt.warehouse);
   add("Доставка", receipt.deliveryType);
@@ -683,6 +689,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       const nextCart = validateCart(result.cart);
       const known = new Set(items.map((item) => item.id));
       const receipts = [];
+      const supplierReceiptCards = new Map();
       let accepted = 0;
       let failed = 0;
       let uncertain = 0;
@@ -715,11 +722,18 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
             ? (group.supplier === "rossko" ? line.rosskoOrders : line.armtekOrders)
             : null;
           const supplierReceipts = Array.isArray(supplierOrders)
-            ? supplierOrders.map((receipt) => supplierOrderReceiptNode(group.supplier, receipt, line.orderIds, line.acceptedQuantity, selectedItem)).filter(Boolean) : [];
+            ? supplierOrders.map((receipt) => {
+              const key = JSON.stringify([group.supplier, receipt?.orderId]);
+              const card = supplierOrderReceiptNode(group.supplier, receipt, line.orderIds, line.acceptedQuantity, selectedItem, supplierReceiptCards.get(key));
+              if (card) supplierReceiptCards.set(key, card);
+              return card;
+            }).filter(Boolean) : [];
           if (partKomOrders.length || forumAutoOrder || supplierReceipts.length) {
             receipts.push(...partKomOrders);
             if (forumAutoOrder) receipts.push(forumAutoOrder);
-            receipts.push(...supplierReceipts);
+            for (const card of supplierReceipts) {
+              if (!receipts.includes(card)) receipts.push(card);
+            }
             if (typeof line.message === "string" && line.message) {
               const note = document.createElement("p");
               note.textContent = line.message;

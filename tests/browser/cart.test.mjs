@@ -95,15 +95,18 @@ async function withCartPage(check, options = {}) {
           if (lines[0].reference.supplier === "forum-auto" && options.forumAutoRefusal) {
             return { confirmed: [], rejected: [{ id: lines[0].id, message: options.forumAutoRefusal }] };
           }
-          return { confirmed: lines.map((line) => ({ id: line.id, acceptedQuantity: line.quantity, orderIds: [`fixture-${line.reference.supplier}`],
+          return { confirmed: lines.map((line) => {
+            const orderId = options.orderIdForLine?.(line) ?? `fixture-${line.reference.supplier}`;
+            return { id: line.id, acceptedQuantity: line.quantity, orderIds: [orderId],
             ...(line.reference.supplier === "part-kom" && options.partKomReceipt ? { partKomOrders: [{ orderNumber: "fixture-part-kom",
               quantity: line.quantity, ...options.partKomReceipt }] } : {}),
             ...(line.reference.supplier === "forum-auto" && options.forumAutoReceipt ? { forumAutoOrder: {
               orderId: "fixture-forum-auto", orderedQuantity: line.quantity, ...options.forumAutoReceipt } } : {}),
             ...(line.reference.supplier === "rossko" && options.rosskoReceipt ? { rosskoOrders: [{
-              orderId: "fixture-rossko", quantity: line.quantity, ...options.rosskoReceipt }] } : {}),
+              orderId, quantity: line.quantity, ...options.rosskoReceipt }] } : {}),
             ...(line.reference.supplier === "armtek" && options.armtekReceipt ? { armtekOrders: [{
-              orderId: "fixture-armtek", quantity: line.quantity, ...options.armtekReceipt }] } : {}) })), rejected: [] };
+              orderId, quantity: line.quantity, ...options.armtekReceipt }] } : {}) };
+          }), rejected: [] };
         },
       },
     };
@@ -1263,6 +1266,56 @@ for (const supplier of ["rossko", "armtek"]) {
           deliveryType: "Доставка до клиента", deliveryAddress: "Тестовый адрес <img src=x onerror=window.cartXss=1>" } }) });
   });
 }
+
+for (const supplier of ["armtek", "rossko"]) {
+  test(`${supplier} confirmation groups two positions under one order number and one order total`, async () => {
+    const extra = offer(supplier, 4, supplier === "armtek" ? { supplier, keyzak: "SECOND", returnDays: 14 }
+      : { supplier, partGuid: "second-guid", stockId: "second-stock" }, {}, "Второй тестовый товар <img src=x onerror=window.cartXss=1>");
+    await withCartPage(async (page) => {
+      for (const index of [0, 1]) {
+        const row = page.locator(`#results-body tr[data-result-index="${index ? 4 : supplier === "armtek" ? 0 : 3}"]`);
+        await row.locator(".cart-quantity").fill(String(index + 1));
+        await row.locator(".cart-offer-button").click();
+        await page.waitForFunction((quantity) => document.querySelector("#cart-badge").textContent === String(quantity), index ? 3 : 1);
+      }
+      await page.locator("#cart-toggle").click();
+      await openCheckout(page);
+      await page.locator("#cart-order-accept").click();
+      await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+      const card = page.locator(`.cart-${supplier}-receipt`);
+      assert.equal(await card.count(), 1);
+      assert.equal(await card.locator("h4").count(), 1);
+      assert.equal(await card.locator("dt", { hasText: "Сумма заказа" }).count(), 1);
+      assert.equal(await card.locator("dt", { hasText: "Сумма заказа" }).evaluate((node) => node.nextElementSibling.textContent), "300,00 ₽");
+      assert.equal(await card.locator(".cart-supplier-receipt__item").count(), 2);
+      assert.deepEqual(await card.locator("dt", { hasText: "Заказано" }).evaluateAll((nodes) => nodes.map((node) => node.nextElementSibling.textContent)), ["1 шт.", "2 шт."]);
+      assert.match(await card.textContent(), /Второй тестовый товар/);
+      assert.equal(await card.locator("img").count(), 0);
+      assert.equal(await page.evaluate(() => window.cartXss), undefined);
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert.equal(await card.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+      if (process.env.TEST_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR, `${supplier}-grouped-order.png`) });
+    }, { allSuppliers: true, extraOffers: [extra], reducedMotion: "reduce", armtekReturnDays: 0,
+      ...(supplier === "armtek" ? { armtekReceipt: { total: 300, price: 100, createdAt: "23.10.2026 17:03", status: "Создан" } }
+        : { rosskoReceipt: { orderTotal: 300, price: 100, total: 100, createdAt: "23.10.2026 17:03", status: "Комплектуется" } }) });
+  });
+}
+
+test("Armtek confirmation preserves distinct order numbers as separate cards", async () => {
+  const extra = offer("armtek", 4, { supplier: "armtek", keyzak: "SECOND" }, {}, "Второй тестовый товар");
+  await withCartPage(async (page) => {
+    for (const index of [0, 1]) {
+      await page.locator(`#results-body tr[data-result-index="${index ? 2 : 0}"] .cart-offer-button`).click();
+      await page.waitForFunction((quantity) => document.querySelector("#cart-badge").textContent === String(quantity), index + 1);
+    }
+    await page.locator("#cart-toggle").click();
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+    assert.equal(await page.locator(".cart-armtek-receipt").count(), 2);
+    assert.deepEqual(await page.locator(".cart-armtek-receipt h4").allTextContents(), ["Armtek · заказ № TEST01", "Armtek · заказ № SECOND"]);
+  }, { extraOffers: [extra], armtekReceipt: { total: 100 }, orderIdForLine: (line) => line.reference.keyzak });
+});
 
 for (const returnDays of [14, 0]) {
   test(`Armtek return terms (${returnDays} days) appear in confirmation and the matching history position`, async () => {
