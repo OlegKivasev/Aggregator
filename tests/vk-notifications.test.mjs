@@ -121,7 +121,8 @@ test("website events persist, paginate without gaps and keep arrivals after a re
   update(changed); repository.markFeedSeen(first.latestId, now);
   const pending = repository.feed();
   assert.equal(pending.unreadCount, 2);
-  assert.deepEqual(pending.entries.slice(0, 2).map((entry) => [entry.kind, entry.items[0].quantity]), [["received", 3], ["cancelled", 2]]);
+  assert.equal(pending.unreadCancellationCount, 1);
+  assert.deepEqual(pending.entries.slice(0, 2).map((entry) => [entry.kind, entry.items[0].quantity]), [["cancelled", 2], ["received", 3]]);
   assert.deepEqual(repository.counts(target), { pending: 0, failed: 0 }, "website events never enter the VK outbox");
   repository.close(); repository = new SqliteNotificationRepository(path);
   update(changed);
@@ -200,8 +201,44 @@ test("website feed HTTP validates cursors and acknowledgements and never checks 
   const read = await post({ throughId: view.latestId }); assert.equal(read.status, 200);
   const result = await read.json(); assert.equal(result.unreadCount, 1);
   assert.equal(result.entries.find((entry) => entry.id === view.latestId).read, true);
-  assert.equal(result.entries[0].read, false);
+  assert.equal(result.entries.find((entry) => entry.kind === "new").read, false);
+  assert.equal(result.unreadCancellationCount, 0);
   assert.equal(f.loads.length, 0); assert.equal(f.calls.length, 0);
+});
+
+test("cancellations precede newer ordinary notifications across pages and keep their order after reading", () => {
+  const repository = new SqliteNotificationRepository(":memory:");
+  const update = (value) => repository.observeFeed([{ supplier: "armtek", histories: [value] }], now);
+  try {
+    update(history());
+    for (let index = 0; index < 35; index++) {
+      update(history([part()], `CANCEL-${index}`));
+      update(history([part({ fulfillment: "cancelled" })], `CANCEL-${index}`));
+    }
+    for (let index = 0; index < 55; index++) update(history([part()], `ORDINARY-${index}`));
+    const first = repository.feed();
+    assert.equal(first.unreadCancellationCount, 35);
+    assert.ok(first.entries.every((entry) => entry.kind === "cancelled"));
+    const all = [];
+    let page = first;
+    for (let index = 0; index < 10; index++) {
+      all.push(...page.entries);
+      if (page.nextBefore === null) break;
+      page = repository.feed(page.nextBefore);
+    }
+    assert.equal(all.length, 125);
+    assert.equal(new Set(all.map((entry) => entry.id)).size, 125);
+    assert.ok(all.slice(0, 35).every((entry) => entry.kind === "cancelled"));
+    assert.ok(all.slice(35).every((entry) => entry.kind === "new"));
+    for (const group of [all.slice(0, 35), all.slice(35)]) {
+      assert.deepEqual(group.map((entry) => entry.id), group.map((entry) => entry.id).sort((a, b) => b - a));
+    }
+    repository.markFeedEntriesSeen(first.entries.map((entry) => entry.id), now);
+    assert.equal(repository.feed().unreadCancellationCount, 5);
+    assert.deepEqual(repository.feed().entries.map((entry) => entry.id), first.entries.map((entry) => entry.id));
+    repository.markFeedSeen(first.latestId, now);
+    assert.equal(repository.feed().unreadCancellationCount, 0);
+  } finally { repository.close(); }
 });
 
 test("monitor initializes each supplier without announcing old orders or terminal states", () => {
@@ -375,7 +412,7 @@ test("legacy Forum Auto document snapshots are rebaselined quietly for VK and th
   repository.sent(repository.pending(target, now).id);
   record("forum-auto", { ...current, orders: current.orders.slice(0, 1) });
   assert.match(repository.pending(target, now).text, /ТРЕБУЕТ ПРОВЕРКИ · Forum Auto\nЗаказ № 456/);
-  assert.deepEqual(repository.feed().entries.map(({ number, kind }) => [number, kind]), [["456", "missing"], ["ORDER-1", "cancelled"]]);
+  assert.deepEqual(repository.feed().entries.map(({ number, kind }) => [number, kind]), [["ORDER-1", "cancelled"], ["456", "missing"]]);
 });
 
 test("Forum Auto disappearance requires manual review and reports each last-known product without inventing a terminal status", () => {

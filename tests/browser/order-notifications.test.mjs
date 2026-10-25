@@ -77,12 +77,18 @@ async function withFeed(check) {
 test("bell shows safe colored order cards, multiple products and fits mobile with automatic visible reads", async () => {
   await withFeed(async (page) => {
     const trigger = page.locator("#order-notifications-trigger");
+    assert.equal(await trigger.evaluate((node) => getComputedStyle(node).animationName), "history-cancellation-pulse");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    assert.equal(await trigger.evaluate((node) => getComputedStyle(node).animationName), "none");
+    await page.emulateMedia({ reducedMotion: "no-preference" });
     await trigger.click();
     const panel = page.locator("#order-notifications-panel");
     assert.equal(await panel.locator(".order-notification-card").count(), 4);
+    assert.equal(await panel.locator(".order-notification-card").first().evaluate((node) => node.classList.contains("order-notification-card--cancelled")), true);
     for (const kind of ["new", "cancelled", "received", "missing"]) assert.equal(await panel.locator(`.order-notification-card--${kind}`).count(), 1);
     assert.equal(await panel.locator("header p").count(), 0);
     await page.waitForFunction(() => Number(document.querySelector("#order-notifications-count").textContent) < 4);
+    await page.waitForFunction(() => !document.querySelector("#order-notifications-trigger").classList.contains("has-cancellations"));
     const cancelled = panel.locator(".order-notification-card--cancelled");
     assert.match(await cancelled.textContent(), /2 шт\./); assert.match(await cancelled.textContent(), /200/);
     assert.match(await panel.locator(".order-notification-card--received").textContent(), /3 шт\./);
@@ -124,7 +130,7 @@ test("read all includes unloaded older events, preserves a new arrival and share
     await page.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "1");
     assert.equal(await page.locator("#order-notifications-panel").isVisible(), false);
     assert.equal(service.orderFeed().unreadCount, 1);
-    assert.equal(service.orderFeed().entries[0].number, "DURING-READ");
+    assert.equal(service.orderFeed().entries.find((entry) => !entry.read).number, "DURING-READ");
     const other = await browser.newPage({ viewport: { width: 1366, height: 900 } });
     await other.goto(origin);
     await other.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "1");
@@ -143,8 +149,10 @@ test("feed polling and pagination retain every event after a long absence and fa
     for (let index = 0; index < 35; index++) addOrder(`LATER-${index}`);
     await page.clock.runFor(30_001);
     await page.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "39");
+    assert.equal(await page.locator("#order-notifications-trigger.has-cancellations").count(), 1);
     await page.locator("#order-notifications-trigger").click();
     assert.equal(await page.locator(".order-notification-card").count(), 30);
+    assert.equal(await page.locator(".order-notification-card").first().evaluate((node) => node.classList.contains("order-notification-card--cancelled")), true);
     await page.locator("#order-notifications-more").click();
     await page.waitForFunction(() => document.querySelectorAll(".order-notification-card").length === 39);
     const ids = await page.locator(".order-notification-card").evaluateAll((cards) => cards.map((card) => card.dataset.notificationId));

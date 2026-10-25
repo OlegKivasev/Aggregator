@@ -2685,7 +2685,7 @@ test("Forum Auto empty active history opens and reloads without history or cance
   await withCartPage(async (page) => {
     await page.locator("#history-toggle").click();
     await page.locator("#history-tab-forum-auto").click();
-    const loaded = () => page.waitForFunction(() => document.querySelector("#history-cancellation-notice").hidden
+    const loaded = () => page.waitForFunction(() => document.querySelector("#history-cancellation-error").hidden
       && document.querySelector("#history-results .history-message:not(.is-error)")?.textContent.includes("заказов нет"));
     await loaded();
     const refreshed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/order-history/forum-auto");
@@ -2693,7 +2693,7 @@ test("Forum Auto empty active history opens and reloads without history or cance
     assert.equal((await refreshed).status(), 200);
     await loaded();
     assert.equal(await page.locator(".history-card, .history-message.is-error").count(), 0);
-    assert.equal(await page.locator("#history-cancellation-retry").isVisible(), false);
+    assert.equal(await page.locator("#history-cancellation-retry").count(), 0);
   }, { allSuppliers: true, supplierOrderHistory: async (query, signal) => query.supplier === "forum-auto"
     ? listForumAutoOrderHistory({ login: "fixture", password: "fixture" }, signal, async (method) => parseForumAutoApiResponse({
       status: 200, contentType: "application/json", body: '{"errors":{"FaultCode":26,"FaultString":"private upstream text"}}',
@@ -3256,55 +3256,38 @@ test("history rejects malformed receipt and cancellation quantities instead of i
     fulfillmentQuantities: quantities, expectedDate: null, guaranteedDate: null, warehouse: null }] }], limited: false }) });
 });
 
-test("new cancellations share one history form across suppliers and stay unread until confirmed, including across browsers", async () => {
+test("cancelled status replaces cancellation review and acknowledges alerts across suppliers and browsers", async () => {
   let refused = 2;
-  const partKomHistory = () => parsePartKomOrderHistory([{ orderNumber: "NEW-PARTKOM", orderDate: "2026-10-16 12:00:00",
-    detailNum: "A1", maker: "TEST", description: "Тестовая частичная отмена", quantity: 10, price: 100, releaseCount: 3, refusalCount: refused }]);
-  const supplierHistory = (supplier) => ({ limited: false, orders: [{ number: `NEW-${supplier}`, date: "2026-10-16", items: [{
-    article: "B1", brand: "TEST", title: "Тестовая отмена <img src=x onerror=window.noticeXss=1>", quantity: 10, price: 100,
-    status: "Отмена", fulfillment: supplier === "armtek" ? "partially_cancelled" : "cancelled",
-    ...(supplier === "armtek" ? { fulfillmentQuantities: { delivered: 4, cancelled: 6 } } : {}),
-    expectedDate: null, guaranteedDate: null, warehouse: null }, ...(supplier === "rossko" ? [{ article: "RETURNED", brand: "TEST",
-      title: "Возврат", quantity: 1, price: 100, status: null, fulfillment: "returned", expectedDate: null, guaranteedDate: null, warehouse: null }] : [])] }] });
+  const partKomHistory = () => parsePartKomOrderHistory([{ orderNumber: "NEW-PARTKOM", orderDate: "2026-10-16",
+    detailNum: "A1", maker: "TEST", quantity: 10, price: 100, releaseCount: 3, refusalCount: refused }]);
+  const supplierHistory = () => ({ limited: false, orders: [{ number: "NEW-OTHER", date: "2026-10-16", items: [{
+    article: "B1", brand: "TEST", title: "Тестовая отмена <img src=x onerror=window.noticeXss=1>", quantity: 1, price: 100,
+    status: "Отмена", fulfillment: "cancelled", expectedDate: null, guaranteedDate: null, warehouse: null }] }] });
   await withCartPage(async (page, { origin }) => {
-    const open = async () => {
-      await page.locator("#history-toggle").click();
-      await page.waitForFunction(() => document.querySelector("#history-cancellation-title")?.textContent === "Новые отмены: 4"
-        && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
-    };
-    await open();
-    assert.equal(await page.locator(".history-card").count(), 1);
+    await page.locator("#history-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#history-status-cancelled")?.title === "Новые отмены: 4");
+    assert.equal(await page.locator("#history-cancellation-notice, #history-cancellation-view, #history-cancellation-done").count(), 0);
+    assert.equal(await page.locator("#history-title").innerText(), "История заказов");
+    const cancelled = page.locator("#history-status-cancelled");
+    assert.equal(await cancelled.evaluate((node) => getComputedStyle(node).color), "rgb(161, 46, 53)");
     await page.locator("#history-status-active").click();
-    await page.locator("#history-cancellation-view").click();
-    assert.equal(await page.locator("dialog[open]").count(), 1);
-    assert.equal(await page.locator("#history-tabs").isVisible(), false);
-    assert.equal(await page.locator(".history-card").count(), 4);
-    assert.deepEqual((await page.locator(".history-card__identity > small:first-child").allTextContents()).sort(), ["Armtek", "Forum Auto", "PartKOM", "Rossko"]);
-    assert.equal(await page.locator(".history-card tbody tr").count(), 4);
-    assert.match(await page.locator(".history-cancellation-time").first().innerText(), /^Обнаружено: \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/);
-    const partKom = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: "Заказ № NEW-PARTKOM" }) });
-    assert.equal(await partKom.locator(".history-status-detail").innerText(), "Отменено 2 шт.");
-    assert.equal(await partKom.locator(".history-card__quantity > span").innerText(), "Отменено позиций / штук");
-    assert.equal(await partKom.locator(".history-card__total").innerText(), new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" }).format(200));
+    await page.locator("#history-close").click();
+    assert.equal((await (await page.request.get(`${origin}/api/order-cancellations`)).json()).total, 4);
+    await page.locator("#history-toggle").click();
+    await page.locator("#history-tab-all").click();
+    await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 4);
     assert.equal(await page.locator(".history-card img").count(), 0);
     assert.equal(await page.evaluate(() => window.noticeXss), undefined);
-    assert.doesNotMatch(await page.locator("#history-results").innerText(), /RETURNED|Получено|Получен|Частичная поставка/);
-    if (process.env.TEST_CAPTURE_DIR) await page.locator("#history-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "new-cancellations-desktop.png") });
+    if (process.env.TEST_CAPTURE_DIR) await page.locator("#history-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "cancelled-status-desktop.png") });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator("#history-modal").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
-    if (process.env.TEST_CAPTURE_DIR) await page.locator("#history-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "new-cancellations-mobile.png") });
-    await page.locator("#history-cancellation-back").click();
-    assert.equal(await page.locator("#history-status-active").getAttribute("aria-selected"), "true");
-    await page.locator("#history-close").click();
-    await page.reload();
-    await open();
-    await page.locator("#history-cancellation-view").click();
-    await page.keyboard.press("Escape");
-    await open();
-    await page.locator("#history-cancellation-view").click();
-    await page.locator("#history-cancellation-done").click();
-    await page.waitForFunction(() => document.querySelector("#history-title").textContent === "История заказов"
-      && document.querySelector("#history-cancellation-notice").hidden);
+    if (process.env.TEST_CAPTURE_DIR) await page.locator("#history-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "cancelled-status-mobile.png") });
+    await cancelled.click();
+    await page.waitForFunction(() => !document.querySelector("#history-toggle").classList.contains("has-cancellations"));
+    assert.equal(await cancelled.getAttribute("aria-selected"), "true");
+    assert.equal(await cancelled.evaluate((node) => node.classList.contains("has-cancellations")), false);
+    assert.equal(await page.locator("#history-tabs").isVisible(), true);
+    assert.equal((await (await page.request.get(`${origin}/api/order-cancellations`)).json()).total, 0);
     const other = await page.context().browser().newContext();
     try {
       const second = await other.newPage();
@@ -3312,68 +3295,84 @@ test("new cancellations share one history form across suppliers and stay unread 
       await second.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
       await second.goto(origin);
       await second.locator("#history-toggle").click();
-      await second.waitForFunction(() => document.querySelector("#history-cancellation-notice").hidden);
+      await second.locator(".history-card").waitFor();
+      assert.equal(await second.locator("#history-toggle.has-cancellations").count(), 0);
     } finally { await other.close(); }
     refused = 3;
     await page.locator("#history-reload").click();
-    await page.waitForFunction(() => document.querySelector("#history-cancellation-title").textContent === "Новые отмены: 1"
-      && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
-    await page.locator("#history-cancellation-view").click();
-    assert.equal(await page.locator(".history-card").count(), 1);
-    assert.equal(await page.locator(".history-status-detail").innerText(), "Отменено 3 шт.");
+    await page.waitForFunction(() => document.querySelector("#history-status-cancelled").title === "Новые отмены: 1");
+    assert.equal(await page.locator("#history-toggle.has-cancellations").count(), 1);
   }, { allSuppliers: true, fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => partKomHistory(),
-    supplierOrderHistory: async ({ supplier }) => supplierHistory(supplier) });
+    supplierOrderHistory: async () => supplierHistory() });
 });
 
-test("acknowledging a cancellation view preserves a newer server revision discovered in another session", async () => {
+test("cancelled status acknowledges more than one hundred known cancellations in bounded batches", async () => {
+  const orders = Array.from({ length: 125 }, (_, index) => ({ number: `CANCEL-${index}`, date: "2026-10-16", items: [{
+    article: "A1", brand: "TEST", title: "Тестовая отмена", quantity: 1, price: 100, status: null,
+    fulfillment: "cancelled", expectedDate: null, guaranteedDate: null, warehouse: null }] }));
+  await withCartPage(async (page, { origin }) => {
+    await page.locator("#history-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#history-status-cancelled")?.title === "Новые отмены: 125");
+    const batches = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.endsWith("/order-cancellations/seen")) batches.push(request.postDataJSON().notices.length);
+    });
+    await page.locator("#history-status-cancelled").click();
+    await page.waitForFunction(() => !document.querySelector("#history-toggle").classList.contains("has-cancellations"));
+    assert.deepEqual(batches, [100, 25]);
+    assert.equal((await (await page.request.get(`${origin}/api/order-cancellations`)).json()).total, 0);
+  }, { fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => ({ orders, limited: false }) });
+});
+
+test("clicking cancelled preserves a newer server revision discovered in another session", async () => {
   let refused = 2;
   await withCartPage(async (page, { origin }) => {
     await page.locator("#history-toggle").click();
-    await page.waitForFunction(() => document.querySelector("#history-cancellation-title").textContent === "Новые отмены: 1"
-      && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
-    await page.locator("#history-cancellation-view").click();
-    assert.equal(await page.locator(".history-status-detail").innerText(), "Отменено 2 шт.");
-    refused = 4;
-    await page.request.get(`${origin}/api/order-history/part-kom`);
-    await page.locator("#history-cancellation-done").click();
-    await page.waitForFunction(() => document.querySelector("#history-title").textContent === "История заказов"
-      && document.querySelector("#history-cancellation-title").textContent === "Новые отмены: 1");
-    await page.locator("#history-cancellation-view").click();
-    assert.equal(await page.locator(".history-status-detail").innerText(), "Отменено 4 шт.");
+    await page.waitForFunction(() => document.querySelector("#history-status-cancelled")?.title === "Новые отмены: 1");
+    await page.route("**/api/order-cancellations/seen", async (route) => {
+      if (refused === 2) {
+        refused = 4;
+        await page.request.get(`${origin}/api/order-history/part-kom`);
+      }
+      await route.continue();
+    });
+    const acknowledged = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith("/order-cancellations/seen"));
+    await page.locator("#history-status-cancelled").click();
+    assert.equal((await (await acknowledged).json()).total, 1);
+    await page.waitForFunction(() => document.querySelector("#history-status-cancelled").getAttribute("aria-busy") === "false");
+    assert.equal(await page.locator("#history-toggle.has-cancellations").count(), 1);
+    await page.locator("#history-reload").click();
+    await page.waitForFunction(() => !document.querySelector(".history-loading")
+      && document.querySelector("#history-status-cancelled").title === "Новые отмены: 1");
+    await page.locator("#history-status-cancelled").click();
+    await page.waitForFunction(() => !document.querySelector("#history-toggle").classList.contains("has-cancellations"));
   }, { fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => parsePartKomOrderHistory([{ orderNumber: "RACE",
     orderDate: "2026-10-16", detailNum: "A1", quantity: 10, price: 100, refusalCount: refused, releaseCount: 0 }]) });
 });
 
-test("failed checks retain known cancellations and a failed acknowledgement remains visible without marking them read", async () => {
+test("failed checks and acknowledgements preserve cancellation alerts and allow retry through cancelled status", async () => {
   let failSupplier = false;
   let failAcknowledgement = true;
   const history = { limited: false, orders: [{ number: "SAVED", date: "2026-10-16", items: [{ article: "A1", brand: "TEST",
     title: "Тестовая отмена", quantity: 1, price: 100, status: "Отменено", fulfillment: "cancelled",
     expectedDate: null, guaranteedDate: null, warehouse: null }] }] };
   await withCartPage(async (page) => {
-    await page.locator("#history-toggle").click();
-    await page.waitForFunction(() => document.querySelector("#history-cancellation-title").textContent === "Новые отмены: 1"
-      && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
-    await page.locator("#history-close").click();
+    await page.locator("#history-toggle.has-cancellations").waitFor();
     failSupplier = true;
     await page.locator("#history-toggle").click();
-    await page.waitForFunction(() => document.querySelector("#history-cancellation-description").textContent.includes("Не удалось проверить: Armtek"));
-    await page.locator("#history-cancellation-view").click();
-    assert.equal(await page.locator(".history-card").count(), 1);
+    await page.waitForFunction(() => document.querySelector("#history-cancellation-error").textContent.includes("Не удалось проверить: Armtek"));
     await page.route("**/api/order-cancellations/seen", (route) => failAcknowledgement
       ? route.fulfill({ status: 500, json: { message: "Не удалось сохранить просмотр отмен." } }) : route.continue());
-    await page.locator("#history-cancellation-done").click();
-    await page.waitForFunction(() => document.querySelector("#history-cancellation-description").textContent.includes("Не удалось сохранить просмотр отмен"));
-    assert.equal(await page.locator("#history-title").innerText(), "Новые отмены заказов");
-    assert.equal(await page.locator("#history-cancellation-done").isEnabled(), true);
+    await page.locator("#history-status-cancelled").click();
+    await page.waitForFunction(() => document.querySelector("#history-cancellation-error").textContent.includes("Не удалось сохранить просмотр отмен"));
+    assert.equal(await page.locator("#history-toggle.has-cancellations").count(), 1);
+    assert.equal(await page.locator("#history-title").innerText(), "История заказов");
     failSupplier = false;
-    await page.locator("#history-cancellation-retry").click();
-    await page.waitForFunction(() => !document.querySelector("#history-cancellation-description").textContent.includes("Не удалось проверить")
-      && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
+    await page.locator("#history-reload").click();
+    await page.waitForFunction(() => document.querySelector("#history-cancellation-error").hidden);
     failAcknowledgement = false;
-    await page.locator("#history-cancellation-done").click();
-    await page.waitForFunction(() => document.querySelector("#history-title").textContent === "История заказов"
-      && document.querySelector("#history-cancellation-notice").hidden);
+    await page.locator("#history-status-cancelled").click();
+    await page.waitForFunction(() => !document.querySelector("#history-toggle").classList.contains("has-cancellations"));
   }, { fixedTime: "2026-10-17T12:00:00Z", supplierOrderHistory: async ({ supplier }) => {
     if (supplier !== "armtek") return { limited: false, orders: [] };
     if (failSupplier) throw new SupplierAuthError();
@@ -3381,35 +3380,24 @@ test("failed checks retain known cancellations and a failed acknowledgement rema
   } });
 });
 
-test("malformed cancellation notices preserve known alerts and do not allow acknowledging unrelated items", async () => {
-  let malformed = true;
+test("malformed cancellation notices preserve known alerts and cannot acknowledge unrelated items", async () => {
   const order = { number: "VALID-CANCELLATION", date: "2026-10-16", items: [{ article: "A1", brand: "TEST", title: "Тестовая отмена",
     quantity: 1, price: 100, status: null, fulfillment: "cancelled", expectedDate: null, guaranteedDate: null, warehouse: null }] };
   await withCartPage(async (page) => {
     await page.locator("#history-toggle.has-cancellations").waitFor();
-    await page.route("**/api/order-cancellations", (route) => malformed ? route.fulfill({ json: { total: 1, notices: [{
+    await page.route("**/api/order-cancellations", (route) => route.fulfill({ json: { total: 1, notices: [{
       id: "00000000-0000-0000-0000-000000000001", supplier: "part-kom", revision: 1, detectedAt: "2026-10-16T12:00:00Z",
       order: { ...order, items: [{ ...order.items[0], fulfillment: "delivered" }] },
-    }] } }) : route.continue());
+    }] } }));
     await page.locator("#history-toggle").click();
-    await page.waitForFunction(() => document.querySelector("#history-cancellation-description").textContent.includes("Не удалось загрузить уведомления")
-      && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
-    assert.equal(await page.locator(".history-card h3").innerText(), "Заказ № VALID-CANCELLATION");
-    assert.equal(await page.locator("#history-cancellation-view").isVisible(), true);
-    assert.equal(await page.locator("#history-cancellation-done").isVisible(), false);
-    await page.locator("#history-cancellation-view").click();
-    assert.notEqual(await page.locator(".history-card").getAttribute("data-cancellation-id"), "00000000-0000-0000-0000-000000000001");
+    await page.waitForFunction(() => document.querySelector("#history-cancellation-error").textContent.includes("Не удалось загрузить уведомления"));
+    assert.equal(await page.locator("#history-toggle.has-cancellations").count(), 1);
+    const acknowledged = page.waitForRequest((request) => new URL(request.url()).pathname.endsWith("/order-cancellations/seen"));
+    await page.locator("#history-status-cancelled").click();
+    assert.notEqual((await acknowledged).postDataJSON().notices[0].id, "00000000-0000-0000-0000-000000000001");
     assert.equal(await page.locator(".history-status--delivered").count(), 0);
-    await page.locator("#history-cancellation-back").click();
-    malformed = false;
-    await page.locator("#history-cancellation-retry").click();
-    await page.waitForFunction(() => document.querySelector("#history-cancellation-title").textContent === "Новые отмены: 1"
-      && !document.querySelector("#history-cancellation-description").textContent.includes("Проверяем"));
-    await page.locator("#history-cancellation-view").click();
-    assert.equal(await page.locator(".history-status-detail").innerText(), "Отменено 1 шт.");
   }, { fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => ({ orders: [order], limited: false }) });
 });
-
 test("history button shows a red circular indicator before opening and clears it only after cancellations are acknowledged", async () => {
   const history = { limited: false, orders: [{ number: "INDICATOR", date: "2026-10-16", items: [{ article: "A1", brand: "TEST",
     title: "Тестовая отмена", quantity: 1, price: 100, status: null, fulfillment: "cancelled",
@@ -3470,8 +3458,7 @@ test("history button shows a red circular indicator before opening and clears it
     await page.locator("#history-close").click();
     assert.equal(await toggle.evaluate((node) => node.classList.contains("has-cancellations")), true);
     await toggle.click();
-    await page.locator("#history-cancellation-view").click();
-    await page.locator("#history-cancellation-done").click();
+    await page.locator("#history-status-cancelled").click();
     await page.waitForFunction(() => !document.querySelector("#history-toggle").classList.contains("has-cancellations"));
     assert.equal(await toggle.getAttribute("title"), "История заказов");
     assert.equal(await toggle.getAttribute("aria-label"), "Открыть историю заказов");

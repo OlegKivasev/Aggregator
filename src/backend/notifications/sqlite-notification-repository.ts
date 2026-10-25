@@ -31,6 +31,8 @@ export class SqliteNotificationRepository {
         id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, payload TEXT NOT NULL, seen_at TEXT
       ) STRICT;
       CREATE INDEX IF NOT EXISTS order_notification_feed_unread ON order_notification_feed(seen_at,id);
+      CREATE INDEX IF NOT EXISTS order_notification_feed_priority
+        ON order_notification_feed((json_extract(payload, '$.kind') = 'cancelled') DESC,id DESC);
     `); } catch (error) { this.database.close(); throw error; }
   }
 
@@ -78,17 +80,22 @@ export class SqliteNotificationRepository {
 
   feed(before: number | null = null) {
     const rows = before === null
-      ? this.database.prepare("SELECT id,created_at,payload,seen_at FROM order_notification_feed ORDER BY id DESC LIMIT 31").all()
-      : this.database.prepare("SELECT id,created_at,payload,seen_at FROM order_notification_feed WHERE id<? ORDER BY id DESC LIMIT 31").all(before);
+      ? this.database.prepare(`SELECT id,created_at,payload,seen_at FROM order_notification_feed
+          ORDER BY (json_extract(payload, '$.kind') = 'cancelled') DESC,id DESC LIMIT 31`).all()
+      : this.database.prepare(`SELECT id,created_at,payload,seen_at FROM order_notification_feed
+          WHERE (json_extract(payload, '$.kind') = 'cancelled', id) <
+            (COALESCE((SELECT json_extract(payload, '$.kind') = 'cancelled' FROM order_notification_feed WHERE id=?), 0), ?)
+          ORDER BY (json_extract(payload, '$.kind') = 'cancelled') DESC,id DESC LIMIT 31`).all(before, before);
     const counts = this.database.prepare(`SELECT
       (SELECT COUNT(*) FROM order_notification_feed WHERE seen_at IS NULL) AS unread,
+      (SELECT COUNT(*) FROM order_notification_feed WHERE seen_at IS NULL AND json_extract(payload, '$.kind') = 'cancelled') AS cancellations,
       (SELECT MAX(id) FROM order_notification_feed) AS latest`).get();
     const entries = rows.slice(0, 30).map((row) => {
       const event = JSON.parse(String(row.payload)) as OrderEvent;
       return { ...event, items: event.items.slice(0, 100), remainingItems: Math.max(0, event.items.length - 100),
         id: Number(row.id), createdAt: String(row.created_at), read: row.seen_at !== null };
     });
-    return { entries, unreadCount: Number(counts?.unread ?? 0), latestId: Number(counts?.latest ?? 0),
+    return { entries, unreadCount: Number(counts?.unread ?? 0), unreadCancellationCount: Number(counts?.cancellations ?? 0), latestId: Number(counts?.latest ?? 0),
       nextBefore: rows.length > 30 ? entries.at(-1)?.id ?? null : null };
   }
 

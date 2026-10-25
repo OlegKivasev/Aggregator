@@ -3,6 +3,9 @@
 .order-notifications-trigger img { display: block; width: 23px; height: 23px; opacity: .6; }
 .order-notifications-trigger:hover, .order-notifications-trigger[aria-expanded="true"] { border-color: var(--accent); background: #fff8f4; }
 .order-notifications-trigger.has-unread { border-color: #ffb09a; }
+.order-notifications-trigger.has-cancellations { border: 2px solid #dc2626; background: #fff5f5; animation: history-cancellation-pulse 1.8s ease-out infinite; }
+.order-notifications-trigger.has-cancellations img { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .order-notifications-trigger.has-cancellations { animation: none; } }
 .order-notifications-count { position: absolute; top: -4px; right: -5px; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border: 2px solid #fff; border-radius: 12px; background: #d92d20; color: #fff; font-size: 10px; font-weight: 800; line-height: 1; }
 .order-notifications-panel { position: fixed; z-index: 1000; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: #fff; color: var(--ink); box-shadow: 0 12px 40px rgba(25,40,60,.16); font-size: 12px; }
 .order-notifications-panel[hidden], .order-notifications-panel [hidden], .order-notifications-count[hidden] { display: none !important; }

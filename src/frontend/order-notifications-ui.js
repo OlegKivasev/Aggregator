@@ -5,6 +5,7 @@ const date = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", 
 const integer = (value) => Number.isSafeInteger(value) && value >= 0;
 const text = (value, max) => typeof value === "string" && value.length <= max;
 const validFeed = (value) => value && integer(value.unreadCount) && integer(value.latestId)
+  && integer(value.unreadCancellationCount) && value.unreadCancellationCount <= value.unreadCount
   && (value.nextBefore === null || integer(value.nextBefore) && value.nextBefore > 0)
   && Array.isArray(value.entries) && value.entries.length <= 30
   && value.entries.every((entry) => entry && integer(entry.id) && entry.id > 0 && entry.id <= value.latestId
@@ -46,9 +47,11 @@ export function bootstrapOrderNotifications() {
   const expanded = new Set();
   let latestId = 0;
   let unreadCount = 0;
+  let unreadCancellationCount = 0;
   let nextBefore = null;
   let loaded = false;
   let pending = false;
+  let moreRequested = false;
   let timer = null;
   let controller = null;
 
@@ -83,6 +86,7 @@ export function bootstrapOrderNotifications() {
   const updateBadge = () => {
     badge.hidden = unreadCount === 0; badge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
     trigger.classList.toggle("has-unread", unreadCount > 0);
+    trigger.classList.toggle("has-cancellations", unreadCancellationCount > 0);
     trigger.setAttribute("aria-label", unreadCount ? `Уведомления о заказах, непрочитанных: ${unreadCount}` : "Уведомления о заказах");
     summary.textContent = !loaded ? error.hidden ? "Загружаем…" : "Не удалось загрузить" : unreadCount ? `Непрочитанных: ${unreadCount}` : "Всё прочитано";
     read.disabled = pending || unreadCount === 0;
@@ -97,7 +101,7 @@ export function bootstrapOrderNotifications() {
     visibilityObserver.disconnect();
     updateBadge(); list.replaceChildren();
     let previousRead = null;
-    for (const entry of [...entries.values()].sort((a, b) => b.id - a.id)) {
+    for (const entry of [...entries.values()].sort((a, b) => Number(b.kind === "cancelled") - Number(a.kind === "cancelled") || b.id - a.id)) {
       if (previousRead !== null && previousRead !== entry.read) {
         const label = entry.read ? "Прочитанные" : "Непрочитанные";
         const divider = element("li", `order-notifications-divider${entry.read ? "" : " is-unread"}`, label);
@@ -159,7 +163,7 @@ export function bootstrapOrderNotifications() {
     if (!document.hidden) timer = setTimeout(() => void request(), 30_000);
   };
   const request = async ({ before = null, seen = null } = {}) => {
-    if (pending) return;
+    if (pending) { if (before !== null) moreRequested = true; return; }
     pending = true; updateBadge(); more.disabled = true;
     controller = new AbortController(); const active = controller;
     const timeout = setTimeout(() => active.abort(), 15_000);
@@ -179,14 +183,20 @@ export function bootstrapOrderNotifications() {
       for (const entry of value.entries) entries.set(entry.id, entry);
       // A fresh head starts pagination again so a long absence cannot leave gaps in the feed.
       if (before !== null || !loaded || reset) nextBefore = value.nextBefore;
-      unreadCount = value.unreadCount; latestId = value.latestId; loaded = true; error.hidden = true;
+      unreadCount = value.unreadCount; unreadCancellationCount = value.unreadCancellationCount;
+      latestId = value.latestId; loaded = true; error.hidden = true;
       if (panel.hidden) updateBadge(); else render();
     } catch {
       if (!active.signal.aborted || !document.hidden) {
         error.hidden = false; error.querySelector("span").textContent = seen ? "Не удалось отметить уведомления. Попробуйте ещё раз." : "Не удалось загрузить уведомления. Попробуйте ещё раз.";
         if (!loaded) empty.textContent = "Уведомления пока недоступны.";
       }
-    } finally { clearTimeout(timeout); controller = null; pending = false; updateBadge(); more.disabled = false; schedule(); readVisible(); }
+    } finally {
+      clearTimeout(timeout); controller = null; pending = false; updateBadge(); more.disabled = false; schedule();
+      const loadMore = moreRequested && nextBefore !== null && !panel.hidden;
+      moreRequested = false;
+      if (loadMore) void request({ before: nextBefore }); else readVisible();
+    }
   };
   trigger.addEventListener("click", () => {
     if (!panel.hidden) { close(); return; }
