@@ -13,12 +13,6 @@ export function setupSearchHistory({ input, form, kind, onSelect }) {
   wrapper.className = "search-history";
   input.before(wrapper);
   wrapper.append(input);
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "search-history__toggle";
-  toggle.title = "История поиска";
-  toggle.setAttribute("aria-label", "История поиска");
-  toggle.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6M12 7v5l3 2"/></svg>';
   const panel = document.createElement("div");
   panel.className = "search-history__panel";
   panel.id = `${input.id}-history`;
@@ -39,12 +33,10 @@ export function setupSearchHistory({ input, form, kind, onSelect }) {
   list.setAttribute("role", "listbox");
   list.setAttribute("aria-label", "История поиска");
   panel.append(header, list);
-  wrapper.append(toggle, panel);
+  wrapper.append(panel);
   input.setAttribute("role", "combobox");
   input.setAttribute("aria-autocomplete", "list");
   input.setAttribute("aria-controls", list.id);
-  toggle.setAttribute("aria-controls", panel.id);
-  toggle.setAttribute("aria-expanded", "false");
   input.setAttribute("aria-expanded", "false");
   let activeIndex = -1;
   let shown = [];
@@ -53,7 +45,6 @@ export function setupSearchHistory({ input, form, kind, onSelect }) {
     panel.hidden = true;
     input.setAttribute("aria-expanded", "false");
     input.removeAttribute("aria-activedescendant");
-    toggle.setAttribute("aria-expanded", "false");
     activeIndex = -1;
   };
   const save = () => {
@@ -63,6 +54,17 @@ export function setupSearchHistory({ input, form, kind, onSelect }) {
       // Searching remains available if storage is full or disabled.
     }
   };
+  save();
+  const resizeList = () => {
+    if (panel.hidden || !shown.length) return;
+    const first = list.firstElementChild;
+    const last = list.children[Math.min(10, shown.length) - 1];
+    const height = last.getBoundingClientRect().bottom - first.getBoundingClientRect().top;
+    const available = Math.max(0, window.innerHeight - list.getBoundingClientRect().top - 16);
+    list.style.maxHeight = `${Math.min(height, available)}px`;
+  };
+  new ResizeObserver(resizeList).observe(list);
+  window.addEventListener("resize", resizeList);
   const select = (entry) => {
     close();
     input.value = entry.query;
@@ -75,6 +77,7 @@ export function setupSearchHistory({ input, form, kind, onSelect }) {
     const query = filter.trim().toLocaleUpperCase();
     shown = entries.filter((entry) => `${entry.query} ${entry.brands.join(" ")}`.toLocaleUpperCase().includes(query));
     list.replaceChildren();
+    list.style.maxHeight = "";
     activeIndex = -1;
     input.removeAttribute("aria-activedescendant");
     shown.forEach((entry, index) => {
@@ -104,14 +107,10 @@ export function setupSearchHistory({ input, form, kind, onSelect }) {
     }
     clear.disabled = !entries.length;
     panel.hidden = false;
-    toggle.setAttribute("aria-expanded", "true");
     input.setAttribute("aria-expanded", "true");
+    list.scrollTop = 0;
+    resizeList();
   };
-  toggle.addEventListener("click", () => {
-    if (!panel.hidden) return close();
-    input.focus();
-    open();
-  });
   clear.addEventListener("click", () => {
     entries = [];
     save();

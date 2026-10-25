@@ -10,7 +10,24 @@ test("pricing history keeps the latest query first without changing its spelling
   history = normalizeSearchHistory(Array.from({ length: 150 }, (_, index) => ({ query: `A${index}` })), "pricing");
   assert.equal(history.length, searchHistoryLimit);
   assert.equal(history[0].query, "A0");
-  assert.equal(history.at(-1).query, "A99");
+  assert.equal(history.at(-1).query, "A29");
+});
+
+test("both histories retain 30 recent requests and replace the oldest on every overflow", () => {
+  assert.equal(searchHistoryLimit, 30);
+  for (const kind of ["pricing", "applicability"]) {
+    let history = [];
+    for (let index = 0; index < 65; index++) {
+      history = addSearchHistoryEntry(history, { query: `A${index}`, brands: ["FORD"] }, kind);
+      assert.equal(history.length, Math.min(index + 1, 30));
+      assert.equal(history[0].query, `A${index}`);
+      assert.equal(history.at(-1).query, `A${Math.max(0, index - 29)}`);
+    }
+    history = addSearchHistoryEntry(history, history.at(-1), kind);
+    assert.equal(history.length, 30);
+    assert.equal(history[0].query, "A35");
+    assert.equal(history.at(-1).query, "A36");
+  }
 });
 
 test("applicability history restores multiple articles and brands and deduplicates equivalent requests", () => {

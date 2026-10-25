@@ -1,6 +1,6 @@
 import { normalizeApplicabilitySku, parseApplicabilitySkus } from "./applicability-search-input.js";
 
-export const searchHistoryLimit = 100;
+export const searchHistoryLimit = 30;
 export const searchHistoryStorageKeys = {
   pricing: "autoservice.searchHistory",
   applicability: "autoservice.applicabilitySearchHistory",
