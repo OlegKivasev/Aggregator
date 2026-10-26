@@ -12,7 +12,10 @@ export async function serveOrderNotifications(request: IncomingMessage, response
   try {
     const params = [...url.searchParams];
     const before = url.searchParams.get("before");
-    if (seen && url.search || params.length > 1 || params.some(([key]) => key !== "before")
+    const priority = url.searchParams.get("priority");
+    if (seen && url.search || params.length > 2 || new Set(params.map(([key]) => key)).size !== params.length
+      || params.some(([key]) => key !== "before" && key !== "priority")
+      || priority !== null && (before === null || !["0", "1"].includes(priority))
       || before !== null && (!/^[1-9]\d{0,15}$/.test(before) || !Number.isSafeInteger(Number(before)))) {
       throw new NotificationSettingsError("Неверный запрос уведомлений.");
     }
@@ -21,7 +24,7 @@ export async function serveOrderNotifications(request: IncomingMessage, response
         serveJson(response, 403, { message: "Запрос прочтения уведомлений отклонён." }); return true;
       }
       serveJson(response, 200, service.markOrdersSeen(await readJsonBody(request)));
-    } else serveJson(response, 200, service.orderFeed(before === null ? null : Number(before)));
+    } else serveJson(response, 200, service.orderFeed(before === null ? null : Number(before), priority === null ? null : priority === "1" ? 1 : 0));
   } catch (error) {
     serveJson(response, error instanceof NotificationSettingsError ? error.status : error instanceof RequestBodyError ? error.statusCode : 500,
       { message: error instanceof NotificationSettingsError ? error.message : "Не удалось загрузить уведомления о заказах." });

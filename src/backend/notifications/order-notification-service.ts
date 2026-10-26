@@ -67,7 +67,7 @@ export class OrderNotificationService {
       testMessage: current?.peerId ? this.repository.welcomeState(`${current.groupId}:${current.peerId}`) : null,
       ...(current?.peerId ? this.repository.counts(`${current.groupId}:${current.peerId}`) : { pending: 0, failed: 0 }) };
   }
-  orderFeed(before: number | null = null) { return this.repository.feed(before); }
+  orderFeed(before: number | null = null, priority: 0 | 1 | null = null) { return this.repository.feed(before, priority); }
   markOrdersSeen(payload: unknown) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new NotificationSettingsError("Неверный запрос прочтения уведомлений.");
     const { throughId, ids, ...rest } = payload as { throughId?: unknown; ids?: unknown };

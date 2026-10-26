@@ -31,8 +31,9 @@ export class SqliteNotificationRepository {
         id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, payload TEXT NOT NULL, seen_at TEXT
       ) STRICT;
       CREATE INDEX IF NOT EXISTS order_notification_feed_unread ON order_notification_feed(seen_at,id);
-      CREATE INDEX IF NOT EXISTS order_notification_feed_priority
-        ON order_notification_feed((json_extract(payload, '$.kind') = 'cancelled') DESC,id DESC);
+      DROP INDEX IF EXISTS order_notification_feed_priority;
+      CREATE INDEX IF NOT EXISTS order_notification_feed_unread_priority
+        ON order_notification_feed((seen_at IS NULL AND json_extract(payload, '$.kind') = 'cancelled') DESC,id DESC);
     `); } catch (error) { this.database.close(); throw error; }
   }
 
@@ -78,14 +79,14 @@ export class SqliteNotificationRepository {
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
   }
 
-  feed(before: number | null = null) {
+  feed(before: number | null = null, priority: 0 | 1 | null = null) {
     const rows = before === null
       ? this.database.prepare(`SELECT id,created_at,payload,seen_at FROM order_notification_feed
-          ORDER BY (json_extract(payload, '$.kind') = 'cancelled') DESC,id DESC LIMIT 31`).all()
+          ORDER BY (seen_at IS NULL AND json_extract(payload, '$.kind') = 'cancelled') DESC,id DESC LIMIT 31`).all()
       : this.database.prepare(`SELECT id,created_at,payload,seen_at FROM order_notification_feed
-          WHERE (json_extract(payload, '$.kind') = 'cancelled', id) <
-            (COALESCE((SELECT json_extract(payload, '$.kind') = 'cancelled' FROM order_notification_feed WHERE id=?), 0), ?)
-          ORDER BY (json_extract(payload, '$.kind') = 'cancelled') DESC,id DESC LIMIT 31`).all(before, before);
+          WHERE (seen_at IS NULL AND json_extract(payload, '$.kind') = 'cancelled', id) <
+            (COALESCE(?, (SELECT seen_at IS NULL AND json_extract(payload, '$.kind') = 'cancelled' FROM order_notification_feed WHERE id=?), 0), ?)
+          ORDER BY (seen_at IS NULL AND json_extract(payload, '$.kind') = 'cancelled') DESC,id DESC LIMIT 31`).all(priority, before, before);
     const counts = this.database.prepare(`SELECT
       (SELECT COUNT(*) FROM order_notification_feed WHERE seen_at IS NULL) AS unread,
       (SELECT COUNT(*) FROM order_notification_feed WHERE seen_at IS NULL AND json_extract(payload, '$.kind') = 'cancelled') AS cancellations,
@@ -95,8 +96,9 @@ export class SqliteNotificationRepository {
       return { ...event, items: event.items.slice(0, 100), remainingItems: Math.max(0, event.items.length - 100),
         id: Number(row.id), createdAt: String(row.created_at), read: row.seen_at !== null };
     });
+    const cursor = rows.length > 30 ? entries.at(-1) : null;
     return { entries, unreadCount: Number(counts?.unread ?? 0), unreadCancellationCount: Number(counts?.cancellations ?? 0), latestId: Number(counts?.latest ?? 0),
-      nextBefore: rows.length > 30 ? entries.at(-1)?.id ?? null : null };
+      nextBefore: cursor?.id ?? null, nextBeforePriority: cursor ? !cursor.read && cursor.kind === "cancelled" ? 1 : 0 : null };
   }
 
   markFeedSeen(throughId: number, now: number): boolean {

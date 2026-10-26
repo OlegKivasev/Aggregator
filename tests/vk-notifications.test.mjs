@@ -186,7 +186,9 @@ test("website feed HTTP validates cursors and acknowledgements and never checks 
   const url = `${f.origin}/api/notifications/orders`;
   const first = await fetch(url); assert.equal(first.status, 200); assert.equal(first.headers.get("cache-control"), "no-store");
   const view = await first.json(); assert.equal(view.unreadCount, 1); assert.equal(f.loads.length, 0); assert.equal(f.calls.length, 0);
-  for (const query of ["?bad=1", "?before=-1", "?before=1&before=2", "?before=9007199254740992", "?before=1.2"]) assert.equal((await fetch(url + query)).status, 400);
+  for (const query of ["?bad=1", "?before=-1", "?before=1&before=2", "?before=9007199254740992", "?before=1.2",
+    "?priority=1", "?before=1&priority=2", "?before=1&priority=", "?before=1&priority=1&priority=0"]) assert.equal((await fetch(url + query)).status, 400);
+  assert.equal((await fetch(`${url}?before=${view.latestId}&priority=1`)).status, 200);
   const post = (payload, headers = {}) => fetch(`${url}/seen`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(payload) });
   for (const payload of [{ throughId: "1" }, { throughId: 1, bad: true }, { throughId: view.latestId + 1 }, [], {},
     { ids: [] }, { ids: [0] }, { ids: [-1] }, { ids: ["1"] }, { ids: [1, 1] }, { ids: [view.latestId + 1] },
@@ -206,7 +208,7 @@ test("website feed HTTP validates cursors and acknowledgements and never checks 
   assert.equal(f.loads.length, 0); assert.equal(f.calls.length, 0);
 });
 
-test("cancellations precede newer ordinary notifications across pages and keep their order after reading", () => {
+test("only unread cancellations precede newer events and pagination survives reading its cursor", () => {
   const repository = new SqliteNotificationRepository(":memory:");
   const update = (value) => repository.observeFeed([{ supplier: "armtek", histories: [value] }], now);
   try {
@@ -224,7 +226,7 @@ test("cancellations precede newer ordinary notifications across pages and keep t
     for (let index = 0; index < 10; index++) {
       all.push(...page.entries);
       if (page.nextBefore === null) break;
-      page = repository.feed(page.nextBefore);
+      page = repository.feed(page.nextBefore, page.nextBeforePriority);
     }
     assert.equal(all.length, 125);
     assert.equal(new Set(all.map((entry) => entry.id)).size, 125);
@@ -235,9 +237,24 @@ test("cancellations precede newer ordinary notifications across pages and keep t
     }
     repository.markFeedEntriesSeen(first.entries.map((entry) => entry.id), now);
     assert.equal(repository.feed().unreadCancellationCount, 5);
-    assert.deepEqual(repository.feed().entries.map((entry) => entry.id), first.entries.map((entry) => entry.id));
+    const next = repository.feed(first.nextBefore, first.nextBeforePriority);
+    assert.ok(next.entries.slice(0, 5).every((entry) => entry.kind === "cancelled" && !entry.read));
+    assert.equal(next.nextBeforePriority, 0);
+    const ids = new Set(first.entries.map((entry) => entry.id));
+    page = next;
+    for (let index = 0; index < 10; index++) {
+      for (const entry of page.entries) ids.add(entry.id);
+      repository.markFeedEntriesSeen(page.entries.map((entry) => entry.id), now);
+      if (page.nextBefore === null) break;
+      page = repository.feed(page.nextBefore, page.nextBeforePriority);
+    }
+    assert.equal(ids.size, 125, "reading and priority changes cannot skip a notification");
     repository.markFeedSeen(first.latestId, now);
-    assert.equal(repository.feed().unreadCancellationCount, 0);
+    const read = repository.feed();
+    assert.equal(read.unreadCancellationCount, 0);
+    assert.equal(read.nextBeforePriority, 0);
+    assert.deepEqual(read.entries.map((entry) => entry.id), Array.from({ length: 30 }, (_, index) => 125 - index));
+    assert.ok(read.entries.every((entry) => entry.kind === "new"));
   } finally { repository.close(); }
 });
 

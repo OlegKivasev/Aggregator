@@ -34,7 +34,10 @@ async function withFeed(check) {
       new VkClient(async () => { throw new Error("VK must never be called by the website feed"); }), {
         available: () => false, load: async () => { throw new Error("Reading the feed must not query suppliers"); }, observe: () => {},
       }, () => now + 600_000);
-    const addOrder = (number) => repository.observeFeed([{ supplier: "rossko", histories: [history([item(2)], number)] }], now + 1_200_000);
+    const addOrder = (number, cancelled = false) => {
+      repository.observeFeed([{ supplier: "rossko", histories: [history([item(2)], number)] }], now + 1_200_000);
+      if (cancelled) repository.observeFeed([{ supplier: "rossko", histories: [history([{ ...item(2), fulfillment: "cancelled" }], number)] }], now + 1_800_000);
+    };
     let mode = "ok"; let onRead = null;
     const source = await readFile("src/frontend/index.html", "utf8");
     const nav = /<nav class="search-tabs[^>]*id="search-tabs"[\s\S]*?<\/nav>/.exec(source)?.[0]; assert.ok(nav);
@@ -126,6 +129,7 @@ test("read all includes unloaded older events, preserves a new arrival and share
       await route.continue();
     });
     onRead(() => addOrder("DURING-READ"));
+    const loadedCount = await page.locator(".order-notification-card").count();
     await page.locator("#order-notifications-read").click();
     await page.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "1");
     assert.equal(await page.locator("#order-notifications-panel").isVisible(), false);
@@ -139,7 +143,7 @@ test("read all includes unloaded older events, preserves a new arrival and share
     assert.equal(service.orderFeed().unreadCount, 0);
     await page.clock.runFor(30_001);
     await page.waitForFunction(() => document.querySelector("#order-notifications-count").hidden);
-    assert.equal(await page.locator(".order-notification-card").count(), 30, "reading keeps the loaded event history");
+    assert.equal(await page.locator(".order-notification-card").count(), loadedCount, "reading keeps the loaded event history");
     await other.close();
   });
 });
@@ -151,7 +155,7 @@ test("feed polling and pagination retain every event after a long absence and fa
     await page.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "39");
     assert.equal(await page.locator("#order-notifications-trigger.has-cancellations").count(), 1);
     await page.locator("#order-notifications-trigger").click();
-    assert.equal(await page.locator(".order-notification-card").count(), 30);
+    assert.ok(await page.locator(".order-notification-card").count() >= 30);
     assert.equal(await page.locator(".order-notification-card").first().evaluate((node) => node.classList.contains("order-notification-card--cancelled")), true);
     await page.locator("#order-notifications-more").click();
     await page.waitForFunction(() => document.querySelectorAll(".order-notification-card").length === 39);
@@ -167,6 +171,72 @@ test("feed polling and pagination retain every event after a long absence and fa
     }
     setMode("ok"); await page.locator(".order-notifications-error button").click();
     await page.locator(".order-notifications-error").waitFor({ state: "hidden" });
+  });
+});
+
+test("a cancellation is promoted once, stays still while read, and returns to chronology on reopening", async () => {
+  await withFeed(async (page, { addOrder, browser, origin }) => {
+    for (let index = 0; index < 35; index++) addOrder(`RECENT-${index}`);
+    await page.clock.runFor(30_001);
+    await page.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "39");
+    const trigger = page.locator("#order-notifications-trigger");
+    await trigger.click();
+    await page.waitForFunction(() => !document.querySelector("#order-notifications-trigger").classList.contains("has-cancellations"));
+    const cards = page.locator(".order-notification-card");
+    assert.equal(await cards.first().evaluate((card) => card.classList.contains("order-notification-card--cancelled")), true);
+    assert.equal(await cards.first().evaluate((card) => card.classList.contains("is-unread")), false);
+    await page.clock.runFor(30_001);
+    assert.equal(await cards.first().evaluate((card) => card.classList.contains("order-notification-card--cancelled")), true);
+    await page.keyboard.press("Escape");
+    await trigger.click();
+    await page.waitForFunction(() => document.querySelector(".order-notification-card__number")?.textContent === "Заказ № RECENT-34");
+    assert.equal(await cards.first().evaluate((card) => card.classList.contains("order-notification-card--new")), true);
+    await page.locator("#order-notifications-more").click();
+    await page.waitForFunction(() => document.querySelectorAll(".order-notification-card").length === 39);
+    const ids = await cards.evaluateAll((nodes) => nodes.map((node) => Number(node.dataset.notificationId)));
+    assert.deepEqual(ids, [...ids].sort((a, b) => b - a));
+    assert.equal(await cards.last().evaluate((card) => card.classList.contains("order-notification-card--cancelled")), true);
+    await page.keyboard.press("Escape");
+    const other = await browser.newPage();
+    try {
+      await other.goto(origin);
+      await other.locator("#order-notifications-trigger").click();
+      await other.waitForFunction(() => document.querySelector(".order-notification-card__number")?.textContent === "Заказ № RECENT-34");
+      assert.equal(await other.locator("#order-notifications-trigger.has-cancellations").count(), 0);
+    } finally { await other.close(); }
+  });
+});
+
+test("pagination retains every event after an entire page of priority cancellations has been read", async () => {
+  await withFeed(async (page, { addOrder, service }) => {
+    for (let index = 0; index < 35; index++) addOrder(`CANCEL-${index}`, true);
+    for (let index = 0; index < 35; index++) addOrder(`RECENT-${index}`);
+    await page.clock.runFor(30_001);
+    await page.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "99+");
+    assert.equal(service.orderFeed().unreadCount, 109);
+    await page.locator("#order-notifications-trigger").click();
+    await page.waitForFunction(() => !document.querySelector("#order-notifications-read").disabled);
+    await page.locator("#order-notifications-read").click();
+    await page.waitForFunction(() => document.querySelector("#order-notifications-count").hidden);
+    assert.equal(service.orderFeed().unreadCancellationCount, 0);
+    const cursors = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.searchParams.has("before")) cursors.push(url.searchParams.get("priority"));
+    });
+    const more = page.locator("#order-notifications-more");
+    for (let index = 0; index < 10 && await more.isVisible(); index++) {
+      const response = page.waitForResponse((result) => new URL(result.url()).searchParams.has("before"));
+      await more.click();
+      assert.equal((await response).status(), 200);
+      await page.waitForFunction(() => !document.querySelector("#order-notifications-more").disabled);
+    }
+    assert.equal(await more.isVisible(), false);
+    const ids = await page.locator(".order-notification-card").evaluateAll((cards) => cards.map((card) => card.dataset.notificationId));
+    assert.equal(ids.length, 109);
+    assert.equal(new Set(ids).size, 109);
+    assert.equal(cursors[0], "1", "the priority cursor must survive reading its last card");
+    assert.ok(cursors.includes("0"));
   });
 });
 

@@ -7,6 +7,7 @@ const text = (value, max) => typeof value === "string" && value.length <= max;
 const validFeed = (value) => value && integer(value.unreadCount) && integer(value.latestId)
   && integer(value.unreadCancellationCount) && value.unreadCancellationCount <= value.unreadCount
   && (value.nextBefore === null || integer(value.nextBefore) && value.nextBefore > 0)
+  && (value.nextBefore === null ? value.nextBeforePriority === null : [0, 1].includes(value.nextBeforePriority))
   && Array.isArray(value.entries) && value.entries.length <= 30
   && value.entries.every((entry) => entry && integer(entry.id) && entry.id > 0 && entry.id <= value.latestId
     && Object.hasOwn(supplierNames, entry.supplier) && Object.hasOwn(labels, entry.kind)
@@ -45,13 +46,16 @@ export function bootstrapOrderNotifications() {
   const closeButton = panel.querySelector(".order-notifications-close");
   const entries = new Map();
   const expanded = new Set();
+  const prioritized = new Set();
   let latestId = 0;
   let unreadCount = 0;
   let unreadCancellationCount = 0;
   let nextBefore = null;
+  let nextBeforePriority = null;
   let loaded = false;
   let pending = false;
   let moreRequested = false;
+  let refreshRequested = false;
   let timer = null;
   let controller = null;
 
@@ -101,7 +105,7 @@ export function bootstrapOrderNotifications() {
     visibilityObserver.disconnect();
     updateBadge(); list.replaceChildren();
     let previousRead = null;
-    for (const entry of [...entries.values()].sort((a, b) => Number(b.kind === "cancelled") - Number(a.kind === "cancelled") || b.id - a.id)) {
+    for (const entry of [...entries.values()].sort((a, b) => Number(prioritized.has(b.id)) - Number(prioritized.has(a.id)) || b.id - a.id)) {
       if (previousRead !== null && previousRead !== entry.read) {
         const label = entry.read ? "Прочитанные" : "Непрочитанные";
         const divider = element("li", `order-notifications-divider${entry.read ? "" : " is-unread"}`, label);
@@ -162,13 +166,13 @@ export function bootstrapOrderNotifications() {
     clearTimeout(timer);
     if (!document.hidden) timer = setTimeout(() => void request(), 30_000);
   };
-  const request = async ({ before = null, seen = null } = {}) => {
-    if (pending) { if (before !== null) moreRequested = true; return; }
+  const request = async ({ before = null, priority = null, seen = null, fresh = false } = {}) => {
+    if (pending) { if (fresh) refreshRequested = true; else if (before !== null) moreRequested = true; return; }
     pending = true; updateBadge(); more.disabled = true;
     controller = new AbortController(); const active = controller;
     const timeout = setTimeout(() => active.abort(), 15_000);
     try {
-      const response = await fetch(seen ? "/api/notifications/orders/seen" : `/api/notifications/orders${before === null ? "" : `?before=${before}`}`, {
+      const response = await fetch(seen ? "/api/notifications/orders/seen" : `/api/notifications/orders${before === null ? "" : `?before=${before}&priority=${priority}`}`, {
         method: seen ? "POST" : "GET", signal: active.signal,
         ...(seen ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(seen) } : {}),
       });
@@ -178,11 +182,14 @@ export function bootstrapOrderNotifications() {
       if (seen) for (const entry of entries.values()) {
         if (seen.ids ? seen.ids.includes(entry.id) : entry.id <= seen.throughId) entry.read = true;
       }
-      const reset = before === null && value.latestId > latestId;
-      if (reset) entries.clear();
-      for (const entry of value.entries) entries.set(entry.id, entry);
+      const reset = before === null && (fresh || value.latestId > latestId);
+      if (reset && (fresh || panel.hidden)) { entries.clear(); prioritized.clear(); }
+      for (const entry of value.entries) {
+        entries.set(entry.id, entry);
+        if (!entry.read && entry.kind === "cancelled") prioritized.add(entry.id);
+      }
       // A fresh head starts pagination again so a long absence cannot leave gaps in the feed.
-      if (before !== null || !loaded || reset) nextBefore = value.nextBefore;
+      if (before !== null || !loaded || reset) { nextBefore = value.nextBefore; nextBeforePriority = value.nextBeforePriority; }
       unreadCount = value.unreadCount; unreadCancellationCount = value.unreadCancellationCount;
       latestId = value.latestId; loaded = true; error.hidden = true;
       if (panel.hidden) updateBadge(); else render();
@@ -194,17 +201,23 @@ export function bootstrapOrderNotifications() {
     } finally {
       clearTimeout(timeout); controller = null; pending = false; updateBadge(); more.disabled = false; schedule();
       const loadMore = moreRequested && nextBefore !== null && !panel.hidden;
+      const refresh = refreshRequested && !panel.hidden;
       moreRequested = false;
-      if (loadMore) void request({ before: nextBefore }); else readVisible();
+      refreshRequested = false;
+      if (refresh) void request({ fresh: true });
+      else if (loadMore) void request({ before: nextBefore, priority: nextBeforePriority }); else readVisible();
     }
   };
   trigger.addEventListener("click", () => {
     if (!panel.hidden) { close(); return; }
-    panel.hidden = false; trigger.setAttribute("aria-expanded", "true"); render(); position(); closeButton.focus(); void request();
+    prioritized.clear();
+    for (const entry of entries.values()) if (!entry.read && entry.kind === "cancelled") prioritized.add(entry.id);
+    scroll.scrollTop = 0;
+    panel.hidden = false; trigger.setAttribute("aria-expanded", "true"); render(); position(); closeButton.focus(); void request({ fresh: true });
   });
   closeButton.addEventListener("click", () => close());
   read.addEventListener("click", () => void request({ seen: { throughId: latestId } }));
-  more.addEventListener("click", () => { if (nextBefore !== null) void request({ before: nextBefore }); });
+  more.addEventListener("click", () => { if (nextBefore !== null) void request({ before: nextBefore, priority: nextBeforePriority }); });
   error.querySelector("button").addEventListener("click", () => void request());
   document.addEventListener("pointerdown", (event) => { if (!panel.hidden && !panel.contains(event.target) && !trigger.contains(event.target)) close(false); });
   document.addEventListener("keydown", (event) => {
