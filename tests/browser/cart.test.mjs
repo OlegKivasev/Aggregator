@@ -615,6 +615,7 @@ test("main and analog action columns stay compact on wide screens, after resizin
     await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
     for (const width of [2504, 1990, 1366, 390]) {
       await page.setViewportSize({ width, height: 900 });
+      if (width <= 800) await page.waitForFunction(() => document.querySelector("#analogs-mobile-sort").value === "markupPrice:ascending");
       await measure("#analogs-results-body .analogs-result-row");
     }
     await page.setViewportSize({ width: 1990, height: 1000 });
@@ -1601,6 +1602,7 @@ test("analog cart controls use shared quantities, merge additions and order the 
     assert.equal(await armtek.locator(".garage-offer-button").getAttribute("data-garage-offer-id"), await armtek.locator(".cart-offer-button").getAttribute("data-cart-offer-id"));
     if (process.env.TEST_CAPTURE_DIR) await armtek.locator(".cart-offer-controls").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "analog-cart-controls-desktop.png") });
     await page.setViewportSize({ width: 390, height: 850 });
+    await page.waitForFunction(() => document.querySelector("#analogs-mobile-sort").value === "markupPrice:ascending");
     await armtek.locator(".cart-offer-controls").scrollIntoViewIfNeeded();
     assert.equal(await armtek.locator(".cart-offer-controls").evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true);
     if (process.env.TEST_CAPTURE_DIR) await armtek.locator(".cart-offer-controls").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "analog-cart-controls-mobile.png") });
