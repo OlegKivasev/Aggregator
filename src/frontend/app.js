@@ -1367,6 +1367,8 @@ const setAnalogFiltersSidebarOpen = (open) => {
 };
 
 const resetSearchState = () => {
+  tableSearchTerm = "";
+  tableSearchInput.value = "";
   results = [];
   selectedFilterValuesByColumn.clear();
   filterRangesByColumn.clear();
