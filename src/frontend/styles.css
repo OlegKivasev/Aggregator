@@ -351,6 +351,7 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 :is(.cart-partkom-receipt, .cart-forum-receipt, .cart-rossko-receipt, .cart-armtek-receipt) dl { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 7px 12px; margin: 0; font-size: 13px; }
 :is(.cart-partkom-receipt, .cart-forum-receipt, .cart-rossko-receipt, .cart-armtek-receipt) dt { color: var(--muted); }
 :is(.cart-partkom-receipt, .cart-forum-receipt, .cart-rossko-receipt, .cart-armtek-receipt) dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.cart-supplier-receipt__item + .cart-supplier-receipt__item, .cart-supplier-receipt__order + .cart-supplier-receipt__item { margin-top: 12px; padding-top: 12px; border-top: 1px solid #b5dac5; }
 :is(.cart-partkom-receipt__state, .cart-forum-receipt__state, .cart-supplier-receipt__state) { color: #b42318; font-weight: 700; }
 .cart-order-status { margin: 16px 0 0; font-size: 14px; }
 .cart-order-status:empty { display: none; }

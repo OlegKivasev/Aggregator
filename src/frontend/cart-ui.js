@@ -9,16 +9,26 @@ const maximumQuantity = (result) => Number.isFinite(result.quantity) ? Math.min(
 const cartIcon = '<img src="/shopping-cart.png" alt="" aria-hidden="true">';
 const cartPriceFormat = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const partKomReceiptNode = (receipt, orderIds, acceptedQuantity) => {
-  if (!receipt || typeof receipt !== "object" || typeof receipt.orderNumber !== "string"
-    || receipt.orderNumber.length > 100 || !orderIds.includes(receipt.orderNumber)
-    || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1 || receipt.quantity > acceptedQuantity) return null;
+const receiptClasses = { "part-kom": "cart-partkom-receipt", "forum-auto": "cart-forum-receipt",
+  rossko: "cart-rossko-receipt", armtek: "cart-armtek-receipt" };
+
+const orderReceiptCard = (supplier, number, existingCard) => {
+  if (existingCard) return existingCard;
   const card = document.createElement("section");
-  card.className = "cart-partkom-receipt";
+  card.className = receiptClasses[supplier];
   const heading = document.createElement("h4");
-  heading.textContent = `PartKOM · заказ № ${receipt.orderNumber}`;
+  heading.textContent = `${supplierNames[supplier]} · заказ № ${number}`;
   card.append(heading);
+  return card;
+};
+
+const partKomReceiptNode = (receipt, orderIds, acceptedQuantity, existingCard) => {
+  if (!receipt || typeof receipt !== "object" || typeof receipt.orderNumber !== "string"
+    || !receipt.orderNumber || receipt.orderNumber.length > 100 || !orderIds.includes(receipt.orderNumber)
+    || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1 || receipt.quantity > acceptedQuantity) return null;
+  const card = orderReceiptCard("part-kom", receipt.orderNumber, existingCard);
   const details = document.createElement("dl");
+  details.className = "cart-supplier-receipt__item";
   const add = (label, value, status = false, highlightDate = false) => {
     if (value === null || value === undefined || value === "") return;
     if (typeof value !== "string" && typeof value !== "number") return;
@@ -55,16 +65,13 @@ const partKomReceiptNode = (receipt, orderIds, acceptedQuantity) => {
   return card;
 };
 
-const forumAutoReceiptNode = (receipt, orderIds, acceptedQuantity) => {
+const forumAutoReceiptNode = (receipt, orderIds, acceptedQuantity, existingCard) => {
   if (!receipt || typeof receipt !== "object" || typeof receipt.orderId !== "string"
-    || receipt.orderId.length > 100 || !orderIds.includes(receipt.orderId)
+    || !receipt.orderId || receipt.orderId.length > 100 || !orderIds.includes(receipt.orderId)
     || !Number.isSafeInteger(receipt.orderedQuantity) || receipt.orderedQuantity !== acceptedQuantity) return null;
-  const card = document.createElement("section");
-  card.className = "cart-forum-receipt";
-  const heading = document.createElement("h4");
-  heading.textContent = `Forum Auto · заказ № ${receipt.orderId}`;
-  card.append(heading);
+  const card = orderReceiptCard("forum-auto", receipt.orderId, existingCard);
   const details = document.createElement("dl");
+  details.className = "cart-supplier-receipt__item";
   const add = (label, value, status = false, highlightDate = false) => {
     if (typeof value !== "string" && typeof value !== "number") return;
     if (typeof value === "string" && (!value || value.length > 500)
@@ -97,16 +104,12 @@ const forumAutoReceiptNode = (receipt, orderIds, acceptedQuantity) => {
   return card;
 };
 
-const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity, item) => {
+const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity, item, existingCard) => {
   if (!receipt || typeof receipt !== "object" || typeof receipt.orderId !== "string"
     || !receipt.orderId || receipt.orderId.length > 100 || !orderIds.includes(receipt.orderId)
     || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1 || receipt.quantity > acceptedQuantity) return null;
-  const card = document.createElement("section");
-  card.className = supplier === "rossko" ? "cart-rossko-receipt" : "cart-armtek-receipt";
-  const heading = document.createElement("h4");
-  heading.textContent = `${supplierNames[supplier]} · заказ № ${receipt.orderId}`;
-  card.append(heading);
-  const details = document.createElement("dl");
+  const card = orderReceiptCard(supplier, receipt.orderId, existingCard);
+  let details = document.createElement("dl");
   const add = (label, value, status = false) => {
     if (typeof value !== "string" && typeof value !== "number") return;
     if (typeof value === "string" && (!value || value.length > 500)
@@ -118,14 +121,21 @@ const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity,
     if (status) description.className = "cart-supplier-receipt__state";
     details.append(term, description);
   };
-  add("Создан", formatOrderDate(receipt.createdAt));
-  add(supplier === "armtek" ? "Статус заказа" : "Статус позиции", receipt.status, true);
-  if (supplier === "armtek") add("Статус позиции", receipt.itemStatus, true);
+  if (!card.querySelector(".cart-supplier-receipt__order")) {
+    details.className = "cart-supplier-receipt__order";
+    add("Создан", formatOrderDate(receipt.createdAt));
+    if (supplier === "armtek") add("Статус заказа", receipt.status, true);
+    const orderTotal = supplier === "armtek" ? receipt.total : receipt.orderTotal;
+    if (Number.isFinite(orderTotal) && orderTotal > 0) add("Сумма заказа", formatPrice(orderTotal));
+    card.firstElementChild.after(details);
+    details = document.createElement("dl");
+  }
+  details.className = "cart-supplier-receipt__item";
+  add("Статус позиции", supplier === "armtek" ? receipt.itemStatus : receipt.status, true);
   add("Товар", [item.result.article, item.result.brand, item.result.title].filter((value) => typeof value === "string" && value.length <= 500).join(" · "));
   add("Заказано", `${receipt.quantity} шт.`);
   if (Number.isFinite(receipt.price) && receipt.price > 0) add("Цена", formatPrice(receipt.price));
-  if (Number.isFinite(receipt.total) && receipt.total > 0) add(supplier === "armtek" ? "Сумма заказа" : "Сумма позиции", formatPrice(receipt.total));
-  if (supplier === "rossko" && Number.isFinite(receipt.orderTotal) && receipt.orderTotal > 0) add("Сумма заказа", formatPrice(receipt.orderTotal));
+  if (supplier === "rossko" && Number.isFinite(receipt.total) && receipt.total > 0) add("Сумма позиции", formatPrice(receipt.total));
   add("Срок доставки", formatOrderDate(receipt.deliveryAt ?? receipt.deliveryEnd ?? receipt.deliveryStart));
   add("Склад", receipt.warehouse);
   add("Доставка", receipt.deliveryType);
@@ -726,6 +736,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       const nextCart = validateCart(result.cart);
       const known = new Set(items.map((item) => item.id));
       const receipts = [];
+      const supplierReceiptCards = new Map();
       let accepted = 0;
       let failed = 0;
       let uncertain = 0;
@@ -745,34 +756,53 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
         if (!Array.isArray(group.result?.confirmed) || !Array.isArray(group.result?.rejected)) throw new Error("Некорректный результат заказа.");
         for (const line of group.result.confirmed) {
           if (!known.has(line.id) || !Number.isSafeInteger(line.acceptedQuantity) || line.acceptedQuantity < 1
-            || !Array.isArray(line.orderIds) || !line.orderIds.length || line.orderIds.some((id) => typeof id !== "string" || id.length > 100)) {
+            || !Array.isArray(line.orderIds) || !line.orderIds.length || line.orderIds.some((id) => typeof id !== "string" || !id || id.length > 100)) {
             throw new Error("Некорректное подтверждение поставщика.");
           }
-          accepted++;
-          const partKomOrders = group.supplier === "part-kom" && Array.isArray(line.partKomOrders)
-            ? line.partKomOrders.map((receipt) => partKomReceiptNode(receipt, line.orderIds, line.acceptedQuantity)).filter(Boolean) : [];
-          const forumAutoOrder = group.supplier === "forum-auto"
-            ? forumAutoReceiptNode(line.forumAutoOrder, line.orderIds, line.acceptedQuantity) : null;
           const selectedItem = items.find((item) => item.id === line.id);
-          const supplierOrders = selectedItem && (group.supplier === "rossko" || group.supplier === "armtek")
-            ? (group.supplier === "rossko" ? line.rosskoOrders : line.armtekOrders)
-            : null;
-          const supplierReceipts = Array.isArray(supplierOrders)
-            ? supplierOrders.map((receipt) => supplierOrderReceiptNode(group.supplier, receipt, line.orderIds, line.acceptedQuantity, selectedItem)).filter(Boolean) : [];
-          if (partKomOrders.length || forumAutoOrder || supplierReceipts.length) {
-            receipts.push(...partKomOrders);
-            if (forumAutoOrder) receipts.push(forumAutoOrder);
-            receipts.push(...supplierReceipts);
-            if (typeof line.message === "string" && line.message) {
-              const note = document.createElement("p");
-              note.textContent = line.message;
-              receipts.push(note);
+          if (selectedItem.result.supplier !== group.supplier) throw new Error("Некорректное подтверждение поставщика.");
+          accepted++;
+          const renderedOrderIds = new Set();
+          const appendReceipt = (orderId, renderReceipt) => {
+            const key = JSON.stringify([group.supplier, orderId]);
+            const existingCard = supplierReceiptCards.get(key);
+            const card = renderReceipt(existingCard);
+            if (!card) return;
+            renderedOrderIds.add(orderId);
+            if (!existingCard) {
+              supplierReceiptCards.set(key, card);
+              receipts.push(card);
             }
+          };
+          if (group.supplier === "part-kom" && Array.isArray(line.partKomOrders)) {
+            for (const receipt of line.partKomOrders) appendReceipt(receipt?.orderNumber,
+              (card) => partKomReceiptNode(receipt, line.orderIds, line.acceptedQuantity, card));
+          } else if (group.supplier === "forum-auto") {
+            appendReceipt(line.forumAutoOrder?.orderId,
+              (card) => forumAutoReceiptNode(line.forumAutoOrder, line.orderIds, line.acceptedQuantity, card));
+          } else if (group.supplier === "rossko" || group.supplier === "armtek") {
+            const supplierOrders = group.supplier === "rossko" ? line.rosskoOrders : line.armtekOrders;
+            if (Array.isArray(supplierOrders)) for (const receipt of supplierOrders) appendReceipt(receipt?.orderId,
+              (card) => supplierOrderReceiptNode(group.supplier, receipt, line.orderIds, line.acceptedQuantity, selectedItem, card));
           }
-          else {
-            const row = document.createElement("p");
-            row.textContent = `${supplierNames[group.supplier]}: заказ ${line.orderIds.join(", ")}, ${line.acceptedQuantity} шт.${line.message ? ` ${line.message}` : ""}`;
-            receipts.push(row);
+          const orderIds = [...new Set(line.orderIds)];
+          for (const orderId of orderIds) {
+            if (renderedOrderIds.has(orderId)) continue;
+            appendReceipt(orderId, (existingCard) => {
+              const card = orderReceiptCard(group.supplier, orderId, existingCard);
+              const row = document.createElement("p");
+              row.className = "cart-supplier-receipt__item";
+              const part = [selectedItem.result.article, selectedItem.result.brand, selectedItem.result.title].join(" · ");
+              const quantityLabel = orderIds.length === 1 ? "Заказано" : "Подтверждено по позиции во всех заказах";
+              row.textContent = `${part} · ${quantityLabel}: ${line.acceptedQuantity} шт.`;
+              card.append(row);
+              return card;
+            });
+          }
+          if (typeof line.message === "string" && line.message) {
+            const note = document.createElement("p");
+            note.textContent = line.message;
+            receipts.push(note);
           }
         }
         for (const line of group.result.rejected) {

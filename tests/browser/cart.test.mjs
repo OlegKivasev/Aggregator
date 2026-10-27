@@ -99,6 +99,7 @@ async function withCartPage(check, options = {}) {
           if (lines[0].reference.supplier === "forum-auto" && options.forumAutoRefusal) {
             return { confirmed: [], rejected: [{ id: lines[0].id, message: options.forumAutoRefusal }] };
           }
+          if (options.confirmOrders) return options.confirmOrders(lines);
           return { confirmed: lines.map((line) => ({ id: line.id, acceptedQuantity: line.quantity, orderIds: [`fixture-${line.reference.supplier}`],
             ...(line.reference.supplier === "part-kom" && options.partKomReceipt ? { partKomOrders: [{ orderNumber: "fixture-part-kom",
               quantity: line.quantity, ...options.partKomReceipt }] } : {}),
@@ -1184,6 +1185,120 @@ test("checkout orders only marked goods and keeps unmarked goods in the cart", a
     assert.equal(await page.locator("#cart-order-confirm").evaluate((node) => getComputedStyle(node).borderTopColor), "rgba(0, 0, 0, 0)");
     assert.equal(await page.locator("#cart-order-title").textContent(), "Подтверждение заказа");
   }, { reducedMotion: "reduce" });
+});
+
+// Fictional confirmations exercise display grouping without sending orders to suppliers.
+function groupedConfirmation(lines, detailed, numberForLine = (line) => line.result.article === "A3" ? "other-number" : "shared-number") {
+  return { rejected: [], confirmed: lines.map((line) => {
+    const supplier = line.reference.supplier;
+    const number = numberForLine(line);
+    const price = line.result.price;
+    const quantity = line.quantity;
+    const orderTotal = lines.filter((item) => numberForLine(item) === number)
+      .reduce((total, item) => total + item.result.price * item.quantity, 0);
+    const confirmed = { id: line.id, acceptedQuantity: quantity, orderIds: [number] };
+    if (!detailed) return confirmed;
+    if (supplier === "part-kom") confirmed.partKomOrders = [{ orderNumber: number, quantity, price,
+      detailNum: line.result.article, maker: line.result.brand, description: line.result.title,
+      orderDate: "2026-10-27 15:58:00", expectedDate: "2026-10-29 10:23:00", stateTxt: "В работе" }];
+    else if (supplier === "forum-auto") confirmed.forumAutoOrder = { orderId: number, orderedQuantity: quantity,
+      article: line.result.article, brand: line.result.brand, title: line.result.title,
+      price, total: price * quantity, reservedQuantity: quantity, confirmedQuantity: 0,
+      status: "Забронирован менеджером", createdAt: "2026-10-27 15:58:00", deliveryAt: "2026-10-29 10:23:00" };
+    else confirmed[supplier === "armtek" ? "armtekOrders" : "rosskoOrders"] = [{ orderId: number, quantity, price,
+      total: supplier === "armtek" ? orderTotal : price * quantity, orderTotal,
+      status: "В работе", itemStatus: "Забронирован", createdAt: "2026-10-27 15:58:00" }];
+    return confirmed;
+  }) };
+}
+
+for (const supplier of ["armtek", "part-kom", "forum-auto", "rossko"]) {
+  for (const detailed of [true, false]) {
+    test(`order confirmation groups ${supplier} positions by number with ${detailed ? "detailed" : "basic"} receipts`, async () => {
+      const reference = supplier === "armtek" ? { supplier, keyzak: "TEST02" }
+        : supplier === "part-kom" ? { supplier, makerId: "101", providerId: "202" }
+          : supplier === "forum-auto" ? { supplier, warehouse: "Тестовый склад", gid: "fixture-gid" }
+            : { supplier, partGuid: "fixture-guid", stockId: "fixture-stock" };
+      await withCartPage(async (page) => {
+        const supplierName = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum-Auto", rossko: "Rossko" }[supplier];
+        for (const [count, article] of ["A1", "A2", "A3"].entries()) {
+          const row = page.locator("#results-body .main-result-row")
+            .filter({ has: page.locator('[data-column="supplier"]', { hasText: supplierName }) })
+            .filter({ has: page.getByRole("link", { name: article, exact: true }) });
+          await row.locator(".cart-offer-button").click();
+          await page.waitForFunction((expected) => document.querySelector("#cart-badge").textContent === String(expected), count + 1);
+        }
+        await page.locator("#cart-toggle").click();
+        await openCheckout(page);
+        await page.locator("#cart-order-accept").click();
+        await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+        const cards = page.locator(`.cart-${{ armtek: "armtek", "part-kom": "partkom", "forum-auto": "forum", rossko: "rossko" }[supplier]}-receipt`);
+        assert.equal(await cards.count(), 2);
+        const shared = cards.filter({ hasText: "заказ № shared-number" });
+        const other = cards.filter({ hasText: "заказ № other-number" });
+        assert.equal(await shared.locator("h4").count(), 1);
+        assert.equal(await shared.locator(".cart-supplier-receipt__item").count(), 2);
+        assert.match(await shared.textContent(), /A1/);
+        assert.match(await shared.textContent(), /A2/);
+        assert.doesNotMatch(await shared.textContent(), /A3/);
+        assert.equal(await other.locator("h4").count(), 1);
+        assert.equal(await other.locator(".cart-supplier-receipt__item").count(), 1);
+        assert.match(await other.textContent(), /A3/);
+        if (detailed) {
+          assert.deepEqual(await shared.locator("dt").filter({ hasText: /^Заказано$/ }).evaluateAll((nodes) =>
+            nodes.map((node) => node.nextElementSibling.textContent)), ["1 шт.", "1 шт."]);
+          if (supplier === "armtek" || supplier === "rossko") assert.equal(await shared.locator("dt").filter({ hasText: /^Сумма заказа$/ }).count(), 1);
+          if (supplier === "forum-auto") assert.equal(await shared.locator("dt").filter({ hasText: /^Забронировано$/ }).count(), 2);
+        }
+        assert.equal(await page.locator("#cart-order-receipt img").count(), 0);
+        assert.equal(await page.evaluate(() => window.cartXss), undefined);
+        if (process.env.CART_ORDER_RESULT_SCREENSHOT_DIR && supplier === "forum-auto" && detailed) {
+          await shared.screenshot({ path: join(process.env.CART_ORDER_RESULT_SCREENSHOT_DIR, "grouped-forum-desktop.png") });
+        }
+        await page.setViewportSize({ width: 390, height: 844 });
+        assert.equal(await shared.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+        if (process.env.CART_ORDER_RESULT_SCREENSHOT_DIR && supplier === "forum-auto" && detailed) {
+          await shared.screenshot({ path: join(process.env.CART_ORDER_RESULT_SCREENSHOT_DIR, "grouped-forum-mobile.png") });
+        }
+      }, { allSuppliers: true, reducedMotion: "reduce", confirmOrders: (lines) => groupedConfirmation(lines, detailed),
+        extraOffers: ["A2", "A3"].map((article) => offer(supplier, 5, reference, { article })) });
+    });
+  }
+}
+
+test("order confirmation keeps identical numbers at different suppliers separate", async () => {
+  await withCartPage(async (page) => {
+    for (let index = 0; index < 4; index++) {
+      await page.locator("#results-body .cart-offer-button").nth(index).click();
+      await page.waitForFunction((expected) => document.querySelector("#cart-badge").textContent === String(expected), index + 1);
+    }
+    await page.locator("#cart-toggle").click();
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+    assert.equal(await page.locator("#cart-order-receipt > section").count(), 4);
+    assert.equal(await page.locator("#cart-order-receipt h4").count(), 4);
+    for (const name of ["Armtek", "PartKOM", "Forum Auto", "Rossko"]) {
+      assert.equal(await page.getByRole("heading", { level: 4, name: `${name} · заказ № shared-number`, exact: true }).count(), 1);
+    }
+  }, { allSuppliers: true, reducedMotion: "reduce", confirmOrders: (lines) => groupedConfirmation(lines, true) });
+});
+
+test("order confirmation preserves split numbers without inventing per-order quantities", async () => {
+  await withCartPage(async (page) => {
+    await page.locator("#results-body .cart-offer-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+    assert.equal(await page.locator("#cart-order-receipt h4").count(), 2);
+    assert.equal(await page.locator("#cart-order-receipt .cart-supplier-receipt__item").count(), 2);
+    assert.doesNotMatch(await page.locator("#cart-order-receipt").textContent(), /Заказано:/);
+    assert.match(await page.locator("#cart-order-receipt").textContent(), /Подтверждено по позиции во всех заказах: 1 шт./);
+  }, { reducedMotion: "reduce", confirmOrders: (lines) => ({ rejected: [], confirmed: lines.map((line) => ({
+    id: line.id, acceptedQuantity: line.quantity, orderIds: ["split-first", "split-second", "split-first"],
+  })) }) });
 });
 
 test("successful PartKOM checkout displays the confirmed order motion without a history page", async () => {
