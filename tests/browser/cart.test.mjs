@@ -37,8 +37,12 @@ async function withCartPage(check, options = {}) {
   const searchCalls = [];
   try {
     const suppliers = options.allSuppliers ? ["armtek", "part-kom", "forum-auto", "rossko"] : ["armtek", "part-kom"];
-    const sessions = suppliers.map((supplier) => ({ supplier, authorized: true, lastCheckedAt: null, lastAuthorizedAt: null }));
+    const sessions = suppliers.map((supplier) => ({ supplier, authorized: supplier === "rossko" ? options.rosskoAuthorized ?? true : true, lastCheckedAt: null, lastAuthorizedAt: null }));
     const application = {
+      getRosskoOrderSettings: options.rosskoSettings?.get,
+      saveRosskoOrderSettings: options.rosskoSettings?.save,
+      authorizeRossko: async () => { const session = sessions.find((item) => item.supplier === "rossko"); session.authorized = true; return session; },
+      logoutRossko: () => { const session = sessions.find((item) => item.supplier === "rossko"); session.authorized = false; options.rosskoSettings?.logout?.(); return session; },
       partKomOrderHistory: options.partKomOrderHistory ?? (async () => ({ orders: [], limited: false })),
       supplierOrderHistory: options.supplierOrderHistory ?? (async () => ({ orders: [], limited: false })),
       listSupplierSessions: () => sessions,
@@ -84,7 +88,7 @@ async function withCartPage(check, options = {}) {
         return testPurchaseOrder(lines, signal);
       },
       realCartOrder: {
-        refresh: async (lines) => { refreshCalls.push(structuredClone(lines)); await options.refreshGate?.(); return lines.map((line) => ({ ...structuredClone(line),
+        refresh: async (lines) => { refreshCalls.push(structuredClone(lines)); await options.refreshGate?.(); if (options.refresh) return options.refresh(lines); return lines.map((line) => ({ ...structuredClone(line),
           result: { ...line.result, price: options.refreshedPrice ?? line.result.price } })); },
         choices: async () => ({ partKom: { deliveries: [{ id: "regular", label: "Обычная доставка", type: "regular" }] },
           rossko: { deliveries: [{ id: "delivery", label: "Доставка", addressId: null }],
@@ -95,6 +99,7 @@ async function withCartPage(check, options = {}) {
           if (lines[0].reference.supplier === "forum-auto" && options.forumAutoRefusal) {
             return { confirmed: [], rejected: [{ id: lines[0].id, message: options.forumAutoRefusal }] };
           }
+          if (options.confirmOrders) return options.confirmOrders(lines);
           return { confirmed: lines.map((line) => {
             const orderId = options.orderIdForLine?.(line) ?? `fixture-${line.reference.supplier}`;
             return { id: line.id, acceptedQuantity: line.quantity, orderIds: [orderId],
@@ -194,6 +199,21 @@ async function openGarageWithFirstOffer(page, { all = false, quantity = 1, befor
   await page.waitForFunction(() => document.querySelector("#garage-view").getAttribute("aria-busy") === "false");
   return vehicle.id;
 }
+
+test("each new pricing search clears the table filter and restores supplier rows", async () => {
+  await withCartPage(async (page, { searchCalls }) => {
+    for (const article of ["A2", "A3"]) {
+      await page.locator("#table-search").fill("NO-MATCHING-PART");
+      await page.waitForFunction(() => document.querySelectorAll("#results-body .main-result-row").length === 0);
+      await page.locator("#article-input").fill(article);
+      if (article === "A2") await page.locator("#submit-button").click();
+      else await page.locator("#article-input").press("Enter");
+      await page.waitForFunction(() => document.querySelectorAll("#results-body .main-result-row").length === 2);
+      assert.equal(await page.locator("#table-search").inputValue(), "");
+      assert.equal(searchCalls.at(-1).article, article);
+    }
+  });
+});
 
 test("main pricing searches both VAZ spellings, keeps original offers and scopes the yellow notice to its persisted tab", async () => {
   const sessions = new SupplierSessionManager();
@@ -581,6 +601,12 @@ test("markup restores legacy values, persists applied tiers and validates the dr
   }, { preserveSearchState: true, legacyMarkup: 17 });
 });
 
+async function resizeAndRender(page, viewport) {
+  await page.setViewportSize(viewport);
+  // Resize handlers schedule row replacement on the next animation frame.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
 test("main and analog action columns stay compact on wide screens, after resizing and on mobile", async () => {
   await withCartPage(async (page) => {
     const measure = async (selector) => {
@@ -600,10 +626,10 @@ test("main and analog action columns stay compact on wide screens, after resizin
       assert.ok(dimensions.gap <= 9 && dimensions.gap >= 7, JSON.stringify(dimensions));
     };
     for (const width of [2504, 1990, 1366, 390]) {
-      await page.setViewportSize({ width, height: 900 });
+      await resizeAndRender(page, { width, height: 900 });
       await measure("#results-body .main-result-row");
     }
-    await page.setViewportSize({ width: 1990, height: 1000 });
+    await resizeAndRender(page, { width: 1990, height: 1000 });
     assert.equal(await page.locator("#results-table .table-column-resize").count(), 0);
     await measure("#results-body .main-result-row");
     await page.locator("#settings-toggle").click();
@@ -614,11 +640,11 @@ test("main and analog action columns stay compact on wide screens, after resizin
     if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "compact-main-table.png") });
     await openOfferAnalogs(page, page.locator("#results-body .main-result-row").first());
     for (const width of [2504, 1990, 1366, 390]) {
-      await page.setViewportSize({ width, height: 900 });
+      await resizeAndRender(page, { width, height: 900 });
       if (width <= 800) await page.waitForFunction(() => document.querySelector("#analogs-mobile-sort").value === "markupPrice:ascending");
       await measure("#analogs-results-body .analogs-result-row");
     }
-    await page.setViewportSize({ width: 1990, height: 1000 });
+    await resizeAndRender(page, { width: 1990, height: 1000 });
     assert.equal(await page.locator("#analogs-results .table-column-resize").count(), 0);
     await measure("#analogs-results-body .analogs-result-row");
     await page.locator('#analogs-results [data-markup-settings]').click();
@@ -980,7 +1006,7 @@ test("mobile garage item cards keep filters, groups, sorting and quantity editin
     await page.setViewportSize({ width: 1366, height: 850 });
     assert.equal(await page.locator("#garage-mobile-sort").isVisible(), false);
     assert.equal(await page.locator("#garage-view thead").isVisible(), true);
-    assert.equal(await page.locator("#garage-filters-sidebar").isVisible(), true);
+    await page.locator("#garage-filters-sidebar").waitFor({ state: "visible" });
   }, { viewport: { width: 390, height: 844 }, title, extraOffers });
 });
 
@@ -1178,6 +1204,120 @@ test("checkout orders only marked goods and keeps unmarked goods in the cart", a
     assert.equal(await page.locator("#cart-order-confirm").evaluate((node) => getComputedStyle(node).borderTopColor), "rgba(0, 0, 0, 0)");
     assert.equal(await page.locator("#cart-order-title").textContent(), "Подтверждение заказа");
   }, { reducedMotion: "reduce" });
+});
+
+// Fictional confirmations exercise display grouping without sending orders to suppliers.
+function groupedConfirmation(lines, detailed, numberForLine = (line) => line.result.article === "A3" ? "other-number" : "shared-number") {
+  return { rejected: [], confirmed: lines.map((line) => {
+    const supplier = line.reference.supplier;
+    const number = numberForLine(line);
+    const price = line.result.price;
+    const quantity = line.quantity;
+    const orderTotal = lines.filter((item) => numberForLine(item) === number)
+      .reduce((total, item) => total + item.result.price * item.quantity, 0);
+    const confirmed = { id: line.id, acceptedQuantity: quantity, orderIds: [number] };
+    if (!detailed) return confirmed;
+    if (supplier === "part-kom") confirmed.partKomOrders = [{ orderNumber: number, quantity, price,
+      detailNum: line.result.article, maker: line.result.brand, description: line.result.title,
+      orderDate: "2026-10-27 15:58:00", expectedDate: "2026-10-29 10:23:00", stateTxt: "В работе" }];
+    else if (supplier === "forum-auto") confirmed.forumAutoOrder = { orderId: number, orderedQuantity: quantity,
+      article: line.result.article, brand: line.result.brand, title: line.result.title,
+      price, total: price * quantity, reservedQuantity: quantity, confirmedQuantity: 0,
+      status: "Забронирован менеджером", createdAt: "2026-10-27 15:58:00", deliveryAt: "2026-10-29 10:23:00" };
+    else confirmed[supplier === "armtek" ? "armtekOrders" : "rosskoOrders"] = [{ orderId: number, quantity, price,
+      total: supplier === "armtek" ? orderTotal : price * quantity, orderTotal,
+      status: "В работе", itemStatus: "Забронирован", createdAt: "2026-10-27 15:58:00" }];
+    return confirmed;
+  }) };
+}
+
+for (const supplier of ["armtek", "part-kom", "forum-auto", "rossko"]) {
+  for (const detailed of [true, false]) {
+    test(`order confirmation groups ${supplier} positions by number with ${detailed ? "detailed" : "basic"} receipts`, async () => {
+      const reference = supplier === "armtek" ? { supplier, keyzak: "TEST02" }
+        : supplier === "part-kom" ? { supplier, makerId: "101", providerId: "202" }
+          : supplier === "forum-auto" ? { supplier, warehouse: "Тестовый склад", gid: "fixture-gid" }
+            : { supplier, partGuid: "fixture-guid", stockId: "fixture-stock" };
+      await withCartPage(async (page) => {
+        const supplierName = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum-Auto", rossko: "Rossko" }[supplier];
+        for (const [count, article] of ["A1", "A2", "A3"].entries()) {
+          const row = page.locator("#results-body .main-result-row")
+            .filter({ has: page.locator('[data-column="supplier"]', { hasText: supplierName }) })
+            .filter({ has: page.getByRole("link", { name: article, exact: true }) });
+          await row.locator(".cart-offer-button").click();
+          await page.waitForFunction((expected) => document.querySelector("#cart-badge").textContent === String(expected), count + 1);
+        }
+        await page.locator("#cart-toggle").click();
+        await openCheckout(page);
+        await page.locator("#cart-order-accept").click();
+        await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+        const cards = page.locator(`.cart-${{ armtek: "armtek", "part-kom": "partkom", "forum-auto": "forum", rossko: "rossko" }[supplier]}-receipt`);
+        assert.equal(await cards.count(), 2);
+        const shared = cards.filter({ hasText: "заказ № shared-number" });
+        const other = cards.filter({ hasText: "заказ № other-number" });
+        assert.equal(await shared.locator("h4").count(), 1);
+        assert.equal(await shared.locator(".cart-supplier-receipt__item").count(), 2);
+        assert.match(await shared.textContent(), /A1/);
+        assert.match(await shared.textContent(), /A2/);
+        assert.doesNotMatch(await shared.textContent(), /A3/);
+        assert.equal(await other.locator("h4").count(), 1);
+        assert.equal(await other.locator(".cart-supplier-receipt__item").count(), 1);
+        assert.match(await other.textContent(), /A3/);
+        if (detailed) {
+          assert.deepEqual(await shared.locator("dt").filter({ hasText: /^Заказано$/ }).evaluateAll((nodes) =>
+            nodes.map((node) => node.nextElementSibling.textContent)), ["1 шт.", "1 шт."]);
+          if (supplier === "armtek" || supplier === "rossko") assert.equal(await shared.locator("dt").filter({ hasText: /^Сумма заказа$/ }).count(), 1);
+          if (supplier === "forum-auto") assert.equal(await shared.locator("dt").filter({ hasText: /^Забронировано$/ }).count(), 2);
+        }
+        assert.equal(await page.locator("#cart-order-receipt img").count(), 0);
+        assert.equal(await page.evaluate(() => window.cartXss), undefined);
+        if (process.env.CART_ORDER_RESULT_SCREENSHOT_DIR && supplier === "forum-auto" && detailed) {
+          await shared.screenshot({ path: join(process.env.CART_ORDER_RESULT_SCREENSHOT_DIR, "grouped-forum-desktop.png") });
+        }
+        await page.setViewportSize({ width: 390, height: 844 });
+        assert.equal(await shared.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+        if (process.env.CART_ORDER_RESULT_SCREENSHOT_DIR && supplier === "forum-auto" && detailed) {
+          await shared.screenshot({ path: join(process.env.CART_ORDER_RESULT_SCREENSHOT_DIR, "grouped-forum-mobile.png") });
+        }
+      }, { allSuppliers: true, reducedMotion: "reduce", confirmOrders: (lines) => groupedConfirmation(lines, detailed),
+        extraOffers: ["A2", "A3"].map((article) => offer(supplier, 5, reference, { article })) });
+    });
+  }
+}
+
+test("order confirmation keeps identical numbers at different suppliers separate", async () => {
+  await withCartPage(async (page) => {
+    for (let index = 0; index < 4; index++) {
+      await page.locator("#results-body .cart-offer-button").nth(index).click();
+      await page.waitForFunction((expected) => document.querySelector("#cart-badge").textContent === String(expected), index + 1);
+    }
+    await page.locator("#cart-toggle").click();
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+    assert.equal(await page.locator("#cart-order-receipt > section").count(), 4);
+    assert.equal(await page.locator("#cart-order-receipt h4").count(), 4);
+    for (const name of ["Armtek", "PartKOM", "Forum Auto", "Rossko"]) {
+      assert.equal(await page.getByRole("heading", { level: 4, name: `${name} · заказ № shared-number`, exact: true }).count(), 1);
+    }
+  }, { allSuppliers: true, reducedMotion: "reduce", confirmOrders: (lines) => groupedConfirmation(lines, true) });
+});
+
+test("order confirmation preserves split numbers without inventing per-order quantities", async () => {
+  await withCartPage(async (page) => {
+    await page.locator("#results-body .cart-offer-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+    assert.equal(await page.locator("#cart-order-receipt h4").count(), 2);
+    assert.equal(await page.locator("#cart-order-receipt .cart-supplier-receipt__item").count(), 2);
+    assert.doesNotMatch(await page.locator("#cart-order-receipt").textContent(), /Заказано:/);
+    assert.match(await page.locator("#cart-order-receipt").textContent(), /Подтверждено по позиции во всех заказах: 1 шт./);
+  }, { reducedMotion: "reduce", confirmOrders: (lines) => ({ rejected: [], confirmed: lines.map((line) => ({
+    id: line.id, acceptedQuantity: line.quantity, orderIds: ["split-first", "split-second", "split-first"],
+  })) }) });
 });
 
 test("successful PartKOM checkout displays the confirmed order motion without a history page", async () => {
@@ -1601,12 +1741,12 @@ test("analog cart controls use shared quantities, merge additions and order the 
     assert.equal(await armtek.locator(".garage-offer-button").getAttribute("aria-disabled"), "false");
     assert.equal(await armtek.locator(".garage-offer-button").getAttribute("data-garage-offer-id"), await armtek.locator(".cart-offer-button").getAttribute("data-cart-offer-id"));
     if (process.env.TEST_CAPTURE_DIR) await armtek.locator(".cart-offer-controls").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "analog-cart-controls-desktop.png") });
-    await page.setViewportSize({ width: 390, height: 850 });
+    await resizeAndRender(page, { width: 390, height: 850 });
     await page.waitForFunction(() => document.querySelector("#analogs-mobile-sort").value === "markupPrice:ascending");
     await armtek.locator(".cart-offer-controls").scrollIntoViewIfNeeded();
     assert.equal(await armtek.locator(".cart-offer-controls").evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true);
     if (process.env.TEST_CAPTURE_DIR) await armtek.locator(".cart-offer-controls").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "analog-cart-controls-mobile.png") });
-    await page.setViewportSize({ width: 1366, height: 850 });
+    await resizeAndRender(page, { width: 1366, height: 850 });
     await armtek.locator(".cart-quantity").fill("99"); assert.equal(await armtek.locator(".cart-quantity").inputValue(), "4");
     await armtek.locator(".cart-quantity").fill("2"); await armtek.locator(".cart-offer-button").click();
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
@@ -1876,6 +2016,7 @@ test("a verified absent Forum Auto order can be unlocked without sending another
     assert.equal(await page.locator("#cart-items .cart-item-select").isDisabled(), true);
     await page.locator(".cart-resolve-button").click();
     assert.equal(await page.locator("#cart-resolve-accept").isDisabled(), true);
+    await page.locator('[name="cart-resolution"][value="missing"]').check();
     await page.locator("#cart-resolve-checked").check();
     await page.locator("#cart-resolve-accept").click();
     await page.waitForFunction(() => !document.querySelector("#cart-resolve-confirm").open);
@@ -1884,6 +2025,45 @@ test("a verified absent Forum Auto order can be unlocked without sending another
     assert.equal(orderCalls.length, 1);
   }, { allSuppliers: true, reducedMotion: "reduce", testGate: async () => { throw new Error("Connection lost"); } });
 });
+
+for (const placed of [true, false]) {
+  test(`uncertain PartKOM order can be reconciled as ${placed ? "placed" : "missing"} without another submission`, async () => {
+    await withCartPage(async (page, { orderCalls, origin }) => {
+      await page.locator("#results-body .cart-offer-button").nth(1).click();
+      await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+      await page.locator("#cart-toggle").click();
+      await openCheckout(page);
+      await page.locator("#cart-order-accept").click();
+      await page.waitForFunction(() => document.querySelector("#cart-order-status").classList.contains("is-error"));
+      await page.locator("#cart-order-cancel").click();
+      await page.locator("#cart-close").click();
+      await page.reload();
+      await page.locator("#cart-toggle").click();
+      await page.locator(".cart-resolve-button").click();
+      assert.match(await page.locator("#cart-resolve-title").textContent(), /PartKOM/);
+      assert.equal(await page.locator("#cart-resolve-accept").isDisabled(), true);
+      await page.locator("#cart-resolve-checked").check();
+      assert.equal(await page.locator("#cart-resolve-accept").isDisabled(), true, "the reconciliation outcome must be chosen explicitly");
+      await page.locator(`[name="cart-resolution"][value="${placed ? "placed" : "missing"}"]`).check();
+      assert.equal(await page.locator("#cart-resolve-checked").isChecked(), false, "changing the outcome requires a fresh acknowledgement");
+      await page.locator("#cart-resolve-checked").check();
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert.equal(await page.locator("#cart-resolve-confirm").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+      await page.locator("#cart-resolve-accept").click();
+      await page.waitForFunction(() => !document.querySelector("#cart-resolve-confirm").open);
+      assert.equal(await page.locator(".cart-resolve-button").count(), 0);
+      const cart = await (await page.request.get(`${origin}/api/cart`)).json();
+      assert.equal(cart.count, placed ? 0 : 1);
+      assert.deepEqual(cart.pendingIds, []);
+      assert.equal(orderCalls.length, 1);
+      if (!placed) {
+        assert.equal(await page.locator("#cart-items .cart-quantity").isEnabled(), true);
+        await page.locator("#cart-items .cart-remove").click();
+        await page.waitForFunction(() => document.querySelectorAll("#cart-items [data-cart-item-id]").length === 0);
+      }
+    }, { reducedMotion: "reduce", testGate: async () => { throw new Error("Connection lost after sending"); } });
+  });
+}
 
 test("a definite Forum Auto refusal keeps the item selectable and names the failure", async () => {
   await withCartPage(async (page, { orderCalls }) => {
@@ -2458,6 +2638,173 @@ test("opening the cart shows a centered blocking refresh state until supplier of
   } finally { release(); }
 });
 
+test("Rossko order settings appear after authorization, safely select account data and retain the contact after reload", async () => {
+  const buyerLabel = 'Тестовый покупатель <img src=x onerror=window.rosskoSettingsXss=1>';
+  const choices = { companies: [{ id: "buyer-1", label: "Другой покупатель" }, { id: "buyer-2", label: buyerLabel }],
+    deliveries: [{ id: "courier", addressId: "address-1", label: "Тестовый адрес 1" }, { id: "courier", addressId: "address-2", label: "Тестовый адрес 2" }],
+    payments: [{ id: "bank", label: "Через банк" }] };
+  let settings = null;
+  let saves = 0;
+  await withCartPage(async (page) => {
+    await page.locator("#settings-toggle").click();
+    await page.locator("#settings-drawer summary").getByText("Поставщики", { exact: true }).click();
+    const section = page.locator("#rossko-order-settings");
+    assert.equal(await section.isVisible(), false);
+    await page.locator("#rossko-key1").fill("fixture-key-one");
+    await page.locator("#rossko-key2").fill("fixture-key-two");
+    await page.locator("#rossko-connect-button").click();
+    await section.locator("fieldset:not(:disabled)").waitFor();
+    assert.equal(await page.locator('[data-supplier="rossko"] .auth-card__loading').isVisible(), false);
+    assert.equal(await section.isVisible(), true);
+    assert.equal(await section.locator('select[name="companyId"] option').last().textContent(), buyerLabel);
+    assert.equal(await section.locator("img").count(), 0);
+    assert.equal(await page.evaluate(() => window.rosskoSettingsXss), undefined);
+    await section.locator('[name="companyId"]').selectOption("buyer-2");
+    await section.locator('[name="delivery"]').selectOption("1");
+    assert.equal(await section.locator('[name="paymentId"]').inputValue(), "bank");
+    await section.locator('[name="contactName"]').fill("Тестовый контакт");
+    await section.locator('[name="contactPhone"]').fill("+7 (000) 123-45-67");
+    await section.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => document.querySelector("#rossko-order-settings [role=status]").textContent === "Настройки заказа сохранены.");
+    assert.equal(saves, 1);
+    assert.deepEqual(settings, { companyId: "buyer-2", deliveryId: "courier", addressId: "address-2", paymentId: "bank",
+      contactName: "Тестовый контакт", contactPhone: "+7 (000) 123-45-67" });
+    assert.equal(await page.evaluate(() => JSON.stringify(localStorage).includes("123-45-67")), false);
+    await page.reload();
+    await page.locator("#settings-toggle").click();
+    await page.locator("#settings-drawer summary").getByText("Поставщики", { exact: true }).click();
+    await section.locator("fieldset:not(:disabled)").waitFor();
+    assert.equal(await section.locator('[name="companyId"]').inputValue(), "buyer-2");
+    assert.equal(await section.locator('[name="delivery"]').inputValue(), "1");
+    assert.equal(await section.locator('[name="contactName"]').inputValue(), "Тестовый контакт");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await section.scrollIntoViewIfNeeded();
+    assert.equal(await section.evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "rossko-order-settings-mobile.png") });
+    await page.locator("#rossko-logout-button").click();
+    await section.waitFor({ state: "hidden" });
+    assert.equal(await section.locator('[name="contactPhone"]').inputValue(), "");
+    assert.equal(settings, null);
+  }, { allSuppliers: true, rosskoAuthorized: false, reducedMotion: "reduce", rosskoSettings: {
+    get: async () => ({ choices, settings, persistent: true }),
+    save: async (value) => { saves++; settings = value; return { choices, settings, persistent: true }; },
+    logout: () => { settings = null; },
+  } });
+});
+
+test("Rossko settings preserve a failed draft, retry loading and explain memory-only saves", async () => {
+  const choices = { companies: [{ id: "buyer", label: "Тестовый покупатель" }],
+    deliveries: [{ id: "delivery", addressId: "address", label: "Тестовый адрес" }], payments: [{ id: "bank", label: "Через банк" }] };
+  let loadFails = true;
+  let saveFails = true;
+  let settings = null;
+  await withCartPage(async (page) => {
+    await page.locator("#settings-toggle").click();
+    await page.locator("#settings-drawer summary").getByText("Поставщики", { exact: true }).click();
+    const section = page.locator("#rossko-order-settings");
+    await page.waitForFunction(() => document.querySelector("#rossko-order-settings [role=status]").textContent.includes("Тестовая ошибка загрузки"));
+    assert.equal(await section.locator("fieldset").evaluate((node) => node.disabled), true);
+    loadFails = false;
+    await section.locator("#rossko-order-reload").click();
+    await section.locator("fieldset:not(:disabled)").waitFor();
+    await section.locator('[name="contactName"]').fill("Тестовый контакт");
+    await section.locator('[name="contactPhone"]').fill("+70000000000");
+    await section.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => document.querySelector("#rossko-order-settings [role=status]").textContent.includes("Тестовая ошибка сохранения"));
+    assert.equal(await section.locator('[name="contactName"]').inputValue(), "Тестовый контакт");
+    assert.equal(settings, null);
+    saveFails = false;
+    await section.locator('button[type="submit"]').click();
+    await page.waitForFunction(() => document.querySelector("#rossko-order-settings [role=status]").textContent.includes("до перезапуска сервера"));
+    assert.equal(settings.contactPhone, "+70000000000");
+  }, { allSuppliers: true, reducedMotion: "reduce", rosskoSettings: {
+    get: async () => { if (loadFails) throw new CartError("Тестовая ошибка загрузки", 502); return { choices, settings, persistent: false }; },
+    save: async (value) => { if (saveFails) throw new CartError("Тестовая ошибка сохранения", 502); settings = value; return { choices, settings, persistent: false }; },
+  } });
+});
+
+test("opening refresh greys only missing goods and allows only their removal without rechecking available goods", async () => {
+  await withCartPage(async (page, { refreshCalls, orderCalls }) => {
+    for (const [button, count] of [[page.locator("#results-body .cart-offer-button").first(), "1"],
+      [page.locator("#results-body tr").filter({ hasText: "MISSING" }).locator(".cart-offer-button"), "2"]]) {
+      await button.click();
+      await page.waitForFunction((count) => document.querySelector("#cart-badge").textContent === count, count);
+    }
+    await page.locator("#cart-toggle").click();
+    await page.locator("#cart-items tr.is-unavailable").waitFor();
+    await page.locator("#cart-refresh-overlay").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    assert.equal(await page.locator("#cart-items .cart-item-check").count(), 1);
+    const available = page.locator('#cart-items tr[data-cart-item-id]').filter({ hasText: "A1" });
+    const missing = page.locator('#cart-items tr[data-cart-item-id]').filter({ hasText: "MISSING" });
+    // Exercise Bootstrap's cell backgrounds and inset overlay even with the CDN blocked.
+    await page.addStyleTag({ content: ".table > :not(caption) > * > * { background-color: #fff; box-shadow: inset 0 0 0 9999px #fff; }" });
+    const assertGreyRow = async () => {
+      assert.equal(await missing.evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(240, 242, 244)");
+      const cells = await missing.locator("td").evaluateAll((nodes) => nodes.map((node) => {
+        const style = getComputedStyle(node);
+        return { background: style.backgroundColor, shadow: style.boxShadow };
+      }));
+      for (const cell of cells) assert.deepEqual(cell, { background: "rgba(0, 0, 0, 0)", shadow: "none" });
+    };
+    assert.equal(await missing.locator(".cart-item-select").isDisabled(), true);
+    assert.equal(await missing.locator(".cart-quantity").isDisabled(), true);
+    assert.equal(await missing.locator(".cart-remove").isEnabled(), true);
+    assert.equal(await missing.locator(".cart-item-name").evaluate((node) => getComputedStyle(node).opacity), "0.5");
+    await assertGreyRow();
+    await missing.hover();
+    await assertGreyRow();
+    assert.equal(await available.locator(".cart-quantity").isEnabled(), true);
+    assert.equal(await page.locator("#cart-status").textContent(), "");
+    assert.doesNotMatch(await page.locator("#cart-items").textContent(), /Прежние данные|Перед заказом проверим/);
+    await page.locator("#cart-select-all").check();
+    assert.equal(await page.locator("#cart-items .cart-item-select:checked").count(), 1);
+    await openCheckout(page);
+    assert.deepEqual(refreshCalls.map((lines) => lines.map((line) => line.result.article)), [["A1", "MISSING"]]);
+    assert.equal(await page.locator(".cart-order-table tbody tr").count(), 1);
+    await page.locator("#cart-order-cancel").click();
+    assert.equal(await available.locator(".cart-item-check").count(), 0);
+    assert.equal(await missing.locator(".cart-item-check").count(), 1);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "cart-missing-grey.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await assertGreyRow();
+    assert.equal(await missing.locator(".cart-remove").isEnabled(), true);
+    assert.equal(await missing.evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "cart-missing-grey-mobile.png") });
+    await missing.locator(".cart-remove").click();
+    await page.waitForFunction(() => document.querySelectorAll("#cart-items tr.is-unavailable").length === 0);
+    const checks = refreshCalls.length;
+    await page.locator("#cart-tab-armtek").click();
+    await openCheckout(page);
+    assert.equal(refreshCalls.length, checks, "verified ids remain valid when changing the supplier tab");
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+    assert.deepEqual(orderCalls.flat().map((line) => line.result.article), ["A1"]);
+    await page.locator("#cart-order-cancel").click();
+    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 0);
+  }, { reducedMotion: "reduce", extraOffers: [offer("armtek", 4, { supplier: "armtek", keyzak: "MISSING" }, { article: "MISSING" })],
+    refresh: async (lines) => {
+      return lines.map((line) => ({ ...structuredClone(line), ...(line.result.article === "MISSING"
+        ? { refreshIssue: { reason: "not_found", message: "Товара больше нет у поставщика." } } : {}) }));
+    } });
+});
+
+test("an entirely missing cart stays delete-only and can be cleared", async () => {
+  await withCartPage(async (page, { orderCalls }) => {
+    await page.locator("#results-body .cart-offer-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await page.locator("#cart-items tr.is-unavailable").waitFor();
+    await page.locator("#cart-refresh-overlay").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#cart-select-all").isDisabled(), true);
+    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    await page.locator("#cart-items .cart-remove").click();
+    await page.waitForFunction(() => !document.querySelector("#cart-items tr[data-cart-item-id]"));
+    assert.deepEqual(orderCalls, []);
+  }, { reducedMotion: "reduce", refresh: async (lines) => lines.map((line) => ({ ...line,
+    refreshIssue: { reason: "not_found", message: "Товара больше нет у поставщика." } })) });
+});
+
 test("a failed cart refresh restores controls and shows a safe error", async () => {
   await withCartPage(async (page) => {
     await page.locator("#results-body .cart-offer-button").first().click();
@@ -2486,6 +2833,9 @@ test("checkout also shows the blocking refresh state when cart data became stale
       await page.locator("#cart-items .cart-quantity").fill("2");
       await page.locator("#cart-items .cart-quantity").press("Tab");
       await page.waitForFunction(() => document.querySelector("#cart-summary").textContent.includes("2 шт."));
+      assert.equal(refreshCalls.length, 1, "changing quantity within the verified stock does not request the supplier again");
+      await page.clock.install();
+      await page.clock.fastForward(111_000);
       await page.locator("#cart-test-order").click();
       await page.locator("#cart-refresh-overlay").waitFor({ state: "visible" });
       assert.equal(await page.locator("#cart-tabs").evaluate((element) => element.inert), true);

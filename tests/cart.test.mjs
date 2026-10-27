@@ -515,9 +515,9 @@ test("verified missing Forum Auto order can be unlocked while retaining the atte
     const attempt = await cart.order(1, "forum-auto", [itemId], {}, new AbortController().signal);
     assert.equal(attempt.results[0].status, "uncertain");
     assert.deepEqual(attempt.cart.pendingIds, [itemId]);
-    assert.throws(() => cart.resolveUncertainForumAutoLine(itemId, attempt.cart.revision, false), /Подтвердите/);
-    assert.throws(() => cart.resolveUncertainForumAutoLine(itemId, attempt.cart.revision - 1, true), /Корзина изменилась/);
-    const resolved = cart.resolveUncertainForumAutoLine(itemId, attempt.cart.revision, true);
+    assert.throws(() => cart.resolveUncertainLine(itemId, attempt.cart.revision, false), /Подтвердите/);
+    assert.throws(() => cart.resolveUncertainLine(itemId, attempt.cart.revision - 1, true), /Корзина изменилась/);
+    const resolved = cart.resolveUncertainLine(itemId, attempt.cart.revision, true);
     assert.equal(resolved.count, 1);
     assert.deepEqual(resolved.pendingIds, []);
     const restored = reopen();
@@ -527,8 +527,125 @@ test("verified missing Forum Auto order can be unlocked while retaining the atte
       assert.equal(database.prepare("SELECT COUNT(*) AS count FROM purchase_order_attempt WHERE state = 'uncertain'").get().count, 1);
       assert.equal(database.prepare("SELECT resolution FROM purchase_order_resolution").get().resolution, "customer_verified_missing");
     } finally { database.close(); }
-    assert.throws(() => restored.resolveUncertainForumAutoLine(itemId, resolved.revision, true), /Не найдена/);
+    assert.throws(() => restored.resolveUncertainLine(itemId, resolved.revision, true), /Не найдена/);
   }, undefined, gateway);
+});
+
+for (const supplier of suppliers) {
+  for (const placed of [true, false]) {
+    test(`manual ${placed ? "placed" : "missing"} reconciliation for ${supplier} persists without resubmitting`, async () => {
+      let submissions = 0;
+      const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => {
+        submissions++; throw new Error("Connection lost after sending");
+      } };
+      await withCart(async (cart, reopen, path) => {
+        const offerId = randomUUID();
+        cart.registerOffer(offerId, result(supplier));
+        cart.mutate("add", { offerId, quantity: 2, revision: 0 });
+        await cart.refreshForOrder(1, supplier, new AbortController().signal);
+        const itemId = cart.view().items[0].id;
+        await cart.order(1, supplier, [itemId], {}, new AbortController().signal);
+        cart = reopen();
+        for (const flags of [[undefined, undefined], [false, false], [true, true], ["true", false], [null, true]]) {
+          assert.throws(() => cart.resolveUncertainLine(itemId, 1, ...flags), /Подтвердите/);
+        }
+        assert.throws(() => cart.mutate("remove", { id: itemId, revision: 1 }), /сверить/);
+        assert.throws(() => cart.mutate("update", { id: itemId, quantity: 1, revision: 1 }), /сверить/);
+        assert.throws(() => cart.resolveUncertainLine(itemId, 0, !placed, placed), /Корзина изменилась/);
+        const resolved = cart.resolveUncertainLine(itemId, 1, !placed, placed);
+        assert.equal(resolved.revision, 2);
+        assert.equal(resolved.count, placed ? 0 : 2);
+        assert.deepEqual(resolved.pendingIds, []);
+        cart = reopen();
+        assert.deepEqual(cart.view(), resolved);
+        assert.throws(() => cart.resolveUncertainLine(itemId, 2, !placed, placed), /Не найдена/);
+        assert.equal(submissions, 1);
+        const database = new DatabaseSync(path);
+        try {
+          assert.equal(database.prepare("SELECT COUNT(*) AS count FROM purchase_order_attempt").get().count, 1);
+          const record = database.prepare("SELECT line_id, resolution FROM purchase_order_resolution").get();
+          assert.equal(record.line_id, itemId);
+          assert.equal(record.resolution, placed ? "customer_verified_placed" : "customer_verified_missing");
+        } finally { database.close(); }
+        if (!placed) {
+          cart.mutate("update", { id: itemId, quantity: 1, revision: 2 });
+          assert.equal(cart.mutate("remove", { id: itemId, revision: 3 }).count, 0);
+        }
+      }, undefined, gateway);
+    });
+  }
+}
+
+test("resolving one line of a grouped order leaves its other lines blocked", async () => {
+  const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => {
+    throw new Error("Connection lost");
+  } };
+  await withCart(async (cart, reopen) => {
+    for (const article of ["A1", "A2"]) {
+      const offerId = randomUUID();
+      const offer = result("armtek");
+      offer.article = article;
+      cart.registerOffer(offerId, offer);
+      cart.mutate("add", { offerId, quantity: 1, revision: cart.view().revision });
+    }
+    const [first, second] = cart.view().items;
+    await cart.refreshForOrder(2, "all", new AbortController().signal);
+    await cart.order(2, "all", [first.id, second.id], {}, new AbortController().signal);
+    cart.resolveUncertainLine(first.id, 2, false, true);
+    cart = reopen();
+    assert.deepEqual(cart.view().pendingIds, [second.id]);
+    assert.throws(() => cart.mutate("remove", { id: second.id, revision: 3 }), /сверить/);
+    assert.throws(() => cart.clear("all", 3), /сверить/);
+    assert.deepEqual(cart.resolveUncertainLine(second.id, 3, true).pendingIds, []);
+    assert.equal(cart.view().count, 1);
+  }, undefined, gateway);
+});
+
+test("manual reconciliation rejects active pending attempts and rolls back storage failures", async () => {
+  await withCart(async (cart, _reopen, path) => {
+    const offerId = randomUUID();
+    cart.registerOffer(offerId, result("part-kom"));
+    cart.mutate("add", { offerId, quantity: 1, revision: 0 });
+    const itemId = cart.view().items[0].id;
+    const repository = new SqliteCartRepository(path);
+    const attemptId = repository.beginOrder("part-kom", [itemId]);
+    try {
+      assert.throws(() => cart.resolveUncertainLine(itemId, 1, false, true), /Не найдена/);
+      repository.markOrderUncertain(attemptId);
+      const database = new DatabaseSync(path);
+      try {
+        database.exec("CREATE TRIGGER reject_cart_save BEFORE UPDATE ON purchase_cart BEGIN SELECT RAISE(ABORT, 'test failure'); END");
+        assert.throws(() => cart.resolveUncertainLine(itemId, 1, false, true), /test failure/);
+        assert.equal(cart.view().count, 1);
+        assert.deepEqual(cart.view().pendingIds, [itemId]);
+        assert.equal(database.prepare("SELECT COUNT(*) AS count FROM purchase_order_resolution").get().count, 0);
+      } finally { database.close(); }
+    } finally { repository.close(); }
+  });
+});
+
+test("legacy attempt resolutions migrate to individual lines without unlocking unresolved orders", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "aggregator-cart-migration-"));
+  const path = join(directory, "cart.sqlite");
+  const resolvedIds = [randomUUID(), randomUUID()];
+  const unresolvedId = randomUUID();
+  const database = new DatabaseSync(path);
+  try {
+    database.exec(`CREATE TABLE purchase_order_resolution (attempt_id TEXT PRIMARY KEY, resolved_at TEXT NOT NULL,
+      resolution TEXT NOT NULL CHECK (resolution = 'customer_verified_missing')) STRICT;
+      CREATE TABLE purchase_order_attempt (id TEXT PRIMARY KEY, supplier TEXT NOT NULL, line_ids TEXT NOT NULL,
+      started_at TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'uncertain'))) STRICT;`);
+    const insert = database.prepare("INSERT INTO purchase_order_attempt VALUES (?, 'forum-auto', ?, '2026-10-20T00:00:00Z', 'uncertain')");
+    insert.run("legacy-resolved", JSON.stringify(resolvedIds));
+    insert.run("legacy-unresolved", JSON.stringify([unresolvedId]));
+    database.prepare("INSERT INTO purchase_order_resolution VALUES ('legacy-resolved', '2026-10-20T01:00:00Z', 'customer_verified_missing')").run();
+    for (let index = 0; index < 2; index++) {
+      const repository = new SqliteCartRepository(path);
+      try { assert.deepEqual(repository.pendingLineIds(), [unresolvedId]); } finally { repository.close(); }
+    }
+    assert.deepEqual(database.prepare("SELECT line_id FROM purchase_order_resolution ORDER BY line_id").all().map((row) => row.line_id), resolvedIds.toSorted());
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM purchase_order_attempt").get().count, 2);
+  } finally { database.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("an uncertain Forum Auto fault exposes only its safe supplier code", async () => {
@@ -600,13 +717,13 @@ test("supplier refresh matches a legacy Forum Auto row and rejects ambiguous or 
     emit({ type: "result", result: result("forum-auto") });
     emit({ type: "supplier_status", supplier: "forum-auto", status: "completed" });
   });
-  await assert.rejects(ambiguous.refresh([oldLine], new AbortController().signal), /ambiguous/);
+  assert.equal((await ambiguous.refresh([oldLine], new AbortController().signal))[0].refreshIssue.reason, "check_failed");
   const scarce = result("forum-auto", 1);
   const insufficient = new RealOrderApplicationService(new SupplierSessionManager(), async (_query, emit) => {
     emit({ type: "result", result: scarce });
     emit({ type: "supplier_status", supplier: "forum-auto", status: "completed" });
   });
-  await assert.rejects(insufficient.refresh([oldLine], new AbortController().signal), /insufficient/);
+  assert.equal((await insufficient.refresh([oldLine], new AbortController().signal))[0].refreshIssue.reason, "insufficient_stock");
 });
 
 test("refresh failure keeps the cart unchanged and cannot authorize a real order", async () => {
@@ -622,6 +739,185 @@ test("refresh failure keeps the cart unchanged and cannot authorize a real order
     await assert.rejects(cart.order(before.revision, "armtek", before.items.map((item) => item.id), {}, new AbortController().signal), /Сначала обновите/);
     assert.equal(sends, 0);
   }, undefined, gateway);
+});
+
+test("selected refresh ignores an unavailable unselected offer and authorizes only the verified ids", async () => {
+  const checked = [];
+  const submitted = [];
+  const gateway = { refresh: async (lines) => {
+    checked.push(lines.map((line) => line.result.article));
+    if (lines.some((line) => line.result.article === "MISSING")) throw new SupplierIntegrationError("Missing fixture offer");
+    return lines;
+  }, choices: async () => ({}), prepare: async (_supplier, lines) => async () => {
+    submitted.push(...lines.map((line) => line.id));
+    return { confirmed: lines.map((line) => ({ id: line.id, acceptedQuantity: line.quantity, orderIds: ["fixture-1"] })), rejected: [] };
+  } };
+  await withCart(async (cart) => {
+    for (const article of ["A1", "MISSING"]) {
+      const offerId = randomUUID();
+      const offer = result();
+      offer.article = article;
+      cart.registerOffer(offerId, offer);
+      cart.mutate("add", { offerId, quantity: 1, revision: cart.view().revision });
+    }
+    const [available, missing] = cart.view().items;
+    const signal = new AbortController().signal;
+    await assert.rejects(cart.refreshForOrder(2, "all", signal), /Missing fixture/);
+    for (const ids of [[], [available.id, available.id], [randomUUID()]]) {
+      await assert.rejects(cart.refreshForOrder(2, "all", signal, ids));
+    }
+    await assert.rejects(cart.refreshForOrder(2, "part-kom", signal, [available.id]), /Выбранные товары/);
+    await cart.refreshForOrder(2, "armtek", signal, [available.id]);
+    await assert.rejects(cart.order(2, "all", [available.id, missing.id], {}, signal), /Сначала обновите/);
+    assert.deepEqual(submitted, []);
+    const response = await cart.order(2, "all", [available.id], {}, signal);
+    assert.deepEqual(submitted, [available.id]);
+    assert.deepEqual(response.cart.items.map((item) => item.id), [missing.id]);
+    assert.deepEqual(checked, [["A1", "MISSING"], ["A1"]]);
+  }, undefined, gateway);
+});
+
+test("pending unselected orders do not block refreshing and ordering another cart line", async () => {
+  let submissions = 0;
+  const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async (_supplier, lines) => async () => {
+    if (++submissions === 1) throw new Error("Connection lost");
+    return { confirmed: lines.map((line) => ({ id: line.id, acceptedQuantity: line.quantity, orderIds: ["fixture-2"] })), rejected: [] };
+  } };
+  await withCart(async (cart) => {
+    for (const supplier of ["armtek", "part-kom"]) {
+      const offerId = randomUUID();
+      cart.registerOffer(offerId, result(supplier));
+      cart.mutate("add", { offerId, quantity: 1, revision: cart.view().revision });
+    }
+    const [uncertain, available] = cart.view().items;
+    const signal = new AbortController().signal;
+    await cart.refreshForOrder(2, "all", signal);
+    await cart.order(2, "armtek", [uncertain.id], {}, signal);
+    assert.deepEqual((await cart.refreshForOrder(2, "all", signal)).pendingIds, [uncertain.id]);
+    await assert.rejects(cart.refreshForOrder(2, "all", signal, [uncertain.id]), /сверить/);
+    await cart.refreshForOrder(2, "all", signal, [available.id]);
+    const response = await cart.order(2, "all", [available.id], {}, signal);
+    assert.deepEqual(response.cart.pendingIds, [uncertain.id]);
+    assert.equal(submissions, 2);
+  }, undefined, gateway);
+});
+
+test("cart refresh accepts both supported VAZ article forms while retaining supplier, brand and warehouse identifiers", async () => {
+  for (const supplier of ["armtek", "part-kom"]) {
+    for (const [original, actual] of [["21211803027", "21210-1803027"], ["21210-1803027", "2121-1803027"]]) {
+      const oldLine = line(supplier);
+      oldLine.result.article = original;
+      const fresh = result(supplier);
+      fresh.article = actual;
+      const service = new RealOrderApplicationService(new SupplierSessionManager(), async (_query, emit) => {
+        emit({ type: "result", result: fresh });
+        emit({ type: "supplier_status", supplier, status: "completed" });
+      });
+      const [updated] = await service.refresh([oldLine], new AbortController().signal);
+      assert.equal(updated.result.article, actual);
+      assert.deepEqual(updated.reference, oldLine.reference);
+      for (const change of [() => { fresh.brand = "OTHER"; }, () => { fresh.brand = "TEST"; fresh.article = "21213-1803027"; }]) {
+        change();
+        assert.equal((await service.refresh([oldLine], new AbortController().signal))[0].refreshIssue.reason, "not_found");
+      }
+      fresh.article = actual;
+      attachPurchaseReference(fresh, supplier === "armtek" ? { supplier, keyzak: "OTHER" } : { supplier, makerId: "101", providerId: "999" });
+      assert.equal((await service.refresh([oldLine], new AbortController().signal))[0].refreshIssue.reason, "not_found");
+    }
+  }
+});
+
+test("offer refresh records unavailable reasons per item without exposing upstream failures", async () => {
+  const item = line("armtek");
+  for (const mode of ["missing", "ambiguous", "insufficient", "failed"]) {
+    const service = new RealOrderApplicationService(new SupplierSessionManager(), async (_query, emit) => {
+      if (mode === "ambiguous") for (let index = 0; index < 2; index++) emit({ type: "result", result: result() });
+      if (mode === "insufficient") emit({ type: "result", result: result("armtek", 1) });
+      emit({ type: "supplier_status", supplier: "armtek", status: mode === "failed" ? "error" : "completed", details: "private supplier payload" });
+    });
+    const [checked] = await service.refresh([item], new AbortController().signal);
+    assert.equal(checked.refreshIssue.reason, mode === "missing" ? "not_found" : mode === "insufficient" ? "insufficient_stock" : "check_failed");
+    assert.ok(checked.refreshIssue.message);
+    assert.doesNotMatch(checked.refreshIssue.message, /private supplier payload/);
+    assert.deepEqual(checked.result, item.result);
+  }
+});
+
+test("opening refresh preserves available items while missing and failed lines are delete-only on the server", async () => {
+  const searches = [];
+  const submitted = [];
+  const service = new RealOrderApplicationService(new SupplierSessionManager(), async (query, emit) => {
+    searches.push(query.article);
+    if (query.article !== "MISSING" && query.article !== "ERROR") {
+      const fresh = result(); fresh.article = query.article; fresh.price = 125;
+      emit({ type: "result", result: fresh });
+    }
+    emit({ type: "supplier_status", supplier: "armtek", status: query.article === "ERROR" ? "error" : "completed" });
+  });
+  const gateway = { refresh: service.refresh.bind(service), choices: async () => ({}), prepare: async (_supplier, lines) => async () => {
+    submitted.push(...lines.map((line) => line.result.article));
+    return { confirmed: lines.map((line) => ({ id: line.id, acceptedQuantity: line.quantity, orderIds: ["fixture-1"] })), rejected: [] };
+  } };
+  await withCart(async (cart) => {
+    for (const article of ["MISSING", "AVAILABLE", "ERROR"]) {
+      const offerId = randomUUID(); const offer = result(); offer.article = article;
+      cart.registerOffer(offerId, offer);
+      cart.mutate("add", { offerId, quantity: 1, revision: cart.view().revision });
+    }
+    const view = await cart.refreshForOrder(3, "all", new AbortController().signal);
+    const [missing, available, failed] = view.items;
+    assert.equal(missing.unavailable.reason, "not_found");
+    assert.equal(available.unavailable, null);
+    assert.equal(available.result.price, 125);
+    assert.equal(failed.unavailable.reason, "check_failed");
+    assert.equal(missing.result.price, 100);
+    for (const item of [missing, failed]) {
+      assert.throws(() => cart.mutate("update", { id: item.id, quantity: 2, revision: view.revision }), /только удалить/);
+      await assert.rejects(cart.orderChoices(view.revision, "all", new AbortController().signal, [item.id]), /недоступные/);
+      await assert.rejects(cart.order(view.revision, "all", [item.id], {}, new AbortController().signal), /недоступные/);
+    }
+    const afterRemove = cart.mutate("remove", { id: failed.id, revision: view.revision });
+    const afterQuantity = cart.mutate("update", { id: available.id, quantity: 2, revision: afterRemove.revision });
+    const ordered = await cart.order(afterQuantity.revision, "all", [available.id], {}, new AbortController().signal);
+    assert.deepEqual(submitted, ["AVAILABLE"]);
+    assert.deepEqual(ordered.cart.items.map((item) => item.id), [missing.id]);
+    assert.equal(ordered.cart.items[0].unavailable.reason, "not_found");
+    assert.deepEqual(searches, ["MISSING", "AVAILABLE", "ERROR"]);
+    assert.equal(cart.mutate("remove", { id: missing.id, revision: ordered.cart.revision }).count, 0);
+  }, undefined, gateway);
+});
+
+test("a later opening refresh can restore an unavailable line without persisting invented availability", async () => {
+  let present = false;
+  const service = new RealOrderApplicationService(new SupplierSessionManager(), async (_query, emit) => {
+    if (present) emit({ type: "result", result: result() });
+    emit({ type: "supplier_status", supplier: "armtek", status: "completed" });
+  });
+  await withCart(async (cart, reopen) => {
+    const offerId = randomUUID(); cart.registerOffer(offerId, result());
+    cart.mutate("add", { offerId, quantity: 1, revision: 0 });
+    assert.equal((await cart.refreshForOrder(1, "all", new AbortController().signal)).items[0].unavailable.reason, "not_found");
+    cart = reopen();
+    assert.equal((await cart.refreshForOrder(1, "all", new AbortController().signal)).items[0].unavailable.reason, "not_found");
+    present = true;
+    assert.equal((await cart.refreshForOrder(1, "all", new AbortController().signal)).items[0].unavailable, null);
+  }, undefined, { refresh: service.refresh.bind(service), choices: async () => ({}), prepare: async () => { throw new Error("not submitted"); } });
+});
+
+test("a partial refresh respects abort and never converts a supplier error to confirmed absence", async () => {
+  const items = [line(), line()]; items[1].result.article = "SECOND";
+  for (const status of ["auth_error", "timeout", "error"]) {
+    const service = new RealOrderApplicationService(new SupplierSessionManager(), async (query, emit) => {
+      emit({ type: "result", result: Object.assign(result(), { article: query.article }) });
+      emit({ type: "supplier_status", supplier: "armtek", status: query.article === "SECOND" ? "completed" : status });
+    });
+    const checked = await service.refresh(items, new AbortController().signal);
+    assert.equal(checked[0].refreshIssue.reason, "check_failed");
+    assert.equal(checked[1].refreshIssue, undefined);
+  }
+  const controller = new AbortController();
+  const aborted = new RealOrderApplicationService(new SupplierSessionManager(), async () => { controller.abort(new Error("fixture abort")); });
+  await assert.rejects(aborted.refresh(items, controller.signal), /fixture abort/);
 });
 
 test("supplier order parsers require matching real confirmations", () => {

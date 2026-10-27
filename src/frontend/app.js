@@ -29,6 +29,7 @@ import { isArmtekReturnableVisible } from "./armtek-return-settings.js";
 import { bootstrapGarage } from "./garage-ui.js";
 import { calculateMarkupPrice, markupPercentForPrice, restoreMarkupSettings, showPurchasePrice } from "./markup-settings.js";
 import { bootstrapMarkupSettings } from "./markup-settings-ui.js";
+import { bootstrapRosskoOrderSettings } from "./rossko-order-settings.js";
 import { setupTableColumnSettings } from "./table-column-settings-ui.js";
 import {
   applySavedColumnWidths,
@@ -99,6 +100,7 @@ const rosskoConnectButton = document.querySelector("#rossko-connect-button");
 const rosskoLogoutButton = document.querySelector("#rossko-logout-button");
 const rosskoSessionPill = document.querySelector("#rossko-session-pill");
 const rosskoAuthFeedback = document.querySelector("#rossko-auth-feedback");
+const rosskoOrderSettings = bootstrapRosskoOrderSettings();
 const armtekAuthForm = document.querySelector("#armtek-auth-form");
 const armtekLoginInput = document.querySelector("#armtek-login");
 const armtekPasswordInput = document.querySelector("#armtek-password");
@@ -1366,6 +1368,8 @@ const setAnalogFiltersSidebarOpen = (open) => {
 };
 
 const resetSearchState = () => {
+  tableSearchTerm = "";
+  tableSearchInput.value = "";
   results = [];
   selectedFilterValuesByColumn.clear();
   filterRangesByColumn.clear();
@@ -1393,6 +1397,7 @@ const closeActiveSource = () => {
 
 const openSettings = () => {
   settingsDrawer.hidden = false;
+  rosskoOrderSettings.refresh();
 };
 
 const closeSettings = () => {
@@ -1408,6 +1413,7 @@ const updateRosskoSessionCard = (session) => {
   rosskoConnectButton.hidden = session.authorized;
   rosskoLogoutButton.hidden = !session.authorized;
   rosskoAuthFeedback.textContent = "";
+  rosskoOrderSettings.setAuthorized(session.authorized);
 };
 
 const updateArmtekSessionCard = (session) => {

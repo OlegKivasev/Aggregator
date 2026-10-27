@@ -47,8 +47,9 @@ import type { OrderHistorySupplier } from "../purchasing/order-cancellation-cont
 import type { OrderNotificationService } from "../notifications/order-notification-service.ts";
 import { serveVkNotifications } from "./vk-notifications.ts";
 import { serveOrderNotifications } from "./order-notifications.ts";
+import { serveRosskoOrderSettings, type RosskoOrderSettingsApplication } from "./rossko-order-settings.ts";
 
-export interface AggregatorApplication {
+export interface AggregatorApplication extends RosskoOrderSettingsApplication {
   testCartOrder?: TestOrder;
   realCartOrder?: RealOrderGateway;
   partKomOrderHistory?: (archive: boolean, signal: AbortSignal) => Promise<OrderHistory>;
@@ -247,6 +248,8 @@ export function createAggregatorServer({
       const release = notifications?.beginForegroundOperation();
       if (release) response.once("close", release);
     }
+    if (await serveRosskoOrderSettings(request, response, url, application,
+      (error) => reportError({ operation: "rossko-order-settings", category: classifyOperationalError(error) }))) return;
 
     if (url.pathname === "/api/order-cancellations" || url.pathname === "/api/order-cancellations/seen") {
       response.setHeader("Cache-Control", "no-store");
@@ -354,10 +357,10 @@ export function createAggregatorServer({
             const choices = await cart.orderChoices(fields.revision, fields.supplier, controller.signal, fields.itemIds);
             if (!controller.signal.aborted) serveJson(response, 200, choices);
           } else if (url.pathname === "/api/cart/refresh") {
-            const result = await cart.refreshForOrder(fields.revision, fields.supplier, controller.signal);
+            const result = await cart.refreshForOrder(fields.revision, fields.supplier, controller.signal, fields.itemIds);
             if (!controller.signal.aborted) serveJson(response, 200, result);
           } else if (url.pathname === "/api/cart/uncertain/resolve") {
-            serveJson(response, 200, cart.resolveUncertainForumAutoLine(fields.id, fields.revision, fields.confirmedAbsent));
+            serveJson(response, 200, cart.resolveUncertainLine(fields.id, fields.revision, fields.confirmedAbsent, fields.confirmedPlaced));
           } else if (url.pathname === "/api/cart/order") {
             const details = fields.details;
             if (!details || typeof details !== "object" || Array.isArray(details)) throw new CartError("Неверные параметры заказа.");

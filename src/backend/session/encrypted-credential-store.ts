@@ -2,16 +2,19 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import type { SupplierId } from "../types.ts";
 import { writeJsonStateFileAtomic } from "./state-file.ts";
+import { parseRosskoOrderSettings, type RosskoOrderSettings } from "../purchasing/rossko-order-settings.ts";
 
 export interface StoredSupplierCredentials {
   login: string;
   password: string;
+  rosskoOrder?: RosskoOrderSettings;
 }
 
 export interface SupplierCredentialRepository {
   get(supplier: SupplierId): StoredSupplierCredentials | null;
   set(supplier: SupplierId, credentials: StoredSupplierCredentials): void;
   delete(supplier: SupplierId): void;
+  persistent(): boolean;
 }
 
 interface EncryptedCredentialEnvelope {
@@ -46,7 +49,10 @@ function parseCredentials(value: unknown): Map<SupplierId, StoredSupplierCredent
     if (typeof login !== "string" || !login.trim() || typeof password !== "string" || !password) {
       throw new Error("Encrypted credential store contains invalid credentials");
     }
-    result.set(supplier as SupplierId, { login, password });
+    const rosskoOrder = (credentials as { rosskoOrder?: unknown }).rosskoOrder;
+    if (rosskoOrder !== undefined && supplier !== "rossko") throw new Error("Encrypted credential store contains invalid order settings");
+    result.set(supplier as SupplierId, { login, password,
+      ...(rosskoOrder !== undefined ? { rosskoOrder: parseRosskoOrderSettings(rosskoOrder) } : {}) });
   }
   return result;
 }
@@ -78,12 +84,15 @@ export class EncryptedSupplierCredentialStore implements SupplierCredentialRepos
 
   get(supplier: SupplierId): StoredSupplierCredentials | null {
     const credentials = this.credentials.get(supplier);
-    return credentials ? { ...credentials } : null;
+    return credentials ? structuredClone(credentials) : null;
   }
+
+  persistent(): boolean { return this.encryptionKey !== null; }
 
   set(supplier: SupplierId, credentials: StoredSupplierCredentials): void {
     const previous = this.credentials;
-    this.credentials = new Map(previous).set(supplier, { ...credentials });
+    const parsed = parseCredentials({ [supplier]: credentials }).get(supplier)!;
+    this.credentials = new Map(previous).set(supplier, parsed);
     try {
       this.persist();
     } catch (error) {

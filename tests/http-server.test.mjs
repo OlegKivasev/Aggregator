@@ -4,6 +4,7 @@ import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../src/backend/errors.ts";
+import { parseRosskoOrderSettings } from "../src/backend/purchasing/rossko-order-settings.ts";
 import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 import { PartsApiApplicabilityClient } from "../src/backend/applicability/partsapi-client.ts";
 import { ApplicabilityApplicationService } from "../src/backend/applicability/applicability-application-service.ts";
@@ -17,6 +18,42 @@ import { testPurchaseOrder } from "../src/backend/application/test-order-applica
 
 const publicDir = join(process.cwd(), "src", "frontend");
 const openServers = new Set();
+
+test("Rossko settings HTTP validates requests, prevents caching and sanitizes errors", async () => {
+  const choices = { companies: [{ id: "buyer", label: "Тестовый покупатель" }],
+    deliveries: [{ id: "courier", label: "Тестовый адрес", addressId: "address" }], payments: [{ id: "bank", label: "Через банк" }] };
+  let settings = null;
+  const application = createApplication({
+    getRosskoOrderSettings: async () => ({ choices, settings, persistent: true }),
+    saveRosskoOrderSettings: async (value) => { settings = parseRosskoOrderSettings(value); return { choices, settings, persistent: true }; },
+  });
+  const { baseUrl } = await listen(application);
+  const url = `${baseUrl}/api/suppliers/rossko/order-settings`;
+  const response = await fetch(url);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), { choices, settings: null, persistent: true });
+  const saved = { companyId: "buyer", deliveryId: "courier", addressId: "address", paymentId: "bank", contactName: "Тест", contactPhone: "+70000000000" };
+  const update = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(saved) });
+  assert.equal(update.status, 200);
+  assert.deepEqual((await update.json()).settings, saved);
+  for (const body of ["{", "null", "[]", JSON.stringify({ ...saved, contactPhone: "------" })]) {
+    const invalid = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+    assert.equal(invalid.status, 400);
+  }
+  assert.deepEqual(settings, saved);
+  assert.equal((await fetch(url, { method: "POST" })).status, 405);
+  assert.equal((await fetch(`${url}?key1=not-a-key`)).status, 400);
+  for (const [error, status] of [[new SupplierAuthError("private key"), 401], [new SupplierTimeoutError("private URL"), 504],
+    [new SupplierIntegrationError("private payload"), 502], [new Error("private path"), 500]]) {
+    application.getRosskoOrderSettings = async () => { throw error; };
+    const failed = await fetch(url);
+    assert.equal(failed.status, status);
+    assert.doesNotMatch(JSON.stringify(await failed.json()), /private/);
+  }
+  delete application.getRosskoOrderSettings;
+  assert.equal((await fetch(url)).status, 503);
+});
 
 test("PartKOM history HTTP forwards archive selection and hides supplier errors", async () => {
   const calls = [];
@@ -160,6 +197,60 @@ test("cart HTTP validates server offers and quantities, hides routing and cannot
     assert.equal((await (await fetch(`${baseUrl}/api/cart`)).json()).count, 0);
     assert.equal((await send("/api/cart/items/batch", { revision: empty.revision, offers: [{ offerId, quantity: 1 }] })).status, 201);
     assert.equal((await (await fetch(`${baseUrl}/api/cart`)).json()).count, 1);
+  } finally {
+    if (server?.listening) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); openServers.delete(server); }
+    if (previousPath === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previousPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cart HTTP reconciles placed and absent PartKOM orders without resubmitting", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "aggregator-cart-resolution-http-"));
+  const previousPath = process.env.GARAGE_DB_PATH;
+  process.env.GARAGE_DB_PATH = join(directory, "cart.sqlite");
+  let server;
+  let submissions = 0;
+  try {
+    const application = createApplication({
+      streamSearch: async (_query, emit) => emit({ type: "result", result: attachPurchaseReference({ supplier: "part-kom",
+        article: "A1", brand: "TEST", title: "Тестовая деталь", price: 100, quantity: 3, warehouse: "Тестовый склад",
+        deliveryDate: null, deliveryDateApproximate: false, link: "https://www.part-kom.ru/" },
+      { supplier: "part-kom", makerId: "101", providerId: "202" }) }),
+      realCartOrder: { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => {
+        submissions++; throw new Error("Private supplier failure after sending");
+      } },
+    });
+    const listening = await listen(application);
+    server = listening.server;
+    const { baseUrl } = listening;
+    const send = (path, body) => fetch(`${baseUrl}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    assert.equal((await fetch(`${baseUrl}/api/cart/uncertain/resolve`)).status, 405);
+    for (const placed of [true, false]) {
+      const initial = await (await fetch(`${baseUrl}/api/cart`)).json();
+      const events = parseSseEvents(await (await fetch(`${baseUrl}/api/search?article=A1&supplier=part-kom&stream=once`)).text());
+      const offerId = events.find((event) => event.type === "result").offerId;
+      const added = await (await send("/api/cart/items", { offerId, revision: initial.revision, quantity: 1 })).json();
+      await send("/api/cart/refresh", { revision: added.revision, supplier: "part-kom" });
+      const id = added.items[0].id;
+      const attempt = await (await send("/api/cart/order", { revision: added.revision, supplier: "part-kom", itemIds: [id], details: {} })).json();
+      assert.equal(attempt.results[0].status, "uncertain");
+      assert.ok(!JSON.stringify(attempt).includes("Private supplier"));
+      const target = { id, revision: attempt.cart.revision };
+      for (const flags of [{}, { confirmedPlaced: "true" }, { confirmedPlaced: true, confirmedAbsent: true }]) {
+        assert.equal((await send("/api/cart/uncertain/resolve", { ...target, ...flags })).status, 400);
+      }
+      assert.equal((await send("/api/cart/uncertain/resolve", { ...target, revision: target.revision - 1, confirmedPlaced: true })).status, 409);
+      const flags = placed ? { confirmedPlaced: true } : { confirmedAbsent: true };
+      const response = await send("/api/cart/uncertain/resolve", { ...target, ...flags });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      const resolved = await response.json();
+      assert.equal(resolved.count, placed ? 0 : 1);
+      assert.deepEqual(resolved.pendingIds, []);
+      assert.ok(!JSON.stringify(resolved).includes("providerId"));
+      assert.equal((await send("/api/cart/uncertain/resolve", { ...target, revision: resolved.revision, ...flags })).status, 409);
+      assert.equal(submissions, placed ? 1 : 2);
+    }
   } finally {
     if (server?.listening) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); openServers.delete(server); }
     if (previousPath === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previousPath;

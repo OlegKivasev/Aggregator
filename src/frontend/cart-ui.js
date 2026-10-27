@@ -9,16 +9,26 @@ const maximumQuantity = (result) => Number.isFinite(result.quantity) ? Math.min(
 const cartIcon = '<img src="/shopping-cart.png" alt="" aria-hidden="true">';
 const cartPriceFormat = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const partKomReceiptNode = (receipt, orderIds, acceptedQuantity) => {
-  if (!receipt || typeof receipt !== "object" || typeof receipt.orderNumber !== "string"
-    || receipt.orderNumber.length > 100 || !orderIds.includes(receipt.orderNumber)
-    || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1 || receipt.quantity > acceptedQuantity) return null;
+const receiptClasses = { "part-kom": "cart-partkom-receipt", "forum-auto": "cart-forum-receipt",
+  rossko: "cart-rossko-receipt", armtek: "cart-armtek-receipt" };
+
+const orderReceiptCard = (supplier, number, existingCard) => {
+  if (existingCard) return existingCard;
   const card = document.createElement("section");
-  card.className = "cart-partkom-receipt";
+  card.className = receiptClasses[supplier];
   const heading = document.createElement("h4");
-  heading.textContent = `PartKOM · заказ № ${receipt.orderNumber}`;
+  heading.textContent = `${supplierNames[supplier]} · заказ № ${number}`;
   card.append(heading);
+  return card;
+};
+
+const partKomReceiptNode = (receipt, orderIds, acceptedQuantity, existingCard) => {
+  if (!receipt || typeof receipt !== "object" || typeof receipt.orderNumber !== "string"
+    || !receipt.orderNumber || receipt.orderNumber.length > 100 || !orderIds.includes(receipt.orderNumber)
+    || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1 || receipt.quantity > acceptedQuantity) return null;
+  const card = orderReceiptCard("part-kom", receipt.orderNumber, existingCard);
   const details = document.createElement("dl");
+  details.className = "cart-supplier-receipt__item";
   const add = (label, value, status = false, highlightDate = false) => {
     if (value === null || value === undefined || value === "") return;
     if (typeof value !== "string" && typeof value !== "number") return;
@@ -55,16 +65,13 @@ const partKomReceiptNode = (receipt, orderIds, acceptedQuantity) => {
   return card;
 };
 
-const forumAutoReceiptNode = (receipt, orderIds, acceptedQuantity) => {
+const forumAutoReceiptNode = (receipt, orderIds, acceptedQuantity, existingCard) => {
   if (!receipt || typeof receipt !== "object" || typeof receipt.orderId !== "string"
-    || receipt.orderId.length > 100 || !orderIds.includes(receipt.orderId)
+    || !receipt.orderId || receipt.orderId.length > 100 || !orderIds.includes(receipt.orderId)
     || !Number.isSafeInteger(receipt.orderedQuantity) || receipt.orderedQuantity !== acceptedQuantity) return null;
-  const card = document.createElement("section");
-  card.className = "cart-forum-receipt";
-  const heading = document.createElement("h4");
-  heading.textContent = `Forum Auto · заказ № ${receipt.orderId}`;
-  card.append(heading);
+  const card = orderReceiptCard("forum-auto", receipt.orderId, existingCard);
   const details = document.createElement("dl");
+  details.className = "cart-supplier-receipt__item";
   const add = (label, value, status = false, highlightDate = false) => {
     if (typeof value !== "string" && typeof value !== "number") return;
     if (typeof value === "string" && (!value || value.length > 500)
@@ -101,8 +108,7 @@ const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity,
   if (!receipt || typeof receipt !== "object" || typeof receipt.orderId !== "string"
     || !receipt.orderId || receipt.orderId.length > 100 || !orderIds.includes(receipt.orderId)
     || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1 || receipt.quantity > acceptedQuantity) return null;
-  const card = existingCard ?? document.createElement("section");
-  card.className = supplier === "rossko" ? "cart-rossko-receipt" : "cart-armtek-receipt";
+  const card = orderReceiptCard(supplier, receipt.orderId, existingCard);
   let details = document.createElement("dl");
   const add = (label, value, status = false) => {
     if (typeof value !== "string" && typeof value !== "number") return;
@@ -115,15 +121,13 @@ const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity,
     if (status) description.className = "cart-supplier-receipt__state";
     details.append(term, description);
   };
-  if (!existingCard) {
-    const heading = document.createElement("h4");
-    heading.textContent = `${supplierNames[supplier]} · заказ № ${receipt.orderId}`;
-    card.append(heading);
+  if (!card.querySelector(".cart-supplier-receipt__order")) {
+    details.className = "cart-supplier-receipt__order";
     add("Создан", formatOrderDate(receipt.createdAt));
     if (supplier === "armtek") add("Статус заказа", receipt.status, true);
     const orderTotal = supplier === "armtek" ? receipt.total : receipt.orderTotal;
     if (Number.isFinite(orderTotal) && orderTotal > 0) add("Сумма заказа", formatPrice(orderTotal));
-    card.append(details);
+    card.firstElementChild.after(details);
     details = document.createElement("dl");
   }
   details.className = "cart-supplier-receipt__item";
@@ -208,6 +212,11 @@ const validateCart = (value) => {
   if (!Array.isArray(value.pendingIds) || value.pendingIds.some((id) => typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id))) {
     throw new Error("Некорректный статус заказов в корзине.");
   }
+  if (value.items.some((item) => item.unavailable != null && (typeof item.unavailable !== "object"
+    || !["not_found", "insufficient_stock", "check_failed"].includes(item.unavailable.reason)
+    || typeof item.unavailable.message !== "string" || !item.unavailable.message || item.unavailable.message.length > 6000))) {
+    throw new Error("Некорректный результат обновления корзины.");
+  }
   return value;
 };
 
@@ -255,13 +264,17 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   resolveDialog.id = "cart-resolve-confirm";
   resolveDialog.className = "cart-modal cart-resolve-confirm";
   resolveDialog.setAttribute("aria-labelledby", "cart-resolve-title");
-  resolveDialog.innerHTML = `<h3 id="cart-resolve-title">Снять блокировку заказа Forum Auto?</h3>
+  resolveDialog.innerHTML = `<h3 id="cart-resolve-title">Сверка заказа с поставщиком</h3>
     <p id="cart-resolve-description"></p>
+    <fieldset class="cart-resolve-options"><legend>Результат проверки в кабинете поставщика</legend>
+      <label><input type="radio" name="cart-resolution" value="placed">Заказ оформлен — убрать позицию из корзины</label>
+      <label><input type="radio" name="cart-resolution" value="missing">Заказа нет — разблокировать позицию</label></fieldset>
+    <p id="cart-resolve-consequence"></p>
     <label class="cart-resolve-acknowledgement"><input id="cart-resolve-checked" type="checkbox">
-      Я проверил кабинет Forum Auto: заказ с этой позицией не создан.</label>
+      <span id="cart-resolve-acknowledgement"></span></label>
     <p id="cart-resolve-status" role="status" aria-live="polite"></p>
     <div class="cart-confirm-actions"><button type="button" class="btn btn-light" id="cart-resolve-cancel" autofocus>Отмена</button>
-      <button type="button" class="btn btn-primary" id="cart-resolve-accept" disabled>Разблокировать</button></div>`;
+      <button type="button" class="btn btn-primary" id="cart-resolve-accept" disabled>Подтвердить сверку</button></div>`;
   document.body.append(resolveDialog);
   const orderDialog = document.createElement("dialog");
   orderDialog.id = "cart-order-confirm";
@@ -307,7 +320,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   let returnFocus = toggle;
   let activeSupplier = "all";
   let refreshedRevision = null;
-  let refreshedScope = null;
+  let refreshedItemIds = new Set();
   let refreshedUntil = 0;
   const selectedIds = new Set();
 
@@ -341,8 +354,9 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     const currentIds = new Set(cart.items.map((item) => item.id));
     for (const id of selectedIds) if (!currentIds.has(id)) selectedIds.delete(id);
     const pending = new Set(cart.pendingIds ?? []);
-    const selected = items.filter((item) => selectedIds.has(item.id) && !pending.has(item.id));
-    const selectable = items.filter((item) => !pending.has(item.id));
+    for (const item of cart.items) if (item.unavailable || pending.has(item.id)) selectedIds.delete(item.id);
+    const selected = items.filter((item) => selectedIds.has(item.id));
+    const selectable = items.filter((item) => !pending.has(item.id) && !item.unavailable);
     tabs.innerHTML = ["all", ...suppliers].map((supplier) => {
       const name = supplier === "all" ? "Все" : supplierNames[supplier];
       const tabCount = supplier === "all" ? cart.count : cart.items.filter((item) => item.result.supplier === supplier).reduce((sum, item) => sum + item.quantity, 0);
@@ -367,13 +381,14 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     body.innerHTML = items.length ? items.map((item) => {
       const result = item.result;
       const unresolved = pending.has(item.id);
-      return `<tr data-cart-item-id="${escapeHtml(item.id)}" class="${selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><label class="cart-selection"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || unresolved ? "disabled" : ""}><span class="cart-mobile-label">К заказу</span></label></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
-        <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : ""}${unresolved && result.supplier === "forum-auto" ? `<button type="button" class="cart-resolve-button" ${locked ? "disabled" : ""}>Заказа нет? Снять блокировку</button>` : ""}</td>
+      const blocked = unresolved || Boolean(item.unavailable);
+      return `<tr data-cart-item-id="${escapeHtml(item.id)}" class="${item.unavailable ? "is-unavailable" : selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><label class="cart-selection"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || blocked ? "disabled" : ""}><span class="cart-mobile-label">К заказу</span></label></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
+        <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : item.unavailable ? `<span class="cart-item-check">${escapeHtml(item.unavailable.message)}</span>` : ""}${unresolved ? `<button type="button" class="cart-resolve-button" ${locked ? "disabled" : ""}>Сверить заказ</button>` : ""}</td>
         ${activeSupplier === "all" ? `<td class="cart-item-supplier" data-label="Поставщик / склад">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
         <td class="cart-item-delivery" data-label="Доставка"><span class="${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span>${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
         <td class="cart-item-price" data-label="Цена, ₽">${renderPrices(result)}</td>
         <td class="cart-item-quantity" data-label="Количество"><input class="cart-quantity" type="number" min="1" max="${maximumQuantity(result)}" step="1" value="${item.quantity}" inputmode="numeric"
-          aria-label="Количество для ${escapeHtml(result.article)}" ${locked || unresolved ? "disabled" : ""}><span class="cart-item-stock">из ${maximumQuantity(result)}</span></td>
+          aria-label="Количество для ${escapeHtml(result.article)}" ${locked || blocked ? "disabled" : ""}><span class="cart-item-stock">${item.unavailable ? "—" : `из ${maximumQuantity(result)}`}</span></td>
         <td class="cart-item-sum" data-label="Стоимость, ₽">${renderPrices(result, item.quantity)}</td>
         <td class="cart-item-remove"><button type="button" class="cart-remove btn btn-light" aria-label="Удалить ${escapeHtml(result.article)}" title="Удалить" ${locked || unresolved ? "disabled" : ""}>×</button></td></tr>`;
     }).join("") : `<tr><td colspan="${activeSupplier === "all" ? 9 : 8}" class="cart-empty">Корзина пуста. Добавьте товары из таблицы предложений.</td></tr>`;
@@ -419,7 +434,12 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     if (source) source.disabled = true;
     try {
       if (!cart) await refresh();
+      const previousRevision = cart.revision;
       cart = validateCart(await api(path, { method, body: JSON.stringify({ revision: cart.revision, ...fields }) }));
+      if (path.startsWith("/api/cart/items/") && (method === "DELETE" || method === "PATCH") && refreshedRevision === previousRevision) {
+        refreshedRevision = cart.revision;
+        refreshedItemIds = new Set(cart.items.filter((item) => !item.unavailable && refreshedItemIds.has(item.id)).map((item) => item.id));
+      }
       status.textContent = "";
       if (source?.matches(".cart-offer-button")) { flyToCart(source); notify("Товар добавлен в корзину."); }
       return true;
@@ -446,7 +466,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       if (cart.items.length) {
         cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier: "all" }) }));
         refreshedRevision = cart.revision;
-        refreshedScope = "all";
+        refreshedItemIds = new Set(cart.items.filter((item) => !item.unavailable && !cart.pendingIds.includes(item.id)).map((item) => item.id));
         refreshedUntil = Date.now() + 110_000;
       }
       status.textContent = "";
@@ -533,35 +553,56 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     const resolve = event.target.closest?.(".cart-resolve-button");
     if (resolve && !resolve.disabled) {
       const item = cart.items.find((candidate) => candidate.id === resolve.closest("tr").dataset.cartItemId);
-      if (!item || !cart.pendingIds.includes(item.id) || item.result.supplier !== "forum-auto") return;
+      if (busy || checking || cart.testing || !item || !cart.pendingIds.includes(item.id)) return;
       resolveTarget = { id: item.id, revision: cart.revision };
-      resolveDialog.querySelector("#cart-resolve-description").textContent = `${item.result.brand} ${item.result.article}. После разблокировки повторное оформление отправит новый заказ.`;
+      const supplier = supplierNames[item.result.supplier];
+      resolveDialog.querySelector("#cart-resolve-title").textContent = `Сверка заказа ${supplier}`;
+      resolveDialog.querySelector("#cart-resolve-description").textContent = `${item.result.brand} ${item.result.article} · ${item.quantity} шт. · ${item.result.warehouse ?? "Склад не указан"}. Проверьте товар и всё количество в кабинете ${supplier}.`;
+      resolveDialog.querySelector("#cart-resolve-acknowledgement").textContent = `Я проверил кабинет ${supplier} и подтверждаю выбранный результат для всех ${item.quantity} шт.`;
+      resolveDialog.querySelector("#cart-resolve-consequence").textContent = "Сверка сама по себе не отправляет и не отменяет заказ у поставщика.";
       resolveDialog.querySelector("#cart-resolve-status").textContent = "";
+      for (const choice of resolveDialog.querySelectorAll('[name="cart-resolution"]')) choice.checked = false;
       resolveChecked.checked = false;
       resolveAccept.disabled = true;
+      resolveAccept.textContent = "Подтвердить сверку";
       resolveDialog.showModal();
     }
   });
-  resolveChecked.addEventListener("change", () => { resolveAccept.disabled = !resolveChecked.checked; });
-  resolveDialog.querySelector("#cart-resolve-cancel").addEventListener("click", () => resolveDialog.close());
+  resolveDialog.addEventListener("change", (event) => {
+    const resolution = resolveDialog.querySelector('[name="cart-resolution"]:checked')?.value;
+    if (event.target.name === "cart-resolution") resolveChecked.checked = false;
+    resolveDialog.querySelector("#cart-resolve-consequence").textContent = resolution === "placed"
+      ? "Позиция будет убрана из корзины. Заказ у поставщика останется без изменений."
+      : resolution === "missing" ? "Позицию можно будет изменить или удалить. Повторное оформление отправит новый заказ."
+        : "Сверка сама по себе не отправляет и не отменяет заказ у поставщика.";
+    resolveAccept.textContent = resolution === "placed" ? "Убрать из корзины" : resolution === "missing" ? "Разблокировать" : "Подтвердить сверку";
+    resolveAccept.disabled = busy || !resolveChecked.checked || !resolution;
+  });
+  resolveDialog.querySelector("#cart-resolve-cancel").addEventListener("click", () => { if (!busy) resolveDialog.close(); });
+  resolveDialog.addEventListener("cancel", (event) => { if (busy) event.preventDefault(); });
   resolveAccept.addEventListener("click", async () => {
-    if (busy || checking || !resolveTarget || !resolveChecked.checked) return;
+    const resolution = resolveDialog.querySelector('[name="cart-resolution"]:checked')?.value;
+    if (busy || checking || !resolveTarget || !resolveChecked.checked || !resolution) return;
     busy = true;
     resolveAccept.disabled = true;
+    for (const control of resolveDialog.querySelectorAll("input, button")) control.disabled = true;
     try {
       cart = validateCart(await api("/api/cart/uncertain/resolve", { method: "POST", body: JSON.stringify({
-        ...resolveTarget, confirmedAbsent: true,
+        ...resolveTarget, ...(resolution === "placed" ? { confirmedPlaced: true } : { confirmedAbsent: true }),
       }) }));
       selectedIds.delete(resolveTarget.id);
       refreshedRevision = null;
-      status.textContent = "Блокировка снята после проверки кабинета Forum Auto. Позицию можно заказать заново.";
+      status.textContent = resolution === "placed"
+        ? "Позиция убрана из корзины после сверки. Заказ у поставщика не изменён."
+        : "Блокировка снята после сверки. Позицию можно изменить, удалить или заказать заново.";
       resolveDialog.close();
     } catch (error) {
       resolveDialog.querySelector("#cart-resolve-status").textContent = error.message;
       try { await refresh(); } catch { /* Keep the original action error visible. */ }
     } finally {
       busy = false;
-      resolveAccept.disabled = !resolveChecked.checked;
+      for (const control of resolveDialog.querySelectorAll("input, button")) control.disabled = false;
+      resolveAccept.disabled = !resolveChecked.checked || !resolveDialog.querySelector('[name="cart-resolution"]:checked');
       render();
     }
   });
@@ -580,7 +621,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   modal.querySelector("#cart-select-all").addEventListener("change", (event) => {
     const items = activeSupplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === activeSupplier);
     const pending = new Set(cart.pendingIds ?? []);
-    for (const item of items) if (!pending.has(item.id)) {
+    for (const item of items) if (!pending.has(item.id) && !item.unavailable) {
       if (event.target.checked) selectedIds.add(item.id); else selectedIds.delete(item.id);
     }
     render();
@@ -604,22 +645,27 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       await refresh();
       if (!modal.open) return;
       if (cart.testing) throw new Error("Дождитесь завершения действия в корзине.");
+      const itemIds = (supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier))
+        .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id) && !item.unavailable).map((item) => item.id);
+      if (!itemIds.length) throw new Error("Выберите товары для заказа.");
       if (refreshedRevision !== cart.revision || refreshedUntil <= Date.now()
-        || refreshedScope !== "all" && refreshedScope !== supplier) {
+        || itemIds.some((id) => !refreshedItemIds.has(id))) {
+        refreshedRevision = null;
         setCartRefreshing(true);
         try {
-          cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier }) }));
+          cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier, itemIds }) }));
         } finally { setCartRefreshing(false); }
         refreshedRevision = cart.revision;
-        refreshedScope = supplier;
+        refreshedItemIds = new Set(cart.items.filter((item) => itemIds.includes(item.id) && !item.unavailable).map((item) => item.id));
         refreshedUntil = Date.now() + 110_000;
+        const unavailable = cart.items.find((item) => itemIds.includes(item.id) && item.unavailable);
+        if (unavailable) throw new Error(unavailable.unavailable.message);
       }
       status.textContent = "";
       render();
       const items = (supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier))
-        .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id));
+        .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id) && !item.unavailable);
       if (!items.length) throw new Error("Выберите товары для заказа.");
-      const itemIds = items.map((item) => item.id);
       const choices = await api("/api/cart/order-options", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier, itemIds }) });
       if (!modal.open) return;
       orderTarget = { supplier, revision: cart.revision, items: structuredClone(items), itemIds, choices };
@@ -682,6 +728,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     render();
     try {
       if (cart.revision !== revision) throw new Error("Корзина изменилась. Вернитесь в корзину и проверьте заказ заново.");
+      refreshedRevision = null;
       const result = await api("/api/cart/order", { method: "POST", body: JSON.stringify({ revision, supplier, itemIds, details }) });
       if (result.supplier !== supplier || !Array.isArray(result.results) || !result.results.length) {
         throw new Error("Не удалось подтвердить результат заказа.");
@@ -709,41 +756,53 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
         if (!Array.isArray(group.result?.confirmed) || !Array.isArray(group.result?.rejected)) throw new Error("Некорректный результат заказа.");
         for (const line of group.result.confirmed) {
           if (!known.has(line.id) || !Number.isSafeInteger(line.acceptedQuantity) || line.acceptedQuantity < 1
-            || !Array.isArray(line.orderIds) || !line.orderIds.length || line.orderIds.some((id) => typeof id !== "string" || id.length > 100)) {
+            || !Array.isArray(line.orderIds) || !line.orderIds.length || line.orderIds.some((id) => typeof id !== "string" || !id || id.length > 100)) {
             throw new Error("Некорректное подтверждение поставщика.");
           }
-          accepted++;
-          const partKomOrders = group.supplier === "part-kom" && Array.isArray(line.partKomOrders)
-            ? line.partKomOrders.map((receipt) => partKomReceiptNode(receipt, line.orderIds, line.acceptedQuantity)).filter(Boolean) : [];
-          const forumAutoOrder = group.supplier === "forum-auto"
-            ? forumAutoReceiptNode(line.forumAutoOrder, line.orderIds, line.acceptedQuantity) : null;
           const selectedItem = items.find((item) => item.id === line.id);
-          const supplierOrders = selectedItem && (group.supplier === "rossko" || group.supplier === "armtek")
-            ? (group.supplier === "rossko" ? line.rosskoOrders : line.armtekOrders)
-            : null;
-          const supplierReceipts = Array.isArray(supplierOrders)
-            ? supplierOrders.map((receipt) => {
-              const key = JSON.stringify([group.supplier, receipt?.orderId]);
-              const card = supplierOrderReceiptNode(group.supplier, receipt, line.orderIds, line.acceptedQuantity, selectedItem, supplierReceiptCards.get(key));
-              if (card) supplierReceiptCards.set(key, card);
-              return card;
-            }).filter(Boolean) : [];
-          if (partKomOrders.length || forumAutoOrder || supplierReceipts.length) {
-            receipts.push(...partKomOrders);
-            if (forumAutoOrder) receipts.push(forumAutoOrder);
-            for (const card of supplierReceipts) {
-              if (!receipts.includes(card)) receipts.push(card);
+          if (selectedItem.result.supplier !== group.supplier) throw new Error("Некорректное подтверждение поставщика.");
+          accepted++;
+          const renderedOrderIds = new Set();
+          const appendReceipt = (orderId, renderReceipt) => {
+            const key = JSON.stringify([group.supplier, orderId]);
+            const existingCard = supplierReceiptCards.get(key);
+            const card = renderReceipt(existingCard);
+            if (!card) return;
+            renderedOrderIds.add(orderId);
+            if (!existingCard) {
+              supplierReceiptCards.set(key, card);
+              receipts.push(card);
             }
-            if (typeof line.message === "string" && line.message) {
-              const note = document.createElement("p");
-              note.textContent = line.message;
-              receipts.push(note);
-            }
+          };
+          if (group.supplier === "part-kom" && Array.isArray(line.partKomOrders)) {
+            for (const receipt of line.partKomOrders) appendReceipt(receipt?.orderNumber,
+              (card) => partKomReceiptNode(receipt, line.orderIds, line.acceptedQuantity, card));
+          } else if (group.supplier === "forum-auto") {
+            appendReceipt(line.forumAutoOrder?.orderId,
+              (card) => forumAutoReceiptNode(line.forumAutoOrder, line.orderIds, line.acceptedQuantity, card));
+          } else if (group.supplier === "rossko" || group.supplier === "armtek") {
+            const supplierOrders = group.supplier === "rossko" ? line.rosskoOrders : line.armtekOrders;
+            if (Array.isArray(supplierOrders)) for (const receipt of supplierOrders) appendReceipt(receipt?.orderId,
+              (card) => supplierOrderReceiptNode(group.supplier, receipt, line.orderIds, line.acceptedQuantity, selectedItem, card));
           }
-          else {
-            const row = document.createElement("p");
-            row.textContent = `${supplierNames[group.supplier]}: заказ ${line.orderIds.join(", ")}, ${line.acceptedQuantity} шт.${line.message ? ` ${line.message}` : ""}`;
-            receipts.push(row);
+          const orderIds = [...new Set(line.orderIds)];
+          for (const orderId of orderIds) {
+            if (renderedOrderIds.has(orderId)) continue;
+            appendReceipt(orderId, (existingCard) => {
+              const card = orderReceiptCard(group.supplier, orderId, existingCard);
+              const row = document.createElement("p");
+              row.className = "cart-supplier-receipt__item";
+              const part = [selectedItem.result.article, selectedItem.result.brand, selectedItem.result.title].join(" · ");
+              const quantityLabel = orderIds.length === 1 ? "Заказано" : "Подтверждено по позиции во всех заказах";
+              row.textContent = `${part} · ${quantityLabel}: ${line.acceptedQuantity} шт.`;
+              card.append(row);
+              return card;
+            });
+          }
+          if (typeof line.message === "string" && line.message) {
+            const note = document.createElement("p");
+            note.textContent = line.message;
+            receipts.push(note);
           }
         }
         for (const line of group.result.rejected) {

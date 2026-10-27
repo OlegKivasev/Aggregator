@@ -281,11 +281,28 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-table tr:last-child td { border-bottom: 0; }
 .cart-item-warehouse, .cart-item-stock, .cart-item-check { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .cart-item-check { color: #b63822; }
+.rossko-order-settings { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.rossko-order-settings h4 { margin: 0 0 12px; font-size: 14px; }
+.rossko-order-settings fieldset { display: grid; gap: 12px; min-width: 0; margin: 0 0 12px; padding: 0; border: 0; }
+.rossko-order-settings select, .rossko-order-settings input { width: 100%; min-width: 0; min-height: 40px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); font: inherit; }
+.rossko-order-settings .btn { white-space: normal; }
+.rossko-order-settings .btn-primary { color: #fff; border-color: var(--accent); background: var(--accent); }
+.rossko-order-settings .btn-primary:hover, .rossko-order-settings .btn-primary:focus-visible { border-color: var(--accent-dark); background: var(--accent-dark); }
+.rossko-order-settings .auth-feedback { color: var(--muted); }
+.rossko-order-settings .auth-feedback[data-state="error"] { color: #b42318; }
+.rossko-order-settings .auth-feedback[data-state="success"] { color: #18794e; }
+.cart-table tr.is-unavailable { background: #f0f2f4; }
+.cart-table tr.is-unavailable > td { background: transparent; box-shadow: none; }
+.cart-table tr.is-unavailable > td:not(.cart-item-remove) { opacity: .5; }
+.cart-table tr.is-unavailable .cart-item-check { color: var(--muted); }
 .cart-resolve-button { display: inline-block; margin-top: 6px; padding: 0; border: 0; color: #b42318; background: none; font: inherit; font-size: 11px; text-decoration: underline; cursor: pointer; }
 .cart-resolve-button:disabled { opacity: .5; cursor: default; }
 .cart-resolve-confirm { width: min(520px, calc(100vw - 24px)); padding: 24px; }
 .cart-resolve-confirm h3 { margin: 0 0 12px; }
 .cart-resolve-confirm p { margin: 0 0 16px; }
+.cart-resolve-options { display: grid; gap: 12px; margin: 0 0 16px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.cart-resolve-options label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.cart-resolve-options input { flex-shrink: 0; margin-top: 4px; }
 .cart-resolve-acknowledgement { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 16px; color: #b42318; font-weight: 700; }
 .cart-resolve-acknowledgement input { margin-top: 4px; }
 #cart-resolve-status:empty { display: none; }
@@ -323,7 +340,7 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 :is(.cart-partkom-receipt, .cart-forum-receipt, .cart-rossko-receipt, .cart-armtek-receipt) dl { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 7px 12px; margin: 0; font-size: 13px; }
 :is(.cart-partkom-receipt, .cart-forum-receipt, .cart-rossko-receipt, .cart-armtek-receipt) dt { color: var(--muted); }
 :is(.cart-partkom-receipt, .cart-forum-receipt, .cart-rossko-receipt, .cart-armtek-receipt) dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
-.cart-supplier-receipt__item { margin-top: 12px !important; padding-top: 12px; border-top: 1px solid #b5dac5; }
+.cart-supplier-receipt__item + .cart-supplier-receipt__item, .cart-supplier-receipt__order + .cart-supplier-receipt__item { margin-top: 12px; padding-top: 12px; border-top: 1px solid #b5dac5; }
 :is(.cart-partkom-receipt__state, .cart-forum-receipt__state, .cart-supplier-receipt__state) { color: #b42318; font-weight: 700; }
 .cart-order-status { margin: 16px 0 0; font-size: 14px; }
 .cart-order-status:empty { display: none; }
@@ -401,6 +418,7 @@ body:has(.garage-add-modal:not([hidden])) { overflow: hidden; }
     background: var(--surface);
   }
   #cart-modal tr[data-cart-item-id].is-selected { border-color: #ffc3b0; background: #fff8f4; }
+  #cart-modal tr[data-cart-item-id].is-unavailable { background: #f0f2f4; }
   #cart-modal .cart-table td, #cart-order-confirm .cart-order-table td {
     display: block;
     width: auto;
@@ -3202,6 +3220,8 @@ th[aria-sort="descending"] .analogs-sort span::after {
   background: rgba(245, 247, 250, 0.9);
   backdrop-filter: blur(3px);
 }
+
+.auth-card__loading[hidden] { display: none; }
 
 .auth-card[data-loading="true"] .auth-form,
 .auth-card[data-loading="true"] .auth-card__header,

@@ -1,4 +1,4 @@
-import { CartError, type RealOrderGateway } from "../purchasing/cart-application-service.ts";
+import { CartError, type CartRefreshIssue, type RealOrderGateway, type RefreshedPurchaseLine } from "../purchasing/cart-application-service.ts";
 import type { CheckoutDetails, OrderChoices, OrderSupplier, RosskoOrderChoices } from "../purchasing/order-contract.ts";
 import { getPurchaseReference, type PurchaseLine, type PurchaseReference } from "../purchasing/purchase-offer.ts";
 import type { SupplierSessionManager } from "../session/session-manager.ts";
@@ -11,11 +11,18 @@ import { getPartKomOrderChoices, listPartKomOrderHistory, placePartKomOrder } fr
 import { getRosskoOrderChoices, listRosskoOrderHistory, placeRosskoOrder } from "../suppliers/rossko/rossko-api-adapter.ts";
 import type { OrderHistory, SupplierOrderHistoryQuery } from "../purchasing/order-history-contract.ts";
 import { createBoundedAbortSignal } from "../abort.ts";
+import { additionalArticleVariants } from "../article-search-variants.ts";
+import type { SupplierCredentialRepository, StoredSupplierCredentials } from "../session/encrypted-credential-store.ts";
+import { decodeRosskoApiCredentials } from "./supplier-session-service.ts";
+import { parseRosskoOrderSettings, RosskoOrderSettingsValidationError, type RosskoOrderSettings, type RosskoOrderSettingsState } from "../purchasing/rossko-order-settings.ts";
+import type { RosskoApiCredentials } from "../types.ts";
 
 const validPhone = (value: unknown): value is string => typeof value === "string" && /^[+\d()\s-]{6,40}$/.test(value);
 const sameText = (left: string, right: string): boolean => left.trim().toLocaleUpperCase() === right.trim().toLocaleUpperCase();
-const sameArticle = (left: string, right: string): boolean => left.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase()
-  === right.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase();
+const articleKey = (article: string): string => article.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase();
+const sameArticle = (left: string, right: string): boolean => [left, ...additionalArticleVariants(left).map((variant) => variant.article)]
+  .some((article) => articleKey(article) === articleKey(right));
+const supplierNames: Record<OrderSupplier, string> = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
 
 export function allowedRosskoOrderChoices(options: RosskoOrderChoices): RosskoOrderChoices {
   const deliveries = options.deliveries.filter((item) => item.addressId !== null);
@@ -73,6 +80,17 @@ function configuredRosskoOrderDefaults(options: RosskoOrderChoices): NonNullable
   });
 }
 
+function selectedRosskoOrderDetails(options: RosskoOrderChoices, settings: RosskoOrderSettings): NonNullable<CheckoutDetails["rossko"]> {
+  const allowed = allowedRosskoOrderChoices(options);
+  if (!allowed.companies.some((item) => item.id === settings.companyId)
+    || !allowed.deliveries.some((item) => item.id === settings.deliveryId && item.addressId === settings.addressId)
+    || !allowed.payments.some((item) => item.id === settings.paymentId)) {
+    throw new RosskoOrderSettingsValidationError("Rossko больше не подтверждает выбранного покупателя, адрес или оплату. Обновите настройки Rossko.");
+  }
+  return { deliveryId: settings.deliveryId, addressId: settings.addressId, paymentId: settings.paymentId,
+    companyId: settings.companyId, name: settings.contactName, phone: settings.contactPhone, deliveryParts: false };
+}
+
 function sameOffer(current: PurchaseLine, fresh: { result: PurchaseLine["result"]; reference: PurchaseReference }): boolean {
   if (!sameArticle(current.result.article, fresh.result.article) || !sameText(current.result.brand, fresh.result.brand)
     || current.reference.supplier !== fresh.reference.supplier) return false;
@@ -90,11 +108,58 @@ function sameOffer(current: PurchaseLine, fresh: { result: PurchaseLine["result"
 export class RealOrderApplicationService implements RealOrderGateway {
   private readonly sessions: SupplierSessionManager;
   private readonly search: (query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) => Promise<void>;
+  private readonly credentialRepository: SupplierCredentialRepository | null;
 
   constructor(sessions: SupplierSessionManager,
-    search: (query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) => Promise<void>) {
+    search: (query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) => Promise<void>,
+    credentialRepository: SupplierCredentialRepository | null = null) {
     this.sessions = sessions;
     this.search = search;
+    this.credentialRepository = credentialRepository;
+  }
+
+  private rosskoCredentialsRecord(credentials: RosskoApiCredentials): StoredSupplierCredentials | null {
+    const stored = this.credentialRepository?.get("rossko") ?? null;
+    const keys = decodeRosskoApiCredentials(stored);
+    return keys?.key1 === credentials.key1 && keys.key2 === credentials.key2 ? stored : null;
+  }
+
+  private rosskoOrderDetails(options: RosskoOrderChoices, credentials: RosskoApiCredentials): NonNullable<CheckoutDetails["rossko"]> {
+    const settings = this.rosskoCredentialsRecord(credentials)?.rosskoOrder;
+    if (!settings) return configuredRosskoOrderDefaults(options);
+    try { return selectedRosskoOrderDetails(options, settings); }
+    catch (error) {
+      if (error instanceof RosskoOrderSettingsValidationError) throw new CartError(error.message, 409);
+      throw error;
+    }
+  }
+
+  private async rosskoSettings(signal: AbortSignal, update?: RosskoOrderSettings): Promise<RosskoOrderSettingsState> {
+    const parsed = update ?? null;
+    const operation = this.sessions.beginOperation("rossko", signal);
+    try {
+      operation.signal.throwIfAborted();
+      const credentials = this.sessions.getRosskoApiCredentials();
+      if (!credentials || !this.sessions.getSession("rossko").authorized) throw new SupplierAuthError("Rossko API keys are missing");
+      const choices = allowedRosskoOrderChoices(await getRosskoOrderChoices(credentials, operation.signal));
+      if (!choices.companies.length) throw new SupplierIntegrationError("Rossko returned no buyers", {
+        publicMessage: "Rossko не вернул покупателей. Заполните реквизиты в личном кабинете Rossko и обновите данные.",
+      });
+      operation.signal.throwIfAborted();
+      if (!operation.isCurrent()) throw new SupplierAuthError("Rossko session changed");
+      const stored = this.rosskoCredentialsRecord(credentials);
+      if (parsed) {
+        selectedRosskoOrderDetails(choices, parsed);
+        if (!stored || !this.credentialRepository) throw new CartError("Повторно подключите Rossko перед сохранением настроек заказа.", 409);
+        this.credentialRepository.set("rossko", { ...stored, rosskoOrder: parsed });
+      }
+      return { choices, settings: parsed ?? stored?.rosskoOrder ?? null, persistent: this.credentialRepository?.persistent() ?? false };
+    } finally { operation.dispose(); }
+  }
+
+  getRosskoOrderSettings(signal: AbortSignal): Promise<RosskoOrderSettingsState> { return this.rosskoSettings(signal); }
+  saveRosskoOrderSettings(settings: unknown, signal: AbortSignal): Promise<RosskoOrderSettingsState> {
+    return this.rosskoSettings(signal, parseRosskoOrderSettings(settings));
   }
 
   async partKomOrderHistory(archive: boolean, signal: AbortSignal) {
@@ -127,40 +192,46 @@ export class RealOrderApplicationService implements RealOrderGateway {
     } finally { bounded.dispose(); }
   }
 
-  async refresh(lines: PurchaseLine[], signal: AbortSignal): Promise<PurchaseLine[]> {
-    const found = new Map<string, Array<{ result: PurchaseLine["result"]; reference: PurchaseReference }>>();
+  async refresh(lines: PurchaseLine[], signal: AbortSignal): Promise<RefreshedPurchaseLine[]> {
+    const found = new Map<string, { offers: Array<{ result: PurchaseLine["result"]; reference: PurchaseReference }>; issue?: CartRefreshIssue }>();
     for (const line of lines) {
       const key = JSON.stringify([line.reference.supplier, line.result.article]);
       if (found.has(key)) continue;
       const offers: Array<{ result: PurchaseLine["result"]; reference: PurchaseReference }> = [];
       let status: string | null = null;
-      await this.search({ article: line.result.article, suppliers: [line.reference.supplier] }, (event) => {
-        if (event.type === "result") {
-          const reference = getPurchaseReference(event.result);
-          if (reference) offers.push({ result: event.result, reference });
-        } else if (event.type === "supplier_status" && event.supplier === line.reference.supplier) status = event.status;
-      }, signal);
-      signal.throwIfAborted();
-      if (status === "auth_error") throw new SupplierAuthError("Supplier authorization is unavailable for order refresh");
-      if (status === "timeout") throw new SupplierTimeoutError("Supplier order refresh timed out");
-      if (status !== "completed") throw new SupplierIntegrationError("Supplier offer refresh failed", {
-        publicMessage: "Не удалось обновить предложение у поставщика. Заказ не отправлен.",
-      });
-      found.set(key, offers);
+      const failed = (message: string): void => { found.set(key, { offers: [], issue: { reason: "check_failed", message } }); };
+      try {
+        await this.search({ article: line.result.article, suppliers: [line.reference.supplier] }, (event) => {
+          if (event.type === "result") {
+            const reference = getPurchaseReference(event.result);
+            if (reference) offers.push({ result: event.result, reference });
+          } else if (event.type === "supplier_status" && event.supplier === line.reference.supplier) status = event.status;
+        }, signal);
+        signal.throwIfAborted();
+        if (status === "completed") found.set(key, { offers });
+        else if (status === "auth_error") failed(`Не удалось проверить товар: требуется авторизация ${supplierNames[line.reference.supplier]}.`);
+        else if (status === "timeout") failed("Не удалось проверить товар: поставщик не ответил вовремя.");
+        else failed("Не удалось проверить товар у поставщика.");
+      } catch (error) {
+        signal.throwIfAborted();
+        if (error instanceof SupplierAuthError) failed(`Не удалось проверить товар: требуется авторизация ${supplierNames[line.reference.supplier]}.`);
+        else if (error instanceof SupplierTimeoutError) failed("Не удалось проверить товар: поставщик не ответил вовремя.");
+        else if (error instanceof SupplierIntegrationError) failed("Не удалось проверить товар у поставщика.");
+        else throw error;
+      }
     }
     return lines.map((line) => {
-      const offers = found.get(JSON.stringify([line.reference.supplier, line.result.article])) ?? [];
-      const matches = offers.filter((offer) => sameOffer(line, offer));
-      if (matches.length !== 1) throw new SupplierIntegrationError("Supplier offer is missing or ambiguous", {
-        publicMessage: matches.length ? "Найдено несколько подходящих предложений. Заказ не отправлен."
-          : "Предложение больше не найдено у поставщика. Заказ не отправлен.",
-      });
+      const lookup = found.get(JSON.stringify([line.reference.supplier, line.result.article]));
+      if (!lookup) throw new Error("Cart offer refresh result is missing");
+      if (lookup.issue) return { ...line, refreshIssue: lookup.issue };
+      const matches = lookup.offers.filter((offer) => sameOffer(line, offer));
+      if (matches.length !== 1) return { ...line, refreshIssue: matches.length
+        ? { reason: "check_failed", message: "Найдено несколько подходящих предложений. Товар недоступен для заказа." }
+        : { reason: "not_found", message: "Товара больше нет у поставщика." } };
       const offer = matches[0];
       if (typeof offer.result.quantity !== "number" || !Number.isSafeInteger(offer.result.quantity)
         || offer.result.quantity < line.quantity) {
-        throw new SupplierIntegrationError("Supplier offer has insufficient confirmed stock", {
-          publicMessage: "Остаток у поставщика меньше количества в корзине. Заказ не отправлен.",
-        });
+        return { ...line, refreshIssue: { reason: "insufficient_stock", message: "У поставщика недостаточно товара для этого количества." } };
       }
       return { id: line.id, quantity: line.quantity, result: offer.result, reference: offer.reference };
     });
@@ -173,7 +244,7 @@ export class RealOrderApplicationService implements RealOrderGateway {
       const credentials = this.sessions.getRosskoApiCredentials();
       if (!credentials) throw new SupplierAuthError("Rossko API keys are missing");
       result.rossko = allowedRosskoOrderChoices(await getRosskoOrderChoices(credentials, signal));
-      configuredRosskoOrderDefaults(result.rossko);
+      this.rosskoOrderDetails(result.rossko, credentials);
     }
     if (suppliers.includes("part-kom")) {
       const credentials = this.sessions.getPartKomCredentials();
@@ -221,7 +292,7 @@ export class RealOrderApplicationService implements RealOrderGateway {
       throw new SupplierIntegrationError("Rossko order reference is invalid");
     }
     const options = allowedRosskoOrderChoices(await getRosskoOrderChoices(credentials, signal));
-    const selected = configuredRosskoOrderDefaults(options);
+    const selected = this.rosskoOrderDetails(options, credentials);
     return (_attemptId: string, orderSignal: AbortSignal) => placeRosskoOrder(lines, credentials, { ...details, rossko: selected }, orderSignal);
   }
 }
