@@ -158,7 +158,7 @@ test("HTTP repair import authorizes before reading the body and validates method
     assert.equal((await send(baseUrl, card, secret, { body: JSON.stringify({ ...card, vehicleName: "x".repeat(17_000) }) })).status, 413);
     assert.equal((await fetch(`${baseUrl}/api/integration/1c/repairs?secret=${secret}`, { method: "POST" })).status, 400);
     assert.equal((await fetch(`${baseUrl}/api/repairs?limit=1`)).status, 400);
-    for (const [path, method, allow] of [["/api/integration/1c/repairs", "GET", "POST"], ["/api/repairs", "POST", "GET"], ["/api/repairs", "OPTIONS", "GET"]]) {
+    for (const [path, method, allow] of [["/api/integration/1c/repairs", "GET", "POST, DELETE"], ["/api/repairs", "POST", "GET"], ["/api/repairs", "OPTIONS", "GET"]]) {
       const response = await fetch(`${baseUrl}${path}`, { method });
       assert.equal(response.status, 405);
       assert.equal(response.headers.get("allow"), allow);
@@ -206,7 +206,7 @@ test("integration status verifies the server secret without requiring or creatin
     const response = await fetch(url, { headers: { Authorization: `Bearer ${secret}` } });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-store");
-    assert.deepEqual(await response.json(), { ready: true });
+    assert.deepEqual(await response.json(), { ready: true, cards: { production: 0, test: 0 } });
     assert.equal((await fetch(url, { method: "POST" })).status, 405);
     assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [] });
   });
@@ -327,5 +327,42 @@ test("HTTP readiness persists separately for test/live cards, updates and never 
     assert.equal((await send(restarted.baseUrl, card)).status, 200);
     assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [card, fullTest] });
     assert.deepEqual(reports, []);
+  });
+});
+
+test("source removes an ineligible repair by UUID with strict authentication, test isolation, idempotency and durable counts", async () => {
+  await withServer(secret, async ({ baseUrl, close }, { start }) => {
+    const remove = (origin, body, token = secret) => fetch(`${origin}/api/integration/1c/repairs`, {
+      method: "DELETE", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const status = async (origin) => (await fetch(`${origin}/api/integration/1c/repairs/status`, {
+      headers: { Authorization: `Bearer ${secret}` },
+    })).json();
+    await send(baseUrl, card);
+    await send(baseUrl, { ...card, testPlatform: true });
+    assert.equal((await remove(baseUrl, { documentId: card.documentId }, "wrong")).status, 401);
+    for (const body of [null, [], {}, { documentId: "wrong" }, { documentId: card.documentId, testPlatform: "true" },
+      { documentId: card.documentId, confirmTestCleanup: true }, { documentId: card.documentId, posted: false }]) {
+      assert.equal((await remove(baseUrl, body)).status, 400);
+    }
+    assert.deepEqual(await status(baseUrl), { ready: true, cards: { production: 1, test: 1 } });
+    const identity = { documentId: card.documentId, testPlatform: true };
+    const response = await remove(baseUrl, identity);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await response.json(), { ...identity, deleted: 1 });
+    assert.deepEqual(await (await remove(baseUrl, identity)).json(), { ...identity, deleted: 0 });
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [card] });
+    await close();
+    const restarted = await start();
+    assert.deepEqual(await status(restarted.baseUrl), { ready: true, cards: { production: 1, test: 0 } });
+    assert.deepEqual(await (await remove(restarted.baseUrl, { documentId: card.documentId })).json(), {
+      documentId: card.documentId, testPlatform: false, deleted: 1,
+    });
+    assert.deepEqual(await status(restarted.baseUrl), { ready: true, cards: { production: 0, test: 0 } });
+    assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [] });
+    assert.equal((await send(restarted.baseUrl, card)).status, 200);
+    assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [card] });
   });
 });

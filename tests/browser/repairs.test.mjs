@@ -207,6 +207,17 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-feedback").textContent(), "");
 
+    // An unposting command from 1C removes the card without manual browser refresh.
+    const removed = await fetch(`${origin}/api/integration/1c/repairs`, { method: "DELETE",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ documentId: card.documentId, testPlatform: false }) });
+    assert.equal(removed.status, 200);
+    await removed.arrayBuffer();
+    await page.clock.runFor(10_001);
+    await page.getByText("Заказ-нарядов в работе нет.", { exact: true }).waitFor();
+    await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 4 } });
+    await page.clock.runFor(10_001);
+    await page.getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
     // Other functions and hidden browser tabs do not poll repairs.
     await page.locator("#markup-function-tab").click();
     const beforeInactive = repairRequests.length;

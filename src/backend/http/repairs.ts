@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { parseRepairCard, RepairValidationError } from "../repairs/repair-card.ts";
+import { parseRepairCard, parseRepairRemoval, RepairValidationError } from "../repairs/repair-card.ts";
 import type { SqliteRepairRepository } from "../repairs/sqlite-repair-repository.ts";
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
 import { serveJson } from "./responses.ts";
@@ -19,9 +19,9 @@ export async function serveRepairs(
   const integration = importCard || checkStatus || clearTest;
   if (!integration && url.pathname !== "/api/repairs") return false;
   response.setHeader("Cache-Control", "no-store");
-  const method = importCard ? "POST" : clearTest ? "DELETE" : "GET";
+  const method = importCard ? (request.method === "DELETE" ? "DELETE" : "POST") : clearTest ? "DELETE" : "GET";
   if (request.method !== method) {
-    response.setHeader("Allow", method);
+    response.setHeader("Allow", importCard ? "POST, DELETE" : method);
     serveJson(response, 405, { message: "Method not allowed" });
     return true;
   }
@@ -49,7 +49,13 @@ export async function serveRepairs(
     }
   }
   try {
-    if (importCard) {
+    if (importCard && request.method === "DELETE") {
+      const identity = parseRepairRemoval(await readJsonBody(request));
+      if (!response.destroyed) {
+        const deleted = repository.remove(identity.documentId, identity.testPlatform);
+        serveJson(response, 200, { ...identity, deleted });
+      }
+    } else if (importCard) {
       const repair = parseRepairCard(await readJsonBody(request));
       if (!response.destroyed) {
         repository.save(repair);
@@ -63,7 +69,7 @@ export async function serveRepairs(
       }
       if (!response.destroyed) serveJson(response, 200, { deleted: repository.clearTestCards() });
     } else if (checkStatus) {
-      serveJson(response, 200, { ready: true });
+      serveJson(response, 200, { ready: true, cards: repository.counts() });
     } else {
       serveJson(response, 200, { repairs: repository.list() });
     }

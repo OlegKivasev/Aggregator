@@ -106,6 +106,22 @@ export class SqliteRepairRepository {
     });
   }
 
+  counts(): { production: number; test: number } {
+    const row = this.database.prepare(`SELECT
+      (SELECT count(*) FROM repair_cards) AS production,
+      (SELECT count(*) FROM test_repair_cards) AS test`).get();
+    if (!row || typeof row.production !== "number" || !Number.isSafeInteger(row.production) || row.production < 0
+      || typeof row.test !== "number" || !Number.isSafeInteger(row.test) || row.test < 0) {
+      throw new Error("Invalid SQLite repair counts");
+    }
+    return { production: row.production, test: row.test };
+  }
+
+  remove(documentId: string, testPlatform: boolean): number {
+    const table = testPlatform ? "test_repair_cards" : "repair_cards";
+    return Number(this.database.prepare(`DELETE FROM ${table} WHERE document_id = ?`).run(documentId).changes);
+  }
+
   clearTestCards(): number {
     return Number(this.database.prepare("DELETE FROM test_repair_cards").run().changes);
   }

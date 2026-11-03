@@ -40,6 +40,27 @@ function parseGoodsReadiness(value: unknown): GoodsReadiness {
   return { totalPositions, availablePositions };
 }
 
+function parseDocumentId(payload: Record<string, unknown>): string {
+  const documentId = cardText(payload, "documentId", 36).toLowerCase();
+  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(documentId)
+    || documentId === "00000000-0000-0000-0000-000000000000") {
+    throw new RepairValidationError("documentId: требуется непустой UUID документа 1С с дефисами.");
+  }
+  return documentId;
+}
+
+export function parseRepairRemoval(value: unknown): { documentId: string; testPlatform: boolean } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RepairValidationError("Требуется JSON-объект идентификатора ремонта.");
+  }
+  const payload = value as Record<string, unknown>;
+  if (Object.keys(payload).some((key) => !["documentId", "testPlatform"].includes(key))
+    || (payload.testPlatform !== undefined && typeof payload.testPlatform !== "boolean")) {
+    throw new RepairValidationError("Допустимы documentId и логический testPlatform.");
+  }
+  return { documentId: parseDocumentId(payload), testPlatform: payload.testPlatform === true };
+}
+
 export function parseRepairCard(value: unknown): RepairCard {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new RepairValidationError("Требуется JSON-объект карточки ремонта.");
@@ -52,11 +73,7 @@ export function parseRepairCard(value: unknown): RepairCard {
     throw new RepairValidationError("testPlatform: требуется логическое значение true или false.");
   }
   const counterpartyName = payload.counterpartyName === undefined ? undefined : cardText(payload, "counterpartyName", 500);
-  const documentId = cardText(payload, "documentId", 36).toLowerCase();
-  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(documentId)
-    || documentId === "00000000-0000-0000-0000-000000000000") {
-    throw new RepairValidationError("documentId: требуется непустой UUID документа 1С с дефисами.");
-  }
+  const documentId = parseDocumentId(payload);
   const date = cardText(payload, "date", 19);
   const timestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(date) ? Date.parse(`${date}Z`) : NaN;
   if (date.startsWith("0000") || !Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 19) !== date) {
