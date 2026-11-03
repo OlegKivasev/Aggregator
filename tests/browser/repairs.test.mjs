@@ -10,7 +10,7 @@ import { createAggregatorServer } from "../../src/backend/http/create-server.ts"
 const secret = "browser-test-only-repairs-secret-32-bytes";
 const card = {
   documentId: "12345678-abcd-1234-abcd-123456789abc", number: "ТЕСТ-1",
-  date: "2026-11-03T14:30:00", vehicleName: '<img src=x onerror="window.repairsXss=1">', status: "Тестовое состояние",
+  date: "2026-11-03T14:30:00", vehicleName: '<img src=x onerror="window.repairsXss=1">', status: "В работе",
 };
 
 test("repairs browser list loads real API data, renders safely, refreshes, restores and preserves other sections", async () => {
@@ -55,7 +55,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.waitForLoadState("networkidle");
     assert.equal(await page.locator("#markup-function").isVisible(), true);
     await page.locator("#repairs-function-tab").click();
-    await page.getByText("Заказ-нарядов пока нет. Они появятся после передачи из 1С.").waitFor();
+    await page.getByText("Заказ-нарядов в работе нет.").waitFor();
     assert.equal(await page.locator("#repairs-count").textContent(), "0");
     assert.equal(await page.locator("#markup-function").isVisible(), false);
     assert.equal(await page.locator("#applicability-function").isVisible(), false);
@@ -72,7 +72,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.deepEqual(await page.locator("#repairs-rows td").allTextContents(), [card.number, "03.11.2026 14:30", card.vehicleName, card.status]);
     assert.equal(await page.locator("#repairs-rows img").count(), 0);
     assert.equal(await page.evaluate(() => window.repairsXss), undefined);
-    const updated = { ...card, vehicleName: "Тестовый контрагент с длинным наименованием для проверки переноса в списке заказ-нарядов", status: "Изменённое тестовое состояние" };
+    const updated = { ...card, vehicleName: "Тестовый контрагент с длинным наименованием для проверки переноса в списке заказ-нарядов", status: "В работе" };
     await send(updated);
     await page.reload();
     await page.getByText(updated.status, { exact: true }).waitFor();
@@ -83,6 +83,18 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(clientStorage.includes(secret), false);
     const rendered = await page.content();
     assert.equal(rendered.includes(secret), false);
+    const legal = { ...updated, vehicleName: "Toyota Camry А123ВС", counterpartyName: 'ООО «Тестовый автопарк»' };
+    await send(legal);
+    await page.locator("#repairs-refresh").click();
+    await page.locator(".repairs-counterparty").waitFor();
+    assert.equal(await page.locator("#repairs-rows td").count(), 4);
+    assert.equal(await page.locator(".repairs-vehicle-name").textContent(), legal.vehicleName);
+    assert.equal(await page.locator(".repairs-counterparty").textContent(), legal.counterpartyName);
+    assert.equal(await page.locator("#repairs-rows img").count(), 0);
+    assert.equal(await page.evaluate(() => window.repairsXss), undefined);
+    const vehicleBox = await page.locator(".repairs-vehicle-name").boundingBox();
+    const counterpartyBox = await page.locator(".repairs-counterparty").boundingBox();
+    assert.ok(counterpartyBox.y >= vehicleBox.y + vehicleBox.height);
     if (process.env.REPAIRS_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.REPAIRS_SCREENSHOT_DIR, "repairs-desktop.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator("#repairs-function-tab").isVisible(), true);
@@ -91,6 +103,20 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator(".repairs-table").evaluate((element) => element.scrollWidth > element.clientWidth), true);
     if (process.env.REPAIRS_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.REPAIRS_SCREENSHOT_DIR, "repairs-mobile.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 900 });
+    const unsafeCounterparty = '<img src=x onerror="window.repairsXss=1">';
+    await send({ ...legal, counterpartyName: unsafeCounterparty });
+    await page.locator("#repairs-refresh").click();
+    await page.getByText(unsafeCounterparty, { exact: true }).waitFor();
+    assert.equal(await page.locator("#repairs-rows img").count(), 0);
+    assert.equal(await page.evaluate(() => window.repairsXss), undefined);
+    await send({ ...legal, vehicleName: "" });
+    await page.locator("#repairs-refresh").click();
+    await page.getByText("Договор не указан", { exact: true }).waitFor();
+    assert.equal(await page.locator(".repairs-counterparty").textContent(), legal.counterpartyName);
+    await send(updated);
+    await page.locator("#repairs-refresh").click();
+    await page.waitForFunction(() => !document.querySelector("#repairs-refresh").disabled);
+    assert.equal(await page.locator(".repairs-counterparty").count(), 0);
     failList = true;
     await page.locator("#repairs-refresh").click();
     await page.getByText("Не удалось загрузить заказ-наряды. Нажмите «Обновить».").waitFor();
@@ -105,7 +131,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.locator("#markup-function-tab").click();
     assert.equal(await page.locator("#markup-function").isVisible(), true);
     assert.equal(await page.locator("#repairs-function").isVisible(), false);
-    await send({ ...updated, testPlatform: true, status: "Тестовая копия той же карточки" });
+    await send({ ...updated, testPlatform: true, status: "В работе" });
     await page.locator("#repairs-function-tab").click();
     await page.locator(".repairs-test-label").waitFor();
     assert.equal(await page.locator("#repairs-rows tr").count(), 2);
@@ -120,6 +146,13 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
     assert.equal(await page.locator(".repairs-test-label").count(), 0);
     assert.equal(await page.getByText(updated.status, { exact: true }).count(), 1);
+    await send({ ...updated, status: "Завершен" });
+    await page.locator("#repairs-refresh").click();
+    await page.getByText("Заказ-нарядов в работе нет.", { exact: true }).waitFor();
+    assert.equal(await page.locator("#repairs-count").textContent(), "0");
+    await send(updated);
+    await page.locator("#repairs-refresh").click();
+    await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

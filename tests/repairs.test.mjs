@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { readRepairIntegrationSecret } from "../src/backend/config.ts";
 import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 import { parseRepairCard, RepairValidationError } from "../src/backend/repairs/repair-card.ts";
@@ -12,7 +13,7 @@ import { SqliteRepairRepository } from "../src/backend/repairs/sqlite-repair-rep
 const secret = "test-only-repairs-integration-secret-32-bytes";
 const card = {
   documentId: "12345678-abcd-1234-abcd-123456789abc", number: "ТЕСТ-1",
-  date: "2026-11-03T14:30:00", vehicleName: "Тестовый контрагент", status: "Тестовое состояние",
+  date: "2026-11-03T14:30:00", vehicleName: "Тестовый контрагент", status: "В работе",
 };
 
 async function withServer(configuredSecret, check) {
@@ -113,7 +114,7 @@ test("HTTP repairs starts empty, atomically upserts by UUID, sorts and survives 
     assert.equal(created.status, 200);
     assert.equal(created.headers.get("cache-control"), "no-store");
     assert.deepEqual(await created.json(), { repair: card });
-    const updated = { ...card, number: "ТЕСТ-2", date: "2026-11-04T08:15:00", vehicleName: "Другой контрагент", status: "Другое состояние" };
+    const updated = { ...card, number: "ТЕСТ-2", date: "2026-11-04T08:15:00", vehicleName: "Другой контрагент", status: "В работе" };
     const updates = await Promise.all(Array.from({ length: 8 }, () => send(baseUrl, { ...updated, documentId: card.documentId.toUpperCase() })));
     assert.ok(updates.every((response) => response.status === 200));
     for (const response of updates) assert.deepEqual(await response.json(), { repair: updated });
@@ -172,9 +173,9 @@ test("HTTP repair import authorizes before reading the body and validates method
 test("test platform isolates copied UUIDs, survives restart and cleanup can never delete working cards", async () => {
   await withServer(secret, async ({ baseUrl, close }, { start }) => {
     assert.equal((await send(baseUrl, card)).status, 200);
-    const testCard = { ...card, status: "Тестовая копия", testPlatform: true };
+    const testCard = { ...card, status: "В работе", testPlatform: true };
     assert.equal((await send(baseUrl, testCard)).status, 200);
-    const updatedTest = { ...testCard, status: "Только новое тестовое состояние" };
+    const updatedTest = { ...testCard, vehicleName: "Обновлённая тестовая машина" };
     assert.equal((await send(baseUrl, updatedTest)).status, 200);
     assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [card, updatedTest] });
     for (const value of [null, "true", 1, [], {}]) {
@@ -209,4 +210,84 @@ test("integration status verifies the server secret without requiring or creatin
     assert.equal((await fetch(url, { method: "POST" })).status, 405);
     assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [] });
   });
+});
+
+
+test("legal repair cards validate counterparty and retain an honest empty contract", () => {
+  const legal = { ...card, vehicleName: "Договор — тестовый автомобиль", counterpartyName: 'ООО «Тестовый автопарк»' };
+  assert.deepEqual(parseRepairCard({ ...legal, counterpartyName: ` ${legal.counterpartyName} ` }), legal);
+  assert.deepEqual(parseRepairCard({ ...legal, vehicleName: "" }), { ...legal, vehicleName: "" });
+  for (const counterpartyName of [null, "", " ", 42, {}, "x".repeat(501), "name\nvalue"]) {
+    assert.throws(() => parseRepairCard({ ...legal, counterpartyName }), RepairValidationError);
+  }
+  for (const vehicleName of [null, undefined, 42]) {
+    assert.throws(() => parseRepairCard({ ...legal, vehicleName }), RepairValidationError);
+  }
+  assert.throws(() => parseRepairCard({ ...card, vehicleName: "" }), RepairValidationError);
+});
+
+test("only In Progress repairs are listed and status changes hide, persist and restore each platform", async () => {
+  await withServer(secret, async ({ baseUrl, close }, { start }) => {
+    const legal = { ...card, vehicleName: "Автомобиль по договору", counterpartyName: 'ООО «Тестовая организация»' };
+    const testCard = { ...legal, vehicleName: "Тестовая машина", testPlatform: true };
+    for (const value of [legal, testCard]) {
+      const response = await send(baseUrl, value);
+      assert.deepEqual(await response.json(), { repair: value });
+    }
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [legal, testCard] });
+    for (const status of ["Завершен", "Ожидание", "Принят", "в работе", "В работе!"]) {
+      const response = await send(baseUrl, { ...legal, status });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).repair.status, status);
+      assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [testCard] });
+    }
+    assert.equal((await send(baseUrl, { ...testCard, status: "Завершен" })).status, 200);
+    await close();
+    const restarted = await start();
+    assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [] });
+    assert.deepEqual(await (await send(restarted.baseUrl, { ...legal, vehicleName: "" })).json(), { repair: { ...legal, vehicleName: "" } });
+    assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [{ ...legal, vehicleName: "" }] });
+    assert.equal((await send(restarted.baseUrl, card)).status, 200);
+    assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [card] });
+  });
+});
+
+test("existing repair SQLite migrates both tables without losing active or hidden cards", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "aggregator-repairs-migration-"));
+  const path = join(directory, "garage.sqlite");
+  const original = new DatabaseSync(path);
+  try {
+    for (const table of ["repair_cards", "test_repair_cards"]) {
+      original.exec(`CREATE TABLE ${table} (
+        document_id TEXT PRIMARY KEY NOT NULL, number TEXT NOT NULL, date TEXT NOT NULL,
+        vehicle_name TEXT NOT NULL, status TEXT NOT NULL
+      ) STRICT`);
+      const insert = original.prepare(`INSERT INTO ${table} VALUES (?, ?, ?, ?, ?)`);
+      insert.run(card.documentId, card.number, card.date, card.vehicleName, card.status);
+      insert.run("22345678-abcd-1234-abcd-123456789abc", "ТЕСТ-СКРЫТ", card.date, "Завершённая машина", "Завершен");
+    }
+    original.exec("CREATE TABLE unrelated_data (value TEXT); INSERT INTO unrelated_data VALUES ('preserved')");
+  } finally { original.close(); }
+  let repository;
+  try {
+    repository = new SqliteRepairRepository(path);
+    assert.deepEqual(repository.list(), [card, { ...card, testPlatform: true }]);
+    const legal = { ...card, vehicleName: "Договор", counterpartyName: "ООО Тест" };
+    repository.save(legal);
+    repository.save({ ...legal, testPlatform: true, counterpartyName: "ООО Тестовая копия" });
+    repository.close();
+    repository = new SqliteRepairRepository(path);
+    assert.deepEqual(repository.list(), [legal, { ...legal, testPlatform: true, counterpartyName: "ООО Тестовая копия" }]);
+    const inspection = new DatabaseSync(path);
+    try {
+      for (const table of ["repair_cards", "test_repair_cards"]) {
+        assert.equal(inspection.prepare(`SELECT count(*) AS count FROM ${table}`).get().count, 2);
+        assert.equal(inspection.prepare(`SELECT status FROM ${table} WHERE number = 'ТЕСТ-СКРЫТ'`).get().status, "Завершен");
+      }
+      assert.equal(inspection.prepare("SELECT value FROM unrelated_data").get().value, "preserved");
+    } finally { inspection.close(); }
+  } finally {
+    repository?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

@@ -31,6 +31,7 @@ export function bootstrapRepairs() {
       const payload = await response.json();
       if (!Array.isArray(payload?.repairs) || payload.repairs.some((card) => !card
         || ["documentId", "number", "date", "vehicleName", "status"].some((key) => typeof card[key] !== "string")
+        || (card.counterpartyName !== undefined && (typeof card.counterpartyName !== "string" || !card.counterpartyName.trim()))
         || (card.testPlatform !== undefined && typeof card.testPlatform !== "boolean")
         || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(card.date))) {
         throw new Error("Invalid repairs response");
@@ -39,11 +40,25 @@ export function bootstrapRepairs() {
       for (const card of payload.repairs) {
         const row = document.createElement("tr");
         const date = `${card.date.slice(8, 10)}.${card.date.slice(5, 7)}.${card.date.slice(0, 4)} ${card.date.slice(11, 16)}`;
-        for (const value of [card.number, date, card.vehicleName, card.status]) {
+        for (const value of [card.number, date]) {
           const cell = document.createElement("td");
           cell.textContent = value;
           row.append(cell);
         }
+        const vehicleCell = document.createElement("td");
+        const vehicle = document.createElement("span");
+        vehicle.className = "repairs-vehicle-name";
+        vehicle.textContent = card.vehicleName || (card.counterpartyName ? "Договор не указан" : "—");
+        vehicleCell.append(vehicle);
+        if (card.counterpartyName) {
+          const counterparty = document.createElement("span");
+          counterparty.className = "repairs-counterparty panel__meta";
+          counterparty.textContent = card.counterpartyName;
+          vehicleCell.append(counterparty);
+        }
+        const statusCell = document.createElement("td");
+        statusCell.textContent = card.status;
+        row.append(vehicleCell, statusCell);
         if (card.testPlatform === true) {
           row.dataset.testPlatform = "true";
           const label = document.createElement("span");
@@ -55,7 +70,7 @@ export function bootstrapRepairs() {
         fragment.append(row);
       }
       rows.replaceChildren(fragment);
-      if (!payload.repairs.length) showMessage("Заказ-нарядов пока нет. Они появятся после передачи из 1С.");
+      if (!payload.repairs.length) showMessage("Заказ-нарядов в работе нет.");
       count.textContent = String(payload.repairs.length);
       count.hidden = false;
       feedback.textContent = "";

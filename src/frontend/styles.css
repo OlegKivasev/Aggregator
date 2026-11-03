@@ -630,6 +630,8 @@ input {
 .repairs-function { margin: 0; height: calc(100dvh - 100px); min-height: 320px; }
 .repairs-table .results-data-table { width: 100%; min-width: 640px; }
 .repairs-table .results-data-table td { white-space: normal; overflow-wrap: anywhere; }
+.repairs-vehicle-name { display: block; font-weight: 600; line-height: 1.4; }
+.repairs-counterparty { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .repairs-number-column { width: 16%; }
 .repairs-test-label { display: block; width: fit-content; margin-top: 4px; }
 .repairs-date-column { width: 170px; }
