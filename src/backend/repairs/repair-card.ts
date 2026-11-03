@@ -4,11 +4,12 @@ export interface RepairCard {
   date: string;
   vehicleName: string;
   status: string;
+  testPlatform?: boolean;
 }
 
 export class RepairValidationError extends Error {}
 
-const fields = ["documentId", "number", "date", "vehicleName", "status"];
+const fields = ["documentId", "number", "date", "vehicleName", "status", "testPlatform"];
 
 function requiredText(payload: Record<string, unknown>, field: string, limit: number): string {
   const value = payload[field];
@@ -24,7 +25,10 @@ export function parseRepairCard(value: unknown): RepairCard {
   }
   const payload = value as Record<string, unknown>;
   if (Object.keys(payload).some((key) => !fields.includes(key))) {
-    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status.");
+    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status, testPlatform.");
+  }
+  if (payload.testPlatform !== undefined && typeof payload.testPlatform !== "boolean") {
+    throw new RepairValidationError("testPlatform: требуется логическое значение true или false.");
   }
   const documentId = requiredText(payload, "documentId", 36).toLowerCase();
   if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(documentId)
@@ -42,5 +46,6 @@ export function parseRepairCard(value: unknown): RepairCard {
     date,
     vehicleName: requiredText(payload, "vehicleName", 500),
     status: requiredText(payload, "status", 200),
+    ...(payload.testPlatform === true ? { testPlatform: true } : {}),
   };
 }

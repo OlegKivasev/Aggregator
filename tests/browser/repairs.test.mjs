@@ -105,6 +105,21 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.locator("#markup-function-tab").click();
     assert.equal(await page.locator("#markup-function").isVisible(), true);
     assert.equal(await page.locator("#repairs-function").isVisible(), false);
+    await send({ ...updated, testPlatform: true, status: "Тестовая копия той же карточки" });
+    await page.locator("#repairs-function-tab").click();
+    await page.locator(".repairs-test-label").waitFor();
+    assert.equal(await page.locator("#repairs-rows tr").count(), 2);
+    assert.equal(await page.locator(".repairs-test-label").count(), 1);
+    assert.equal(await page.locator('[data-test-platform="true"]').getByText("Тест", { exact: true }).count(), 1);
+    const cleanup = await fetch(`${origin}/api/integration/1c/repairs/test`, { method: "DELETE",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ confirmTestCleanup: true }) });
+    assert.equal(cleanup.status, 200);
+    assert.deepEqual(await cleanup.json(), { deleted: 1 });
+    await page.locator("#repairs-refresh").click();
+    await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
+    assert.equal(await page.locator(".repairs-test-label").count(), 0);
+    assert.equal(await page.getByText(updated.status, { exact: true }).count(), 1);
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

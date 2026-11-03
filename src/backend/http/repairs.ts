@@ -13,10 +13,13 @@ export async function serveRepairs(
   secret: string | null,
   reportError: () => void,
 ): Promise<boolean> {
-  const integration = url.pathname === "/api/integration/1c/repairs";
+  const importCard = url.pathname === "/api/integration/1c/repairs";
+  const checkStatus = url.pathname === "/api/integration/1c/repairs/status";
+  const clearTest = url.pathname === "/api/integration/1c/repairs/test";
+  const integration = importCard || checkStatus || clearTest;
   if (!integration && url.pathname !== "/api/repairs") return false;
   response.setHeader("Cache-Control", "no-store");
-  const method = integration ? "POST" : "GET";
+  const method = importCard ? "POST" : clearTest ? "DELETE" : "GET";
   if (request.method !== method) {
     response.setHeader("Allow", method);
     serveJson(response, 405, { message: "Method not allowed" });
@@ -40,18 +43,27 @@ export async function serveRepairs(
       serveJson(response, 401, { message: "Неверный секрет интеграции." });
       return true;
     }
-    if (request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+    if (!checkStatus && request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
       serveJson(response, 415, { message: "Требуется Content-Type: application/json." });
       return true;
     }
   }
   try {
-    if (integration) {
+    if (importCard) {
       const repair = parseRepairCard(await readJsonBody(request));
       if (!response.destroyed) {
         repository.save(repair);
         serveJson(response, 200, { repair });
       }
+    } else if (clearTest) {
+      const payload = await readJsonBody(request);
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)
+        || Object.keys(payload).length !== 1 || !("confirmTestCleanup" in payload) || payload.confirmTestCleanup !== true) {
+        throw new RequestBodyError(400, "Для удаления тестовых карточек требуется confirmTestCleanup: true.");
+      }
+      if (!response.destroyed) serveJson(response, 200, { deleted: repository.clearTestCards() });
+    } else if (checkStatus) {
+      serveJson(response, 200, { ready: true });
     } else {
       serveJson(response, 200, { repairs: repository.list() });
     }

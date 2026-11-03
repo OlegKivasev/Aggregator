@@ -31,6 +31,7 @@ export function bootstrapRepairs() {
       const payload = await response.json();
       if (!Array.isArray(payload?.repairs) || payload.repairs.some((card) => !card
         || ["documentId", "number", "date", "vehicleName", "status"].some((key) => typeof card[key] !== "string")
+        || (card.testPlatform !== undefined && typeof card.testPlatform !== "boolean")
         || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(card.date))) {
         throw new Error("Invalid repairs response");
       }
@@ -42,6 +43,14 @@ export function bootstrapRepairs() {
           const cell = document.createElement("td");
           cell.textContent = value;
           row.append(cell);
+        }
+        if (card.testPlatform === true) {
+          row.dataset.testPlatform = "true";
+          const label = document.createElement("span");
+          label.className = "results-count repairs-test-label";
+          label.textContent = "Тест";
+          label.title = "Тестовая платформа";
+          row.firstElementChild.append(label);
         }
         fragment.append(row);
       }

@@ -167,3 +167,46 @@ test("HTTP repair import authorizes before reading the body and validates method
     assert.deepEqual(reports, []);
   });
 });
+
+
+test("test platform isolates copied UUIDs, survives restart and cleanup can never delete working cards", async () => {
+  await withServer(secret, async ({ baseUrl, close }, { start }) => {
+    assert.equal((await send(baseUrl, card)).status, 200);
+    const testCard = { ...card, status: "Тестовая копия", testPlatform: true };
+    assert.equal((await send(baseUrl, testCard)).status, 200);
+    const updatedTest = { ...testCard, status: "Только новое тестовое состояние" };
+    assert.equal((await send(baseUrl, updatedTest)).status, 200);
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [card, updatedTest] });
+    for (const value of [null, "true", 1, [], {}]) {
+      assert.equal((await send(baseUrl, { ...card, testPlatform: value })).status, 400);
+    }
+    const cleanup = (options = {}) => fetch(`${baseUrl}/api/integration/1c/repairs/test`, {
+      method: "DELETE", headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmTestCleanup: true }), ...options,
+    });
+    assert.equal((await cleanup({ headers: { "Content-Type": "application/json" } })).status, 401);
+    for (const body of ["{}", "null", "[]", JSON.stringify({ confirmTestCleanup: false }), JSON.stringify({ confirmTestCleanup: true, production: true })]) {
+      assert.equal((await cleanup({ body })).status, 400);
+    }
+    assert.deepEqual(await (await cleanup()).json(), { deleted: 1 });
+    assert.deepEqual(await (await cleanup()).json(), { deleted: 0 });
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [card] });
+    await close();
+    const restarted = await start();
+    assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [card] });
+  });
+});
+
+test("integration status verifies the server secret without requiring or creating a repair", async () => {
+  await withServer(secret, async ({ baseUrl }) => {
+    const url = `${baseUrl}/api/integration/1c/repairs/status`;
+    assert.equal((await fetch(url)).status, 401);
+    assert.equal((await fetch(url, { headers: { Authorization: "Bearer wrong" } })).status, 401);
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${secret}` } });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await response.json(), { ready: true });
+    assert.equal((await fetch(url, { method: "POST" })).status, 405);
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [] });
+  });
+});
