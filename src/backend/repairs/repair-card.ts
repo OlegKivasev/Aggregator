@@ -1,0 +1,46 @@
+export interface RepairCard {
+  documentId: string;
+  number: string;
+  date: string;
+  vehicleName: string;
+  status: string;
+}
+
+export class RepairValidationError extends Error {}
+
+const fields = ["documentId", "number", "date", "vehicleName", "status"];
+
+function requiredText(payload: Record<string, unknown>, field: string, limit: number): string {
+  const value = payload[field];
+  if (typeof value !== "string" || !value.trim() || value.length > limit || /[\u0000-\u001f\u007f-\u009f]/.test(value)) {
+    throw new RepairValidationError(`${field}: требуется непустая строка длиной до ${limit} символов без управляющих символов.`);
+  }
+  return value.trim();
+}
+
+export function parseRepairCard(value: unknown): RepairCard {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RepairValidationError("Требуется JSON-объект карточки ремонта.");
+  }
+  const payload = value as Record<string, unknown>;
+  if (Object.keys(payload).some((key) => !fields.includes(key))) {
+    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status.");
+  }
+  const documentId = requiredText(payload, "documentId", 36).toLowerCase();
+  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(documentId)
+    || documentId === "00000000-0000-0000-0000-000000000000") {
+    throw new RepairValidationError("documentId: требуется непустой UUID документа 1С с дефисами.");
+  }
+  const date = requiredText(payload, "date", 19);
+  const timestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(date) ? Date.parse(`${date}Z`) : NaN;
+  if (date.startsWith("0000") || !Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 19) !== date) {
+    throw new RepairValidationError("date: требуется реальная дата и время документа в формате YYYY-MM-DDTHH:mm:ss без часового пояса.");
+  }
+  return {
+    documentId,
+    number: requiredText(payload, "number", 64),
+    date,
+    vehicleName: requiredText(payload, "vehicleName", 500),
+    status: requiredText(payload, "status", 200),
+  };
+}

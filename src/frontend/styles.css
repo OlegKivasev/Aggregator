@@ -625,6 +625,21 @@ input {
 
 .applicability-function[hidden] { display: none; }
 
+.repairs-function[hidden] { display: none; }
+.repairs-function [hidden] { display: none; }
+.repairs-function { margin: 0; height: calc(100dvh - 100px); min-height: 320px; }
+.repairs-table .results-data-table { width: 100%; min-width: 640px; }
+.repairs-table .results-data-table td { white-space: normal; overflow-wrap: anywhere; }
+.repairs-number-column { width: 16%; }
+.repairs-date-column { width: 170px; }
+.repairs-status-column { width: 24%; }
+.repairs-feedback { margin: 0; padding: 0 18px 12px; color: var(--muted); }
+.repairs-feedback:empty { display: none; }
+.repairs-feedback[data-tone="error"] { color: #b42318; }
+@media (max-width: 720px) {
+  .repairs-function { height: calc(100dvh - 160px); }
+}
+
 .applicability-function {
   display: flex;
   min-width: 0;
@@ -3602,7 +3617,8 @@ th[aria-sort="descending"] .analogs-sort span::after {
 /* Mobile offers use cards and explicit sorting controls instead of table headers. */
 @media (max-width: 800px) {
   .function-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .function-tabs { position: static; flex-direction: row; }
+  .function-tabs { position: static; min-width: 0; flex-direction: row; overflow-x: auto; }
+  .function-tab { flex: 1 0 auto; width: auto; padding-inline: 12px; white-space: nowrap; }
   .function-content { grid-column: 1; }
   .page { padding: 12px !important; }
   .workspace {

@@ -54,6 +54,25 @@ Dependencies flow from HTTP transport through application services to supplier a
 
 The frontend uses native browser modules without a bundler. `src/frontend/app.js` owns DOM state and event wiring, while `result-formatting.js`, `search-stream.js`, and `supplier-search-summary.js` isolate result safety, SSE transport, and summary formatting respectively.
 
+## Заказ-наряды из 1С
+
+Раздел «Заказ-наряды» показывает полным списком карточки ремонтов, полученные
+из расширения 1С: номер, дату, автомобиль (пока наименование контрагента) и
+состояние. Список оформлен теми же панелями, таблицами и кнопками, что и остальные
+разделы; обновляется при открытии и по кнопке «Обновить». Пока данных нет,
+отображается пустое состояние без демонстрационных карточек.
+
+`POST /api/integration/1c/repairs` принимает полную карточку с UUID документа.
+Повторный UUID обновляет запись без дубликата. Данные хранятся в отдельной
+таблице `repair_cards` существующей SQLite-базы `GARAGE_DB_PATH` и переживают
+перезапуск; `GET /api/repairs` возвращает весь список. Приём требует отдельного
+серверного секрета `ONEC_REPAIRS_INTEGRATION_SECRET`; без него возвращается `503`,
+остальные функции работают как прежде. Запчасти и вход сотрудников по коду
+к этому этапу не относятся. Расширение 1С в этой задаче не изменяется.
+
+Точный JSON, ограничения полей, ответы, настройка reverse proxy и правила
+подключения: [API интеграции с 1С](docs/1c-repairs-api.md).
+
 ## История поиска
 
 При фокусе поля артикула в проценке и применимости открывается отдельная история

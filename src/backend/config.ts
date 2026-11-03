@@ -116,6 +116,15 @@ export function readPort(): number {
   return readBoundedInteger("PORT", 3000, 1, 65_535);
 }
 
+export function readRepairIntegrationSecret(): string | null {
+  const value = process.env.ONEC_REPAIRS_INTEGRATION_SECRET;
+  if (value === undefined || value === "") return null;
+  if (!/^[A-Za-z0-9_-]{32,256}$/.test(value)) {
+    throw new Error("ONEC_REPAIRS_INTEGRATION_SECRET must contain 32 to 256 ASCII letters, digits, underscores or hyphens");
+  }
+  return value;
+}
+
 export function getStateFilePath(fileName: string): string {
   if (!fileName || fileName === "." || fileName === ".." || basename(fileName) !== fileName) {
     throw new Error("State file name must not contain a path");

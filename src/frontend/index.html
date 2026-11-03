@@ -23,6 +23,7 @@
       <nav class="function-tabs card border-0 shadow-sm" aria-label="Разделы приложения">
         <button type="button" class="function-tab active" id="markup-function-tab" aria-controls="markup-function" aria-selected="true">Проценка</button>
         <button type="button" class="function-tab" id="applicability-function-tab" aria-controls="applicability-function" aria-selected="false">Применимость</button>
+        <button type="button" class="function-tab" id="repairs-function-tab" aria-controls="repairs-function" aria-selected="false">Заказ-наряды</button>
       </nav>
       <div class="function-content">
       <div id="markup-function">
@@ -378,6 +379,24 @@
           <button type="button" class="garage-vehicles__button" id="applicability-oem-more" hidden>Показать ещё</button>
           <div class="garage-sidebar__resize" id="applicability-oem-resize" role="separator" aria-label="Изменить ширину сохранённых OEM-артикулов" aria-orientation="vertical" tabindex="0"></div>
         </aside>
+        </div>
+      </section>
+      <section id="repairs-function" class="repairs-function results-panel card border-0 shadow-sm overflow-hidden" aria-labelledby="repairs-title" hidden>
+        <header class="results-panel__header card-header bg-white border-0">
+          <div class="results-panel__heading">
+            <h2 id="repairs-title">Заказ-наряды</h2>
+            <span class="panel__meta results-count" id="repairs-count" aria-label="Количество заказ-нарядов" hidden></span>
+          </div>
+          <div class="results-panel__controls"><button type="button" class="btn btn-light garage-inline-action" id="repairs-refresh">Обновить</button></div>
+        </header>
+        <p class="repairs-feedback panel__meta" id="repairs-feedback" role="status" aria-live="polite"></p>
+        <div class="results-table repairs-table">
+          <table class="table table-hover align-middle mb-0 results-data-table">
+            <caption class="visually-hidden">Заказ-наряды из 1С, сначала новые. Автомобиль — наименование контрагента.</caption>
+            <colgroup><col class="repairs-number-column"><col class="repairs-date-column"><col><col class="repairs-status-column"></colgroup>
+            <thead><tr><th scope="col">Номер</th><th scope="col">Дата</th><th scope="col">Автомобиль</th><th scope="col">Состояние ремонта</th></tr></thead>
+            <tbody id="repairs-rows"></tbody>
+          </table>
         </div>
       </section>
       </div>

@@ -35,7 +35,9 @@ import { securityHeaders, serveJson, writeSseEvent } from "./responses.ts";
 import { serveStatic } from "./static-files.ts";
 import { createHttpGarageApplication } from "../garage/http-garage-application.ts";
 import { GarageConflictError, GarageNotFoundError, GarageOfferExpiredError, GarageValidationError } from "../garage/garage-application-service.ts";
-import { getGarageDatabasePath } from "../config.ts";
+import { getGarageDatabasePath, readRepairIntegrationSecret } from "../config.ts";
+import { SqliteRepairRepository } from "../repairs/sqlite-repair-repository.ts";
+import { serveRepairs } from "./repairs.ts";
 import { CartApplicationService, CartError, type RealOrderGateway } from "../purchasing/cart-application-service.ts";
 import { SqliteCartRepository } from "../purchasing/sqlite-cart-repository.ts";
 import type { TestOrder } from "../purchasing/purchase-offer.ts";
@@ -227,12 +229,14 @@ export function createAggregatorServer({
   ),
 }: CreateAggregatorServerOptions): Server {
   const resolvedPublicDir = resolve(publicDir);
+  const repairIntegrationSecret = readRepairIntegrationSecret();
   const garage = createHttpGarageApplication(application.streamSearch.bind(application));
   const cart = new CartApplicationService(new SqliteCartRepository(getGarageDatabasePath()), (lines, signal) => {
     if (!application.testCartOrder) throw new CartError("Тестовая проверка заказов не настроена.", 503);
     return application.testCartOrder(lines, signal);
   }, application.realCartOrder ?? null);
   const cancellations = new OrderCancellationService(new SqliteOrderCancellationRepository(getGarageDatabasePath()));
+  const repairs = new SqliteRepairRepository(getGarageDatabasePath());
 
   const server = createServer(async (request, response) => {
     if (!request.url) {
@@ -241,6 +245,9 @@ export function createAggregatorServer({
     }
 
     const url = new URL(request.url, "http://127.0.0.1");
+
+    if (await serveRepairs(request, response, url, repairs, repairIntegrationSecret,
+      () => reportError({ operation: "repairs", category: "internal" }))) return;
 
     if (await serveVkNotifications(request, response, url, notifications)) return;
     if (await serveOrderNotifications(request, response, url, notifications)) return;
@@ -801,6 +808,6 @@ export function createAggregatorServer({
 
     serveJson(response, 405, { message: "Method not allowed" });
   });
-  server.once("close", () => { garage.close(); cart.close(); cancellations.close(); });
+  server.once("close", () => { garage.close(); cart.close(); cancellations.close(); repairs.close(); });
   return server;
 }

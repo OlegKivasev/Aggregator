@@ -5,12 +5,16 @@ import { applicabilityFileMaxBytes, decodeApplicabilityFile, parseApplicabilityF
 import { createApplicabilityMakeMatcher } from "./applicability-make-aliases.js";
 import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { setupSearchHistory } from "./search-history-ui.js";
+import { bootstrapRepairs } from "./repairs-ui.js";
 import { moveApplicabilityGroupRelative, moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, moveApplicabilityTabRelative, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "./applicability-tab-groups.js";
 
 const markupFunction = document.querySelector("#markup-function");
 const applicabilityFunction = document.querySelector("#applicability-function");
 const markupTab = document.querySelector("#markup-function-tab");
 const applicabilityTab = document.querySelector("#applicability-function-tab");
+const repairsFunction = document.querySelector("#repairs-function");
+const repairsTab = document.querySelector("#repairs-function-tab");
+const repairsUi = bootstrapRepairs();
 const applicabilityTabsList = document.querySelector("#applicability-tabs-list");
 const applicabilityTabs = applicabilityTabsList.closest(".applicability-tabs");
 const tabUngroupDrop = document.querySelector("#applicability-tab-ungroup-drop");
@@ -178,12 +182,13 @@ const getActiveTab = () => tabs.find((tab) => tab.id === activeTabId);
 const setActiveFunction = (name) => {
   const isApplicability = name === "applicability";
   if (!isApplicability) oemSidebar?.hide();
-  markupFunction.hidden = isApplicability;
-  applicabilityFunction.hidden = !isApplicability;
-  markupTab.classList.toggle("active", !isApplicability);
-  applicabilityTab.classList.toggle("active", isApplicability);
-  markupTab.setAttribute("aria-selected", String(!isApplicability));
-  applicabilityTab.setAttribute("aria-selected", String(isApplicability));
+  for (const [key, section, button] of [
+    ["markup", markupFunction, markupTab], ["applicability", applicabilityFunction, applicabilityTab], ["repairs", repairsFunction, repairsTab],
+  ]) {
+    section.hidden = name !== key;
+    button.classList.toggle("active", name === key);
+    button.setAttribute("aria-selected", String(name === key));
+  }
   try {
     localStorage.setItem(activeFunctionStorageKey, name);
   } catch {
@@ -193,6 +198,7 @@ const setActiveFunction = (name) => {
     renderActiveTab();
     skuInput.focus();
   }
+  if (name === "repairs") void repairsUi.refresh();
 };
 
 const setFeedback = (message, tone = "error") => {
@@ -1498,6 +1504,7 @@ const loadMakes = async () => {
 
 markupTab.addEventListener("click", () => setActiveFunction("markup"));
 applicabilityTab.addEventListener("click", () => setActiveFunction("applicability"));
+repairsTab.addEventListener("click", () => setActiveFunction("repairs"));
 newApplicabilityTabButton.addEventListener("click", addTab);
 listButton.addEventListener("click", () => openDocumentModal());
 multiListButton.addEventListener("click", openGroupDocument);
@@ -2042,7 +2049,8 @@ renderActiveTab();
 const makesReady = loadMakes();
 const apiKeyReady = loadApiKeyState();
 try {
-  if (localStorage.getItem(activeFunctionStorageKey) === "applicability") setActiveFunction("applicability");
+  const savedFunction = localStorage.getItem(activeFunctionStorageKey);
+  if (savedFunction === "applicability" || savedFunction === "repairs") setActiveFunction(savedFunction);
 } catch {
   // The selected function is a convenience preference.
 }
