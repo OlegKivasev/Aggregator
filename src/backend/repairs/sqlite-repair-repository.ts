@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import type { RepairCard } from "./repair-card.ts";
+import type { GoodsReadiness, RepairCard } from "./repair-card.ts";
 
 export class SqliteRepairRepository {
   private readonly database: DatabaseSync;
@@ -19,12 +19,12 @@ export class SqliteRepairRepository {
         CREATE TABLE IF NOT EXISTS repair_cards (
           document_id TEXT PRIMARY KEY NOT NULL,
           number TEXT NOT NULL, date TEXT NOT NULL,
-          vehicle_name TEXT NOT NULL, status TEXT NOT NULL, counterparty_name TEXT
+          vehicle_name TEXT NOT NULL, status TEXT NOT NULL, counterparty_name TEXT, goods_total_positions INTEGER, goods_available_positions INTEGER
         ) STRICT;
         CREATE TABLE IF NOT EXISTS test_repair_cards (
           document_id TEXT PRIMARY KEY NOT NULL,
           number TEXT NOT NULL, date TEXT NOT NULL,
-          vehicle_name TEXT NOT NULL, status TEXT NOT NULL, counterparty_name TEXT
+          vehicle_name TEXT NOT NULL, status TEXT NOT NULL, counterparty_name TEXT, goods_total_positions INTEGER, goods_available_positions INTEGER
         ) STRICT;
       `);
       // Existing installations retain both repair tables and every stored card.
@@ -35,6 +35,11 @@ export class SqliteRepairRepository {
           if (!columns.some((column) => column.name === "counterparty_name")) {
             this.database.exec(`ALTER TABLE ${table} ADD COLUMN counterparty_name TEXT`);
           }
+          for (const name of ["goods_total_positions", "goods_available_positions"]) {
+            if (!columns.some((column) => column.name === name)) {
+              this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} INTEGER`);
+            }
+          }
         }
         this.database.exec("COMMIT");
       } catch (error) {
@@ -42,22 +47,24 @@ export class SqliteRepairRepository {
         throw error;
       }
       this.saveStatement = this.database.prepare(`
-        INSERT INTO repair_cards (document_id, number, date, vehicle_name, status, counterparty_name) VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO repair_cards (document_id, number, date, vehicle_name, status, counterparty_name, goods_total_positions, goods_available_positions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
           number = excluded.number, date = excluded.date,
-          vehicle_name = excluded.vehicle_name, status = excluded.status, counterparty_name = excluded.counterparty_name
+          vehicle_name = excluded.vehicle_name, status = excluded.status, counterparty_name = excluded.counterparty_name,
+          goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions
       `);
       this.testSaveStatement = this.database.prepare(`
-        INSERT INTO test_repair_cards (document_id, number, date, vehicle_name, status, counterparty_name) VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO test_repair_cards (document_id, number, date, vehicle_name, status, counterparty_name, goods_total_positions, goods_available_positions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
           number = excluded.number, date = excluded.date,
-          vehicle_name = excluded.vehicle_name, status = excluded.status, counterparty_name = excluded.counterparty_name
+          vehicle_name = excluded.vehicle_name, status = excluded.status, counterparty_name = excluded.counterparty_name,
+          goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions
       `);
       this.listStatement = this.database.prepare(`
-        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, counterparty_name AS counterpartyName, 0 AS testPlatform
+        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, counterparty_name AS counterpartyName, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, 0 AS testPlatform
         FROM repair_cards WHERE status = 'В работе'
         UNION ALL
-        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, counterparty_name AS counterpartyName, 1 AS testPlatform
+        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, counterparty_name AS counterpartyName, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, 1 AS testPlatform
         FROM test_repair_cards WHERE status = 'В работе'
         ORDER BY date DESC, documentId ASC, testPlatform ASC
       `);
@@ -69,7 +76,7 @@ export class SqliteRepairRepository {
 
   save(card: RepairCard): void {
     const statement = card.testPlatform === true ? this.testSaveStatement : this.saveStatement;
-    statement.run(card.documentId, card.number, card.date, card.vehicleName, card.status, card.counterpartyName ?? null);
+    statement.run(card.documentId, card.number, card.date, card.vehicleName, card.status, card.counterpartyName ?? null, card.goodsReadiness?.totalPositions ?? null, card.goodsReadiness?.availablePositions ?? null);
   }
 
   list(): RepairCard[] {
@@ -81,9 +88,20 @@ export class SqliteRepairRepository {
       }
       if (row.testPlatform !== 0 && row.testPlatform !== 1) throw new Error("Invalid SQLite repair platform");
       if (counterpartyName !== null && typeof counterpartyName !== "string") throw new Error("Invalid SQLite repair counterparty");
+      const total = row.goodsTotalPositions;
+      const available = row.goodsAvailablePositions;
+      let goodsReadiness: GoodsReadiness | undefined;
+      if (total !== null || available !== null) {
+        if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || total > 100_000
+          || typeof available !== "number" || !Number.isSafeInteger(available) || available < 0 || available > total) {
+          throw new Error("Invalid SQLite goods readiness");
+        }
+        goodsReadiness = { totalPositions: total, availablePositions: available };
+      }
       return { documentId, number, date, vehicleName, status,
         ...(row.testPlatform === 1 ? { testPlatform: true } : {}),
         ...(counterpartyName !== null ? { counterpartyName } : {}),
+        ...(goodsReadiness !== undefined ? { goodsReadiness } : {}),
       };
     });
   }

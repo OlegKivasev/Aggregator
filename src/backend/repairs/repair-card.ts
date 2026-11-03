@@ -1,3 +1,8 @@
+export interface GoodsReadiness {
+  totalPositions: number;
+  availablePositions: number;
+}
+
 export interface RepairCard {
   documentId: string;
   number: string;
@@ -6,11 +11,12 @@ export interface RepairCard {
   status: string;
   testPlatform?: boolean;
   counterpartyName?: string;
+  goodsReadiness?: GoodsReadiness;
 }
 
 export class RepairValidationError extends Error {}
 
-const fields = ["documentId", "number", "date", "vehicleName", "status", "testPlatform", "counterpartyName"];
+const fields = ["documentId", "number", "date", "vehicleName", "status", "testPlatform", "counterpartyName", "goodsReadiness"];
 
 function cardText(payload: Record<string, unknown>, field: string, limit: number, allowEmpty = false): string {
   const value = payload[field];
@@ -20,13 +26,27 @@ function cardText(payload: Record<string, unknown>, field: string, limit: number
   return value.trim();
 }
 
+function parseGoodsReadiness(value: unknown): GoodsReadiness {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RepairValidationError("goodsReadiness: требуется объект totalPositions, availablePositions.");
+  }
+  const payload = value as Record<string, unknown>;
+  const { totalPositions, availablePositions } = payload;
+  if (Object.keys(payload).length !== 2 || Object.keys(payload).some((key) => !["totalPositions", "availablePositions"].includes(key))
+    || typeof totalPositions !== "number" || !Number.isSafeInteger(totalPositions) || totalPositions < 0 || totalPositions > 100_000
+    || typeof availablePositions !== "number" || !Number.isSafeInteger(availablePositions) || availablePositions < 0 || availablePositions > totalPositions) {
+    throw new RepairValidationError("goodsReadiness: требуются целые количества позиций от 0 до 100000; availablePositions не больше totalPositions.");
+  }
+  return { totalPositions, availablePositions };
+}
+
 export function parseRepairCard(value: unknown): RepairCard {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new RepairValidationError("Требуется JSON-объект карточки ремонта.");
   }
   const payload = value as Record<string, unknown>;
   if (Object.keys(payload).some((key) => !fields.includes(key))) {
-    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status, testPlatform, counterpartyName.");
+    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status, testPlatform, counterpartyName, goodsReadiness.");
   }
   if (payload.testPlatform !== undefined && typeof payload.testPlatform !== "boolean") {
     throw new RepairValidationError("testPlatform: требуется логическое значение true или false.");
@@ -50,5 +70,6 @@ export function parseRepairCard(value: unknown): RepairCard {
     status: cardText(payload, "status", 200),
     ...(payload.testPlatform === true ? { testPlatform: true } : {}),
     ...(counterpartyName !== undefined ? { counterpartyName } : {}),
+    ...(payload.goodsReadiness !== undefined ? { goodsReadiness: parseGoodsReadiness(payload.goodsReadiness) } : {}),
   };
 }

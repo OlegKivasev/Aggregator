@@ -69,13 +69,13 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.locator("#repairs-refresh").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-rows tr").count(), 1);
-    assert.deepEqual(await page.locator("#repairs-rows td").allTextContents(), [card.number, "03.11.2026 14:30", card.vehicleName, card.status]);
+    assert.deepEqual(await page.locator("#repairs-rows td").allTextContents(), [card.vehicleName, "Наличие ещё не проверено"]);
     assert.equal(await page.locator("#repairs-rows img").count(), 0);
     assert.equal(await page.evaluate(() => window.repairsXss), undefined);
     const updated = { ...card, vehicleName: "Тестовый контрагент с длинным наименованием для проверки переноса в списке заказ-нарядов", status: "В работе" };
     await send(updated);
     await page.reload();
-    await page.getByText(updated.status, { exact: true }).waitFor();
+    await page.getByText(updated.vehicleName, { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-rows tr").count(), 1);
     assert.equal(await page.locator("#repairs-function-tab").getAttribute("aria-selected"), "true");
     for (const request of repairRequests) assert.equal((await request.allHeaders()).authorization, undefined);
@@ -83,11 +83,25 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(clientStorage.includes(secret), false);
     const rendered = await page.content();
     assert.equal(rendered.includes(secret), false);
-    const legal = { ...updated, vehicleName: "Toyota Camry А123ВС", counterpartyName: 'ООО «Тестовый автопарк»' };
+    for (const [goodsReadiness, tone, label, detail] of [
+      [{ totalPositions: 5, availablePositions: 2 }, "waiting", "Есть товары к получению", "В наличии 2 из 5 позиций"],
+      [{ totalPositions: 5, availablePositions: 5 }, "ready", "Все товары в наличии", "В наличии 5 из 5 позиций"],
+      [{ totalPositions: 0, availablePositions: 0 }, "empty", "Не найдено товаров", null],
+    ]) {
+      await send({ ...updated, goodsReadiness });
+      await page.locator("#repairs-refresh").click();
+      await page.getByText(label, { exact: true }).waitFor();
+      assert.equal(await page.locator(".repairs-readiness").getAttribute("data-tone"), tone);
+      assert.equal(await page.locator("#repairs-rows td").count(), 2);
+      assert.equal(await page.locator("#repairs-function thead th").count(), 2);
+      if (detail) assert.equal(await page.locator(".repairs-readiness-detail").textContent(), detail);
+      else assert.equal(await page.locator(".repairs-readiness-detail").count(), 0);
+    }
+    const legal = { ...updated, goodsReadiness: { totalPositions: 5, availablePositions: 2 }, vehicleName: "Toyota Camry А123ВС", counterpartyName: 'ООО «Тестовый автопарк»' };
     await send(legal);
     await page.locator("#repairs-refresh").click();
     await page.locator(".repairs-counterparty").waitFor();
-    assert.equal(await page.locator("#repairs-rows td").count(), 4);
+    assert.equal(await page.locator("#repairs-rows td").count(), 2);
     assert.equal(await page.locator(".repairs-vehicle-name").textContent(), legal.vehicleName);
     assert.equal(await page.locator(".repairs-counterparty").textContent(), legal.counterpartyName);
     assert.equal(await page.locator("#repairs-rows img").count(), 0);
@@ -100,7 +114,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#repairs-function-tab").isVisible(), true);
     assert.equal(await page.locator("#repairs-refresh").isVisible(), true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-    assert.equal(await page.locator(".repairs-table").evaluate((element) => element.scrollWidth > element.clientWidth), true);
+    assert.equal(await page.locator(".repairs-table").evaluate((element) => element.scrollWidth <= element.clientWidth), true);
     if (process.env.REPAIRS_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.REPAIRS_SCREENSHOT_DIR, "repairs-mobile.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 900 });
     const unsafeCounterparty = '<img src=x onerror="window.repairsXss=1">';
@@ -124,7 +138,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#repairs-refresh").isEnabled(), true);
     failList = false;
     await page.locator("#repairs-refresh").click();
-    await page.getByText(updated.status, { exact: true }).waitFor();
+    await page.getByText(updated.vehicleName, { exact: true }).waitFor();
     await page.locator("#applicability-function-tab").click();
     assert.equal(await page.locator("#repairs-function").isVisible(), false);
     assert.equal(await page.locator("#applicability-function").isVisible(), true);
@@ -145,7 +159,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.locator("#repairs-refresh").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
     assert.equal(await page.locator(".repairs-test-label").count(), 0);
-    assert.equal(await page.getByText(updated.status, { exact: true }).count(), 1);
+    assert.equal(await page.getByText(updated.vehicleName, { exact: true }).count(), 1);
     await send({ ...updated, status: "Завершен" });
     await page.locator("#repairs-refresh").click();
     await page.getByText("Заказ-нарядов в работе нет.", { exact: true }).waitFor();

@@ -291,3 +291,41 @@ test("existing repair SQLite migrates both tables without losing active or hidde
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("goods readiness accepts verified empty/full/partial position counts and rejects false or ambiguous data", () => {
+  for (const goodsReadiness of [{ totalPositions: 0, availablePositions: 0 }, { totalPositions: 5, availablePositions: 2 }, { totalPositions: 5, availablePositions: 5 }]) {
+    assert.deepEqual(parseRepairCard({ ...card, goodsReadiness }), { ...card, goodsReadiness });
+  }
+  const invalid = [null, false, [], {}, { totalPositions: 0 }, { availablePositions: 0 },
+    { totalPositions: 0, availablePositions: 1 }, { totalPositions: 2, availablePositions: -1 },
+    { totalPositions: -1, availablePositions: 0 }, { totalPositions: 2.5, availablePositions: 1 },
+    { totalPositions: 2, availablePositions: 0.5 }, { totalPositions: "2", availablePositions: 1 },
+    { totalPositions: 100_001, availablePositions: 0 }, { totalPositions: 2, availablePositions: 1, extra: true }];
+  for (const goodsReadiness of invalid) assert.throws(() => parseRepairCard({ ...card, goodsReadiness }), /goodsReadiness:/);
+});
+
+test("HTTP readiness persists separately for test/live cards, updates and never invents availability for legacy imports", async () => {
+  await withServer(secret, async ({ baseUrl, close }, { start, reports }) => {
+    const partial = { ...card, goodsReadiness: { totalPositions: 5, availablePositions: 2 } };
+    const fullTest = { ...card, testPlatform: true, goodsReadiness: { totalPositions: 5, availablePositions: 5 } };
+    assert.deepEqual(await (await send(baseUrl, partial)).json(), { repair: partial });
+    assert.deepEqual(await (await send(baseUrl, fullTest)).json(), { repair: fullTest });
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [partial, fullTest] });
+    for (const goodsReadiness of [null, { totalPositions: 1, availablePositions: 2 }]) {
+      const invalid = await send(baseUrl, { ...card, goodsReadiness });
+      assert.equal(invalid.status, 400);
+      assert.match((await invalid.json()).message, /^goodsReadiness:/);
+    }
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [partial, fullTest] });
+    await close();
+    const restarted = await start();
+    assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [partial, fullTest] });
+    const empty = { ...card, goodsReadiness: { totalPositions: 0, availablePositions: 0 } };
+    assert.deepEqual(await (await send(restarted.baseUrl, empty)).json(), { repair: empty });
+    assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [empty, fullTest] });
+    assert.equal((await send(restarted.baseUrl, card)).status, 200);
+    assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [card, fullTest] });
+    assert.deepEqual(reports, []);
+  });
+});
