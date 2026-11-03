@@ -5,6 +5,21 @@ export function bootstrapRepairs() {
   const count = document.querySelector("#repairs-count");
   const refreshButton = document.querySelector("#repairs-refresh");
   let loading = false;
+  let active = false;
+  let loaded = false;
+  let refreshTimer;
+
+  const clearRefreshTimer = () => {
+    window.clearTimeout(refreshTimer);
+    refreshTimer = undefined;
+  };
+
+  const scheduleRefresh = () => {
+    clearRefreshTimer();
+    if (active && !document.hidden) {
+      refreshTimer = window.setTimeout(() => { void refresh({ background: true }); }, 10_000);
+    }
+  };
 
   const showMessage = (message) => {
     const row = document.createElement("tr");
@@ -43,15 +58,18 @@ export function bootstrapRepairs() {
     return cell;
   };
 
-  async function refresh() {
+  async function refresh({ background = false } = {}) {
     if (loading) return;
     loading = true;
+    clearRefreshTimer();
     refreshButton.disabled = true;
     section.setAttribute("aria-busy", "true");
-    feedback.textContent = "Загрузка…";
-    delete feedback.dataset.tone;
-    count.hidden = true;
-    showMessage("Загрузка заказ-нарядов…");
+    if (!background || !loaded) {
+      feedback.textContent = "Загрузка…";
+      delete feedback.dataset.tone;
+      count.hidden = true;
+      showMessage("Загрузка заказ-нарядов…");
+    }
     try {
       const response = await fetch("/api/repairs", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
       if (!response.ok) throw new Error("Repairs request failed");
@@ -94,17 +112,38 @@ export function bootstrapRepairs() {
       count.textContent = String(payload.repairs.length);
       count.hidden = false;
       feedback.textContent = "";
+      delete feedback.dataset.tone;
+      loaded = true;
     } catch {
       feedback.dataset.tone = "error";
-      feedback.textContent = "Не удалось загрузить заказ-наряды. Нажмите «Обновить».";
-      showMessage("Список недоступен.");
+      if (background && loaded) {
+        feedback.textContent = "Не удалось обновить заказ-наряды. Показаны ранее загруженные данные.";
+      } else {
+        feedback.textContent = "Не удалось загрузить заказ-наряды. Нажмите «Обновить».";
+        showMessage("Список недоступен.");
+        loaded = false;
+      }
     } finally {
       loading = false;
       refreshButton.disabled = false;
       section.setAttribute("aria-busy", "false");
+      scheduleRefresh();
     }
   }
 
-  refreshButton.addEventListener("click", refresh);
-  return { refresh };
+  const setActive = (value) => {
+    active = value;
+    clearRefreshTimer();
+    if (active && !document.hidden) void refresh({ background: true });
+  };
+
+  const resume = () => {
+    clearRefreshTimer();
+    if (active && !document.hidden) void refresh({ background: true });
+  };
+
+  document.addEventListener("visibilitychange", resume);
+  window.addEventListener("focus", resume);
+  refreshButton.addEventListener("click", () => { void refresh(); });
+  return { setActive };
 }

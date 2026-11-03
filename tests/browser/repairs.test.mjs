@@ -20,6 +20,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
   process.env.GARAGE_DB_PATH = join(directory, "garage.sqlite");
   process.env.ONEC_REPAIRS_INTEGRATION_SECRET = secret;
   let browser;
+  let releaseList;
   const server = createAggregatorServer({ application: { streamSearch: async () => {} }, publicDir: resolve("src/frontend") });
   try {
     await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
@@ -29,6 +30,8 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     const errors = [];
     const repairRequests = [];
     let failList = false;
+    let holdList = false;
+    let onListHeld;
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/*", async (route) => {
       const request = route.request();
@@ -39,6 +42,10 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
       if (url.origin !== origin) return route.abort();
       if (url.pathname === "/api/repairs") {
         repairRequests.push(request);
+        if (holdList) await new Promise((resolve) => {
+          releaseList = resolve;
+          onListHeld();
+        });
         if (failList) return route.fulfill({ status: 500, json: { message: "Test database unavailable" } });
         return route.continue();
       }
@@ -167,8 +174,63 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await send(updated);
     await page.locator("#repairs-refresh").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
+    // Reproduce a saved fourth product: the visible list updates without a button.
+    await page.clock.install();
+    await send({ ...updated, goodsReadiness: { totalPositions: 3, availablePositions: 3 } });
+    await page.reload();
+    await page.getByText("В наличии 3 из 3 позиций", { exact: true }).waitFor();
+    await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 3 } });
+    holdList = true;
+    const beforePoll = repairRequests.length;
+    const listHeld = new Promise((resolve) => { onListHeld = resolve; });
+    await page.clock.runFor(10_001);
+    await listHeld;
+    assert.equal(repairRequests.length, beforePoll + 1);
+    assert.equal(await page.getByText("В наличии 3 из 3 позиций", { exact: true }).isVisible(), true);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    assert.equal(repairRequests.length, beforePoll + 1);
+    holdList = false;
+    releaseList();
+    releaseList = undefined;
+    await page.getByText("В наличии 3 из 4 позиций", { exact: true }).waitFor();
+    assert.equal(await page.locator(".repairs-readiness").getAttribute("data-tone"), "waiting");
+    assert.equal(await page.locator("#repairs-rows tr").count(), 1);
+
+    failList = true;
+    await page.clock.runFor(10_001);
+    await page.getByText("Не удалось обновить заказ-наряды. Показаны ранее загруженные данные.", { exact: true }).waitFor();
+    assert.equal(await page.getByText("В наличии 3 из 4 позиций", { exact: true }).isVisible(), true);
+    assert.equal(await page.locator("#repairs-count").isVisible(), true);
+    failList = false;
+    await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 4 } });
+    await page.clock.runFor(10_001);
+    await page.getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
+    assert.equal(await page.locator("#repairs-feedback").textContent(), "");
+
+    // Other functions and hidden browser tabs do not poll repairs.
+    await page.locator("#markup-function-tab").click();
+    const beforeInactive = repairRequests.length;
+    await page.clock.runFor(30_001);
+    assert.equal(repairRequests.length, beforeInactive);
+    await send({ ...updated, goodsReadiness: { totalPositions: 0, availablePositions: 0 } });
+    await page.locator("#repairs-function-tab").click();
+    await page.getByText("Не найдено товаров", { exact: true }).waitFor();
+    await page.evaluate(() => {
+      Object.defineProperty(document, "hidden", { configurable: true, value: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    const beforeHidden = repairRequests.length;
+    await page.clock.runFor(30_001);
+    assert.equal(repairRequests.length, beforeHidden);
+    await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 3 } });
+    await page.evaluate(() => {
+      delete document.hidden;
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await page.getByText("В наличии 3 из 4 позиций", { exact: true }).waitFor();
     assert.deepEqual(errors, []);
   } finally {
+    releaseList?.();
     await browser?.close();
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
