@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { SearchApplicationService } from "../../src/backend/application/search-application-service.ts";
+import { RealOrderApplicationService } from "../../src/backend/application/real-order-application-service.ts";
 import { SupplierSessionManager } from "../../src/backend/session/session-manager.ts";
 import { chromium } from "playwright";
 import { createAggregatorServer } from "../../src/backend/http/create-server.ts";
@@ -88,7 +89,7 @@ async function withCartPage(check, options = {}) {
         return testPurchaseOrder(lines, signal);
       },
       realCartOrder: {
-        refresh: async (lines) => { refreshCalls.push(structuredClone(lines)); await options.refreshGate?.(); if (options.refresh) return options.refresh(lines); return lines.map((line) => ({ ...structuredClone(line),
+        refresh: async (lines, signal) => { refreshCalls.push(structuredClone(lines)); await options.refreshGate?.(); if (options.refresh) return options.refresh(lines, signal); return lines.map((line) => ({ ...structuredClone(line),
           result: { ...line.result, price: options.refreshedPrice ?? line.result.price } })); },
         choices: async () => ({ partKom: { deliveries: [{ id: "regular", label: "Обычная доставка", type: "regular" }] },
           rossko: { deliveries: [{ id: "delivery", label: "Доставка", addressId: null }],
@@ -348,6 +349,66 @@ test("garage refresh updates real delivery dates and clearly flags failed or exp
     assert.match(await delivery.innerText(), /Срок доставки устарел/);
     assert.match(await page.locator("#garage-status").innerText(), /Не подтверждены/);
   }, options);
+});
+
+test("garage opening and refresh keep the selected PartKOM provider among duplicate warehouses just like cart opening", async () => {
+  let price = 100;
+  let deliveryDate = "2028-03-10";
+  const streamSearch = async (query, emit) => {
+    emit({ type: "search_started", article: query.article, suppliers: ["armtek", "part-kom"] });
+    for (const [providerId, currentPrice] of [["202", price], ["303", 150]]) {
+      const current = offer("part-kom", 3, { supplier: "part-kom", makerId: "101", providerId },
+        { price: currentPrice, deliveryDate, deliveryDateApproximate: false }, "Цилиндр сцепления рабочий");
+      emit({ type: "result", result: current });
+    }
+    for (const supplier of ["armtek", "part-kom"]) emit({ type: "supplier_status", supplier, status: "completed" });
+    emit({ type: "search_completed", article: query.article });
+  };
+  const cartRefresh = new RealOrderApplicationService(new SupplierSessionManager(), streamSearch);
+  await withCartPage(async (page, { origin, orderCalls }) => {
+    const vehicleId = await openGarageWithFirstOffer(page, { quantity: 2, beforeOpen: () => { price = 180; } });
+    const row = page.locator('#garage-items tr[data-garage-item-id]');
+    assert.equal(await row.evaluate((node) => node.classList.contains("garage-item--unconfirmed")), false);
+    assert.equal(await row.locator(".garage-cart-button").isEnabled(), true);
+    const readItem = async () => {
+      const response = await page.request.get(`${origin}/api/garage/vehicles/${vehicleId}`);
+      const payload = await response.json();
+      assert.doesNotMatch(JSON.stringify(payload), /makerId|providerId|purchaseReference|purchase_reference/);
+      return payload.vehicle.items[0];
+    };
+    assert.equal((await readItem()).purchasePrice, 180, "opening must retain provider 202 despite the now cheaper alternative");
+    const refreshGarage = async () => {
+      const response = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/garage/vehicles/${vehicleId}/refresh`);
+      await page.locator("#garage-refresh").click();
+      assert.equal((await response).status(), 200);
+      await page.waitForFunction(() => document.querySelector("#garage-view").getAttribute("aria-busy") === "false");
+    };
+    price = 190;
+    deliveryDate = "2028-03-13";
+    await refreshGarage();
+    const item = await readItem();
+    assert.equal(item.purchasePrice, 190);
+    assert.equal(item.deliveryDate, deliveryDate);
+    assert.equal(item.supplierQuantity, 3);
+    assert.equal(item.requiredQuantity, 2);
+    assert.equal(item.availabilityStatus, "available");
+    assert.match(await page.locator("#garage-status").innerText(), /Проверено предложений: 1/);
+    assert.match(await row.locator('td[data-garage-column="deliveryDate"]').innerText(), /13\.03\.2028/);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "garage-partkom-refreshed.png") });
+    await row.locator(".garage-cart-button").click();
+    await page.waitForFunction(() => document.querySelector("#garage-status").textContent.includes("Добавлено позиций"));
+    price = 230;
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#cart-refresh-overlay").hidden);
+    const cart = await (await page.request.get(`${origin}/api/cart`)).json();
+    assert.equal(cart.items.length, 1);
+    assert.equal(cart.items[0].unavailable, null);
+    assert.equal(cart.items[0].result.price, 230);
+    await page.locator("#cart-close").click();
+    await refreshGarage();
+    assert.equal((await readItem()).purchasePrice, cart.items[0].result.price);
+    assert.deepEqual(orderCalls, [], "refresh never submits a supplier order");
+  }, { streamSearch, refresh: cartRefresh.refresh.bind(cartRefresh), reducedMotion: "reduce" });
 });
 
 test("garage automatically checks saved offers, greys missing positions and adds only confirmed quantities", async () => {

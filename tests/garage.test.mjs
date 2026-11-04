@@ -9,12 +9,185 @@ import { SqliteGarageRepository } from "../src/backend/garage/sqlite-garage-repo
 import { CartApplicationService } from "../src/backend/purchasing/cart-application-service.ts";
 import { SqliteCartRepository } from "../src/backend/purchasing/sqlite-cart-repository.ts";
 import { attachPurchaseReference } from "../src/backend/purchasing/purchase-offer.ts";
+import { parsePartKomApiResults } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
+import { createHttpGarageApplication } from "../src/backend/garage/http-garage-application.ts";
+import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../src/backend/errors.ts";
 
 const offer = {
   supplier: "rossko", brand: "Toyota", article: "ABC-123", title: "Фильтр", price: 100,
   quantity: 4, warehouse: "Основной", deliveryDate: "2026-09-11", deliveryDateTo: "2026-09-13", deliveryDateApproximate: true,
   link: "https://rossko.ru/product/123",
 };
+
+// Fictional PartKOM providers intentionally share the same public warehouse label.
+const partKomOffers = (price = 100) => parsePartKomApiResults([
+  { number: "2478298", maker: "Ford", description: "Цилиндр сцепления рабочий", makerId: 101,
+    providerId: 202, placement: "Склад", price, quantity: 3, expectedDate: "2028-03-10" },
+  { number: "2478298", maker: "Ford", description: "Цилиндр сцепления рабочий", makerId: 101,
+    providerId: 303, placement: "Склад", price: 150, quantity: 5, expectedDate: "2028-03-12" },
+], "2478298");
+
+test("garage retains the supplier identity across restart and refreshes the same PartKOM provider as the cart", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autoservice-garage-provider-"));
+  const path = join(directory, "garage.sqlite");
+  let results = partKomOffers(130);
+  let service = new GarageApplicationService(new SqliteGarageRepository(path), {
+    findOffers: async () => ({ results, failed: false }),
+  });
+  try {
+    const vehicle = service.createVehicle("Тестовый Transit");
+    const initial = partKomOffers()[0];
+    const saved = service.addOffer(vehicle.id, vehicle.revision, service.registerSearchOffer(initial), 35, 2);
+    service.close();
+    service = new GarageApplicationService(new SqliteGarageRepository(path), {
+      findOffers: async () => ({ results, failed: false }),
+    });
+    const refresh = () => service.refreshVehicle(vehicle.id, service.getVehicle(vehicle.id).revision, new AbortController().signal);
+    const fresh = (await refresh()).items[0];
+    assert.equal(fresh.availabilityStatus, "available");
+    assert.equal(fresh.purchasePrice, 130);
+    assert.equal(fresh.regularPrice, 175.5);
+    assert.equal(fresh.requiredQuantity, 2);
+    assert.equal(fresh.id, saved.id);
+    assert.equal(fresh.deliveryDate, results[0].deliveryDate);
+    const prepared = await service.prepareCartOffers(vehicle.id, service.getVehicle(vehicle.id).revision, saved.id,
+      new AbortController().signal, (_id, result) => { assert.equal(result.price, 130); return true; });
+    assert.equal(prepared.offers.length, 1);
+    assert.doesNotMatch(JSON.stringify(prepared), /providerId|makerId|purchaseReference|purchase_reference/);
+    results = [results[1]];
+    assert.equal((await refresh()).items[0].availabilityStatus, "not_found", "another provider must not silently replace the original");
+    assert.equal(service.getVehicle(vehicle.id).items[0].purchasePrice, 130);
+    results = partKomOffers(140);
+    assert.equal((await refresh()).items[0].purchasePrice, 140);
+  } finally { service.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("garage recovers an unambiguous legacy PartKOM snapshot then retains its private provider identity", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autoservice-garage-legacy-provider-"));
+  const path = join(directory, "garage.sqlite");
+  let results = partKomOffers();
+  const service = new GarageApplicationService(new SqliteGarageRepository(path), {
+    findOffers: async () => ({ results, failed: false }),
+  });
+  try {
+    const vehicle = service.createVehicle("Сохранённый Transit");
+    // structuredClone simulates a pre-migration garage entry with no private reference.
+    const initial = structuredClone(results[0]);
+    service.addOffer(vehicle.id, vehicle.revision, service.registerSearchOffer(initial), 35, 1);
+    const refresh = () => service.refreshVehicle(vehicle.id, service.getVehicle(vehicle.id).revision, new AbortController().signal);
+    assert.equal((await refresh()).items[0].availabilityStatus, "available");
+    results = partKomOffers(135);
+    assert.equal((await refresh()).items[0].purchasePrice, 135);
+  } finally { service.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("legacy garage entries remain unconfirmed when snapshots cannot distinguish providers", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autoservice-garage-ambiguous-provider-"));
+  const initial = structuredClone(partKomOffers()[0]);
+  let results = partKomOffers(110);
+  const service = new GarageApplicationService(new SqliteGarageRepository(join(directory, "garage.sqlite")), {
+    findOffers: async () => ({ results, failed: false }),
+  });
+  try {
+    const vehicle = service.createVehicle("Тестовая машина");
+    service.addOffer(vehicle.id, vehicle.revision, service.registerSearchOffer(initial), 35, 1);
+    const refresh = () => service.prepareCartOffers(vehicle.id, service.getVehicle(vehicle.id).revision, undefined,
+      new AbortController().signal, () => assert.fail("ambiguous offers must never be orderable"));
+    let current = await refresh();
+    assert.equal(current.vehicle.items[0].availabilityStatus, "not_found", "neither provider matches the stored price");
+    assert.deepEqual(current.offers, []);
+    results = partKomOffers();
+    results[1].price = 100;
+    current = await refresh();
+    assert.equal(current.vehicle.items[0].availabilityStatus, "not_found", "identical saved snapshots remain ambiguous");
+    assert.deepEqual(current.offers, []);
+    assert.equal(current.vehicle.items[0].purchasePrice, initial.price);
+  } finally { service.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("garage refresh uses persisted identities for every cart supplier and accepts both VAZ article forms", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autoservice-garage-identities-"));
+  const reference = (supplier, id) => supplier === "armtek" ? { supplier, keyzak: id, returnDays: 14 }
+    : supplier === "part-kom" ? { supplier, makerId: "101", providerId: id }
+      : supplier === "forum-auto" ? { supplier, warehouse: "Основной", gid: id } : { supplier, partGuid: "part", stockId: id };
+  const origins = { "part-kom": "https://www.part-kom.ru/", armtek: "https://etp.armtek.ru/",
+    "forum-auto": "https://itrade.forum-auto.ru/", rossko: "https://samara.rossko.ru/" };
+  try {
+    for (const supplier of Object.keys(origins)) {
+      const original = attachPurchaseReference({ ...offer, supplier, article: "2121-1803027", brand: "TEST", link: origins[supplier] }, reference(supplier, "202"));
+      const updated = attachPurchaseReference({ ...original, article: "21210-1803027", price: 180, quantity: 7,
+        warehouse: "Обновлённое название склада", deliveryDate: "2028-03-10", deliveryDateTo: null, deliveryDateApproximate: false }, reference(supplier, "202"));
+      const other = attachPurchaseReference({ ...updated, price: 90 }, reference(supplier, "303"));
+      let results = [other, updated];
+      let failed = false;
+      const lookup = { findOffers: async () => ({ results, failed }) };
+      const path = join(directory, `${supplier}.sqlite`);
+      let service = new GarageApplicationService(new SqliteGarageRepository(path), lookup);
+      try {
+        const vehicle = service.createVehicle("Тестовый автомобиль");
+        const item = service.addOffer(vehicle.id, vehicle.revision, service.registerSearchOffer(original), 25, 2);
+        service.close();
+        service = new GarageApplicationService(new SqliteGarageRepository(path), lookup);
+        const refresh = () => service.refreshVehicle(vehicle.id, service.getVehicle(vehicle.id).revision, new AbortController().signal);
+        const current = (await refresh()).items[0];
+        assert.equal(current.purchasePrice, 180, supplier);
+        assert.equal(current.article, "21210-1803027");
+        assert.equal(current.availabilityStatus, "available");
+        failed = true;
+        assert.equal((await refresh()).items[0].availabilityStatus, "supplier_error");
+        failed = false;
+        assert.equal((await refresh()).items[0].availabilityStatus, "available");
+        results = [other];
+        assert.equal((await refresh()).items[0].availabilityStatus, "not_found", supplier);
+        assert.equal(service.getVehicle(vehicle.id).items[0].purchasePrice, 180);
+        assert.equal(service.getVehicle(vehicle.id).items[0].id, item.id);
+        results = [updated, updated];
+        assert.equal((await refresh()).items[0].availabilityStatus, "not_found", "duplicate matches remain ambiguous");
+        results = [updated];
+        assert.equal((await refresh()).items[0].availabilityStatus, "available");
+      } finally { service.close(); }
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("garage lookup requires completed supplier search and keeps upstream failures distinct from missing goods", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autoservice-garage-lookup-"));
+  const previousPath = process.env.GARAGE_DB_PATH;
+  process.env.GARAGE_DB_PATH = join(directory, "garage.sqlite");
+  let mode = "completed";
+  const controller = new AbortController();
+  const service = createHttpGarageApplication(async (_query, emit) => {
+    if (mode === "abort") { controller.abort(new Error("fixture abort")); return; }
+    if (mode === "auth_throw") throw new SupplierAuthError("private credential detail");
+    if (mode === "timeout_throw") throw new SupplierTimeoutError("private upstream URL");
+    if (mode === "integration_throw") throw new SupplierIntegrationError("private supplier payload");
+    if (mode === "missing") { emit({ type: "supplier_status", supplier: "rossko", status: "completed" }); return; }
+    emit({ type: "result", result: offer });
+    if (mode === "fatal") emit({ type: "fatal_error", message: "private failure" });
+    if (mode === "other_supplier") emit({ type: "supplier_status", supplier: "armtek", status: "completed" });
+    if (!["incomplete", "fatal", "other_supplier"].includes(mode)) {
+      emit({ type: "supplier_status", supplier: "rossko", status: mode });
+    }
+  });
+  try {
+    const vehicle = service.createVehicle("Тестовая машина");
+    service.addOffer(vehicle.id, vehicle.revision, service.registerSearchOffer(offer), 35, 1);
+    for (mode of ["completed", "missing", "auth_error", "timeout", "error", "incomplete", "fatal", "other_supplier",
+      "auth_throw", "timeout_throw", "integration_throw"]) {
+      const result = await service.refreshVehicle(vehicle.id, service.getVehicle(vehicle.id).revision, controller.signal);
+      assert.equal(result.items[0].availabilityStatus, mode === "completed" ? "available" : mode === "missing" ? "not_found" : "supplier_error", mode);
+      assert.doesNotMatch(JSON.stringify(result), /private/);
+    }
+    mode = "abort";
+    const before = service.getVehicle(vehicle.id);
+    await assert.rejects(service.refreshVehicle(vehicle.id, before.revision, controller.signal), /fixture abort/);
+    assert.deepEqual(service.getVehicle(vehicle.id), before);
+  } finally {
+    service.close();
+    if (previousPath === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previousPath;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("garage prepares only fresh confirmed cart offers and retains missing or failed positions", async () => {
   const directory = await mkdtemp(join(tmpdir(), "autoservice-garage-cart-"));

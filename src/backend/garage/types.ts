@@ -1,4 +1,5 @@
 import type { NormalizedSearchResult, SupplierId } from "../types.ts";
+import type { PurchaseReference } from "../purchasing/purchase-offer.ts";
 
 export type GarageAvailabilityStatus = "available" | "unknown" | "insufficient" | "not_found" | "supplier_error";
 
@@ -50,6 +51,7 @@ export interface GarageVehicleDetails extends GarageVehicle {
 
 export interface GarageSearchOffer {
   result: NormalizedSearchResult;
+  reference: PurchaseReference | null;
   expiresAt: number;
 }
 
@@ -62,14 +64,15 @@ export interface GarageRepository {
   createGroup(group: GarageGroup, vehicleRevision: number, updatedAt: string): "created" | "conflict" | "missing";
   renameGroup(vehicleId: string, groupId: string, vehicleRevision: number, name: string, updatedAt: string): GarageGroup | "conflict" | "missing";
   deleteGroup(vehicleId: string, groupId: string, vehicleRevision: number, updatedAt: string): "deleted" | "conflict" | "missing";
-  createItem(item: GarageItem, vehicleRevision: number, updatedAt: string): "created" | "conflict" | "missing";
+  createItem(item: GarageItem, vehicleRevision: number, updatedAt: string, reference: PurchaseReference | null): "created" | "conflict" | "missing";
   findGroup(id: string): GarageGroup | null;
   findItem(id: string): GarageItem | null;
+  getItemReference(id: string): PurchaseReference | null;
   findDuplicate(vehicleId: string, groupId: string | null, supplier: SupplierId, brand: string, article: string, warehouse: string | null): GarageItem | null;
   incrementItem(id: string, revision: number, increment: number, updatedAt: string): GarageItem | "conflict" | "missing";
   updateItem(id: string, revision: number, requiredQuantity: number, comment: string, groupId: string | null, updatedAt: string): GarageItem | "conflict" | "missing";
   deleteItem(id: string, revision: number, updatedAt: string): "deleted" | "conflict" | "missing";
-  refreshItem(item: GarageItem, updatedAt: string): boolean;
+  refreshItem(item: GarageItem, updatedAt: string, reference?: PurchaseReference | null): boolean;
   getUiPreference(key: string): string | null;
   setUiPreference(key: string, value: string): void;
   close(): void;

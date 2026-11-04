@@ -1,6 +1,6 @@
 import { CartError, type CartRefreshIssue, type RealOrderGateway, type RefreshedPurchaseLine } from "../purchasing/cart-application-service.ts";
 import type { CheckoutDetails, OrderChoices, OrderSupplier, RosskoOrderChoices } from "../purchasing/order-contract.ts";
-import { getPurchaseReference, type PurchaseLine, type PurchaseReference } from "../purchasing/purchase-offer.ts";
+import { getPurchaseReference, samePurchaseOffer, type PurchaseLine, type PurchaseReference } from "../purchasing/purchase-offer.ts";
 import type { SupplierSessionManager } from "../session/session-manager.ts";
 import type { SearchStreamEvent, SupplierSearchQuery } from "../types.ts";
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../suppliers/errors.ts";
@@ -11,7 +11,6 @@ import { getPartKomOrderChoices, listPartKomOrderHistory, placePartKomOrder } fr
 import { getRosskoOrderChoices, listRosskoOrderHistory, placeRosskoOrder } from "../suppliers/rossko/rossko-api-adapter.ts";
 import type { OrderHistory, SupplierOrderHistoryQuery } from "../purchasing/order-history-contract.ts";
 import { createBoundedAbortSignal } from "../abort.ts";
-import { additionalArticleVariants } from "../article-search-variants.ts";
 import type { SupplierCredentialRepository, StoredSupplierCredentials } from "../session/encrypted-credential-store.ts";
 import { decodeRosskoApiCredentials } from "./supplier-session-service.ts";
 import { parseRosskoOrderSettings, RosskoOrderSettingsValidationError, type RosskoOrderSettings, type RosskoOrderSettingsState } from "../purchasing/rossko-order-settings.ts";
@@ -19,9 +18,6 @@ import type { RosskoApiCredentials } from "../types.ts";
 
 const validPhone = (value: unknown): value is string => typeof value === "string" && /^[+\d()\s-]{6,40}$/.test(value);
 const sameText = (left: string, right: string): boolean => left.trim().toLocaleUpperCase() === right.trim().toLocaleUpperCase();
-const articleKey = (article: string): string => article.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase();
-const sameArticle = (left: string, right: string): boolean => [left, ...additionalArticleVariants(left).map((variant) => variant.article)]
-  .some((article) => articleKey(article) === articleKey(right));
 const supplierNames: Record<OrderSupplier, string> = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
 
 export function allowedRosskoOrderChoices(options: RosskoOrderChoices): RosskoOrderChoices {
@@ -89,20 +85,6 @@ function selectedRosskoOrderDetails(options: RosskoOrderChoices, settings: Rossk
   }
   return { deliveryId: settings.deliveryId, addressId: settings.addressId, paymentId: settings.paymentId,
     companyId: settings.companyId, name: settings.contactName, phone: settings.contactPhone, deliveryParts: false };
-}
-
-function sameOffer(current: PurchaseLine, fresh: { result: PurchaseLine["result"]; reference: PurchaseReference }): boolean {
-  if (!sameArticle(current.result.article, fresh.result.article) || !sameText(current.result.brand, fresh.result.brand)
-    || current.reference.supplier !== fresh.reference.supplier) return false;
-  const old = current.reference;
-  const next = fresh.reference;
-  if (old.supplier === "armtek" && next.supplier === "armtek") return old.keyzak === next.keyzak;
-  if (old.supplier === "part-kom" && next.supplier === "part-kom") return old.makerId === next.makerId && old.providerId === next.providerId;
-  if (old.supplier === "forum-auto" && next.supplier === "forum-auto") {
-    return old.gid ? old.gid === next.gid : old.warehouse === next.warehouse;
-  }
-  return old.supplier === "rossko" && next.supplier === "rossko" && old.stockId === next.stockId
-    && old.partGuid === next.partGuid;
 }
 
 export class RealOrderApplicationService implements RealOrderGateway {
@@ -224,7 +206,7 @@ export class RealOrderApplicationService implements RealOrderGateway {
       const lookup = found.get(JSON.stringify([line.reference.supplier, line.result.article]));
       if (!lookup) throw new Error("Cart offer refresh result is missing");
       if (lookup.issue) return { ...line, refreshIssue: lookup.issue };
-      const matches = lookup.offers.filter((offer) => sameOffer(line, offer));
+      const matches = lookup.offers.filter((offer) => samePurchaseOffer(line, offer));
       if (matches.length !== 1) return { ...line, refreshIssue: matches.length
         ? { reason: "check_failed", message: "Найдено несколько подходящих предложений. Товар недоступен для заказа." }
         : { reason: "not_found", message: "Товара больше нет у поставщика." } };

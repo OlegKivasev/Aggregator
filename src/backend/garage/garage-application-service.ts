@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { NormalizedSearchResult } from "../types.ts";
 import type { GarageAvailabilityStatus, GarageGroup, GarageItem, GarageOfferLookup, GarageRepository, GarageSearchOffer, GarageVehicle, GarageVehicleDetails } from "./types.ts";
+import { getPurchaseReference, samePurchaseArticle, samePurchaseOffer } from "../purchasing/purchase-offer.ts";
 
 const maxNameLength = 120;
 const maxCommentLength = 1_000;
@@ -59,11 +60,6 @@ function normalizeGroupId(value: unknown): string | null {
   return value;
 }
 function sameText(left: string, right: string): boolean { return left.trim().toLocaleLowerCase("ru-RU") === right.trim().toLocaleLowerCase("ru-RU"); }
-function sameArticle(left: string, right: string): boolean {
-  const normalize = (value: string) => value.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase("ru-RU");
-  const article = normalize(left);
-  return article.length > 0 && article === normalize(right);
-}
 function safeLink(value: string): string {
   const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new GarageValidationError("offer link is invalid");
@@ -134,7 +130,7 @@ export class GarageApplicationService {
   registerSearchOffer(result: NormalizedSearchResult): string {
     this.purgeExpiredOffers();
     const id = randomUUID();
-    this.offers.set(id, { result: structuredClone(result), expiresAt: Date.now() + offerLifetimeMs });
+    this.offers.set(id, { result: structuredClone(result), reference: structuredClone(getPurchaseReference(result)), expiresAt: Date.now() + offerLifetimeMs });
     return id;
   }
 
@@ -219,7 +215,7 @@ export class GarageApplicationService {
     }
     if (strategy !== undefined && strategy !== "new") throw new GarageValidationError("duplicateStrategy is invalid");
     const item = this.itemFromOffer(vehicleId, normalizedGroupId, snapshot, quantity, markup);
-    const result = this.repository.createItem(item, revision, now());
+    const result = this.repository.createItem(item, revision, now(), offer.reference);
     if (result === "conflict") throw new GarageConflictError();
     if (result === "missing") throw new GarageNotFoundError();
     return item;
@@ -360,9 +356,20 @@ export class GarageApplicationService {
       this.repository.refreshItem({ ...item, lastCheckedAt: checkedAt, availabilityStatus: "supplier_error" }, checkedAt);
       return null;
     }
-    const candidates = lookup.results.filter((result) => result.supplier === item.supplier && sameText(result.brand, item.brand) && sameArticle(result.article, item.article));
-    const sameWarehouse = candidates.filter((result) => result.warehouse === item.warehouse);
-    const matches = sameWarehouse.length === 1 ? sameWarehouse : candidates.length === 1 ? candidates : [];
+    const reference = this.repository.getItemReference(item.id);
+    const candidates = lookup.results.filter((result) => result.supplier === item.supplier && sameText(result.brand, item.brand) && samePurchaseArticle(item.article, result.article));
+    let matches: NormalizedSearchResult[];
+    if (reference) {
+      matches = candidates.filter((result) => {
+        const fresh = getPurchaseReference(result);
+        return fresh && samePurchaseOffer({ result: item, reference }, { result, reference: fresh });
+      });
+    } else {
+      // Legacy rows have no private routing IDs. Recover one only from a unique saved snapshot.
+      const sameWarehouse = candidates.filter((result) => result.warehouse === item.warehouse);
+      matches = sameWarehouse.length === 1 ? sameWarehouse : candidates.length === 1 ? candidates
+        : sameWarehouse.filter((result) => result.price === item.purchasePrice && sameText(result.title.replace(/\s+/g, " "), item.title));
+    }
     if (matches.length !== 1) {
       this.repository.refreshItem({ ...item, lastCheckedAt: checkedAt, availabilityStatus: "not_found" }, checkedAt);
       return null;
@@ -375,7 +382,7 @@ export class GarageApplicationService {
       link: safeLink(offer.link), supplierQuantity: quantity, purchasePrice: offer.price,
       regularPrice: regularPrice(offer.price, item.markupPercent), lastCheckedAt: checkedAt,
       availabilityStatus: availability(quantity, item.requiredQuantity),
-    }, checkedAt);
+    }, checkedAt, getPurchaseReference(offer));
     return updated ? offer : null;
   }
 }
