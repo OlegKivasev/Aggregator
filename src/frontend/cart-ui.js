@@ -3,6 +3,7 @@ import { formatDeliveryDate } from "./supplier-search-summary.js";
 import { formatOrderDate } from "./order-date-formatting.js";
 import { formatOrderStatus } from "./order-history-presentation.js";
 import { armtekReturnSource, formatArmtekReturnDays, hasOfferDeliveryWarning, hasSupplierWeekendDelivery } from "./order-notices.js";
+import { setupCartTabs } from "./cart-tabs-ui.js";
 
 const supplierNames = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
 const maximumQuantity = (result) => Number.isFinite(result.quantity) ? Math.min(1_000_000, Math.floor(result.quantity)) : 0;
@@ -238,7 +239,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   modal.innerHTML = `<header class="analogs-modal__header"><h2 id="cart-title">Корзина</h2>
     <div class="cart-header-actions"><button type="button" class="btn btn-light cart-clear-button" id="cart-clear" aria-label="Очистить вкладку «Все»" title="Очистить вкладку «Все»"><img src="/recycle-bin.png" alt="" aria-hidden="true"></button>
       <button type="button" class="btn btn-light analogs-modal__close" id="cart-close" aria-label="Закрыть корзину">×</button></div></header>
-    <div class="cart-tabs" id="cart-tabs" role="tablist" aria-label="Поставщики в корзине"></div>
+    <div class="cart-tabs" id="cart-tabs" role="tablist" aria-label="Вкладки корзины"></div>
     <div class="cart-content" id="cart-tab-panel" role="tabpanel" aria-labelledby="cart-tab-all">
       <div class="cart-table-scroll"><table class="table align-middle cart-table"><thead><tr>
         <th class="cart-select-column"><label class="cart-selection"><input id="cart-select-all" type="checkbox" aria-label="Выбрать все товары вкладки" title="Выбрать все товары вкладки"><span class="cart-mobile-label">Выбрать все</span></label></th><th>Запчасть</th><th>Наименование</th><th id="cart-supplier-column">Поставщик</th><th>Доставка</th><th class="cart-price-column">Цена, ₽</th><th class="cart-quantity-column">Кол-во</th><th class="cart-price-column">Стоимость, ₽</th><th><span class="visually-hidden">Удалить</span></th>
@@ -297,7 +298,6 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   toast.setAttribute("aria-live", "polite");
   document.body.append(toast);
   const body = modal.querySelector("#cart-items");
-  const tabs = modal.querySelector("#cart-tabs");
   const status = modal.querySelector("#cart-status");
   const refreshOverlay = modal.querySelector("#cart-refresh-overlay");
   const testButton = modal.querySelector("#cart-test-order");
@@ -318,7 +318,6 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   let checking = false;
   let toastTimeout;
   let returnFocus = toggle;
-  let activeSupplier = "all";
   let refreshedRevision = null;
   let refreshedItemIds = new Set();
   let refreshedUntil = 0;
@@ -339,17 +338,19 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     toast.hidden = false;
     toastTimeout = setTimeout(() => { toast.hidden = true; }, 4000);
   };
+  const cartTabs = setupCartTabs({ modal, supplierNames, getCart: () => cart,
+    isLocked: () => busy || checking || Boolean(cart?.testing),
+    onChange: () => { status.textContent = ""; render(); }, notify });
   const render = () => {
     if (!cart) return;
     const focusedControl = document.activeElement.closest?.("#cart-items input, #cart-items button");
-    const focusedTab = document.activeElement.closest?.(".cart-tab")?.dataset.cartSupplier;
     const focusedId = focusedControl?.closest("tr")?.dataset.cartItemId;
     const focusedSelector = focusedControl?.matches(".cart-item-select") ? ".cart-item-select"
       : focusedControl?.matches("input") ? ".cart-quantity" : ".cart-remove";
     const locked = busy || checking || cart.testing;
-    const suppliers = Object.keys(supplierNames).filter((supplier) => cart.items.some((item) => item.result.supplier === supplier));
-    if (activeSupplier !== "all" && !suppliers.includes(activeSupplier)) activeSupplier = "all";
-    const items = activeSupplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === activeSupplier);
+    cartTabs.render();
+    const supplierView = cartTabs.getSupplier() !== "all";
+    const items = cartTabs.getItems();
     const count = items.reduce((sum, item) => sum + item.quantity, 0);
     const currentIds = new Set(cart.items.map((item) => item.id));
     for (const id of selectedIds) if (!currentIds.has(id)) selectedIds.delete(id);
@@ -357,16 +358,8 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     for (const item of cart.items) if (item.unavailable || pending.has(item.id)) selectedIds.delete(item.id);
     const selected = items.filter((item) => selectedIds.has(item.id));
     const selectable = items.filter((item) => !pending.has(item.id) && !item.unavailable);
-    tabs.innerHTML = ["all", ...suppliers].map((supplier) => {
-      const name = supplier === "all" ? "Все" : supplierNames[supplier];
-      const tabCount = supplier === "all" ? cart.count : cart.items.filter((item) => item.result.supplier === supplier).reduce((sum, item) => sum + item.quantity, 0);
-      return `<button type="button" class="cart-tab" id="cart-tab-${supplier}" role="tab" data-cart-supplier="${supplier}"
-        aria-selected="${activeSupplier === supplier}" aria-controls="cart-tab-panel" tabindex="${activeSupplier === supplier ? "0" : "-1"}"
-        aria-label="${name}: ${tabCount} шт.">${name}<span class="cart-tab__count" aria-hidden="true">${tabCount}</span></button>`;
-    }).join("");
-    modal.querySelector("#cart-tab-panel").setAttribute("aria-labelledby", `cart-tab-${activeSupplier}`);
-    modal.querySelector("#cart-supplier-column").hidden = activeSupplier !== "all";
-    modal.querySelector(".cart-table").classList.toggle("is-supplier-view", activeSupplier !== "all");
+    modal.querySelector("#cart-supplier-column").hidden = supplierView;
+    modal.querySelector(".cart-table").classList.toggle("is-supplier-view", supplierView);
     badge.textContent = String(cart.count);
     badge.hidden = cart.count === 0;
     toggle.hidden = cart.count === 0 && !toggle.closest("#garage-tools");
@@ -382,20 +375,20 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       const result = item.result;
       const unresolved = pending.has(item.id);
       const blocked = unresolved || Boolean(item.unavailable);
-      return `<tr data-cart-item-id="${escapeHtml(item.id)}" class="${item.unavailable ? "is-unavailable" : selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><label class="cart-selection"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || blocked ? "disabled" : ""}><span class="cart-mobile-label">К заказу</span></label></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
+      return `<tr data-cart-item-id="${escapeHtml(item.id)}" draggable="${!locked}" class="${item.unavailable ? "is-unavailable" : selectedIds.has(item.id) ? "is-selected" : ""}"><td class="cart-select-cell"><label class="cart-selection"><input class="cart-item-select" type="checkbox" aria-label="Выбрать для заказа ${escapeHtml(result.article)}" ${selectedIds.has(item.id) ? "checked" : ""} ${locked || blocked ? "disabled" : ""}><span class="cart-mobile-label">К заказу</span></label></td><td class="cart-item-part"><span>${escapeHtml(formatBrand(result.brand))}</span><span class="cart-item-article">${escapeHtml(formatArticle(result.article))}</span></td>
         <td class="cart-item-name">${escapeHtml(result.title)}${unresolved ? '<span class="cart-item-check">Статус заказа требует сверки с поставщиком.</span>' : item.unavailable ? `<span class="cart-item-check">${escapeHtml(item.unavailable.message)}</span>` : ""}${unresolved ? `<button type="button" class="cart-resolve-button" ${locked ? "disabled" : ""}>Сверить заказ</button>` : ""}</td>
-        ${activeSupplier === "all" ? `<td class="cart-item-supplier" data-label="Поставщик / склад">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
-        <td class="cart-item-delivery" data-label="Доставка"><span class="${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span>${activeSupplier !== "all" ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
+        ${!supplierView ? `<td class="cart-item-supplier" data-label="Поставщик / склад">${escapeHtml(supplierNames[result.supplier] ?? result.supplier)}<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span></td>` : ""}
+        <td class="cart-item-delivery" data-label="Доставка"><span class="${hasOfferDeliveryWarning(result.supplier, result.deliveryDate, result.deliveryDateTo) ? "delivery-date--warning" : ""}">${escapeHtml(formatDeliveryDate(result.deliveryDate, result.deliveryDateApproximate, result.deliveryDateTo))}</span>${supplierView ? `<span class="cart-item-warehouse">${escapeHtml(result.warehouse ?? "Склад не указан")}</span>` : ""}</td>
         <td class="cart-item-price" data-label="Цена, ₽">${renderPrices(result)}</td>
         <td class="cart-item-quantity" data-label="Количество"><input class="cart-quantity" type="number" min="1" max="${maximumQuantity(result)}" step="1" value="${item.quantity}" inputmode="numeric"
           aria-label="Количество для ${escapeHtml(result.article)}" ${locked || blocked ? "disabled" : ""}><span class="cart-item-stock">${item.unavailable ? "—" : `из ${maximumQuantity(result)}`}</span></td>
         <td class="cart-item-sum" data-label="Стоимость, ₽">${renderPrices(result, item.quantity)}</td>
         <td class="cart-item-remove"><button type="button" class="cart-remove btn btn-light" aria-label="Удалить ${escapeHtml(result.article)}" title="Удалить" ${locked || unresolved ? "disabled" : ""}>×</button></td></tr>`;
-    }).join("") : `<tr><td colspan="${activeSupplier === "all" ? 9 : 8}" class="cart-empty">Корзина пуста. Добавьте товары из таблицы предложений.</td></tr>`;
+    }).join("") : `<tr><td colspan="${supplierView ? 8 : 9}" class="cart-empty">${cart.items.length ? "В этой вкладке нет товаров. Перетащите сюда товар из другой вкладки." : "Корзина пуста. Добавьте товары из таблицы предложений."}</td></tr>`;
     testButton.disabled = locked || !selected.length;
-    testButton.textContent = checking ? "Оформляем…" : activeSupplier === "all" ? "Оформить заказы" : "Оформить заказ";
+    testButton.textContent = checking ? "Оформляем…" : supplierView ? "Оформить заказ" : "Оформить заказы";
     clearButton.disabled = locked || !items.length || items.some((item) => pending.has(item.id));
-    const clearLabel = `Очистить вкладку «${activeSupplier === "all" ? "Все" : supplierNames[activeSupplier]}»`;
+    const clearLabel = `Очистить вкладку «${cartTabs.getName()}»`;
     clearButton.title = clearLabel;
     clearButton.setAttribute("aria-label", clearLabel);
     if (modal.open && focusedId) {
@@ -403,7 +396,6 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       if (replacement && !replacement.disabled) replacement.focus();
       else modal.querySelector("#cart-close").focus();
     }
-    if (modal.open && focusedTab) (tabs.querySelector(`#cart-tab-${CSS.escape(focusedTab)}`) ?? tabs.querySelector('[aria-selected="true"]')).focus();
   };
   const refresh = async () => {
     cart = validateCart(await api("/api/cart"));
@@ -453,7 +445,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
 
   toggle.addEventListener("click", async () => {
     returnFocus = document.activeElement;
-    activeSupplier = "all";
+    cartTabs.reset();
     selectedIds.clear();
     if (!modal.open) modal.showModal();
     if (busy || checking) return;
@@ -476,8 +468,8 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   modal.querySelector("#cart-close").addEventListener("click", () => modal.close());
   clearButton.addEventListener("click", () => {
     if (busy || checking || cart?.testing || !cart?.items.length) return;
-    clearTarget = { supplier: activeSupplier, revision: cart.revision };
-    clearDialog.querySelector("#cart-clear-title").textContent = `Очистить вкладку «${activeSupplier === "all" ? "Все" : supplierNames[activeSupplier]}»?`;
+    clearTarget = { supplier: cartTabs.getSupplier(), revision: cart.revision, itemIds: cartTabs.getItems().map((item) => item.id) };
+    clearDialog.querySelector("#cart-clear-title").textContent = `Очистить вкладку «${cartTabs.getName()}»?`;
     clearDialog.showModal();
   });
   clearCancel.addEventListener("click", () => clearDialog.close());
@@ -494,26 +486,6 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     if (event.key !== "Tab") return;
     if (event.shiftKey && document.activeElement === clearCancel) { event.preventDefault(); clearAccept.focus(); }
     else if (!event.shiftKey && document.activeElement === clearAccept) { event.preventDefault(); clearCancel.focus(); }
-  });
-  tabs.addEventListener("click", (event) => {
-    const tab = event.target.closest(".cart-tab");
-    if (!tab) return;
-    activeSupplier = tab.dataset.cartSupplier;
-    status.textContent = "";
-    render();
-  });
-  tabs.addEventListener("keydown", (event) => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    const buttons = [...tabs.querySelectorAll(".cart-tab")];
-    const current = buttons.findIndex((button) => button === event.target.closest(".cart-tab"));
-    if (current < 0) return;
-    event.preventDefault();
-    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
-      : (current + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
-    activeSupplier = buttons[next].dataset.cartSupplier;
-    status.textContent = "";
-    render();
-    tabs.querySelector('[aria-selected="true"]').focus();
   });
   modal.addEventListener("click", (event) => { if (event.target === modal && !modal.classList.contains("is-refreshing")) {
     const rect = modal.getBoundingClientRect();
@@ -619,7 +591,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     void mutate(`/api/cart/items/${encodeURIComponent(input.closest("tr").dataset.cartItemId)}`, "PATCH", { quantity: Number(input.value) });
   });
   modal.querySelector("#cart-select-all").addEventListener("change", (event) => {
-    const items = activeSupplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === activeSupplier);
+    const items = cartTabs.getItems();
     const pending = new Set(cart.pendingIds ?? []);
     for (const item of items) if (!pending.has(item.id) && !item.unavailable) {
       if (event.target.checked) selectedIds.add(item.id); else selectedIds.delete(item.id);
@@ -638,14 +610,14 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   };
   testButton.addEventListener("click", async () => {
     if (busy || checking || cart?.testing || !cart?.items.length || !selectedIds.size) return;
-    const supplier = activeSupplier;
+    const supplier = cartTabs.getSupplier();
     busy = true;
     render();
     try {
       await refresh();
       if (!modal.open) return;
       if (cart.testing) throw new Error("Дождитесь завершения действия в корзине.");
-      const itemIds = (supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier))
+      const itemIds = cartTabs.getItems()
         .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id) && !item.unavailable).map((item) => item.id);
       if (!itemIds.length) throw new Error("Выберите товары для заказа.");
       if (refreshedRevision !== cart.revision || refreshedUntil <= Date.now()
@@ -663,7 +635,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       }
       status.textContent = "";
       render();
-      const items = (supplier === "all" ? cart.items : cart.items.filter((item) => item.result.supplier === supplier))
+      const items = cartTabs.getItems()
         .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id) && !item.unavailable);
       if (!items.length) throw new Error("Выберите товары для заказа.");
       const choices = await api("/api/cart/order-options", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier, itemIds }) });
