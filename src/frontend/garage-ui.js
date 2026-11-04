@@ -1266,9 +1266,7 @@ export const bootstrapGarage = ({ getMarkupPercent, startSearch, addToCart, onVi
       }
       await loadVehicles();
       if (request !== vehicleRequest) return;
-      const unconfirmed = selectedVehicle.items.filter((item) => garageCartWarning(item)).length;
-      const message = unconfirmed ? `Проверка завершена. Не подтверждены предложения, сроки или количество: ${unconfirmed}. Причина — в подсказке кнопки корзины.` : `Проверено предложений: ${selectedVehicle.items.length}.`;
-      setStatus(message); showToast(message, unconfirmed ? "error" : "success");
+      setStatus(`Проверено предложений: ${selectedVehicle.items.length}.`);
     } catch (error) { if (!controller.signal.aborted && request === vehicleRequest) { setStatus(error.message); showToast(error.message, "error"); } }
     finally {
       if (checkingController === controller) {

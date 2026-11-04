@@ -327,12 +327,16 @@ test("garage refresh updates real delivery dates and clearly flags failed or exp
     const delivery = page.locator('#garage-items tr:has(td[data-garage-column="article"]) td[data-garage-column="deliveryDate"]');
     assert.match(await delivery.innerText(), /Срок доставки устарел/);
     assert.match(await delivery.innerText(), /Было:.*05\.10\.2026/);
+    assert.equal(await page.locator("#garage-status").innerText(), "Проверено предложений: 1.");
+    assert.equal(await page.locator("#garage-toast").evaluate((node) => node.hidden), true);
     const refresh = async () => {
       const refreshed = page.waitForResponse((response) => /\/api\/garage\/vehicles\/[^/]+\/refresh$/.test(new URL(response.url()).pathname));
       await page.locator("#garage-refresh").click();
       const response = await refreshed; assert.equal(response.status(), 200);
       const value = await response.json();
       await page.waitForFunction(() => !document.querySelector("#garage-refresh").disabled);
+      assert.equal(await page.locator("#garage-status").innerText(), "Проверено предложений: 1.");
+      assert.equal(await page.locator("#garage-toast").evaluate((node) => node.hidden), true);
       return value.vehicle.items[0];
     };
     options.deliveries.armtek.deliveryDate = "2026-10-20";
@@ -342,12 +346,12 @@ test("garage refresh updates real delivery dates and clearly flags failed or exp
     options.failedSearchSupplier = "armtek";
     assert.equal((await refresh()).availabilityStatus, "supplier_error");
     assert.match(await delivery.innerText(), /Не удалось проверить/);
+    assert.equal(await page.locator("#garage-items .garage-item--unconfirmed").count(), 1);
     assert.match(await page.locator(".garage-group-summary__delivery").innerText(), /Не подтверждена/);
     delete options.failedSearchSupplier;
     options.deliveries.armtek.deliveryDate = "2026-10-05";
     assert.equal((await refresh()).deliveryDate, "2026-10-05", "expired supplier dates must never be replaced with invented dates");
     assert.match(await delivery.innerText(), /Срок доставки устарел/);
-    assert.match(await page.locator("#garage-status").innerText(), /Не подтверждены/);
   }, options);
 });
 
