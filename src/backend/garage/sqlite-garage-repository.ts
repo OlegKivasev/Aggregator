@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { GarageAvailabilityStatus, GarageGroup, GarageItem, GarageRepository, GarageVehicle, GarageVehicleDetails } from "./types.ts";
 import type { SupplierId } from "../types.ts";
+import type { PurchaseReference } from "../purchasing/purchase-offer.ts";
 
 type SqlRow = Record<string, string | number | bigint | Uint8Array | null>;
 
@@ -54,6 +55,28 @@ function mapItem(row: SqlRow): GarageItem {
   };
 }
 
+function parseReference(value: unknown, supplier: string): PurchaseReference {
+  if (value && typeof value === "object" && "supplier" in value && value.supplier === supplier) {
+    if (value.supplier === "part-kom" && "makerId" in value && "providerId" in value
+      && typeof value.makerId === "string" && /^[1-9]\d{0,19}$/.test(value.makerId)
+      && typeof value.providerId === "string" && /^[1-9]\d{0,19}$/.test(value.providerId)) {
+      return { supplier: "part-kom", makerId: value.makerId, providerId: value.providerId };
+    }
+    if (value.supplier === "armtek" && "keyzak" in value && typeof value.keyzak === "string" && /^[\w-]{1,10}$/.test(value.keyzak)) {
+      return { supplier: "armtek", keyzak: value.keyzak };
+    }
+    const identifier = (id: unknown): id is string | null => id === null || typeof id === "string" && id.length > 0 && id.length <= 2000;
+    if (value.supplier === "forum-auto" && "warehouse" in value && identifier(value.warehouse)
+      && (!("gid" in value) || typeof value.gid === "string" && value.gid.length > 0 && value.gid.length <= 2000)) {
+      return { supplier: "forum-auto", warehouse: value.warehouse, ...("gid" in value && typeof value.gid === "string" ? { gid: value.gid } : {}) };
+    }
+    if (value.supplier === "rossko" && "partGuid" in value && "stockId" in value && identifier(value.partGuid) && identifier(value.stockId)) {
+      return { supplier: "rossko", partGuid: value.partGuid, stockId: value.stockId };
+    }
+  }
+  throw new Error("Invalid garage purchase reference");
+}
+
 export class SqliteGarageRepository implements GarageRepository {
   private readonly database: DatabaseSync;
 
@@ -93,6 +116,9 @@ export class SqliteGarageRepository implements GarageRepository {
     }
     if (!itemColumns.some((column) => text(column, "name") === "delivery_date_approximate")) {
       this.database.exec("ALTER TABLE garage_items ADD COLUMN delivery_date_approximate INTEGER NOT NULL DEFAULT 0");
+    }
+    if (!itemColumns.some((column) => text(column, "name") === "purchase_reference")) {
+      this.database.exec("ALTER TABLE garage_items ADD COLUMN purchase_reference TEXT");
     }
   }
 
@@ -177,18 +203,18 @@ export class SqliteGarageRepository implements GarageRepository {
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
   }
 
-  createItem(item: GarageItem, vehicleRevision: number, updatedAt: string): "created" | "conflict" | "missing" {
+  createItem(item: GarageItem, vehicleRevision: number, updatedAt: string, reference: PurchaseReference | null): "created" | "conflict" | "missing" {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const vehicle = this.database.prepare("SELECT revision FROM garage_vehicles WHERE id = ?").get(item.vehicleId) as { revision: number } | undefined;
       if (!vehicle) { this.database.exec("ROLLBACK"); return "missing"; }
       if (vehicle.revision !== vehicleRevision) { this.database.exec("ROLLBACK"); return "conflict"; }
     this.database.prepare(`INSERT INTO garage_items (id, vehicle_id, revision, supplier, brand, article, title, warehouse, delivery_date, delivery_date_to, delivery_date_approximate, link,
-      supplier_quantity, required_quantity, purchase_price, markup_percent, regular_price, comment, last_checked_at, availability_status, group_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      supplier_quantity, required_quantity, purchase_price, markup_percent, regular_price, comment, last_checked_at, availability_status, group_id, purchase_reference)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(item.id, item.vehicleId, item.revision, item.supplier, item.brand, item.article, item.title, item.warehouse,
           item.deliveryDate, item.deliveryDateTo, Number(item.deliveryDateApproximate), item.link, item.supplierQuantity, item.requiredQuantity, item.purchasePrice, item.markupPercent,
-          item.regularPrice, item.comment, item.lastCheckedAt, item.availabilityStatus, item.groupId);
+          item.regularPrice, item.comment, item.lastCheckedAt, item.availabilityStatus, item.groupId, reference === null ? null : JSON.stringify(reference));
       this.database.prepare("UPDATE garage_vehicles SET revision = revision + 1, updated_at = ? WHERE id = ?").run(updatedAt, item.vehicleId);
       this.database.exec("COMMIT");
       return "created";
@@ -203,6 +229,12 @@ export class SqliteGarageRepository implements GarageRepository {
   findItem(id: string): GarageItem | null {
     const row = this.database.prepare("SELECT * FROM garage_items WHERE id = ?").get(id);
     return row ? mapItem(row) : null;
+  }
+
+  getItemReference(id: string): PurchaseReference | null {
+    const row = this.database.prepare("SELECT supplier, purchase_reference FROM garage_items WHERE id = ?").get(id);
+    if (!row || row.purchase_reference === null) return null;
+    return parseReference(JSON.parse(text(row, "purchase_reference")), text(row, "supplier"));
   }
 
   findDuplicate(vehicleId: string, groupId: string | null, supplier: SupplierId, brand: string, article: string, warehouse: string | null): GarageItem | null {
@@ -245,11 +277,13 @@ export class SqliteGarageRepository implements GarageRepository {
     return "deleted";
   }
 
-  refreshItem(item: GarageItem, updatedAt: string): boolean {
+  refreshItem(item: GarageItem, updatedAt: string, reference?: PurchaseReference | null): boolean {
     const updated = this.database.prepare(`UPDATE garage_items SET supplier = ?, brand = ?, article = ?, title = ?, warehouse = ?, delivery_date = ?, delivery_date_to = ?, delivery_date_approximate = ?, link = ?,
-      supplier_quantity = ?, purchase_price = ?, markup_percent = ?, regular_price = ?, last_checked_at = ?, availability_status = ?, revision = revision + 1 WHERE id = ? AND revision = ?`)
+      supplier_quantity = ?, purchase_price = ?, markup_percent = ?, regular_price = ?, last_checked_at = ?, availability_status = ?,
+      purchase_reference = COALESCE(?, purchase_reference), revision = revision + 1 WHERE id = ? AND revision = ?`)
       .run(item.supplier, item.brand, item.article, item.title, item.warehouse, item.deliveryDate, item.deliveryDateTo, Number(item.deliveryDateApproximate), item.link, item.supplierQuantity,
-        item.purchasePrice, item.markupPercent, item.regularPrice, item.lastCheckedAt, item.availabilityStatus, item.id, item.revision);
+        item.purchasePrice, item.markupPercent, item.regularPrice, item.lastCheckedAt, item.availabilityStatus,
+        reference ? JSON.stringify(reference) : null, item.id, item.revision);
     if (!updated.changes) return false;
     this.database.prepare("UPDATE garage_vehicles SET revision = revision + 1, updated_at = ? WHERE id = ?").run(updatedAt, item.vehicleId);
     return true;

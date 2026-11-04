@@ -357,7 +357,8 @@ export function createAggregatorServer({
             || url.pathname === "/api/cart/items/batch"
             || url.pathname === "/api/cart/uncertain/resolve"
             || url.pathname === "/api/cart/order-options") && request.method === "POST") {
-          const payload = await readJsonBody(request, url.pathname === "/api/cart/items/batch" ? 64 * 1024 : undefined);
+          const payload = await readJsonBody(request, url.pathname === "/api/cart/items/batch" ? 64 * 1024
+            : url.pathname === "/api/cart/items" && request.method === "DELETE" ? 32 * 1024 : undefined);
           if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new CartError("Неверные параметры корзины.");
           const fields = payload as Record<string, unknown>;
           if (url.pathname === "/api/cart/order-options") {
@@ -377,7 +378,7 @@ export function createAggregatorServer({
             const result = await cart.test(fields.revision, controller.signal, fields.supplier);
             if (!controller.signal.aborted) serveJson(response, 200, result);
           } else if (url.pathname === "/api/cart/items" && request.method === "DELETE") {
-            serveJson(response, 200, cart.clear(fields.supplier, fields.revision));
+            serveJson(response, 200, cart.clear(fields.supplier, fields.revision, fields.itemIds));
           } else {
             const action = cartItemMatch ? request.method === "DELETE" ? "remove" : "update" : "add";
             serveJson(response, action === "add" ? 201 : 200, cart.mutate(action, { ...fields, ...(cartItemMatch ? { id: cartItemMatch[1] } : {}) }));

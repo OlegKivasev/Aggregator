@@ -289,6 +289,29 @@ test("cart atomically clears only the requested supplier and rejects invalid or 
   });
 });
 
+test("cart clears an exact mixed-supplier subset atomically and rejects stale, duplicate or out-of-scope IDs", async () => {
+  await withCart((cart, reopen) => {
+    for (const supplier of suppliers) {
+      const offerId = randomUUID();
+      cart.registerOffer(offerId, result(supplier));
+      cart.mutate("add", { offerId, quantity: 1, revision: cart.view().revision });
+    }
+    const before = cart.view();
+    const ids = [before.items[0].id, before.items[2].id];
+    for (const invalid of [null, [], [null], ["bad"], [ids[0], ids[0]], Array(501).fill(ids[0])]) {
+      assert.throws(() => cart.clear("all", before.revision, invalid), /Выберите товары для удаления/);
+    }
+    assert.throws(() => cart.clear("all", 0, ids), /Корзина изменилась/);
+    assert.throws(() => cart.clear("all", before.revision, [ids[0], randomUUID()]), /Выбранные товары изменились/);
+    assert.throws(() => cart.clear(before.items[1].result.supplier, before.revision, ids), /Выбранные товары изменились/);
+    assert.deepEqual(cart.view(), before);
+    const cleared = cart.clear("all", before.revision, ids);
+    assert.equal(cleared.revision, before.revision + 1);
+    assert.deepEqual(cleared.items.map((item) => item.id), before.items.filter((item) => !ids.includes(item.id)).map((item) => item.id));
+    assert.deepEqual(reopen().view(), cleared);
+  });
+});
+
 test("cart tests only the selected supplier while keeping all-mode and real-order protection", async () => {
   const calls = [];
   await withCart(async (cart) => {
@@ -500,6 +523,7 @@ test("uncertain supplier response remains in cart and blocks duplicate checkout 
     const restored = reopen();
     await assert.rejects(restored.order(1, "armtek", restored.view().items.map((item) => item.id), {}, new AbortController().signal), /сверить/);
     assert.throws(() => restored.clear("armtek", 1), /сверить/);
+    assert.throws(() => restored.clear("all", 1, response.cart.pendingIds), /сверить/);
     assert.equal(calls, 1);
   }, undefined, gateway);
 });

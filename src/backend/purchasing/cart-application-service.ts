@@ -56,11 +56,12 @@ function normalizeCartSupplier(value: unknown): "all" | PurchaseReference["suppl
   return value;
 }
 
-function selectedOrderLines(lines: PurchaseLine[], scope: "all" | OrderSupplier, itemIds: unknown): PurchaseLine[] {
+function selectedOrderLines(lines: PurchaseLine[], scope: "all" | OrderSupplier, itemIds: unknown,
+  validationMessage = "Выберите товары для заказа."): PurchaseLine[] {
   if (!Array.isArray(itemIds) || !itemIds.length || itemIds.length > 500
     || itemIds.some((id) => typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id))
     || new Set(itemIds).size !== itemIds.length) {
-    throw new CartError("Выберите товары для заказа.");
+    throw new CartError(validationMessage);
   }
   const ids = new Set<string>(itemIds);
   const selected = lines.filter((line) => ids.has(line.id) && (scope === "all" || line.reference.supplier === scope));
@@ -186,12 +187,15 @@ export class CartApplicationService {
     return this.view();
   }
 
-  clear(supplier: unknown, revision: unknown) {
+  clear(supplier: unknown, revision: unknown, itemIds?: unknown) {
     if (this.testing) throw new CartError("Дождитесь завершения проверки заказа.", 409);
     const scope = normalizeCartSupplier(supplier);
     const cart = this.load();
     if (revision !== cart.revision) throw new CartError("Корзина изменилась. Обновите её и повторите действие.", 409);
-    const lines = scope === "all" ? [] : cart.lines.filter((line) => line.reference.supplier !== scope);
+    const removed = new Set((itemIds === undefined
+      ? cart.lines.filter((line) => scope === "all" || line.reference.supplier === scope)
+      : selectedOrderLines(cart.lines, scope, itemIds, "Выберите товары для удаления.")).map((line) => line.id));
+    const lines = cart.lines.filter((line) => !removed.has(line.id));
     const pending = new Set(this.repository.pendingLineIds());
     if (cart.lines.some((line) => pending.has(line.id) && !lines.some((kept) => kept.id === line.id))) {
       throw new CartError("Статус заказа этих позиций нужно сверить с поставщиком.", 409);

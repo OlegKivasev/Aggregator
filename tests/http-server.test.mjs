@@ -182,7 +182,16 @@ test("cart HTTP validates server offers and quantities, hides routing and cannot
     assert.equal((await send("/api/cart/order", { revision: added.revision, supplier: "part-kom", details: {} })).status, 503);
     const unaffected = await (await send("/api/cart/items", { revision: added.revision, supplier: "armtek" }, "DELETE")).json();
     assert.equal(unaffected.count, 2);
-    assert.equal((await send("/api/cart/items", { revision: added.revision, supplier: "part-kom" }, "DELETE")).status, 200);
+    for (const itemIds of [null, [], ["bad"], [added.items[0].id, added.items[0].id]]) {
+      assert.equal((await send("/api/cart/items", { revision: added.revision, supplier: "all", itemIds }, "DELETE")).status, 400);
+    }
+    assert.equal((await send("/api/cart/items", { revision: added.revision, supplier: "armtek", itemIds: [added.items[0].id] }, "DELETE")).status, 409);
+    const oversizedClear = await send("/api/cart/items", { text: "x".repeat(33_000) }, "DELETE");
+    assert.equal(oversizedClear.status, 413);
+    const largeClear = await send("/api/cart/items", { revision: added.revision, supplier: "all",
+      itemIds: Array.from({ length: 500 }, (_, n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`) }, "DELETE");
+    assert.equal(largeClear.status, 409, "500 IDs fit the bounded body but must belong to the actual cart");
+    assert.equal((await send("/api/cart/items", { revision: added.revision, supplier: "all", itemIds: [added.items[0].id] }, "DELETE")).status, 200);
     assert.equal((await (await fetch(`${baseUrl}/api/cart`)).json()).count, 0);
     const empty = await (await fetch(`${baseUrl}/api/cart`)).json();
     assert.equal((await fetch(`${baseUrl}/api/cart/items/batch`)).status, 405);
