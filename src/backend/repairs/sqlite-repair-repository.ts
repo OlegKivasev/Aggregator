@@ -40,6 +40,19 @@ export class SqliteRepairRepository {
               this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} INTEGER`);
             }
           }
+          const previousTotal = columns.some((column) => column.name === "total_positions");
+          const previousAvailable = columns.some((column) => column.name === "available_positions");
+          if (previousTotal !== previousAvailable) throw new Error("Incomplete previous repair readiness schema");
+          if (previousTotal) {
+            // Recover counters written by the regressed schema, preserving untouched original values.
+            // Remove duplicate columns so a later restart cannot overwrite newly updated readiness.
+            this.database.exec(`
+              UPDATE ${table} SET goods_total_positions = total_positions, goods_available_positions = available_positions
+              WHERE total_positions IS NOT NULL OR available_positions IS NOT NULL;
+              ALTER TABLE ${table} DROP COLUMN total_positions;
+              ALTER TABLE ${table} DROP COLUMN available_positions;
+            `);
+          }
         }
         this.database.exec("COMMIT");
       } catch (error) {
@@ -120,6 +133,10 @@ export class SqliteRepairRepository {
   remove(documentId: string, testPlatform: boolean): number {
     const table = testPlatform ? "test_repair_cards" : "repair_cards";
     return Number(this.database.prepare(`DELETE FROM ${table} WHERE document_id = ?`).run(documentId).changes);
+  }
+
+  clearProductionCards(): number {
+    return Number(this.database.prepare("DELETE FROM repair_cards").run().changes);
   }
 
   clearTestCards(): number {

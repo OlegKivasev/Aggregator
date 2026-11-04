@@ -114,6 +114,10 @@ test("HTTP repairs starts empty, atomically upserts by UUID, sorts and survives 
     assert.equal(created.status, 200);
     assert.equal(created.headers.get("cache-control"), "no-store");
     assert.deepEqual(await created.json(), { repair: card });
+    // The 1C acknowledgement treats omitted testPlatform as the production mode.
+    const explicitProduction = await send(baseUrl, { ...card, testPlatform: false });
+    assert.equal(explicitProduction.status, 200);
+    assert.deepEqual(await explicitProduction.json(), { repair: card });
     const updated = { ...card, number: "ТЕСТ-2", date: "2026-11-04T08:15:00", vehicleName: "Другой контрагент", status: "В работе" };
     const updates = await Promise.all(Array.from({ length: 8 }, () => send(baseUrl, { ...updated, documentId: card.documentId.toUpperCase() })));
     assert.ok(updates.every((response) => response.status === 200));
@@ -174,7 +178,9 @@ test("test platform isolates copied UUIDs, survives restart and cleanup can neve
   await withServer(secret, async ({ baseUrl, close }, { start }) => {
     assert.equal((await send(baseUrl, card)).status, 200);
     const testCard = { ...card, status: "В работе", testPlatform: true };
-    assert.equal((await send(baseUrl, testCard)).status, 200);
+    const acceptedTest = await send(baseUrl, testCard);
+    assert.equal(acceptedTest.status, 200);
+    assert.deepEqual(await acceptedTest.json(), { repair: testCard });
     const updatedTest = { ...testCard, vehicleName: "Обновлённая тестовая машина" };
     assert.equal((await send(baseUrl, updatedTest)).status, 200);
     assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [card, updatedTest] });
@@ -366,3 +372,160 @@ test("source removes an ineligible repair by UUID with strict authentication, te
     assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [card] });
   });
 });
+
+test("platform counts and explicitly confirmed production cleanup remain isolated across restart", async () => {
+  await withServer(secret, async ({ baseUrl, close }, { start }) => {
+    const headers = { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" };
+    const status = () => fetch(`${baseUrl}/api/integration/1c/repairs/status`, { headers }).then((response) => response.json());
+    const cleanup = (options = {}) => fetch(`${baseUrl}/api/integration/1c/repairs/production`, {
+      method: "DELETE", headers, body: JSON.stringify({ confirmProductionCleanup: true }), ...options,
+    });
+    const testCard = { ...card, testPlatform: true };
+    await send(baseUrl, testCard);
+    assert.deepEqual(await status(), { ready: true, cards: { production: 0, test: 1 } });
+    await send(baseUrl, card);
+    await send(baseUrl, card);
+    assert.deepEqual(await status(), { ready: true, cards: { production: 1, test: 1 } });
+    assert.equal((await cleanup({ headers: { "Content-Type": "application/json" } })).status, 401);
+    assert.equal((await cleanup({ headers: { ...headers, "Content-Type": "text/plain" } })).status, 415);
+    for (const body of ["{", "null", "[]", "{}", JSON.stringify({ confirmTestCleanup: true }),
+      JSON.stringify({ confirmProductionCleanup: false }), JSON.stringify({ confirmProductionCleanup: true, extra: true })]) {
+      assert.equal((await cleanup({ body })).status, 400);
+    }
+    assert.equal((await cleanup({ body: JSON.stringify({ text: "x".repeat(17_000) }) })).status, 413);
+    const wrongMethod = await fetch(`${baseUrl}/api/integration/1c/repairs/production`, { headers });
+    assert.equal(wrongMethod.status, 405);
+    assert.equal(wrongMethod.headers.get("allow"), "DELETE");
+    assert.deepEqual(await status(), { ready: true, cards: { production: 1, test: 1 } });
+    assert.deepEqual(await (await cleanup()).json(), { deleted: 1 });
+    assert.deepEqual(await (await cleanup()).json(), { deleted: 0 });
+    assert.deepEqual(await status(), { ready: true, cards: { production: 0, test: 1 } });
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [testCard] });
+    await close();
+    const restarted = await start();
+    assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [testCard] });
+  });
+});
+
+test("repair rechecks accept current 1C metadata and safely remove only the selected UUID and platform", async () => {
+  await withServer(secret, async ({ baseUrl, close }, { start }) => {
+    const detailed = { ...card, counterpartyName: "Тестовое юридическое лицо",
+      goodsReadiness: { totalPositions: 3, availablePositions: 1 } };
+    assert.deepEqual(await (await send(baseUrl, detailed)).json(), { repair: detailed });
+    const testCard = { ...detailed, testPlatform: true, goodsReadiness: { totalPositions: 3, availablePositions: 3 } };
+    await send(baseUrl, testCard);
+    const other = { ...card, documentId: "22345678-abcd-1234-abcd-123456789abc", number: "ТЕСТ-2" };
+    await send(baseUrl, other);
+    for (const goodsReadiness of [null, [], {}, { totalPositions: 1, availablePositions: 2 },
+      { totalPositions: 1.5, availablePositions: 0 }, { totalPositions: -1, availablePositions: 0 },
+      { totalPositions: 100001, availablePositions: 0 }, { totalPositions: 1, availablePositions: -1 },
+      { totalPositions: "1", availablePositions: 0 }, { totalPositions: 1, availablePositions: 0, extra: true }]) {
+      assert.equal((await send(baseUrl, { ...detailed, goodsReadiness })).status, 400);
+    }
+    for (const counterpartyName of [null, "", 1, "x".repeat(501)]) {
+      assert.equal((await send(baseUrl, { ...detailed, counterpartyName })).status, 400);
+    }
+    await close();
+    const restarted = await start();
+    baseUrl = restarted.baseUrl;
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [detailed, testCard, other] });
+    const remove = (payload, options = {}) => fetch(`${baseUrl}/api/integration/1c/repairs`, {
+      method: "DELETE", headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload), ...options,
+    });
+    const selection = { documentId: card.documentId, testPlatform: false };
+    assert.equal((await remove(selection, { headers: { "Content-Type": "application/json" } })).status, 401);
+    for (const payload of [null, [], {}, { testPlatform: false }, { ...selection, testPlatform: "false" },
+      { ...selection, extra: true }, { ...selection, documentId: "not-a-uuid" }]) {
+      assert.equal((await remove(payload)).status, 400);
+    }
+    assert.deepEqual(await (await remove(selection)).json(), { ...selection, deleted: 1 });
+    assert.deepEqual(await (await remove(selection)).json(), { ...selection, deleted: 0 });
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [testCard, other] });
+    // A full replacement also removes obsolete optional metadata.
+    await send(baseUrl, { ...card, testPlatform: true });
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [{ ...card, testPlatform: true }, other] });
+  });
+});
+
+test("repair metadata migration preserves existing production and test rows", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "aggregator-repairs-migration-"));
+  const path = join(directory, "repairs.sqlite");
+  const legacy = new DatabaseSync(path);
+  try {
+    for (const table of ["repair_cards", "test_repair_cards"]) {
+      legacy.exec(`CREATE TABLE ${table} (document_id TEXT PRIMARY KEY NOT NULL, number TEXT NOT NULL,
+        date TEXT NOT NULL, vehicle_name TEXT NOT NULL, status TEXT NOT NULL) STRICT`);
+      legacy.prepare(`INSERT INTO ${table} VALUES (?, ?, ?, ?, ?)`).run(...Object.values(card));
+    }
+  } finally { legacy.close(); }
+  let repository;
+  try {
+    repository = new SqliteRepairRepository(path);
+    assert.deepEqual(repository.list(), [card, { ...card, testPlatform: true }]);
+    const updated = { ...card, goodsReadiness: { totalPositions: 0, availablePositions: 0 } };
+    repository.save(updated);
+    repository.close();
+    repository = new SqliteRepairRepository(path);
+    assert.deepEqual(repository.list(), [updated, { ...card, testPlatform: true }]);
+  } finally {
+    repository?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+for (const schema of ["original", "regressed", "mixed"]) {
+  test(`readiness recovery preserves ${schema} SQLite data in both platforms without another 1C export`, async () => {
+    const directory = await mkdtemp(join(tmpdir(), "aggregator-readiness-recovery-"));
+    const path = join(directory, "repairs.sqlite");
+    const stored = { ...card, vehicleName: "Машина из договора", counterpartyName: "Тестовый автопарк",
+      goodsReadiness: { totalPositions: 5, availablePositions: 2 } };
+    const untouched = { ...card, documentId: "22345678-abcd-1234-abcd-123456789abc", vehicleName: "Другая машина",
+      goodsReadiness: { totalPositions: 7, availablePositions: 4 } };
+    const before = new DatabaseSync(path);
+    try {
+      for (const table of ["repair_cards", "test_repair_cards"]) {
+        before.exec(`CREATE TABLE ${table} (document_id TEXT PRIMARY KEY NOT NULL, number TEXT NOT NULL,
+          date TEXT NOT NULL, vehicle_name TEXT NOT NULL, status TEXT NOT NULL, counterparty_name TEXT
+          ${schema !== "regressed" ? ", goods_total_positions INTEGER, goods_available_positions INTEGER" : ""}
+          ${schema !== "original" ? ", total_positions INTEGER, available_positions INTEGER" : ""}) STRICT`);
+        const originalValues = schema === "regressed" ? [] : [5, schema === "mixed" ? 1 : 2];
+        const regressedValues = schema === "original" ? [] : [5, 2];
+        const values = [card.documentId, card.number, card.date, stored.vehicleName, card.status, stored.counterpartyName,
+          ...originalValues, ...regressedValues];
+        before.prepare(`INSERT INTO ${table} VALUES (${values.map(() => "?").join(",")})`).run(...values);
+        if (schema === "mixed") {
+          // Yesterday's card with untouched original counters and only NULLs in the incorrect columns.
+          before.prepare(`INSERT INTO ${table} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+            untouched.documentId, card.number, card.date, untouched.vehicleName, card.status, null, 7, 4, null, null);
+        }
+      }
+      before.exec("CREATE TABLE unrelated_data (value TEXT); INSERT INTO unrelated_data VALUES ('preserved')");
+    } finally { before.close(); }
+    let repository;
+    try {
+      repository = new SqliteRepairRepository(path);
+      const expected = [stored, { ...stored, testPlatform: true },
+        ...(schema === "mixed" ? [untouched, { ...untouched, testPlatform: true }] : [])];
+      assert.deepEqual(repository.list(), expected);
+      assert.deepEqual(repository.counts(), { production: expected.length / 2, test: expected.length / 2 });
+      const inspection = new DatabaseSync(path);
+      try {
+        for (const table of ["repair_cards", "test_repair_cards"]) {
+          const columns = inspection.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name);
+          assert.ok(columns.includes("goods_total_positions") && columns.includes("goods_available_positions"));
+          assert.ok(!columns.includes("total_positions") && !columns.includes("available_positions"));
+        }
+        assert.equal(inspection.prepare("SELECT value FROM unrelated_data").get().value, "preserved");
+      } finally { inspection.close(); }
+      const updated = { ...stored, goodsReadiness: { totalPositions: 5, availablePositions: 5 } };
+      repository.save(updated);
+      repository.close();
+      repository = new SqliteRepairRepository(path);
+      assert.deepEqual(repository.list(), [updated, ...expected.slice(1)]);
+    } finally {
+      repository?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}

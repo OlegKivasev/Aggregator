@@ -16,10 +16,12 @@ export async function serveRepairs(
   const importCard = url.pathname === "/api/integration/1c/repairs";
   const checkStatus = url.pathname === "/api/integration/1c/repairs/status";
   const clearTest = url.pathname === "/api/integration/1c/repairs/test";
-  const integration = importCard || checkStatus || clearTest;
+  const clearProduction = url.pathname === "/api/integration/1c/repairs/production";
+  const deleteCard = importCard && request.method === "DELETE";
+  const integration = importCard || checkStatus || clearTest || clearProduction;
   if (!integration && url.pathname !== "/api/repairs") return false;
   response.setHeader("Cache-Control", "no-store");
-  const method = importCard ? (request.method === "DELETE" ? "DELETE" : "POST") : clearTest ? "DELETE" : "GET";
+  const method = deleteCard || clearTest || clearProduction ? "DELETE" : importCard ? "POST" : "GET";
   if (request.method !== method) {
     response.setHeader("Allow", importCard ? "POST, DELETE" : method);
     serveJson(response, 405, { message: "Method not allowed" });
@@ -49,7 +51,7 @@ export async function serveRepairs(
     }
   }
   try {
-    if (importCard && request.method === "DELETE") {
+    if (deleteCard) {
       const identity = parseRepairRemoval(await readJsonBody(request));
       if (!response.destroyed) {
         const deleted = repository.remove(identity.documentId, identity.testPlatform);
@@ -61,13 +63,17 @@ export async function serveRepairs(
         repository.save(repair);
         serveJson(response, 200, { repair });
       }
-    } else if (clearTest) {
+    } else if (clearTest || clearProduction) {
       const payload = await readJsonBody(request);
+      const confirmation = clearTest ? "confirmTestCleanup" : "confirmProductionCleanup";
       if (!payload || typeof payload !== "object" || Array.isArray(payload)
-        || Object.keys(payload).length !== 1 || !("confirmTestCleanup" in payload) || payload.confirmTestCleanup !== true) {
-        throw new RequestBodyError(400, "Для удаления тестовых карточек требуется confirmTestCleanup: true.");
+        || Object.keys(payload).length !== 1 || !(confirmation in payload)
+        || (payload as Record<string, unknown>)[confirmation] !== true) {
+        throw new RequestBodyError(400, `Для удаления карточек требуется ${confirmation}: true.`);
       }
-      if (!response.destroyed) serveJson(response, 200, { deleted: repository.clearTestCards() });
+      if (!response.destroyed) serveJson(response, 200, {
+        deleted: clearTest ? repository.clearTestCards() : repository.clearProductionCards(),
+      });
     } else if (checkStatus) {
       serveJson(response, 200, { ready: true, cards: repository.counts() });
     } else {
