@@ -202,8 +202,8 @@ const setActiveFunction = (name) => {
     renderActiveTab();
     skuInput.focus();
   }
-  if (name === "repairs") void repairsUi.refresh();
-  if (name === "test-repairs") void testRepairsUi.refresh();
+  repairsUi.setActive(name === "repairs");
+  testRepairsUi.setActive(name === "test-repairs");
 };
 
 const setFeedback = (message, tone = "error") => {

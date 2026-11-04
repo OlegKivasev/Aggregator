@@ -10,7 +10,7 @@ import { createAggregatorServer } from "../../src/backend/http/create-server.ts"
 const secret = "browser-test-only-repairs-secret-32-bytes";
 const card = {
   documentId: "12345678-abcd-1234-abcd-123456789abc", number: "ТЕСТ-1",
-  date: "2026-11-03T14:30:00", vehicleName: '<img src=x onerror="window.repairsXss=1">', status: "Тестовое состояние",
+  date: "2026-11-03T14:30:00", vehicleName: '<img src=x onerror="window.repairsXss=1">', status: "В работе",
 };
 
 test("repairs browser list loads real API data, renders safely, refreshes, restores and preserves other sections", async () => {
@@ -20,6 +20,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
   process.env.GARAGE_DB_PATH = join(directory, "garage.sqlite");
   process.env.ONEC_REPAIRS_INTEGRATION_SECRET = secret;
   let browser;
+  let releaseList;
   const server = createAggregatorServer({ application: { streamSearch: async () => {} }, publicDir: resolve("src/frontend") });
   try {
     await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
@@ -29,6 +30,8 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     const errors = [];
     const repairRequests = [];
     let failList = false;
+    let holdList = false;
+    let onListHeld;
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/*", async (route) => {
       const request = route.request();
@@ -39,6 +42,10 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
       if (url.origin !== origin) return route.abort();
       if (url.pathname === "/api/repairs") {
         repairRequests.push(request);
+        if (holdList) await new Promise((resolve) => {
+          releaseList = resolve;
+          onListHeld();
+        });
         if (failList) return route.fulfill({ status: 500, json: { message: "Test database unavailable" } });
         return route.continue();
       }
@@ -55,7 +62,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.waitForLoadState("networkidle");
     assert.equal(await page.locator("#markup-function").isVisible(), true);
     await page.locator("#repairs-function-tab").click();
-    await page.getByText("Заказ-нарядов пока нет. Они появятся после передачи из 1С.").waitFor();
+    await page.getByText("Заказ-нарядов в работе нет.").waitFor();
     assert.equal(await page.locator("#repairs-count").textContent(), "0");
     assert.equal(await page.locator("#markup-function").isVisible(), false);
     assert.equal(await page.locator("#applicability-function").isVisible(), false);
@@ -69,13 +76,13 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.locator("#repairs-refresh").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-rows tr").count(), 1);
-    assert.deepEqual(await page.locator("#repairs-rows td").allTextContents(), [card.number, "03.11.2026 14:30", card.vehicleName, card.status]);
+    assert.deepEqual(await page.locator("#repairs-rows td").allTextContents(), [card.vehicleName, "Наличие ещё не проверено"]);
     assert.equal(await page.locator("#repairs-rows img").count(), 0);
     assert.equal(await page.evaluate(() => window.repairsXss), undefined);
-    const updated = { ...card, vehicleName: "Тестовый контрагент с длинным наименованием для проверки переноса в списке заказ-нарядов", status: "Изменённое тестовое состояние" };
+    const updated = { ...card, vehicleName: "Тестовый контрагент с длинным наименованием для проверки переноса в списке заказ-нарядов", status: "В работе" };
     await send(updated);
     await page.reload();
-    await page.getByText(updated.status, { exact: true }).waitFor();
+    await page.getByText(updated.vehicleName, { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-rows tr").count(), 1);
     assert.equal(await page.locator("#repairs-function-tab").getAttribute("aria-selected"), "true");
     for (const request of repairRequests) assert.equal((await request.allHeaders()).authorization, undefined);
@@ -83,14 +90,54 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(clientStorage.includes(secret), false);
     const rendered = await page.content();
     assert.equal(rendered.includes(secret), false);
+    for (const [goodsReadiness, tone, label, detail] of [
+      [{ totalPositions: 5, availablePositions: 2 }, "waiting", "Есть товары к получению", "В наличии 2 из 5 позиций"],
+      [{ totalPositions: 5, availablePositions: 5 }, "ready", "Все товары в наличии", "В наличии 5 из 5 позиций"],
+      [{ totalPositions: 0, availablePositions: 0 }, "empty", "Не найдено товаров", null],
+    ]) {
+      await send({ ...updated, goodsReadiness });
+      await page.locator("#repairs-refresh").click();
+      await page.getByText(label, { exact: true }).waitFor();
+      assert.equal(await page.locator("#repairs-function .repairs-readiness").getAttribute("data-tone"), tone);
+      assert.equal(await page.locator("#repairs-rows td").count(), 2);
+      assert.equal(await page.locator("#repairs-function thead th").count(), 2);
+      if (detail) assert.equal(await page.locator("#repairs-function .repairs-readiness-detail").textContent(), detail);
+      else assert.equal(await page.locator("#repairs-function .repairs-readiness-detail").count(), 0);
+    }
+    const legal = { ...updated, goodsReadiness: { totalPositions: 5, availablePositions: 2 }, vehicleName: "Toyota Camry А123ВС", counterpartyName: 'ООО «Тестовый автопарк»' };
+    await send(legal);
+    await page.locator("#repairs-refresh").click();
+    await page.locator("#repairs-function .repairs-counterparty").waitFor();
+    assert.equal(await page.locator("#repairs-rows td").count(), 2);
+    assert.equal(await page.locator("#repairs-function .repairs-vehicle-name").textContent(), legal.vehicleName);
+    assert.equal(await page.locator("#repairs-function .repairs-counterparty").textContent(), legal.counterpartyName);
+    assert.equal(await page.locator("#repairs-rows img").count(), 0);
+    assert.equal(await page.evaluate(() => window.repairsXss), undefined);
+    const vehicleBox = await page.locator("#repairs-function .repairs-vehicle-name").boundingBox();
+    const counterpartyBox = await page.locator("#repairs-function .repairs-counterparty").boundingBox();
+    assert.ok(counterpartyBox.y >= vehicleBox.y + vehicleBox.height);
     if (process.env.REPAIRS_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.REPAIRS_SCREENSHOT_DIR, "repairs-desktop.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator("#repairs-function-tab").isVisible(), true);
     assert.equal(await page.locator("#repairs-refresh").isVisible(), true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-    assert.equal(await page.locator("#repairs-function .repairs-table").evaluate((element) => element.scrollWidth > element.clientWidth), true);
+    assert.equal(await page.locator("#repairs-function .repairs-table").evaluate((element) => element.scrollWidth <= element.clientWidth), true);
     if (process.env.REPAIRS_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.REPAIRS_SCREENSHOT_DIR, "repairs-mobile.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 900 });
+    const unsafeCounterparty = '<img src=x onerror="window.repairsXss=1">';
+    await send({ ...legal, counterpartyName: unsafeCounterparty });
+    await page.locator("#repairs-refresh").click();
+    await page.getByText(unsafeCounterparty, { exact: true }).waitFor();
+    assert.equal(await page.locator("#repairs-rows img").count(), 0);
+    assert.equal(await page.evaluate(() => window.repairsXss), undefined);
+    await send({ ...legal, vehicleName: "" });
+    await page.locator("#repairs-refresh").click();
+    await page.getByText("Договор не указан", { exact: true }).waitFor();
+    assert.equal(await page.locator("#repairs-function .repairs-counterparty").textContent(), legal.counterpartyName);
+    await send(updated);
+    await page.locator("#repairs-refresh").click();
+    await page.waitForFunction(() => !document.querySelector("#repairs-refresh").disabled);
+    assert.equal(await page.locator("#repairs-function .repairs-counterparty").count(), 0);
     failList = true;
     await page.locator("#repairs-refresh").click();
     await page.getByText("Не удалось загрузить заказ-наряды. Нажмите «Обновить».").waitFor();
@@ -98,46 +145,137 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#repairs-refresh").isEnabled(), true);
     failList = false;
     await page.locator("#repairs-refresh").click();
-    await page.getByText(updated.status, { exact: true }).waitFor();
+    await page.getByText(updated.vehicleName, { exact: true }).waitFor();
     await page.locator("#applicability-function-tab").click();
     assert.equal(await page.locator("#repairs-function").isVisible(), false);
     assert.equal(await page.locator("#applicability-function").isVisible(), true);
     await page.locator("#markup-function-tab").click();
     assert.equal(await page.locator("#markup-function").isVisible(), true);
     assert.equal(await page.locator("#repairs-function").isVisible(), false);
-    await send({ ...updated, testPlatform: true, status: "Тестовая копия той же карточки" });
+    const testVehicle = "Тестовая машина в отдельной вкладке";
+    await send({ ...updated, testPlatform: true, vehicleName: testVehicle, goodsReadiness: { totalPositions: 5, availablePositions: 2 } });
     await page.locator("#repairs-function-tab").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-rows tr").count(), 1);
-    assert.equal(await page.locator("#repairs-rows").getByText(updated.status, { exact: true }).count(), 1);
-    assert.equal(await page.locator("#repairs-rows").getByText("Тестовая копия той же карточки", { exact: true }).count(), 0);
+    assert.equal(await page.locator("#repairs-rows").getByText(updated.vehicleName, { exact: true }).count(), 1);
+    assert.equal(await page.locator("#repairs-rows").getByText(testVehicle, { exact: true }).count(), 0);
     await page.locator("#test-repairs-function-tab").click();
-    await page.locator("#test-repairs-rows").getByText("Тестовая копия той же карточки", { exact: true }).waitFor();
+    await page.locator("#test-repairs-rows").getByText(testVehicle, { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-function").isVisible(), false);
     assert.equal(await page.locator("#test-repairs-count").textContent(), "1");
     assert.equal(await page.locator("#test-repairs-rows tr").count(), 1);
+    assert.deepEqual(await page.locator("#test-repairs-function thead th").allTextContents(), ["Наименование", "Готовность товаров"]);
+    assert.equal(await page.locator("#test-repairs-rows .repairs-readiness").textContent(), "Есть товары к получению");
+    assert.equal(await page.locator("#test-repairs-rows .repairs-readiness-detail").textContent(), "В наличии 2 из 5 позиций");
     await page.reload();
-    await page.locator("#test-repairs-rows").getByText("Тестовая копия той же карточки", { exact: true }).waitFor();
+    await page.locator("#test-repairs-rows").getByText(testVehicle, { exact: true }).waitFor();
     assert.equal(await page.locator("#test-repairs-function-tab").getAttribute("aria-selected"), "true");
     failList = true;
     await page.locator("#test-repairs-refresh").click();
     await page.locator("#test-repairs-feedback").getByText("Не удалось загрузить заказ-наряды. Нажмите «Обновить».").waitFor();
     failList = false;
     await page.locator("#test-repairs-refresh").click();
-    await page.locator("#test-repairs-rows").getByText("Тестовая копия той же карточки", { exact: true }).waitFor();
+    await page.locator("#test-repairs-rows").getByText(testVehicle, { exact: true }).waitFor();
     const cleanup = await fetch(`${origin}/api/integration/1c/repairs/test`, { method: "DELETE",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
       body: JSON.stringify({ confirmTestCleanup: true }) });
     assert.equal(cleanup.status, 200);
     assert.deepEqual(await cleanup.json(), { deleted: 1 });
     await page.locator("#test-repairs-refresh").click();
-    await page.getByText("Тестовых заказ-нарядов пока нет. Они появятся после передачи из 1С в тестовом режиме.").waitFor();
+    await page.getByText("Тестовых заказ-нарядов в работе нет.").waitFor();
     assert.equal(await page.locator("#test-repairs-count").textContent(), "0");
     await page.locator("#repairs-function-tab").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
-    assert.equal(await page.locator("#repairs-rows").getByText(updated.status, { exact: true }).count(), 1);
+    assert.equal(await page.locator("#repairs-rows").getByText(updated.vehicleName, { exact: true }).count(), 1);
+    await send({ ...updated, status: "Завершен" });
+    await page.locator("#repairs-refresh").click();
+    await page.getByText("Заказ-нарядов в работе нет.", { exact: true }).waitFor();
+    assert.equal(await page.locator("#repairs-count").textContent(), "0");
+    await send(updated);
+    await page.locator("#repairs-refresh").click();
+    await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
+    // Reproduce a saved fourth product: the visible list updates without a button.
+    await page.clock.install();
+    await send({ ...updated, goodsReadiness: { totalPositions: 3, availablePositions: 3 } });
+    await page.reload();
+    await page.getByText("В наличии 3 из 3 позиций", { exact: true }).waitFor();
+    await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 3 } });
+    holdList = true;
+    const beforePoll = repairRequests.length;
+    const listHeld = new Promise((resolve) => { onListHeld = resolve; });
+    await page.clock.runFor(10_001);
+    await listHeld;
+    assert.equal(repairRequests.length, beforePoll + 1);
+    assert.equal(await page.getByText("В наличии 3 из 3 позиций", { exact: true }).isVisible(), true);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    assert.equal(repairRequests.length, beforePoll + 1);
+    holdList = false;
+    releaseList();
+    releaseList = undefined;
+    await page.getByText("В наличии 3 из 4 позиций", { exact: true }).waitFor();
+    assert.equal(await page.locator("#repairs-function .repairs-readiness").getAttribute("data-tone"), "waiting");
+    assert.equal(await page.locator("#repairs-rows tr").count(), 1);
+
+    failList = true;
+    await page.clock.runFor(10_001);
+    await page.getByText("Не удалось обновить заказ-наряды. Показаны ранее загруженные данные.", { exact: true }).waitFor();
+    assert.equal(await page.getByText("В наличии 3 из 4 позиций", { exact: true }).isVisible(), true);
+    assert.equal(await page.locator("#repairs-count").isVisible(), true);
+    failList = false;
+    await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 4 } });
+    await page.clock.runFor(10_001);
+    await page.getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
+    assert.equal(await page.locator("#repairs-feedback").textContent(), "");
+
+    // An unposting command from 1C removes the card without manual browser refresh.
+    const removed = await fetch(`${origin}/api/integration/1c/repairs`, { method: "DELETE",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ documentId: card.documentId, testPlatform: false }) });
+    assert.equal(removed.status, 200);
+    await removed.arrayBuffer();
+    await page.clock.runFor(10_001);
+    await page.getByText("Заказ-нарядов в работе нет.", { exact: true }).waitFor();
+    await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 4 } });
+    await page.clock.runFor(10_001);
+    await page.getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
+    // Other functions and hidden browser tabs do not poll repairs.
+    await page.locator("#markup-function-tab").click();
+    const beforeInactive = repairRequests.length;
+    await page.clock.runFor(30_001);
+    assert.equal(repairRequests.length, beforeInactive);
+    await send({ ...updated, goodsReadiness: { totalPositions: 0, availablePositions: 0 } });
+    await page.locator("#repairs-function-tab").click();
+    await page.getByText("Не найдено товаров", { exact: true }).waitFor();
+    await page.evaluate(() => {
+      Object.defineProperty(document, "hidden", { configurable: true, value: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    const beforeHidden = repairRequests.length;
+    await page.clock.runFor(30_001);
+    assert.equal(repairRequests.length, beforeHidden);
+    await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 3 } });
+    await page.evaluate(() => {
+      delete document.hidden;
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await page.getByText("В наличии 3 из 4 позиций", { exact: true }).waitFor();
+    // The isolated test tab retains the same readiness renderer and background refresh.
+    const testCard = { ...updated, testPlatform: true, vehicleName: testVehicle,
+      goodsReadiness: { totalPositions: 5, availablePositions: 2 } };
+    await send(testCard);
+    await page.locator("#test-repairs-function-tab").click();
+    await page.locator("#test-repairs-rows").getByText("В наличии 2 из 5 позиций", { exact: true }).waitFor();
+    await send({ ...testCard, goodsReadiness: { totalPositions: 5, availablePositions: 5 } });
+    const beforeTestPoll = repairRequests.length;
+    await page.clock.runFor(10_001);
+    await page.locator("#test-repairs-rows").getByText("Все товары в наличии", { exact: true }).waitFor();
+    assert.equal(repairRequests.length, beforeTestPoll + 1);
+    assert.equal(await page.locator("#test-repairs-rows .repairs-readiness-detail").textContent(), "В наличии 5 из 5 позиций");
+    await page.locator("#repairs-function-tab").click();
+    await page.locator("#repairs-rows").getByText("В наличии 3 из 4 позиций", { exact: true }).waitFor();
     assert.deepEqual(errors, []);
   } finally {
+    releaseList?.();
     await browser?.close();
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));

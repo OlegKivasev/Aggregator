@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { parseRepairCard, parseRepairDocumentId, RepairValidationError } from "../repairs/repair-card.ts";
+import { parseRepairCard, parseRepairRemoval, RepairValidationError } from "../repairs/repair-card.ts";
 import type { SqliteRepairRepository } from "../repairs/sqlite-repair-repository.ts";
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
 import { serveJson } from "./responses.ts";
@@ -52,15 +52,11 @@ export async function serveRepairs(
   }
   try {
     if (deleteCard) {
-      const payload = await readJsonBody(request);
-      if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).length !== 2
-        || !("documentId" in payload) || !("testPlatform" in payload) || typeof payload.testPlatform !== "boolean") {
-        throw new RequestBodyError(400, "Для удаления карточки требуются documentId и логическое testPlatform.");
+      const identity = parseRepairRemoval(await readJsonBody(request));
+      if (!response.destroyed) {
+        const deleted = repository.remove(identity.documentId, identity.testPlatform);
+        serveJson(response, 200, { ...identity, deleted });
       }
-      const documentId = parseRepairDocumentId(payload.documentId);
-      if (!response.destroyed) serveJson(response, 200, {
-        documentId, testPlatform: payload.testPlatform, deleted: repository.deleteCard(documentId, payload.testPlatform),
-      });
     } else if (importCard) {
       const repair = parseRepairCard(await readJsonBody(request));
       if (!response.destroyed) {

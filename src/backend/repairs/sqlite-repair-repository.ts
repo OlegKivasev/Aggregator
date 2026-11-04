@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { parseRepairCard, type RepairCard } from "./repair-card.ts";
+import type { GoodsReadiness, RepairCard } from "./repair-card.ts";
 
 export class SqliteRepairRepository {
   private readonly database: DatabaseSync;
@@ -19,20 +19,39 @@ export class SqliteRepairRepository {
         CREATE TABLE IF NOT EXISTS repair_cards (
           document_id TEXT PRIMARY KEY NOT NULL,
           number TEXT NOT NULL, date TEXT NOT NULL,
-          vehicle_name TEXT NOT NULL, status TEXT NOT NULL
+          vehicle_name TEXT NOT NULL, status TEXT NOT NULL, counterparty_name TEXT, goods_total_positions INTEGER, goods_available_positions INTEGER
         ) STRICT;
         CREATE TABLE IF NOT EXISTS test_repair_cards (
           document_id TEXT PRIMARY KEY NOT NULL,
           number TEXT NOT NULL, date TEXT NOT NULL,
-          vehicle_name TEXT NOT NULL, status TEXT NOT NULL
+          vehicle_name TEXT NOT NULL, status TEXT NOT NULL, counterparty_name TEXT, goods_total_positions INTEGER, goods_available_positions INTEGER
         ) STRICT;
       `);
+      // Existing installations retain both repair tables and every stored card.
       this.database.exec("BEGIN IMMEDIATE");
       try {
         for (const table of ["repair_cards", "test_repair_cards"]) {
-          const columns = new Set(this.database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
-          for (const [name, type] of [["counterparty_name", "TEXT"], ["total_positions", "INTEGER"], ["available_positions", "INTEGER"]]) {
-            if (!columns.has(name)) this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+          const columns = this.database.prepare(`PRAGMA table_info(${table})`).all();
+          if (!columns.some((column) => column.name === "counterparty_name")) {
+            this.database.exec(`ALTER TABLE ${table} ADD COLUMN counterparty_name TEXT`);
+          }
+          for (const name of ["goods_total_positions", "goods_available_positions"]) {
+            if (!columns.some((column) => column.name === name)) {
+              this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} INTEGER`);
+            }
+          }
+          const previousTotal = columns.some((column) => column.name === "total_positions");
+          const previousAvailable = columns.some((column) => column.name === "available_positions");
+          if (previousTotal !== previousAvailable) throw new Error("Incomplete previous repair readiness schema");
+          if (previousTotal) {
+            // Recover counters written by the regressed schema, preserving untouched original values.
+            // Remove duplicate columns so a later restart cannot overwrite newly updated readiness.
+            this.database.exec(`
+              UPDATE ${table} SET goods_total_positions = total_positions, goods_available_positions = available_positions
+              WHERE total_positions IS NOT NULL OR available_positions IS NOT NULL;
+              ALTER TABLE ${table} DROP COLUMN total_positions;
+              ALTER TABLE ${table} DROP COLUMN available_positions;
+            `);
           }
         }
         this.database.exec("COMMIT");
@@ -41,29 +60,25 @@ export class SqliteRepairRepository {
         throw error;
       }
       this.saveStatement = this.database.prepare(`
-        INSERT INTO repair_cards (document_id, number, date, vehicle_name, status, counterparty_name, total_positions, available_positions)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO repair_cards (document_id, number, date, vehicle_name, status, counterparty_name, goods_total_positions, goods_available_positions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
           number = excluded.number, date = excluded.date,
           vehicle_name = excluded.vehicle_name, status = excluded.status, counterparty_name = excluded.counterparty_name,
-          total_positions = excluded.total_positions, available_positions = excluded.available_positions
+          goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions
       `);
       this.testSaveStatement = this.database.prepare(`
-        INSERT INTO test_repair_cards (document_id, number, date, vehicle_name, status, counterparty_name, total_positions, available_positions)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO test_repair_cards (document_id, number, date, vehicle_name, status, counterparty_name, goods_total_positions, goods_available_positions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
           number = excluded.number, date = excluded.date,
           vehicle_name = excluded.vehicle_name, status = excluded.status, counterparty_name = excluded.counterparty_name,
-          total_positions = excluded.total_positions, available_positions = excluded.available_positions
+          goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions
       `);
       this.listStatement = this.database.prepare(`
-        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status,
-          counterparty_name AS counterpartyName, total_positions AS totalPositions, available_positions AS availablePositions,
-          0 AS testPlatform FROM repair_cards
+        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, counterparty_name AS counterpartyName, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, 0 AS testPlatform
+        FROM repair_cards WHERE status = 'В работе'
         UNION ALL
-        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status,
-          counterparty_name AS counterpartyName, total_positions AS totalPositions, available_positions AS availablePositions,
-          1 AS testPlatform FROM test_repair_cards
+        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, counterparty_name AS counterpartyName, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, 1 AS testPlatform
+        FROM test_repair_cards WHERE status = 'В работе'
         ORDER BY date DESC, documentId ASC, testPlatform ASC
       `);
     } catch (error) {
@@ -74,52 +89,58 @@ export class SqliteRepairRepository {
 
   save(card: RepairCard): void {
     const statement = card.testPlatform === true ? this.testSaveStatement : this.saveStatement;
-    statement.run(card.documentId, card.number, card.date, card.vehicleName, card.status, card.counterpartyName ?? null,
-      card.goodsReadiness?.totalPositions ?? null, card.goodsReadiness?.availablePositions ?? null);
+    statement.run(card.documentId, card.number, card.date, card.vehicleName, card.status, card.counterpartyName ?? null, card.goodsReadiness?.totalPositions ?? null, card.goodsReadiness?.availablePositions ?? null);
   }
 
   list(): RepairCard[] {
     return this.listStatement.all().map((row) => {
-      const { documentId, number, date, vehicleName, status } = row;
+      const { documentId, number, date, vehicleName, status, counterpartyName } = row;
       if (typeof documentId !== "string" || typeof number !== "string" || typeof date !== "string"
         || typeof vehicleName !== "string" || typeof status !== "string") {
         throw new Error("Invalid SQLite repair card");
       }
       if (row.testPlatform !== 0 && row.testPlatform !== 1) throw new Error("Invalid SQLite repair platform");
-      try {
-        return parseRepairCard({ documentId, number, date, vehicleName, status,
-          ...(row.testPlatform === 1 ? { testPlatform: true } : {}),
-          ...(row.counterpartyName !== null ? { counterpartyName: row.counterpartyName } : {}),
-          ...(row.totalPositions !== null || row.availablePositions !== null
-            ? { goodsReadiness: { totalPositions: row.totalPositions, availablePositions: row.availablePositions } } : {}),
-        });
-      } catch (error) {
-        throw new Error("Invalid SQLite repair card", { cause: error });
+      if (counterpartyName !== null && typeof counterpartyName !== "string") throw new Error("Invalid SQLite repair counterparty");
+      const total = row.goodsTotalPositions;
+      const available = row.goodsAvailablePositions;
+      let goodsReadiness: GoodsReadiness | undefined;
+      if (total !== null || available !== null) {
+        if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || total > 100_000
+          || typeof available !== "number" || !Number.isSafeInteger(available) || available < 0 || available > total) {
+          throw new Error("Invalid SQLite goods readiness");
+        }
+        goodsReadiness = { totalPositions: total, availablePositions: available };
       }
+      return { documentId, number, date, vehicleName, status,
+        ...(row.testPlatform === 1 ? { testPlatform: true } : {}),
+        ...(counterpartyName !== null ? { counterpartyName } : {}),
+        ...(goodsReadiness !== undefined ? { goodsReadiness } : {}),
+      };
     });
   }
 
-  clearTestCards(): number {
-    return Number(this.database.prepare("DELETE FROM test_repair_cards").run().changes);
+  counts(): { production: number; test: number } {
+    const row = this.database.prepare(`SELECT
+      (SELECT count(*) FROM repair_cards) AS production,
+      (SELECT count(*) FROM test_repair_cards) AS test`).get();
+    if (!row || typeof row.production !== "number" || !Number.isSafeInteger(row.production) || row.production < 0
+      || typeof row.test !== "number" || !Number.isSafeInteger(row.test) || row.test < 0) {
+      throw new Error("Invalid SQLite repair counts");
+    }
+    return { production: row.production, test: row.test };
+  }
+
+  remove(documentId: string, testPlatform: boolean): number {
+    const table = testPlatform ? "test_repair_cards" : "repair_cards";
+    return Number(this.database.prepare(`DELETE FROM ${table} WHERE document_id = ?`).run(documentId).changes);
   }
 
   clearProductionCards(): number {
     return Number(this.database.prepare("DELETE FROM repair_cards").run().changes);
   }
 
-  deleteCard(documentId: string, testPlatform: boolean): number {
-    const table = testPlatform ? "test_repair_cards" : "repair_cards";
-    return Number(this.database.prepare(`DELETE FROM ${table} WHERE document_id = ?`).run(documentId).changes);
-  }
-
-  counts(): { production: number; test: number } {
-    const row = this.database.prepare(`SELECT
-      (SELECT COUNT(*) FROM repair_cards) AS production,
-      (SELECT COUNT(*) FROM test_repair_cards) AS test`).get();
-    if (!row || typeof row.production !== "number" || typeof row.test !== "number") {
-      throw new Error("Invalid SQLite repair counts");
-    }
-    return { production: row.production, test: row.test };
+  clearTestCards(): number {
+    return Number(this.database.prepare("DELETE FROM test_repair_cards").run().changes);
   }
 
   close(): void {

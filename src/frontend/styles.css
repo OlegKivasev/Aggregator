@@ -649,11 +649,18 @@ input {
 .repairs-function[hidden] { display: none; }
 .repairs-function [hidden] { display: none; }
 .repairs-function { margin: 0; height: calc(100dvh - 100px); min-height: 320px; }
-.repairs-table .results-data-table { width: 100%; min-width: 640px; }
+.repairs-table .results-data-table { width: 100%; min-width: 0; }
+.repairs-table .results-data-table th { white-space: normal; overflow: visible; text-overflow: clip; }
 .repairs-table .results-data-table td { white-space: normal; overflow-wrap: anywhere; }
-.repairs-number-column { width: 16%; }
-.repairs-date-column { width: 170px; }
-.repairs-status-column { width: 24%; }
+.repairs-vehicle-name { display: block; font-weight: 600; line-height: 1.4; }
+.repairs-counterparty { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.repairs-name-column { width: 58%; }
+.repairs-readiness-column { width: 42%; }
+.repairs-readiness { display: inline-block; max-width: 100%; padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: #f5f7fa; color: #526174; font-size: 12px; font-weight: 700; line-height: 1.4; white-space: normal; }
+.repairs-readiness[data-tone="ready"] { border-color: #a6d9b8; background: #edf8f0; color: #21663c; }
+.repairs-readiness[data-tone="waiting"] { border-color: #e9c454; background: #fff4cc; color: #765000; }
+.repairs-readiness[data-tone="empty"] { border-color: #efbab6; background: #fff0ee; color: #a32f27; }
+.repairs-readiness-detail { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .repairs-feedback { margin: 0; padding: 0 18px 12px; color: var(--muted); }
 .repairs-feedback:empty { display: none; }
 .repairs-feedback[data-tone="error"] { color: #b42318; }
