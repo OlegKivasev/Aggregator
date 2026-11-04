@@ -15,6 +15,9 @@ const applicabilityTab = document.querySelector("#applicability-function-tab");
 const repairsFunction = document.querySelector("#repairs-function");
 const repairsTab = document.querySelector("#repairs-function-tab");
 const repairsUi = bootstrapRepairs();
+const testRepairsFunction = document.querySelector("#test-repairs-function");
+const testRepairsTab = document.querySelector("#test-repairs-function-tab");
+const testRepairsUi = bootstrapRepairs({ testPlatform: true });
 const applicabilityTabsList = document.querySelector("#applicability-tabs-list");
 const applicabilityTabs = applicabilityTabsList.closest(".applicability-tabs");
 const tabUngroupDrop = document.querySelector("#applicability-tab-ungroup-drop");
@@ -184,6 +187,7 @@ const setActiveFunction = (name) => {
   if (!isApplicability) oemSidebar?.hide();
   for (const [key, section, button] of [
     ["markup", markupFunction, markupTab], ["applicability", applicabilityFunction, applicabilityTab], ["repairs", repairsFunction, repairsTab],
+    ["test-repairs", testRepairsFunction, testRepairsTab],
   ]) {
     section.hidden = name !== key;
     button.classList.toggle("active", name === key);
@@ -199,6 +203,7 @@ const setActiveFunction = (name) => {
     skuInput.focus();
   }
   if (name === "repairs") void repairsUi.refresh();
+  if (name === "test-repairs") void testRepairsUi.refresh();
 };
 
 const setFeedback = (message, tone = "error") => {
@@ -1505,6 +1510,7 @@ const loadMakes = async () => {
 markupTab.addEventListener("click", () => setActiveFunction("markup"));
 applicabilityTab.addEventListener("click", () => setActiveFunction("applicability"));
 repairsTab.addEventListener("click", () => setActiveFunction("repairs"));
+testRepairsTab.addEventListener("click", () => setActiveFunction("test-repairs"));
 newApplicabilityTabButton.addEventListener("click", addTab);
 listButton.addEventListener("click", () => openDocumentModal());
 multiListButton.addEventListener("click", openGroupDocument);
@@ -2050,7 +2056,7 @@ const makesReady = loadMakes();
 const apiKeyReady = loadApiKeyState();
 try {
   const savedFunction = localStorage.getItem(activeFunctionStorageKey);
-  if (savedFunction === "applicability" || savedFunction === "repairs") setActiveFunction(savedFunction);
+  if (["applicability", "repairs", "test-repairs"].includes(savedFunction)) setActiveFunction(savedFunction);
 } catch {
   // The selected function is a convenience preference.
 }

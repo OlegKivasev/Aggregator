@@ -88,7 +88,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#repairs-function-tab").isVisible(), true);
     assert.equal(await page.locator("#repairs-refresh").isVisible(), true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-    assert.equal(await page.locator(".repairs-table").evaluate((element) => element.scrollWidth > element.clientWidth), true);
+    assert.equal(await page.locator("#repairs-function .repairs-table").evaluate((element) => element.scrollWidth > element.clientWidth), true);
     if (process.env.REPAIRS_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.REPAIRS_SCREENSHOT_DIR, "repairs-mobile.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 900 });
     failList = true;
@@ -107,19 +107,35 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#repairs-function").isVisible(), false);
     await send({ ...updated, testPlatform: true, status: "Тестовая копия той же карточки" });
     await page.locator("#repairs-function-tab").click();
-    await page.locator(".repairs-test-label").waitFor();
-    assert.equal(await page.locator("#repairs-rows tr").count(), 2);
-    assert.equal(await page.locator(".repairs-test-label").count(), 1);
-    assert.equal(await page.locator('[data-test-platform="true"]').getByText("Тест", { exact: true }).count(), 1);
+    await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
+    assert.equal(await page.locator("#repairs-rows tr").count(), 1);
+    assert.equal(await page.locator("#repairs-rows").getByText(updated.status, { exact: true }).count(), 1);
+    assert.equal(await page.locator("#repairs-rows").getByText("Тестовая копия той же карточки", { exact: true }).count(), 0);
+    await page.locator("#test-repairs-function-tab").click();
+    await page.locator("#test-repairs-rows").getByText("Тестовая копия той же карточки", { exact: true }).waitFor();
+    assert.equal(await page.locator("#repairs-function").isVisible(), false);
+    assert.equal(await page.locator("#test-repairs-count").textContent(), "1");
+    assert.equal(await page.locator("#test-repairs-rows tr").count(), 1);
+    await page.reload();
+    await page.locator("#test-repairs-rows").getByText("Тестовая копия той же карточки", { exact: true }).waitFor();
+    assert.equal(await page.locator("#test-repairs-function-tab").getAttribute("aria-selected"), "true");
+    failList = true;
+    await page.locator("#test-repairs-refresh").click();
+    await page.locator("#test-repairs-feedback").getByText("Не удалось загрузить заказ-наряды. Нажмите «Обновить».").waitFor();
+    failList = false;
+    await page.locator("#test-repairs-refresh").click();
+    await page.locator("#test-repairs-rows").getByText("Тестовая копия той же карточки", { exact: true }).waitFor();
     const cleanup = await fetch(`${origin}/api/integration/1c/repairs/test`, { method: "DELETE",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
       body: JSON.stringify({ confirmTestCleanup: true }) });
     assert.equal(cleanup.status, 200);
     assert.deepEqual(await cleanup.json(), { deleted: 1 });
-    await page.locator("#repairs-refresh").click();
+    await page.locator("#test-repairs-refresh").click();
+    await page.getByText("Тестовых заказ-нарядов пока нет. Они появятся после передачи из 1С в тестовом режиме.").waitFor();
+    assert.equal(await page.locator("#test-repairs-count").textContent(), "0");
+    await page.locator("#repairs-function-tab").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
-    assert.equal(await page.locator(".repairs-test-label").count(), 0);
-    assert.equal(await page.getByText(updated.status, { exact: true }).count(), 1);
+    assert.equal(await page.locator("#repairs-rows").getByText(updated.status, { exact: true }).count(), 1);
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

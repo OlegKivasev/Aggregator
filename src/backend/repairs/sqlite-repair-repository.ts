@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import type { RepairCard } from "./repair-card.ts";
+import { parseRepairCard, type RepairCard } from "./repair-card.ts";
 
 export class SqliteRepairRepository {
   private readonly database: DatabaseSync;
@@ -27,22 +27,43 @@ export class SqliteRepairRepository {
           vehicle_name TEXT NOT NULL, status TEXT NOT NULL
         ) STRICT;
       `);
+      this.database.exec("BEGIN IMMEDIATE");
+      try {
+        for (const table of ["repair_cards", "test_repair_cards"]) {
+          const columns = new Set(this.database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
+          for (const [name, type] of [["counterparty_name", "TEXT"], ["total_positions", "INTEGER"], ["available_positions", "INTEGER"]]) {
+            if (!columns.has(name)) this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+          }
+        }
+        this.database.exec("COMMIT");
+      } catch (error) {
+        this.database.exec("ROLLBACK");
+        throw error;
+      }
       this.saveStatement = this.database.prepare(`
-        INSERT INTO repair_cards (document_id, number, date, vehicle_name, status) VALUES (?, ?, ?, ?, ?)
+        INSERT INTO repair_cards (document_id, number, date, vehicle_name, status, counterparty_name, total_positions, available_positions)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
           number = excluded.number, date = excluded.date,
-          vehicle_name = excluded.vehicle_name, status = excluded.status
+          vehicle_name = excluded.vehicle_name, status = excluded.status, counterparty_name = excluded.counterparty_name,
+          total_positions = excluded.total_positions, available_positions = excluded.available_positions
       `);
       this.testSaveStatement = this.database.prepare(`
-        INSERT INTO test_repair_cards (document_id, number, date, vehicle_name, status) VALUES (?, ?, ?, ?, ?)
+        INSERT INTO test_repair_cards (document_id, number, date, vehicle_name, status, counterparty_name, total_positions, available_positions)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
           number = excluded.number, date = excluded.date,
-          vehicle_name = excluded.vehicle_name, status = excluded.status
+          vehicle_name = excluded.vehicle_name, status = excluded.status, counterparty_name = excluded.counterparty_name,
+          total_positions = excluded.total_positions, available_positions = excluded.available_positions
       `);
       this.listStatement = this.database.prepare(`
-        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, 0 AS testPlatform FROM repair_cards
+        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status,
+          counterparty_name AS counterpartyName, total_positions AS totalPositions, available_positions AS availablePositions,
+          0 AS testPlatform FROM repair_cards
         UNION ALL
-        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, 1 AS testPlatform FROM test_repair_cards
+        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status,
+          counterparty_name AS counterpartyName, total_positions AS totalPositions, available_positions AS availablePositions,
+          1 AS testPlatform FROM test_repair_cards
         ORDER BY date DESC, documentId ASC, testPlatform ASC
       `);
     } catch (error) {
@@ -53,7 +74,8 @@ export class SqliteRepairRepository {
 
   save(card: RepairCard): void {
     const statement = card.testPlatform === true ? this.testSaveStatement : this.saveStatement;
-    statement.run(card.documentId, card.number, card.date, card.vehicleName, card.status);
+    statement.run(card.documentId, card.number, card.date, card.vehicleName, card.status, card.counterpartyName ?? null,
+      card.goodsReadiness?.totalPositions ?? null, card.goodsReadiness?.availablePositions ?? null);
   }
 
   list(): RepairCard[] {
@@ -64,12 +86,40 @@ export class SqliteRepairRepository {
         throw new Error("Invalid SQLite repair card");
       }
       if (row.testPlatform !== 0 && row.testPlatform !== 1) throw new Error("Invalid SQLite repair platform");
-      return { documentId, number, date, vehicleName, status, ...(row.testPlatform === 1 ? { testPlatform: true } : {}) };
+      try {
+        return parseRepairCard({ documentId, number, date, vehicleName, status,
+          ...(row.testPlatform === 1 ? { testPlatform: true } : {}),
+          ...(row.counterpartyName !== null ? { counterpartyName: row.counterpartyName } : {}),
+          ...(row.totalPositions !== null || row.availablePositions !== null
+            ? { goodsReadiness: { totalPositions: row.totalPositions, availablePositions: row.availablePositions } } : {}),
+        });
+      } catch (error) {
+        throw new Error("Invalid SQLite repair card", { cause: error });
+      }
     });
   }
 
   clearTestCards(): number {
     return Number(this.database.prepare("DELETE FROM test_repair_cards").run().changes);
+  }
+
+  clearProductionCards(): number {
+    return Number(this.database.prepare("DELETE FROM repair_cards").run().changes);
+  }
+
+  deleteCard(documentId: string, testPlatform: boolean): number {
+    const table = testPlatform ? "test_repair_cards" : "repair_cards";
+    return Number(this.database.prepare(`DELETE FROM ${table} WHERE document_id = ?`).run(documentId).changes);
+  }
+
+  counts(): { production: number; test: number } {
+    const row = this.database.prepare(`SELECT
+      (SELECT COUNT(*) FROM repair_cards) AS production,
+      (SELECT COUNT(*) FROM test_repair_cards) AS test`).get();
+    if (!row || typeof row.production !== "number" || typeof row.test !== "number") {
+      throw new Error("Invalid SQLite repair counts");
+    }
+    return { production: row.production, test: row.test };
   }
 
   close(): void {

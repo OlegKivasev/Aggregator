@@ -1,9 +1,10 @@
-export function bootstrapRepairs() {
-  const section = document.querySelector("#repairs-function");
-  const rows = document.querySelector("#repairs-rows");
-  const feedback = document.querySelector("#repairs-feedback");
-  const count = document.querySelector("#repairs-count");
-  const refreshButton = document.querySelector("#repairs-refresh");
+export function bootstrapRepairs({ testPlatform = false } = {}) {
+  const prefix = testPlatform ? "test-repairs" : "repairs";
+  const section = document.querySelector(`#${prefix}-function`);
+  const rows = document.querySelector(`#${prefix}-rows`);
+  const feedback = document.querySelector(`#${prefix}-feedback`);
+  const count = document.querySelector(`#${prefix}-count`);
+  const refreshButton = document.querySelector(`#${prefix}-refresh`);
   let loading = false;
 
   const showMessage = (message) => {
@@ -35,8 +36,9 @@ export function bootstrapRepairs() {
         || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(card.date))) {
         throw new Error("Invalid repairs response");
       }
+      const repairs = payload.repairs.filter((card) => (card.testPlatform === true) === testPlatform);
       const fragment = document.createDocumentFragment();
-      for (const card of payload.repairs) {
+      for (const card of repairs) {
         const row = document.createElement("tr");
         const date = `${card.date.slice(8, 10)}.${card.date.slice(5, 7)}.${card.date.slice(0, 4)} ${card.date.slice(11, 16)}`;
         for (const value of [card.number, date, card.vehicleName, card.status]) {
@@ -44,19 +46,13 @@ export function bootstrapRepairs() {
           cell.textContent = value;
           row.append(cell);
         }
-        if (card.testPlatform === true) {
-          row.dataset.testPlatform = "true";
-          const label = document.createElement("span");
-          label.className = "results-count repairs-test-label";
-          label.textContent = "Тест";
-          label.title = "Тестовая платформа";
-          row.firstElementChild.append(label);
-        }
         fragment.append(row);
       }
       rows.replaceChildren(fragment);
-      if (!payload.repairs.length) showMessage("Заказ-нарядов пока нет. Они появятся после передачи из 1С.");
-      count.textContent = String(payload.repairs.length);
+      if (!repairs.length) showMessage(testPlatform
+        ? "Тестовых заказ-нарядов пока нет. Они появятся после передачи из 1С в тестовом режиме."
+        : "Заказ-нарядов пока нет. Они появятся после передачи из 1С.");
+      count.textContent = String(repairs.length);
       count.hidden = false;
       feedback.textContent = "";
     } catch {

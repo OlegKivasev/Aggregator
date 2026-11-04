@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { readRepairIntegrationSecret } from "../src/backend/config.ts";
 import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 import { parseRepairCard, RepairValidationError } from "../src/backend/repairs/repair-card.ts";
@@ -136,6 +137,9 @@ test("HTTP repairs starts empty, atomically upserts by UUID, sorts and survives 
 test("HTTP repair import fails closed without a configured secret and leaves existing endpoints working", async () => {
   await withServer(null, async ({ baseUrl }) => {
     assert.equal((await send(baseUrl, card)).status, 503);
+    for (const [path, method] of [["/status", "GET"], ["/test", "DELETE"], ["/production", "DELETE"], ["", "DELETE"]]) {
+      assert.equal((await fetch(`${baseUrl}/api/integration/1c/repairs${path}`, { method })).status, 503);
+    }
     assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [] });
     assert.equal((await fetch(baseUrl)).status, 200);
     assert.equal((await fetch(`${baseUrl}/api/suppliers/sessions`)).status, 200);
@@ -157,7 +161,7 @@ test("HTTP repair import authorizes before reading the body and validates method
     assert.equal((await send(baseUrl, card, secret, { body: JSON.stringify({ ...card, vehicleName: "x".repeat(17_000) }) })).status, 413);
     assert.equal((await fetch(`${baseUrl}/api/integration/1c/repairs?secret=${secret}`, { method: "POST" })).status, 400);
     assert.equal((await fetch(`${baseUrl}/api/repairs?limit=1`)).status, 400);
-    for (const [path, method, allow] of [["/api/integration/1c/repairs", "GET", "POST"], ["/api/repairs", "POST", "GET"], ["/api/repairs", "OPTIONS", "GET"]]) {
+    for (const [path, method, allow] of [["/api/integration/1c/repairs", "GET", "POST, DELETE"], ["/api/repairs", "POST", "GET"], ["/api/repairs", "OPTIONS", "GET"]]) {
       const response = await fetch(`${baseUrl}${path}`, { method });
       assert.equal(response.status, 405);
       assert.equal(response.headers.get("allow"), allow);
@@ -205,8 +209,109 @@ test("integration status verifies the server secret without requiring or creatin
     const response = await fetch(url, { headers: { Authorization: `Bearer ${secret}` } });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-store");
-    assert.deepEqual(await response.json(), { ready: true });
+    assert.deepEqual(await response.json(), { ready: true, cards: { production: 0, test: 0 } });
     assert.equal((await fetch(url, { method: "POST" })).status, 405);
     assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [] });
   });
+});
+
+test("platform counts and explicitly confirmed production cleanup remain isolated across restart", async () => {
+  await withServer(secret, async ({ baseUrl, close }, { start }) => {
+    const headers = { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" };
+    const status = () => fetch(`${baseUrl}/api/integration/1c/repairs/status`, { headers }).then((response) => response.json());
+    const cleanup = (options = {}) => fetch(`${baseUrl}/api/integration/1c/repairs/production`, {
+      method: "DELETE", headers, body: JSON.stringify({ confirmProductionCleanup: true }), ...options,
+    });
+    const testCard = { ...card, testPlatform: true };
+    await send(baseUrl, testCard);
+    assert.deepEqual(await status(), { ready: true, cards: { production: 0, test: 1 } });
+    await send(baseUrl, card);
+    await send(baseUrl, card);
+    assert.deepEqual(await status(), { ready: true, cards: { production: 1, test: 1 } });
+    assert.equal((await cleanup({ headers: { "Content-Type": "application/json" } })).status, 401);
+    assert.equal((await cleanup({ headers: { ...headers, "Content-Type": "text/plain" } })).status, 415);
+    for (const body of ["{", "null", "[]", "{}", JSON.stringify({ confirmTestCleanup: true }),
+      JSON.stringify({ confirmProductionCleanup: false }), JSON.stringify({ confirmProductionCleanup: true, extra: true })]) {
+      assert.equal((await cleanup({ body })).status, 400);
+    }
+    assert.equal((await cleanup({ body: JSON.stringify({ text: "x".repeat(17_000) }) })).status, 413);
+    const wrongMethod = await fetch(`${baseUrl}/api/integration/1c/repairs/production`, { headers });
+    assert.equal(wrongMethod.status, 405);
+    assert.equal(wrongMethod.headers.get("allow"), "DELETE");
+    assert.deepEqual(await status(), { ready: true, cards: { production: 1, test: 1 } });
+    assert.deepEqual(await (await cleanup()).json(), { deleted: 1 });
+    assert.deepEqual(await (await cleanup()).json(), { deleted: 0 });
+    assert.deepEqual(await status(), { ready: true, cards: { production: 0, test: 1 } });
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [testCard] });
+    await close();
+    const restarted = await start();
+    assert.deepEqual(await (await fetch(`${restarted.baseUrl}/api/repairs`)).json(), { repairs: [testCard] });
+  });
+});
+
+test("repair rechecks accept current 1C metadata and safely remove only the selected UUID and platform", async () => {
+  await withServer(secret, async ({ baseUrl, close }, { start }) => {
+    const detailed = { ...card, counterpartyName: "Тестовое юридическое лицо",
+      goodsReadiness: { totalPositions: 3, availablePositions: 1 } };
+    assert.deepEqual(await (await send(baseUrl, detailed)).json(), { repair: detailed });
+    const testCard = { ...detailed, testPlatform: true, goodsReadiness: { totalPositions: 3, availablePositions: 3 } };
+    await send(baseUrl, testCard);
+    const other = { ...card, documentId: "22345678-abcd-1234-abcd-123456789abc", number: "ТЕСТ-2" };
+    await send(baseUrl, other);
+    for (const goodsReadiness of [null, [], {}, { totalPositions: 1, availablePositions: 2 },
+      { totalPositions: 1.5, availablePositions: 0 }, { totalPositions: -1, availablePositions: 0 },
+      { totalPositions: 100001, availablePositions: 0 }, { totalPositions: 1, availablePositions: -1 },
+      { totalPositions: "1", availablePositions: 0 }, { totalPositions: 1, availablePositions: 0, extra: true }]) {
+      assert.equal((await send(baseUrl, { ...detailed, goodsReadiness })).status, 400);
+    }
+    for (const counterpartyName of [null, "", 1, "x".repeat(501)]) {
+      assert.equal((await send(baseUrl, { ...detailed, counterpartyName })).status, 400);
+    }
+    await close();
+    const restarted = await start();
+    baseUrl = restarted.baseUrl;
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [detailed, testCard, other] });
+    const remove = (payload, options = {}) => fetch(`${baseUrl}/api/integration/1c/repairs`, {
+      method: "DELETE", headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload), ...options,
+    });
+    const selection = { documentId: card.documentId, testPlatform: false };
+    assert.equal((await remove(selection, { headers: { "Content-Type": "application/json" } })).status, 401);
+    for (const payload of [null, [], {}, { documentId: card.documentId }, { ...selection, testPlatform: "false" },
+      { ...selection, extra: true }, { ...selection, documentId: "not-a-uuid" }]) {
+      assert.equal((await remove(payload)).status, 400);
+    }
+    assert.deepEqual(await (await remove(selection)).json(), { ...selection, deleted: 1 });
+    assert.deepEqual(await (await remove(selection)).json(), { ...selection, deleted: 0 });
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [testCard, other] });
+    // A full replacement also removes obsolete optional metadata.
+    await send(baseUrl, { ...card, testPlatform: true });
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [{ ...card, testPlatform: true }, other] });
+  });
+});
+
+test("repair metadata migration preserves existing production and test rows", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "aggregator-repairs-migration-"));
+  const path = join(directory, "repairs.sqlite");
+  const legacy = new DatabaseSync(path);
+  try {
+    for (const table of ["repair_cards", "test_repair_cards"]) {
+      legacy.exec(`CREATE TABLE ${table} (document_id TEXT PRIMARY KEY NOT NULL, number TEXT NOT NULL,
+        date TEXT NOT NULL, vehicle_name TEXT NOT NULL, status TEXT NOT NULL) STRICT`);
+      legacy.prepare(`INSERT INTO ${table} VALUES (?, ?, ?, ?, ?)`).run(...Object.values(card));
+    }
+  } finally { legacy.close(); }
+  let repository;
+  try {
+    repository = new SqliteRepairRepository(path);
+    assert.deepEqual(repository.list(), [card, { ...card, testPlatform: true }]);
+    const updated = { ...card, goodsReadiness: { totalPositions: 0, availablePositions: 0 } };
+    repository.save(updated);
+    repository.close();
+    repository = new SqliteRepairRepository(path);
+    assert.deepEqual(repository.list(), [updated, { ...card, testPlatform: true }]);
+  } finally {
+    repository?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

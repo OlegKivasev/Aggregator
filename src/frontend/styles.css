@@ -652,7 +652,6 @@ input {
 .repairs-table .results-data-table { width: 100%; min-width: 640px; }
 .repairs-table .results-data-table td { white-space: normal; overflow-wrap: anywhere; }
 .repairs-number-column { width: 16%; }
-.repairs-test-label { display: block; width: fit-content; margin-top: 4px; }
 .repairs-date-column { width: 170px; }
 .repairs-status-column { width: 24%; }
 .repairs-feedback { margin: 0; padding: 0 18px 12px; color: var(--muted); }
