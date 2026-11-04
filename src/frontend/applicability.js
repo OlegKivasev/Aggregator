@@ -14,10 +14,9 @@ const markupTab = document.querySelector("#markup-function-tab");
 const applicabilityTab = document.querySelector("#applicability-function-tab");
 const repairsFunction = document.querySelector("#repairs-function");
 const repairsTab = document.querySelector("#repairs-function-tab");
-const repairsUi = bootstrapRepairs();
+const repairsUi = bootstrapRepairs({ onActiveEmpty: () => setActiveFunction("markup") });
 const testRepairsFunction = document.querySelector("#test-repairs-function");
 const testRepairsTab = document.querySelector("#test-repairs-function-tab");
-const testRepairsUi = bootstrapRepairs({ testPlatform: true });
 const applicabilityTabsList = document.querySelector("#applicability-tabs-list");
 const applicabilityTabs = applicabilityTabsList.closest(".applicability-tabs");
 const tabUngroupDrop = document.querySelector("#applicability-tab-ungroup-drop");
@@ -202,8 +201,7 @@ const setActiveFunction = (name) => {
     renderActiveTab();
     skuInput.focus();
   }
-  repairsUi.setActive(name === "repairs");
-  testRepairsUi.setActive(name === "test-repairs");
+  repairsUi.setActive(name);
 };
 
 const setFeedback = (message, tone = "error") => {
@@ -2060,3 +2058,5 @@ try {
 } catch {
   // The selected function is a convenience preference.
 }
+
+repairsUi.start();

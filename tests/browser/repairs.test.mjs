@@ -61,11 +61,22 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.goto(origin);
     await page.waitForLoadState("networkidle");
     assert.equal(await page.locator("#markup-function").isVisible(), true);
-    await page.locator("#repairs-function-tab").click();
-    await page.getByText("Заказ-нарядов в работе нет.").waitFor();
-    assert.equal(await page.locator("#repairs-count").textContent(), "0");
-    assert.equal(await page.locator("#markup-function").isVisible(), false);
-    assert.equal(await page.locator("#applicability-function").isVisible(), false);
+    assert.equal(await page.locator("#repairs-function-tab").isVisible(), false);
+    assert.equal(await page.locator("#test-repairs-function-tab").isVisible(), false);
+    await page.evaluate(() => localStorage.setItem("autoservice.activeFunction", "test-repairs"));
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    assert.equal(await page.locator("#markup-function").isVisible(), true);
+    assert.equal(await page.locator("#test-repairs-function").isVisible(), false);
+    await page.clock.install();
+    const waitForRepairIdle = () => page.waitForFunction(() => !document.querySelector("#repairs-refresh").disabled);
+    const pollRepairs = async () => {
+      await waitForRepairIdle();
+      const response = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/repairs");
+      await page.clock.runFor(10_001);
+      await response;
+      await waitForRepairIdle();
+    };
     const send = async (value) => {
       const response = await fetch(`${origin}/api/integration/1c/repairs`, { method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` }, body: JSON.stringify(value) });
@@ -73,7 +84,10 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
       await response.arrayBuffer();
     };
     await send(card);
-    await page.locator("#repairs-refresh").click();
+    await pollRepairs();
+    await page.locator("#repairs-function-tab").waitFor();
+    assert.equal(await page.locator("#test-repairs-function-tab").isVisible(), false);
+    await page.locator("#repairs-function-tab").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-rows tr").count(), 1);
     assert.deepEqual(await page.locator("#repairs-rows td").allTextContents(), [card.vehicleName, "Наличие ещё не проверено"]);
@@ -154,6 +168,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#repairs-function").isVisible(), false);
     const testVehicle = "Тестовая машина в отдельной вкладке";
     await send({ ...updated, testPlatform: true, vehicleName: testVehicle, goodsReadiness: { totalPositions: 5, availablePositions: 2 } });
+    await pollRepairs();
     await page.locator("#repairs-function-tab").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-rows tr").count(), 1);
@@ -182,20 +197,23 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(cleanup.status, 200);
     assert.deepEqual(await cleanup.json(), { deleted: 1 });
     await page.locator("#test-repairs-refresh").click();
-    await page.getByText("Тестовых заказ-нарядов в работе нет.").waitFor();
-    assert.equal(await page.locator("#test-repairs-count").textContent(), "0");
+    await page.locator("#test-repairs-function-tab").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#test-repairs-function").isVisible(), false);
+    assert.equal(await page.locator("#markup-function").isVisible(), true);
+    assert.equal(await page.locator("#repairs-function-tab").isVisible(), true);
     await page.locator("#repairs-function-tab").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-rows").getByText(updated.vehicleName, { exact: true }).count(), 1);
     await send({ ...updated, status: "Завершен" });
     await page.locator("#repairs-refresh").click();
-    await page.getByText("Заказ-нарядов в работе нет.", { exact: true }).waitFor();
-    assert.equal(await page.locator("#repairs-count").textContent(), "0");
+    await page.locator("#repairs-function-tab").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#markup-function").isVisible(), true);
     await send(updated);
-    await page.locator("#repairs-refresh").click();
+    await pollRepairs();
+    await page.locator("#repairs-function-tab").waitFor();
+    await page.locator("#repairs-function-tab").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
     // Reproduce a saved fourth product: the visible list updates without a button.
-    await page.clock.install();
     await send({ ...updated, goodsReadiness: { totalPositions: 3, availablePositions: 3 } });
     await page.reload();
     await page.getByText("В наличии 3 из 3 позиций", { exact: true }).waitFor();
@@ -217,13 +235,13 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#repairs-rows tr").count(), 1);
 
     failList = true;
-    await page.clock.runFor(10_001);
+    await pollRepairs();
     await page.getByText("Не удалось обновить заказ-наряды. Показаны ранее загруженные данные.", { exact: true }).waitFor();
     assert.equal(await page.getByText("В наличии 3 из 4 позиций", { exact: true }).isVisible(), true);
     assert.equal(await page.locator("#repairs-count").isVisible(), true);
     failList = false;
     await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 4 } });
-    await page.clock.runFor(10_001);
+    await pollRepairs();
     await page.getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-feedback").textContent(), "");
 
@@ -233,16 +251,20 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
       body: JSON.stringify({ documentId: card.documentId, testPlatform: false }) });
     assert.equal(removed.status, 200);
     await removed.arrayBuffer();
-    await page.clock.runFor(10_001);
-    await page.getByText("Заказ-нарядов в работе нет.", { exact: true }).waitFor();
+    await pollRepairs();
+    await page.locator("#repairs-function-tab").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#markup-function").isVisible(), true);
     await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 4 } });
-    await page.clock.runFor(10_001);
+    await pollRepairs();
+    await page.locator("#repairs-function-tab").waitFor();
+    await page.locator("#repairs-function-tab").click();
     await page.getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
-    // Other functions and hidden browser tabs do not poll repairs.
+    // Availability updates outside repairs; hidden browser pages pause all polling.
     await page.locator("#markup-function-tab").click();
+    await waitForRepairIdle();
     const beforeInactive = repairRequests.length;
-    await page.clock.runFor(30_001);
-    assert.equal(repairRequests.length, beforeInactive);
+    for (let index = 0; index < 3; index++) await pollRepairs();
+    assert.equal(repairRequests.length, beforeInactive + 3);
     await send({ ...updated, goodsReadiness: { totalPositions: 0, availablePositions: 0 } });
     await page.locator("#repairs-function-tab").click();
     await page.getByText("Не найдено товаров", { exact: true }).waitFor();
@@ -263,11 +285,12 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     const testCard = { ...updated, testPlatform: true, vehicleName: testVehicle,
       goodsReadiness: { totalPositions: 5, availablePositions: 2 } };
     await send(testCard);
+    await pollRepairs();
     await page.locator("#test-repairs-function-tab").click();
     await page.locator("#test-repairs-rows").getByText("В наличии 2 из 5 позиций", { exact: true }).waitFor();
     await send({ ...testCard, goodsReadiness: { totalPositions: 5, availablePositions: 5 } });
     const beforeTestPoll = repairRequests.length;
-    await page.clock.runFor(10_001);
+    await pollRepairs();
     await page.locator("#test-repairs-rows").getByText("Все товары в наличии", { exact: true }).waitFor();
     assert.equal(repairRequests.length, beforeTestPoll + 1);
     assert.equal(await page.locator("#test-repairs-rows .repairs-readiness-detail").textContent(), "В наличии 5 из 5 позиций");

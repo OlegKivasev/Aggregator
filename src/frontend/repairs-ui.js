@@ -1,12 +1,16 @@
-export function bootstrapRepairs({ testPlatform = false } = {}) {
-  const prefix = testPlatform ? "test-repairs" : "repairs";
-  const section = document.querySelector(`#${prefix}-function`);
-  const rows = document.querySelector(`#${prefix}-rows`);
-  const feedback = document.querySelector(`#${prefix}-feedback`);
-  const count = document.querySelector(`#${prefix}-count`);
-  const refreshButton = document.querySelector(`#${prefix}-refresh`);
+export function bootstrapRepairs({ onActiveEmpty } = {}) {
+  const views = [false, true].map((testPlatform) => {
+    const prefix = testPlatform ? "test-repairs" : "repairs";
+    const section = document.querySelector(`#${prefix}-function`);
+    const rows = document.querySelector(`#${prefix}-rows`);
+    const feedback = document.querySelector(`#${prefix}-feedback`);
+    const count = document.querySelector(`#${prefix}-count`);
+    const refreshButton = document.querySelector(`#${prefix}-refresh`);
+    const tab = document.querySelector(`#${prefix}-function-tab`);
+    return { testPlatform, prefix, section, rows, feedback, count, refreshButton, tab };
+  });
+  let activeView;
   let loading = false;
-  let active = false;
   let loaded = false;
   let refreshTimer;
 
@@ -17,12 +21,12 @@ export function bootstrapRepairs({ testPlatform = false } = {}) {
 
   const scheduleRefresh = () => {
     clearRefreshTimer();
-    if (active && !document.hidden) {
+    if (!document.hidden) {
       refreshTimer = window.setTimeout(() => { void refresh({ background: true }); }, 10_000);
     }
   };
 
-  const showMessage = (message) => {
+  const showMessage = (rows, message) => {
     const row = document.createElement("tr");
     row.className = "results-table__empty";
     const cell = document.createElement("td");
@@ -63,13 +67,17 @@ export function bootstrapRepairs({ testPlatform = false } = {}) {
     if (loading) return;
     loading = true;
     clearRefreshTimer();
-    refreshButton.disabled = true;
-    section.setAttribute("aria-busy", "true");
-    if (!background || !loaded) {
+    const view = activeView;
+    for (const { refreshButton, section } of views) {
+      refreshButton.disabled = true;
+      section.setAttribute("aria-busy", "true");
+    }
+    if (view && (!background || !loaded)) {
+      const { feedback, count, rows } = view;
       feedback.textContent = "Загрузка…";
       delete feedback.dataset.tone;
       count.hidden = true;
-      showMessage("Загрузка заказ-нарядов…");
+      showMessage(rows, "Загрузка заказ-нарядов…");
     }
     try {
       const response = await fetch("/api/repairs", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
@@ -83,61 +91,68 @@ export function bootstrapRepairs({ testPlatform = false } = {}) {
         || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(card.date))) {
         throw new Error("Invalid repairs response");
       }
-      const repairs = payload.repairs.filter((card) => (card.testPlatform === true) === testPlatform);
-      const fragment = document.createDocumentFragment();
-      for (const card of repairs) {
-        const row = document.createElement("tr");
-        const vehicleCell = document.createElement("td");
-        const vehicle = document.createElement("span");
-        vehicle.className = "repairs-vehicle-name";
-        vehicle.textContent = card.vehicleName || (card.counterpartyName ? "Договор не указан" : "—");
-        vehicleCell.append(vehicle);
-        if (card.counterpartyName) {
-          const counterparty = document.createElement("span");
-          counterparty.className = "repairs-counterparty panel__meta";
-          counterparty.textContent = card.counterpartyName;
-          vehicleCell.append(counterparty);
+      for (const { testPlatform, rows, count, feedback, tab } of views) {
+        const repairs = payload.repairs.filter((card) => (card.testPlatform === true) === testPlatform);
+        const fragment = document.createDocumentFragment();
+        for (const card of repairs) {
+          const row = document.createElement("tr");
+          const vehicleCell = document.createElement("td");
+          const vehicle = document.createElement("span");
+          vehicle.className = "repairs-vehicle-name";
+          vehicle.textContent = card.vehicleName || (card.counterpartyName ? "Договор не указан" : "—");
+          vehicleCell.append(vehicle);
+          if (card.counterpartyName) {
+            const counterparty = document.createElement("span");
+            counterparty.className = "repairs-counterparty panel__meta";
+            counterparty.textContent = card.counterpartyName;
+            vehicleCell.append(counterparty);
+          }
+          row.append(vehicleCell, readinessCell(card.goodsReadiness));
+          fragment.append(row);
         }
-        row.append(vehicleCell, readinessCell(card.goodsReadiness));
-        fragment.append(row);
+        rows.replaceChildren(fragment);
+        if (!repairs.length) showMessage(rows, testPlatform ? "Тестовых заказ-нарядов в работе нет." : "Заказ-нарядов в работе нет.");
+        count.textContent = String(repairs.length);
+        count.hidden = false;
+        feedback.textContent = "";
+        delete feedback.dataset.tone;
+        tab.hidden = repairs.length === 0;
       }
-      rows.replaceChildren(fragment);
-      if (!repairs.length) showMessage(testPlatform ? "Тестовых заказ-нарядов в работе нет." : "Заказ-нарядов в работе нет.");
-      count.textContent = String(repairs.length);
-      count.hidden = false;
-      feedback.textContent = "";
-      delete feedback.dataset.tone;
       loaded = true;
+      if (activeView?.tab.hidden) onActiveEmpty?.();
     } catch {
+      if (!view) return;
+      const { feedback, rows } = view;
       feedback.dataset.tone = "error";
       if (background && loaded) {
         feedback.textContent = "Не удалось обновить заказ-наряды. Показаны ранее загруженные данные.";
       } else {
         feedback.textContent = "Не удалось загрузить заказ-наряды. Нажмите «Обновить».";
-        showMessage("Список недоступен.");
+        showMessage(rows, "Список недоступен.");
         loaded = false;
       }
     } finally {
       loading = false;
-      refreshButton.disabled = false;
-      section.setAttribute("aria-busy", "false");
+      for (const { refreshButton, section } of views) {
+        refreshButton.disabled = false;
+        section.setAttribute("aria-busy", "false");
+      }
       scheduleRefresh();
     }
   }
 
   const setActive = (value) => {
-    active = value;
-    clearRefreshTimer();
-    if (active && !document.hidden) void refresh({ background: true });
+    activeView = views.find((view) => view.prefix === value);
+    if (activeView && !document.hidden) void refresh({ background: true });
   };
 
   const resume = () => {
     clearRefreshTimer();
-    if (active && !document.hidden) void refresh({ background: true });
+    if (!document.hidden) void refresh({ background: true });
   };
 
   document.addEventListener("visibilitychange", resume);
   window.addEventListener("focus", resume);
-  refreshButton.addEventListener("click", () => { void refresh(); });
-  return { setActive };
+  for (const { refreshButton } of views) refreshButton.addEventListener("click", () => { void refresh(); });
+  return { setActive, start: resume };
 }

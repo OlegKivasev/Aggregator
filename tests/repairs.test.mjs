@@ -114,6 +114,10 @@ test("HTTP repairs starts empty, atomically upserts by UUID, sorts and survives 
     assert.equal(created.status, 200);
     assert.equal(created.headers.get("cache-control"), "no-store");
     assert.deepEqual(await created.json(), { repair: card });
+    // The 1C acknowledgement treats omitted testPlatform as the production mode.
+    const explicitProduction = await send(baseUrl, { ...card, testPlatform: false });
+    assert.equal(explicitProduction.status, 200);
+    assert.deepEqual(await explicitProduction.json(), { repair: card });
     const updated = { ...card, number: "ТЕСТ-2", date: "2026-11-04T08:15:00", vehicleName: "Другой контрагент", status: "В работе" };
     const updates = await Promise.all(Array.from({ length: 8 }, () => send(baseUrl, { ...updated, documentId: card.documentId.toUpperCase() })));
     assert.ok(updates.every((response) => response.status === 200));
@@ -174,7 +178,9 @@ test("test platform isolates copied UUIDs, survives restart and cleanup can neve
   await withServer(secret, async ({ baseUrl, close }, { start }) => {
     assert.equal((await send(baseUrl, card)).status, 200);
     const testCard = { ...card, status: "В работе", testPlatform: true };
-    assert.equal((await send(baseUrl, testCard)).status, 200);
+    const acceptedTest = await send(baseUrl, testCard);
+    assert.equal(acceptedTest.status, 200);
+    assert.deepEqual(await acceptedTest.json(), { repair: testCard });
     const updatedTest = { ...testCard, vehicleName: "Обновлённая тестовая машина" };
     assert.equal((await send(baseUrl, updatedTest)).status, 200);
     assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [card, updatedTest] });
