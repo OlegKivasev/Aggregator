@@ -53,14 +53,53 @@ function booleanResult(response: SiteHttpResponse, method: "Authorization" | "Is
   return result.text.trim() === "true" || result.text.trim() === "1";
 }
 
+function mergeCookies(previous: string | null, setCookie: string[]): string {
+  const cookies = new Map<string, string>();
+  for (const pair of previous?.split("; ") ?? []) {
+    const separator = pair.indexOf("=");
+    cookies.set(pair.slice(0, separator), pair.slice(separator + 1));
+  }
+  for (const header of setCookie) {
+    const [pair, ...attributes] = header.split(";");
+    const match = /^([A-Za-z0-9_.-]+)=([^\s;,\x00-\x1f\x7f]*)$/.exec(pair?.trim() || "");
+    if (!match) throw new SupplierIntegrationError("Autopiter returned an invalid cookie");
+    const options = new Map(attributes.map((attribute) => {
+      const separator = attribute.indexOf("=");
+      return [attribute.slice(0, separator < 0 ? undefined : separator).trim().toLowerCase(), separator < 0 ? "" : attribute.slice(separator + 1).trim()];
+    }));
+    const domain = options.get("domain")?.toLowerCase().replace(/^\./, "");
+    if (domain && domain !== endpoint.hostname && domain !== "autopiter.ru") continue;
+    const path = options.get("path");
+    if (path && endpoint.pathname !== path && !endpoint.pathname.startsWith(path.endsWith("/") ? path : `${path}/`)) continue;
+    const maxAge = options.get("max-age");
+    const expires = options.get("expires");
+    const expired = maxAge !== undefined ? /^-?\d+$/.test(maxAge) && Number(maxAge) <= 0
+      : expires !== undefined && Number.isFinite(Date.parse(expires)) && Date.parse(expires) <= Date.now();
+    if (!match[2] || expired) cookies.delete(match[1]);
+    else cookies.set(match[1], match[2]);
+  }
+  const cookie = [...cookies].map(([name, value]) => `${name}=${value}`).join("; ");
+  if (cookies.size > 32 || cookie.length > 16_384) throw new SupplierIntegrationError("Autopiter returned too many cookies");
+  return cookie;
+}
+
+function hasAuthCookie(cookie: string): boolean {
+  // The service documents this exact cookie name (including its spelling).
+  return /(?:^|; )AuthCoocies=[^;]+(?:;|$)/.test(cookie);
+}
+
 export async function verifyAutopiterCredentials(credentials: AutopiterCredentials, signal: AbortSignal, request: AutopiterRequester = autopiterSoapRequest): Promise<string> {
   const response = await request("Authorization", { UserID: credentials.login.trim(), Password: credentials.password, Save: "false" }, signal);
   signal.throwIfAborted();
   if (!booleanResult(response, "Authorization")) throw new SupplierAuthError("Autopiter rejected the client number or password");
-  // The service documents this exact cookie name (including its spelling).
-  const cookie = response.setCookie.map((value) => value.split(";", 1)[0]?.trim()).find((value) => /^AuthCoocies=[^\s;,]+$/.test(value || ""));
-  if (!cookie) throw new SupplierIntegrationError("Autopiter did not establish an authorization cookie");
-  return cookie;
+  const cookie = mergeCookies(null, response.setCookie);
+  if (!hasAuthCookie(cookie)) throw new SupplierIntegrationError("Autopiter did not establish an authorization cookie");
+  const validation = await request("IsAuthorization", {}, signal, cookie);
+  signal.throwIfAborted();
+  if (!booleanResult(validation, "IsAuthorization")) throw new SupplierAuthError("Autopiter did not confirm the new session");
+  const verifiedCookie = mergeCookies(cookie, validation.setCookie);
+  if (!hasAuthCookie(verifiedCookie)) throw new SupplierAuthError("Autopiter invalidated the new session");
+  return verifiedCookie;
 }
 
 function listResult(response: SiteHttpResponse, method: "FindCatalog" | "GetPriceId", itemName: string): XmlElement[] {
@@ -116,6 +155,46 @@ export class AutopiterApiAdapter implements SupplierAdapter {
 
   constructor(request: AutopiterRequester = autopiterSoapRequest) { this.request = request; }
 
+  private async requestWithSession<T>(
+    method: Exclude<AutopiterMethod, "Authorization">,
+    fields: SoapFields,
+    context: SupplierSearchContext,
+    manager: SupplierSessionManager,
+    parse: (response: SiteHttpResponse) => T,
+    recovery?: { attempted: boolean },
+  ): Promise<T> {
+    const operation = manager.beginOperation(this.id, context.signal);
+    try {
+      operation.signal.throwIfAborted();
+      const credentials = manager.getAutopiterCredentials();
+      if (!credentials) throw new SupplierAuthError("Autopiter credentials are not configured");
+      let cookie = manager.getAutopiterCookie();
+      while (true) {
+        if (!cookie) {
+          if (!recovery || recovery.attempted) throw new SupplierAuthError("Autopiter authorization is required");
+          recovery.attempted = true;
+          const previous = manager.getAutopiterCookie();
+          cookie = await verifyAutopiterCredentials(credentials, operation.signal, this.request);
+          operation.signal.throwIfAborted();
+          manager.updateAutopiterCookie(previous, cookie);
+        }
+        try {
+          const response = await this.request(method, fields, operation.signal, cookie);
+          operation.signal.throwIfAborted();
+          const result = parse(response);
+          const updatedCookie = mergeCookies(cookie, response.setCookie);
+          if (!hasAuthCookie(updatedCookie)) throw new SupplierAuthError("Autopiter invalidated the session");
+          manager.updateAutopiterCookie(cookie, updatedCookie);
+          return result;
+        } catch (error) {
+          operation.signal.throwIfAborted();
+          if (!(error instanceof SupplierAuthError) || !recovery || recovery.attempted) throw error;
+          cookie = null;
+        }
+      }
+    } finally { operation.dispose(); }
+  }
+
   async ensureSession(manager: SupplierSessionManager) {
     return manager.getAutopiterCredentials()
       ? manager.markChecked(this.id, "Autopiter credentials are configured")
@@ -123,17 +202,15 @@ export class AutopiterApiAdapter implements SupplierAdapter {
   }
 
   async validateSession(context: SupplierSearchContext, manager: SupplierSessionManager): Promise<void> {
-    const cookie = manager.getAutopiterCookie();
-    if (!cookie || !booleanResult(await this.request("IsAuthorization", {}, context.signal, cookie), "IsAuthorization")) {
-      throw new SupplierAuthError("Autopiter authorization is required");
-    }
-    context.signal.throwIfAborted();
+    // The session service owns validation's single full authorization attempt.
+    await this.requestWithSession("IsAuthorization", {}, context, manager, (response) => {
+      if (!booleanResult(response, "IsAuthorization")) throw new SupplierAuthError("Autopiter authorization is required");
+    });
   }
 
   async search(query: SearchQuery, context: SupplierSearchContext, onResult: (result: NormalizedSearchResult) => void, manager: SupplierSessionManager): Promise<void> {
-    const cookie = manager.getAutopiterCookie();
-    if (!cookie) throw new SupplierAuthError("Autopiter authorization is required");
-    const catalogs = listResult(await this.request("FindCatalog", { Number: query.article }, context.signal, cookie), "FindCatalog", "SearchCatalogModel");
+    const recovery = { attempted: false };
+    const catalogs = await this.requestWithSession("FindCatalog", { Number: query.article }, context, manager, (response) => listResult(response, "FindCatalog", "SearchCatalogModel"), recovery);
     context.signal.throwIfAborted();
     const ids = new Set<string>();
     for (const catalog of catalogs) {
@@ -145,7 +222,7 @@ export class AutopiterApiAdapter implements SupplierAdapter {
     if (ids.size > 64) throw new SupplierIntegrationError("Autopiter returned too many catalogs");
     for (const id of ids) {
       context.signal.throwIfAborted();
-      const offers = listResult(await this.request("GetPriceId", { ArticleId: id, Currency: "РУБ", SearchCross: "0", MinSalesRating: "0", MinRealTimeInProc: "0" }, context.signal, cookie), "GetPriceId", "PriceSearchModel");
+      const offers = await this.requestWithSession("GetPriceId", { ArticleId: id, Currency: "РУБ", SearchCross: "0", MinSalesRating: "0", MinRealTimeInProc: "0" }, context, manager, (response) => listResult(response, "GetPriceId", "PriceSearchModel"), recovery);
       context.signal.throwIfAborted();
       for (const offer of offers) {
         const result = normalizeOffer(offer, query.article);

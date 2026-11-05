@@ -30,13 +30,18 @@ async function searchOffers(content) {
   return results;
 }
 
-test("Autopiter authorizes with client number and preserves password, accepting only the documented cookie", async () => {
+test("Autopiter authorizes with client number, preserves all applicable cookies and confirms the session", async () => {
   const received = [];
   assert.equal(await verifyAutopiterCredentials(credentials, signal(), async (...args) => {
-    received.push(args); return response("Authorization", "true", { setCookie: ["unrelated=ignore; Path=/", `${cookie}; HttpOnly; Secure; Path=/`] });
-  }), cookie);
+    received.push(args);
+    return args[0] === "Authorization" ? response("Authorization", "true", { setCookie: ["ASP.NET_SessionId=fixture-session; Path=/; HttpOnly", `${cookie}; HttpOnly; Secure; Path=/`] })
+      : response("IsAuthorization", "true");
+  }), `ASP.NET_SessionId=fixture-session; ${cookie}`);
   assert.equal(received[0][0], "Authorization");
   assert.deepEqual(received[0][1], { UserID: "123456", Password: " test-password ", Save: "false" });
+  assert.equal(received.length, 2);
+  assert.equal(received[1][0], "IsAuthorization");
+  assert.equal(received[1][3], `ASP.NET_SessionId=fixture-session; ${cookie}`);
   for (const [payload, type] of [[response("Authorization", "false"), SupplierAuthError],
     [response("Authorization", "true"), SupplierIntegrationError], [response("Authorization", "maybe"), SupplierIntegrationError],
     [response("Authorization", "true", { status: 401 }), SupplierAuthError]]) {
@@ -54,6 +59,130 @@ test("Autopiter validates sessions without product searches and never invents ac
   assert.equal(calls[0][0], "IsAuthorization");
   assert.equal(calls[0][3], cookie);
   await assert.rejects(new AutopiterApiAdapter(async () => response("IsAuthorization", "false")).validateSession(context(), manager()), SupplierAuthError);
+});
+
+test("Autopiter rejects a new login when the separate session check fails", async () => {
+  const methods = [];
+  await assert.rejects(verifyAutopiterCredentials(credentials, signal(), async (method) => {
+    methods.push(method);
+    return method === "Authorization" ? response(method, "true", { setCookie: [cookie] }) : response(method, "false");
+  }), SupplierAuthError);
+  assert.deepEqual(methods, ["Authorization", "IsAuthorization"]);
+});
+
+test("Autopiter retains session cookies from login through validation and pricing, and recovers after restart or expiry", async () => {
+  let authorizations = 0;
+  let expectedCookie;
+  let validations = 0;
+  const request = async (method, _fields, receivedSignal, receivedCookie) => {
+    receivedSignal.throwIfAborted();
+    if (method === "Authorization") {
+      authorizations++;
+      expectedCookie = `AuthCoocies=fixture-${authorizations}; ASP.NET_SessionId=session-${authorizations}; affinity=node-a`;
+      return response(method, "true", { setCookie: [`AuthCoocies=fixture-${authorizations}; Path=/; HttpOnly; Secure`,
+        `ASP.NET_SessionId=session-${authorizations}; Path=/; HttpOnly`, "affinity=node-a; Path=/; Secure"] });
+    }
+    if (method === "IsAuthorization") {
+      validations++;
+      return response(method, receivedCookie === expectedCookie ? "true" : "false");
+    }
+    if (receivedCookie !== expectedCookie) return response(method, "", { status: 401 });
+    if (method === "FindCatalog") {
+      expectedCookie = `AuthCoocies=fixture-${authorizations}; ASP.NET_SessionId=rotated-${authorizations}; affinity=node-a`;
+      return response(method, catalog(), { setCookie: [`ASP.NET_SessionId=rotated-${authorizations}; Path=/; HttpOnly`] });
+    }
+    assert.equal(method, "GetPriceId");
+    return response(method, offer());
+  };
+  const adapter = new AutopiterApiAdapter(request);
+  const sessions = new SupplierSessionManager();
+  const service = new SupplierSessionService([adapter], sessions, {
+    verifyAutopiterCredentials: (data, authSignal) => verifyAutopiterCredentials(data, authSignal, request),
+  });
+  await service.authorizeAutopiter(credentials, signal());
+  const results = [];
+  await adapter.search({ article: "A1" }, context(), (value) => results.push(value), sessions);
+  assert.equal(results.length, 1);
+  assert.equal(authorizations, 1);
+  assert.equal(sessions.getAutopiterCookie(), expectedCookie);
+  const restarted = new SupplierSessionManager();
+  restarted.setAutopiterCredentials(credentials); restarted.markAuthorized("autopiter");
+  // The frontend opens SSE directly; it does not call the session-validation endpoint first.
+  const events = [];
+  await runSupplierSearch({ adapter, sessionManager: restarted, query: { article: "A1" }, signal: signal(), emit: (event) => events.push(event) });
+  assert.equal(events.at(-1).status, "completed");
+  assert.equal(events.filter((event) => event.type === "result").length, 1);
+  assert.equal(authorizations, 2);
+  expectedCookie = "expired-on-server";
+  await adapter.search({ article: "A1" }, context(), (value) => results.push(value), restarted);
+  assert.equal(authorizations, 3);
+  assert.equal(results.length, 2);
+  assert.equal(validations, 3);
+});
+
+test("Autopiter merges refreshed cookies, discards expired cookies and never forwards foreign cookie scopes", async () => {
+  const incoming = [];
+  const verified = await verifyAutopiterCredentials(credentials, signal(), async (method, _fields, _signal, receivedCookie) => {
+    incoming.push(receivedCookie);
+    return method === "Authorization" ? response(method, "true", { setCookie: [cookie,
+      "ASP.NET_SessionId=first; Domain=.autopiter.ru; Path=/v2", "affinity=node-a; Path=/",
+      "otherOrigin=secret; Domain=another.test; Path=/", "otherPath=secret; Path=/other",
+      "expired=discard; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/"] })
+      : response(method, "true", { setCookie: ["ASP.NET_SessionId=second; Path=/", "affinity=; Max-Age=0; Path=/"] });
+  });
+  assert.equal(incoming[1], `${cookie}; ASP.NET_SessionId=first; affinity=node-a`);
+  assert.equal(verified, `${cookie}; ASP.NET_SessionId=second`);
+});
+
+test("Autopiter performs at most one full recovery and never retries timeouts or integration failures", async () => {
+  for (const failure of [new SupplierAuthError(), new SupplierTimeoutError(), new SupplierIntegrationError()]) {
+    let authorizations = 0;
+    let searches = 0;
+    const adapter = new AutopiterApiAdapter(async (method) => {
+      if (method === "Authorization") { authorizations++; return response(method, "true", { setCookie: [cookie] }); }
+      if (method === "IsAuthorization") return response(method, "true");
+      searches++; throw failure;
+    });
+    await assert.rejects(adapter.search({ article: "A1" }, context(), () => assert.fail("unexpected result"), manager()), failure.constructor);
+    assert.equal(authorizations, failure instanceof SupplierAuthError ? 1 : 0);
+    assert.equal(searches, failure instanceof SupplierAuthError ? 2 : 1);
+  }
+});
+
+test("Autopiter logout prevents late search recovery and rotated cookies from restoring the session", async () => {
+  for (const missingCookie of [false, true]) {
+    const sessions = manager();
+    if (missingCookie) sessions.setAutopiterCredentials(credentials);
+    let release;
+    const adapter = new AutopiterApiAdapter((method) => new Promise((resolve) => {
+      release = () => resolve(method === "Authorization" ? response(method, "true", { setCookie: [cookie] })
+        : response(method, catalog(), { setCookie: ["ASP.NET_SessionId=late; Path=/"] }));
+    }));
+    const service = new SupplierSessionService([adapter], sessions, {});
+    const pending = adapter.search({ article: "A1" }, context(), () => assert.fail("unexpected result"), sessions);
+    const rejected = assert.rejects(pending, /invalidated/i);
+    service.logoutAutopiter(); release(); await rejected;
+    assert.equal(sessions.getAutopiterCookie(), null);
+    assert.equal(sessions.getAutopiterCredentials(), null);
+    assert.equal(sessions.getSession("autopiter").authorized, false);
+  }
+});
+
+test("Autopiter shares its one recovery attempt across catalog and price requests", async () => {
+  let authorizations = 0;
+  let priceCalls = 0;
+  const results = [];
+  const adapter = new AutopiterApiAdapter(async (method) => {
+    if (method === "FindCatalog") return response(method, catalog() + catalog({ ArticleId: "102" }));
+    if (method === "Authorization") { authorizations++; return response(method, "true", { setCookie: [cookie] }); }
+    if (method === "IsAuthorization") return response(method, "true");
+    priceCalls++;
+    return priceCalls === 2 ? response(method, offer()) : response(method, "", { status: 401 });
+  });
+  await assert.rejects(adapter.search({ article: "A1" }, context(), (value) => results.push(value), manager()), SupplierAuthError);
+  assert.equal(authorizations, 1);
+  assert.equal(priceCalls, 3);
+  assert.equal(results.length, 1);
 });
 
 test("Autopiter prices every exact catalog once, filters other articles and replacements and does not enable orders", async () => {

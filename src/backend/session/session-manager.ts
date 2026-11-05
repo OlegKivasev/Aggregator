@@ -270,6 +270,12 @@ export class SupplierSessionManager {
     return this.autopiterCookie;
   }
 
+  updateAutopiterCookie(previous: string | null, cookie: string): void {
+    if (this.autopiterCredentials && this.autopiterCookie === previous) {
+      this.autopiterCookie = cookie;
+    }
+  }
+
   clearAutopiterCredentials(): void {
     this.autopiterCredentials = null;
     this.autopiterCookie = null;
