@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { classifyOperationalError, SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError, type OperationalErrorCategory } from "../errors.ts";
 import type {
   ArmtekCredentials,
+  AutopiterCredentials,
   ForumAutoCredentials,
   MladovCredentials,
   MotorDetalCredentials,
@@ -66,6 +67,7 @@ export interface AggregatorApplication extends RosskoOrderSettingsApplication {
   authorizeArmtek(credentials: ArmtekCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizePartKom(credentials: PartKomCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeStparts(credentials: StpartsCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
+  authorizeAutopiter(credentials: AutopiterCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeForumAuto(credentials: ForumAutoCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeMotorDetal(credentials: MotorDetalCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeMladov(credentials: MladovCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
@@ -73,6 +75,7 @@ export interface AggregatorApplication extends RosskoOrderSettingsApplication {
   logoutArmtek(): SupplierSessionState;
   logoutPartKom(): SupplierSessionState;
   logoutStparts(): SupplierSessionState;
+  logoutAutopiter(): SupplierSessionState;
   logoutForumAuto(): SupplierSessionState;
   logoutMotorDetal(): SupplierSessionState;
   logoutMladov(): SupplierSessionState;
@@ -699,6 +702,16 @@ export function createAggregatorServer({
 
     if (request.method === "POST" && url.pathname === "/api/suppliers/stparts/logout") {
       serveJson(response, 200, { session: application.logoutStparts() });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/suppliers/autopiter/authorize") {
+      await serveAuthorization(request, response, application.authorizeAutopiter.bind(application), "authorize-autopiter", reportError, parseCredentials);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/suppliers/autopiter/logout") {
+      serveJson(response, 200, { session: application.logoutAutopiter() });
       return;
     }
 

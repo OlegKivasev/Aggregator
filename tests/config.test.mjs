@@ -31,6 +31,8 @@ const configurationVariables = [
   "MOTORDETAL_REQUEST_TIMEOUT_MS",
   "MOTORDETAL_SEARCH_TIMEOUT_MS",
   "PARTKOM_SEARCH_TIMEOUT_MS",
+  "AUTOPITER_REQUEST_TIMEOUT_MS",
+  "AUTOPITER_SEARCH_TIMEOUT_MS",
   "STPARTS_API_URL",
   "STPARTS_API_LOGIN",
   "STPARTS_API_PASSWORD",
@@ -105,6 +107,19 @@ test("configuration rejects invalid timeout and attempt values", () => {
   );
   assert.notEqual(excessiveRosskoTimeout.status, 0);
   assert.match(excessiveRosskoTimeout.stderr, /ROSSKO_API_REQUEST_TIMEOUT_MS must be an integer between 1000 and 120000/);
+});
+
+test("Autopiter timeouts use bounded integer configuration", () => {
+  const defaults = runConfig('const { autopiterConfig } = await import("./src/backend/config.ts"); process.stdout.write(JSON.stringify(autopiterConfig));');
+  assert.equal(defaults.status, 0, defaults.stderr);
+  assert.deepEqual(JSON.parse(defaults.stdout), { requestTimeoutMs: 15000, searchTimeoutMs: 30000 });
+  for (const name of ["AUTOPITER_REQUEST_TIMEOUT_MS", "AUTOPITER_SEARCH_TIMEOUT_MS"]) {
+    for (const value of ["0", "999", "120001", "Infinity", "1500.5"]) {
+      const invalid = runConfig('await import("./src/backend/config.ts");', { [name]: value });
+      assert.notEqual(invalid.status, 0);
+      assert.ok(invalid.stderr.includes(`${name} must be an integer between 1000 and 120000`));
+    }
+  }
 });
 
 test("configuration validates the supplier credential encryption key", () => {

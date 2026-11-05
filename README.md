@@ -1552,6 +1552,36 @@ curl -fsS \
 
 Use the configured local port instead of `3000` when `PORT` is overridden. A result status of `connected` means validation or automatic recovery succeeded, `expired` means manual authorization is required, and `error` means validation was temporarily unavailable.
 
+## Автопитер: только проценка
+
+В настройках поставщиков подключите «Автопитер»: укажите номер клиента (UserID)
+и пароль. Используется официальный SOAP API v2:
+[документация](https://service.autopiter.ru/v2/price).
+Доступ к веб-сервису должен быть разрешён Автопитером для вашей учётной записи.
+Авторизация проверяется методом Authorization, сессия — IsAuthorization;
+поиск выполняет FindCatalog и GetPriceId с SearchCross=0 и валютой РУБ.
+Поиск аналогов, корзина и оформление заказов Автопитера пока не подключены.
+Ссылка предложения открывает сайт Автопитера.
+
+По умолчанию скрыты предложения с TypeRefusal=3 или 4 (возврат невозможен).
+Их можно включить переключателем «Показывать товары без возможности возврата»
+в карточке Автопитера. Неизвестная или некорректная возвратность считается
+ошибкой интеграции, а не разрешением возврата. Остаток 0 или null означает
+неизвестное количество согласно API и отображается прочерком.
+
+Данные доступа сохраняются существующим зашифрованным хранилищем при наличии
+SUPPLIER_CREDENTIALS_ENCRYPTION_KEY; без ключа остаются в памяти. Cookie
+AuthCoocies хранится только в памяти и заново получается при проверке сессии
+после перезапуска. Отключение удаляет данные доступа и отменяет текущие операции.
+Новые настройки: AUTOPITER_REQUEST_TIMEOUT_MS (15000) и
+AUTOPITER_SEARCH_TIMEOUT_MS (30000), допустимый диапазон 1000–120000 мс.
+Обновляйте backend и frontend вместе; новые зависимости не требуются.
+
+Ручная проверка с реальным доступом: подключить Автопитер в настройках,
+выполнить проценку известного артикула и сверить цену, остаток, склад, дату и
+возвратность с сайтом. Проверить переключатель невозвратных предложений,
+недоступность кнопки корзины, восстановление после перезапуска и отключение.
+
 ## Configuration Validation
 
 Configuration is validated when backend modules are loaded. Invalid ports, timeouts, retry counts, supplier URLs, or production state paths stop startup with a configuration error instead of falling back to unsafe values.

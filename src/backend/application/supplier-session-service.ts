@@ -10,6 +10,7 @@ import {
 } from "../suppliers/errors.ts";
 import type {
   ArmtekCredentials,
+  AutopiterCredentials,
   ForumAutoCredentials,
   MladovCredentials,
   MotorDetalCredentials,
@@ -49,6 +50,7 @@ export interface SupplierSessionOperations {
   verifyArmtekCredentials(credentials: ArmtekCredentials, signal: AbortSignal): Promise<string>;
   verifyPartKomApiCredentials(credentials: PartKomCredentials, signal: AbortSignal): Promise<void>;
   verifyStpartsApiCredentials(credentials: StpartsCredentials, signal: AbortSignal): Promise<void>;
+  verifyAutopiterCredentials(credentials: AutopiterCredentials, signal: AbortSignal): Promise<string>;
   verifyForumAutoCredentials(credentials: ForumAutoCredentials, signal: AbortSignal): Promise<void>;
   verifyMotorDetalCredentials(credentials: MotorDetalCredentials, signal: AbortSignal): Promise<CredentialCheckResult>;
   verifyMladovCredentials(credentials: MladovCredentials, signal: AbortSignal): Promise<CredentialCheckResult>;
@@ -255,6 +257,33 @@ export class SupplierSessionService {
     return this.sessionManager.markUnauthorized("forum-auto");
   }
 
+  async authorizeAutopiter(credentials: AutopiterCredentials, signal: AbortSignal) {
+    return this.runAuthorization(signal, "autopiter", "Автопитер", async (authorizationSignal, establishSession) => {
+      let cookie: string;
+      try {
+        cookie = await this.operations.verifyAutopiterCredentials(credentials, authorizationSignal);
+      } catch (error) {
+        authorizationSignal.throwIfAborted();
+        if (error instanceof SupplierAuthError) {
+          return this.rejectAuthorization("autopiter", "Автопитер отклонил номер клиента или пароль");
+        }
+        throw error;
+      }
+      authorizationSignal.throwIfAborted();
+      establishSession();
+      this.rememberCredentials("autopiter", credentials);
+      this.sessionManager.setAutopiterCredentials(credentials, cookie);
+      return this.sessionManager.markAuthorized("autopiter", "Данные доступа к Автопитеру успешно проверены");
+    });
+  }
+
+  logoutAutopiter() {
+    this.sessionManager.invalidateOperations("autopiter");
+    this.sessionManager.clearAutopiterCredentials();
+    this.forgetCredentials("autopiter");
+    return this.sessionManager.markUnauthorized("autopiter");
+  }
+
   async authorizeMotorDetal(credentials: MotorDetalCredentials, signal: AbortSignal) {
     return this.runAuthorization(signal, "motordetal", "MotorDetal", async (authorizationSignal, establishSession) => {
       const result = await this.operations.verifyMotorDetalCredentials(credentials, authorizationSignal);
@@ -306,6 +335,7 @@ export class SupplierSessionService {
       "part-kom": () => this.logoutPartKom(),
       stparts: () => this.logoutStparts(),
       "forum-auto": () => this.logoutForumAuto(),
+      autopiter: () => this.logoutAutopiter(),
       motordetal: () => this.logoutMotorDetal(),
       mladov: () => this.logoutMladov(),
     };
@@ -371,6 +401,7 @@ export class SupplierSessionService {
       case "part-kom": return this.sessionManager.getPartKomCredentials();
       case "stparts": return this.sessionManager.getStpartsCredentials();
       case "forum-auto": return this.sessionManager.getForumAutoCredentials();
+      case "autopiter": return this.sessionManager.getAutopiterCredentials();
       case "motordetal": return this.sessionManager.getMotorDetalCredentials();
       case "mladov": return this.sessionManager.getMladovCredentials();
       case "rossko": return null;
@@ -390,6 +421,7 @@ export class SupplierSessionService {
       case "part-kom": return this.authorizePartKom(credentials, signal);
       case "stparts": return this.authorizeStparts(credentials, signal);
       case "forum-auto": return this.authorizeForumAuto(credentials, signal);
+      case "autopiter": return this.authorizeAutopiter(credentials, signal);
       case "motordetal": return this.authorizeMotorDetal(credentials, signal);
       case "mladov": return this.authorizeMladov(credentials, signal);
     }

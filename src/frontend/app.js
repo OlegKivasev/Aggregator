@@ -24,6 +24,7 @@ import {
   normalizeStpartsWarehouseColors,
 } from "./stparts-warehouse-settings.js";
 import { isPartKomReturnableVisible } from "./partkom-return-settings.js";
+import { isAutopiterReturnableVisible } from "./autopiter-return-settings.js";
 import { isForumAutoReturnableVisible } from "./forum-auto-return-settings.js";
 import { isArmtekReturnableVisible } from "./armtek-return-settings.js";
 import { bootstrapGarage } from "./garage-ui.js";
@@ -133,6 +134,14 @@ const forumAutoLogoutButton = document.querySelector("#forum-auto-logout-button"
 const forumAutoSessionPill = document.querySelector("#forum-auto-session-pill");
 const forumAutoAuthFeedback = document.querySelector("#forum-auto-auth-feedback");
 const forumAutoNonReturnableInput = document.querySelector("#forum-auto-non-returnable");
+const autopiterAuthForm = document.querySelector("#autopiter-auth-form");
+const autopiterLoginInput = document.querySelector("#autopiter-login");
+const autopiterPasswordInput = document.querySelector("#autopiter-password");
+const autopiterConnectButton = document.querySelector("#autopiter-connect-button");
+const autopiterLogoutButton = document.querySelector("#autopiter-logout-button");
+const autopiterSessionPill = document.querySelector("#autopiter-session-pill");
+const autopiterAuthFeedback = document.querySelector("#autopiter-auth-feedback");
+const autopiterNonReturnableInput = document.querySelector("#autopiter-non-returnable");
 const motorDetalAuthForm = document.querySelector("#motordetal-auth-form");
 const motorDetalLoginInput = document.querySelector("#motordetal-login");
 const motorDetalPasswordInput = document.querySelector("#motordetal-password");
@@ -231,6 +240,7 @@ const tableColumnsStorageKey = "autoservice.tableColumns";
 const stpartsWarehousesStorageKey = "autoservice.stpartsWarehouses";
 const armtekNonReturnableStorageKey = "autoservice.armtekNonReturnable";
 const partKomNonReturnableStorageKey = "autoservice.partKomNonReturnable";
+const autopiterNonReturnableStorageKey = "autoservice.autopiterNonReturnable";
 const forumAutoNonReturnableStorageKey = "autoservice.forumAutoNonReturnable";
 const supplierVisibilityStorageKey = "autoservice.supplierVisibility";
 const filtersWidthStorageKey = "autoservice.filtersWidth.v2";
@@ -243,6 +253,7 @@ const supplierNames = {
   "part-kom": "PartKOM",
   stparts: "STParts",
   "forum-auto": "Forum-Auto",
+  autopiter: "Автопитер",
   motordetal: "MotorDetal",
   mladov: "Механик Ладов",
 };
@@ -270,6 +281,7 @@ let visibleStpartsWarehouses = new Set(["green"]);
 let showArmtekNonReturnable = false;
 let showPartKomNonReturnable = false;
 let showForumAutoNonReturnable = false;
+let showAutopiterNonReturnable = false;
 const mainFilterColumns = ["supplier", "brand", "article", "warehouse", "markupPrice", "deliveryDate"];
 const rangeFilterColumns = new Set(["markupPrice", "deliveryDate"]);
 
@@ -473,9 +485,9 @@ const hasActiveAnalogFilter = (column) => (rangeFilterColumns.has(column)
   ? Boolean(getAnalogFilterRange(column).from || getAnalogFilterRange(column).to)
   : getSelectedAnalogFilterValues(column).size > 0);
 
-const getVisibleAnalogResults = (items) => filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
+const getVisibleAnalogResults = (items) => filterVisibleAutopiterReturnable(filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
   items.filter((result) => isSupplierVisible(result.supplier) && (!analogDeliverySoon || isOfferDueSoon(result))),
-))));
+)))));
 
 const getFilteredAnalogResults = (sourceResults, ignoredFilterColumn = null) => {
   const normalizedSearchTerm = analogSearchTerm.trim().toLocaleLowerCase();
@@ -1116,6 +1128,27 @@ const filterVisibleForumAutoReturnable = (items) => items.filter(
   (result) => isForumAutoReturnableVisible(result, showForumAutoNonReturnable),
 );
 
+const saveAutopiterNonReturnable = () => {
+  try {
+    localStorage.setItem(autopiterNonReturnableStorageKey, String(showAutopiterNonReturnable));
+  } catch {
+    // Return preferences are optional; unavailable storage must not affect search.
+  }
+};
+
+const restoreAutopiterNonReturnable = () => {
+  try {
+    showAutopiterNonReturnable = localStorage.getItem(autopiterNonReturnableStorageKey) === "true";
+  } catch {
+    // Return preferences are optional; unavailable storage must not affect search.
+  }
+  autopiterNonReturnableInput.checked = showAutopiterNonReturnable;
+};
+
+const filterVisibleAutopiterReturnable = (items) => items.filter(
+  (result) => isAutopiterReturnableVisible(result, showAutopiterNonReturnable),
+);
+
 const saveSearchState = () => {
   try {
     syncActiveTab();
@@ -1251,9 +1284,9 @@ const closeTab = (tabId) => {
 const getVisibleMainExactResults = (items) => {
   // Older persisted tabs can still contain automatically fetched analogs.
   const exactResults = items.filter((result) => result.isAnalog !== true);
-  return filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
+  return filterVisibleAutopiterReturnable(filterVisibleArmtekReturnable(filterVisibleForumAutoReturnable(filterVisiblePartKomReturnable(filterVisibleStpartsWarehouses(
     exactResults.filter((result) => isSupplierVisible(result.supplier) && (!mainDeliverySoon || isOfferDueSoon(result))),
-  ))));
+  )))));
 };
 
 const getMainTableResults = (items) => {
@@ -1460,6 +1493,17 @@ const updateForumAutoSessionCard = (session) => {
   forumAutoAuthFeedback.textContent = "";
 };
 
+const updateAutopiterSessionCard = (session) => {
+  updateSupplierNotice(session);
+  updateSupplierSearchToggle("autopiter", session.authorized);
+  autopiterSessionPill.dataset.status = sessionPillStatus(session.authorized);
+  autopiterSessionPill.textContent = sessionPillText(session.authorized);
+  autopiterAuthForm.dataset.authorized = String(session.authorized);
+  autopiterConnectButton.hidden = session.authorized;
+  autopiterLogoutButton.hidden = !session.authorized;
+  autopiterAuthFeedback.textContent = "";
+};
+
 const updateMotorDetalSessionCard = (session) => {
   updateSupplierNotice(session);
   updateSupplierSearchToggle("motordetal", session.authorized);
@@ -1488,6 +1532,7 @@ const sessionCardUpdaters = {
   "part-kom": updatePartKomSessionCard,
   stparts: updateStpartsSessionCard,
   "forum-auto": updateForumAutoSessionCard,
+  autopiter: updateAutopiterSessionCard,
   motordetal: updateMotorDetalSessionCard,
   mladov: updateMladovSessionCard,
 };
@@ -1505,6 +1550,8 @@ const loadSessions = async () => {
   const armtekSession = payload.sessions.find((session) => session.supplier === "armtek");
   const partKomSession = payload.sessions.find((session) => session.supplier === "part-kom");
   const stpartsSession = payload.sessions.find((session) => session.supplier === "stparts");
+  const autopiterSession = payload.sessions.find((session) => session.supplier === "autopiter");
+  if (autopiterSession) updateAutopiterSessionCard(autopiterSession);
   const forumAutoSession = payload.sessions.find((session) => session.supplier === "forum-auto");
   const motorDetalSession = payload.sessions.find((session) => session.supplier === "motordetal");
   const mladovSession = payload.sessions.find((session) => session.supplier === "mladov");
@@ -2110,6 +2157,13 @@ partKomNonReturnableInput.addEventListener("change", () => {
 forumAutoNonReturnableInput.addEventListener("change", () => {
   showForumAutoNonReturnable = forumAutoNonReturnableInput.checked;
   saveForumAutoNonReturnable();
+  renderResults();
+  renderAnalogRows();
+});
+
+autopiterNonReturnableInput.addEventListener("change", () => {
+  showAutopiterNonReturnable = autopiterNonReturnableInput.checked;
+  saveAutopiterNonReturnable();
   renderResults();
   renderAnalogRows();
 });
@@ -2794,6 +2848,33 @@ forumAutoLogoutButton.addEventListener("click", async () => {
   }
 });
 
+autopiterAuthForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setAuthCardLoading(autopiterAuthForm, true);
+
+  try {
+    const payload = await postJson("/api/suppliers/autopiter/authorize", {
+      login: autopiterLoginInput.value.trim(),
+      password: autopiterPasswordInput.value,
+    });
+    handleAuthorizeResult(payload.session, "autopiter", autopiterAuthFeedback, "Автопитер API отклонил авторизацию", updateAutopiterSessionCard);
+  } catch (error) {
+    showAuthorizeError(autopiterAuthFeedback, error);
+  } finally {
+    setAuthCardLoading(autopiterAuthForm, false);
+  }
+});
+
+autopiterLogoutButton.addEventListener("click", async () => {
+  try {
+    const payload = await postJson("/api/suppliers/autopiter/logout");
+    updateAutopiterSessionCard(payload.session);
+    clearAuthInputs(autopiterLoginInput, autopiterPasswordInput);
+  } catch (error) {
+    showAuthFeedback(autopiterAuthFeedback, error.message);
+  }
+});
+
 stpartsAuthForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   setAuthCardLoading(stpartsAuthForm, true);
@@ -3060,6 +3141,7 @@ restoreStpartsWarehouses();
 restoreArmtekNonReturnable();
 restorePartKomNonReturnable();
 restoreForumAutoNonReturnable();
+restoreAutopiterNonReturnable();
 restoreSupplierVisibility();
 tableColumnInputs.forEach((input) => {
   input.checked = visibleTableColumns.has(input.value);

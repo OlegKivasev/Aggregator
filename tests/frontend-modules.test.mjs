@@ -166,7 +166,7 @@ test("PartKOM return preference is rendered and applied only to regular results"
   assert.match(html, /id="part-kom-non-returnable"/);
   assert.match(app, /autoservice\.partKomNonReturnable/);
   assert.match(app, /filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
-  assert.match(app, /const getVisibleAnalogResults = \(items\) => filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses/);
+  assert.match(app, /const getVisibleAnalogResults = \(items\) => filterVisibleAutopiterReturnable\(filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses/);
 });
 
 test("Forum-Auto return preference is rendered and applied only to regular results", async () => {
@@ -176,7 +176,7 @@ test("Forum-Auto return preference is rendered and applied only to regular resul
   assert.match(html, /id="forum-auto-non-returnable"/);
   assert.match(app, /autoservice\.forumAutoNonReturnable/);
   assert.match(app, /filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
-  assert.match(app, /const getVisibleAnalogResults = \(items\) => filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses/);
+  assert.match(app, /const getVisibleAnalogResults = \(items\) => filterVisibleAutopiterReturnable\(filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses/);
 });
 
 test("Armtek return preference is rendered and applied only to regular results", async () => {
@@ -186,7 +186,7 @@ test("Armtek return preference is rendered and applied only to regular results",
   assert.match(html, /id="armtek-non-returnable"/);
   assert.match(app, /autoservice\.armtekNonReturnable/);
   assert.match(app, /filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses\([\s\S]*?exactResults\.filter/);
-  assert.match(app, /const getVisibleAnalogResults = \(items\) => filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses/);
+  assert.match(app, /const getVisibleAnalogResults = \(items\) => filterVisibleAutopiterReturnable\(filterVisibleArmtekReturnable\(filterVisibleForumAutoReturnable\(filterVisiblePartKomReturnable\(filterVisibleStpartsWarehouses/);
 });
 
 test("delivery date sorting moves intervals above dates they finish before", () => {

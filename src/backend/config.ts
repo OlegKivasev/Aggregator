@@ -202,6 +202,10 @@ export const motorDetalConfig = {
 };
 
 export const partKomSearchTimeoutMs = readBoundedInteger("PARTKOM_SEARCH_TIMEOUT_MS", 15_000, 1, 120_000);
+export const autopiterConfig = {
+  requestTimeoutMs: readBoundedInteger("AUTOPITER_REQUEST_TIMEOUT_MS", 15_000, 1_000, 120_000),
+  searchTimeoutMs: readBoundedInteger("AUTOPITER_SEARCH_TIMEOUT_MS", 30_000, 1_000, 120_000),
+};
 export const forumAutoSearchTimeoutMs = readBoundedInteger("FORUM_AUTO_SEARCH_TIMEOUT_MS", 15_000, 1_000, 120_000);
 
 export const stpartsConfig = {

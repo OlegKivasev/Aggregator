@@ -69,6 +69,7 @@
               <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="part-kom" checked /><span>PartKOM</span></label>
               <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="stparts" checked /><span>STParts</span></label>
               <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="forum-auto" checked /><span>Forum-Auto</span></label>
+              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="autopiter" checked /><span>Автопитер</span></label>
               <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="motordetal" checked /><span>MotorDetal</span></label>
               <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="mladov" checked /><span>Механик Ладов</span></label>
             </div>
@@ -520,6 +521,7 @@
               <label><input class="supplier-visibility-input" type="checkbox" value="part-kom" checked><span>PartKOM</span></label>
               <label><input class="supplier-visibility-input" type="checkbox" value="stparts" checked><span>STParts</span></label>
               <label><input class="supplier-visibility-input" type="checkbox" value="forum-auto" checked><span>Forum-Auto</span></label>
+              <label><input class="supplier-visibility-input" type="checkbox" value="autopiter" checked><span>Автопитер</span></label>
               <label><input class="supplier-visibility-input" type="checkbox" value="motordetal" checked><span>MotorDetal</span></label>
               <label><input class="supplier-visibility-input" type="checkbox" value="mladov" checked><span>Механик Ладов</span></label>
             </div>
@@ -684,6 +686,42 @@
               <div class="supplier-options__list supplier-options__list--single" aria-label="Настройка возврата Forum-Auto">
                 <label>
                   <input id="forum-auto-non-returnable" type="checkbox" />
+                  <span>Показывать товары без возможности возврата</span>
+                </label>
+              </div>
+            </details>
+          </article>
+
+          <article class="auth-card" data-supplier="autopiter">
+            <div class="auth-card__header">
+              <div>
+                <h3>Автопитер</h3>
+              </div>
+              <span class="status-pill badge rounded-pill text-bg-secondary" id="autopiter-session-pill" data-status="idle">Не подключен</span>
+            </div>
+
+            <form id="autopiter-auth-form" class="auth-form" data-authorized="false">
+              <label class="field">
+                <span>Номер клиента</span>
+                <input id="autopiter-login" name="login" type="text" autocomplete="username" />
+              </label>
+              <label class="field">
+                <span>Пароль</span>
+                <span class="password-field"><input id="autopiter-password" name="password" type="password" autocomplete="current-password" /><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="autopiter-password"><span aria-hidden="true">&#128065;</span></button></span>
+              </label>
+              <div class="auth-actions">
+                <button type="submit" id="autopiter-connect-button" class="btn btn-primary">Подключить</button>
+                <button type="button" class="button-secondary btn btn-light" id="autopiter-logout-button" hidden>Отключить</button>
+              </div>
+            </form>
+
+            <p class="auth-feedback" id="autopiter-auth-feedback"></p>
+
+            <details class="supplier-options">
+              <summary class="supplier-options__summary">Возврат</summary>
+              <div class="supplier-options__list supplier-options__list--single" aria-label="Настройка возврата Автопитер">
+                <label>
+                  <input id="autopiter-non-returnable" type="checkbox" />
                   <span>Показывать товары без возможности возврата</span>
                 </label>
               </div>
