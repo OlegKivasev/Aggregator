@@ -1174,6 +1174,8 @@ const saveSearchState = () => {
   }
 };
 
+window.addEventListener("pagehide", saveSearchState);
+
 const restoreSearchState = () => {
   try {
     const rawState = localStorage.getItem(searchStateStorageKey);
@@ -2982,6 +2984,24 @@ const startSearch = (article, enabledSuppliers) => {
 
   const source = openSearchStream(`/api/search?${searchParams.toString()}`);
   tab.source = source;
+  let resultsRenderFrame = null;
+  const cancelResultsRender = () => {
+    if (resultsRenderFrame !== null) {
+      cancelAnimationFrame(resultsRenderFrame);
+      resultsRenderFrame = null;
+    }
+  };
+  const scheduleResultsRender = () => {
+    if (resultsRenderFrame !== null) return;
+    resultsRenderFrame = requestAnimationFrame(() => {
+      resultsRenderFrame = null;
+      if (tab.source !== source) return;
+      updateSearchProgress(tab);
+      if (tab.id === activeTabId) renderResults();
+      renderTabs();
+      saveSearchState();
+    });
+  };
   updateSearchProgress(tab);
   startSearchProgressTimer();
   setSearchUiState(true);
@@ -3029,17 +3049,15 @@ const startSearch = (article, enabledSuppliers) => {
 
     if (payload.type === "result") {
       tab.results.push({ ...payload.result, offerId: typeof payload.offerId === "string" ? payload.offerId : "" });
-      updateSearchProgress(tab);
       if (tab.id === activeTabId) {
         results = tab.results;
-        renderResults();
       }
-      renderTabs();
-      saveSearchState();
+      scheduleResultsRender();
       return;
     }
 
     if (payload.type === "search_completed") {
+      cancelResultsRender();
       tab.status = "";
       source.close();
       tab.source = null;
@@ -3060,6 +3078,7 @@ const startSearch = (article, enabledSuppliers) => {
     }
 
     if (payload.type === "fatal_error") {
+      cancelResultsRender();
       tab.status = `Ошибка: ${payload.message}`;
       source.close();
       tab.source = null;
@@ -3079,6 +3098,7 @@ const startSearch = (article, enabledSuppliers) => {
       return;
     }
 
+    cancelResultsRender();
     tab.status = "Соединение с потоком поиска было закрыто";
     source.close();
     tab.source = null;
