@@ -1568,6 +1568,12 @@ Use the configured local port instead of `3000` when `PORT` is overridden. A res
 Авторизация выполняется методом Authorization и подтверждается отдельным
 IsAuthorization с полученными cookies; сессия проверяется IsAuthorization;
 поиск выполняет FindCatalog и GetPriceId с SearchCross=0 и валютой РУБ.
+В [официальной WSDL](https://service.autopiter.ru/v2/price?WSDL) результаты
+FindCatalogResult и GetPriceIdResult необязательны (minOccurs=0). Корректный
+пустой FindCatalogResponse означает отсутствие каталогов, а пустой
+GetPriceIdResponse — отсутствие предложений в текущем каталоге; поиск
+продолжается по остальным каталогам. Отсутствующий метод ответа, SOAP Fault,
+неожиданные поля, повреждённый XML и недопустимый xsi:nil остаются ошибками.
 Поиск аналогов, корзина и оформление заказов Автопитера пока не подключены.
 Ссылка предложения открывает сайт Автопитера.
 

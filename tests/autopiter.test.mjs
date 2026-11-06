@@ -19,6 +19,10 @@ const signal = () => new AbortController().signal;
 const context = () => ({ signal: signal(), timeoutMs: 1000 });
 const response = (method, content, extra = {}) => ({ status: 200, contentType: "text/xml; charset=utf-8", setCookie: [],
   body: `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><${method}Response xmlns="http://www.autopiter.ru/"><${method}Result>${content}</${method}Result></${method}Response></s:Body></s:Envelope>`, ...extra });
+// WSDL declares both list Result elements optional (minOccurs=0).
+const emptyResponse = (method) => response(method, "", {
+  body: `<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><${method}Response xmlns="http://www.autopiter.ru/" /></soap:Body></soap:Envelope>`,
+});
 const fields = (data) => Object.entries(data).map(([key, value]) => `<${key}>${value ?? ""}</${key}>`).join("");
 const catalog = (data = {}) => `<SearchCatalogModel>${fields({ ArticleId: "101", CatalogName: "TEST", Number: "A-1", ...data })}</SearchCatalogModel>`;
 const offer = (data = {}) => `<PriceSearchModel>${fields({ Number: "A-1", CatalogName: "TEST", Name: "Тестовый фильтр &amp; комплект", SalePrice: "125.50", NumberOfAvailable: "7", Region: "Тестовый склад", DeliveryDate: "2026-11-10T00:00:00+03:00", TypeRefusal: "1", CurrencyName: "RUB", ...data })}</PriceSearchModel>`;
@@ -239,6 +243,46 @@ test("Autopiter accepts explicit empty lists but reports SOAP faults, nil and ma
   }
   const empty = new AutopiterApiAdapter(async (method) => response(method, ""));
   await empty.search({ article: "A1" }, context(), () => assert.fail("unexpected offer"), manager());
+});
+
+test("Autopiter continues other catalogs after the valid 301-byte empty GetPriceId response", async () => {
+  assert.equal(Buffer.byteLength(emptyResponse("GetPriceId").body), 301);
+  const article = "8450006725";
+  const calls = [];
+  const adapter = new AutopiterApiAdapter(async (method, parameters) => {
+    calls.push(method === "GetPriceId" ? parameters.ArticleId : method);
+    if (method === "FindCatalog") return response(method, catalog({ Number: article }) + catalog({ Number: article, ArticleId: "102" }));
+    return parameters.ArticleId === "101" ? emptyResponse(method) : response(method, offer({ Number: article }));
+  });
+  const events = [];
+  await runSupplierSearch({ adapter, sessionManager: manager(), query: { article }, signal: signal(), emit: (event) => events.push(event) });
+  assert.equal(events.at(-1).status, "completed");
+  assert.equal(events.filter((event) => event.type === "result").length, 1);
+  assert.deepEqual(calls, ["FindCatalog", "101", "102"]);
+});
+
+test("Autopiter accepts omitted optional list results without accepting broken or error envelopes", async () => {
+  for (const method of ["FindCatalog", "GetPriceId"]) {
+    const adapter = new AutopiterApiAdapter(async (requestedMethod) => requestedMethod === "FindCatalog" && method === "GetPriceId"
+      ? response(requestedMethod, catalog()) : emptyResponse(requestedMethod));
+    const events = [];
+    await runSupplierSearch({ adapter, sessionManager: manager(), query: { article: "A1" }, signal: signal(), emit: (event) => events.push(event) });
+    assert.equal(events.at(-1).status, "completed");
+    assert.equal(events.filter((event) => event.type === "result").length, 0);
+  }
+  const empty = emptyResponse("GetPriceId");
+  for (const body of [
+    empty.body.replace("GetPriceIdResponse", "UnexpectedResponse"),
+    empty.body.replace('<GetPriceIdResponse xmlns="http://www.autopiter.ru/" />', ""),
+    empty.body.replace(' />', '><Error>Supplier error</Error></GetPriceIdResponse>'),
+    empty.body.replace(' />', '>Supplier error</GetPriceIdResponse>'),
+    empty.body.replace(' />', ' xsi:nil="true" />'),
+    empty.body.replace(' />', '><GetPriceIdResult xsi:nil="true" /></GetPriceIdResponse>'),
+    empty.body.replace('</soap:Body>', ''),
+  ]) {
+    const adapter = new AutopiterApiAdapter(async (method) => method === "FindCatalog" ? response(method, catalog()) : { ...empty, body });
+    await assert.rejects(adapter.search({ article: "A1" }, context(), () => assert.fail("unexpected result"), manager()), SupplierIntegrationError);
+  }
 });
 
 test("Autopiter timeout, cancellation and integration failure keep distinct SSE statuses", async () => {

@@ -26,7 +26,7 @@ export const autopiterSoapRequest: AutopiterRequester = (method, fields, signal,
   body: `<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><${method} xmlns="${namespace}">${Object.entries(fields).map(([key, value]) => `<${key}>${escapeXml(value)}</${key}>`).join("")}</${method}></soap:Body></soap:Envelope>`,
 });
 
-function resultElement(response: SiteHttpResponse, method: AutopiterMethod): XmlElement {
+function methodResponse(response: SiteHttpResponse, method: AutopiterMethod): XmlElement {
   if (response.status === 401 || response.status === 403) throw new SupplierAuthError("Autopiter authorization is required");
   const mediaType = response.contentType?.split(";", 1)[0]?.trim().toLowerCase();
   if (mediaType !== "text/xml" && mediaType !== "application/soap+xml" && mediaType !== "application/xml") {
@@ -42,7 +42,12 @@ function resultElement(response: SiteHttpResponse, method: AutopiterMethod): Xml
   }
   if (response.status !== 200) throw new SupplierIntegrationError("Autopiter request failed");
   const wrapper = children(body, `${method}Response`)[0];
-  const result = wrapper && children(wrapper, `${method}Result`)[0];
+  if (!wrapper || body.children.length !== 1 || body.text.trim()) throw new SupplierIntegrationError("Autopiter did not return a method result");
+  return wrapper;
+}
+
+function resultElement(response: SiteHttpResponse, method: AutopiterMethod): XmlElement {
+  const result = children(methodResponse(response, method), `${method}Result`)[0];
   if (!result) throw new SupplierIntegrationError("Autopiter did not return a method result");
   return result;
 }
@@ -103,9 +108,13 @@ export async function verifyAutopiterCredentials(credentials: AutopiterCredentia
 }
 
 function listResult(response: SiteHttpResponse, method: "FindCatalog" | "GetPriceId", itemName: string): XmlElement[] {
-  const result = resultElement(response, method);
-  const nilResult = new RegExp(`<(?:(?:[\\w.-]+):)?${method}Result\\b[^>]*\\s(?:[\\w.-]+:)?nil\\s*=\\s*["'](?:true|1)["']`).test(response.body);
-  if (nilResult || result.text.trim() || result.children.some((item) => localName(item) !== itemName)) {
+  const wrapper = methodResponse(response, method);
+  const nilResult = new RegExp(`<(?:(?:[\\w.-]+):)?${method}(?:Response|Result)\\b[^>]*\\s(?:[\\w.-]+:)?nil\\s*=\\s*["'](?:true|1)["']`).test(response.body);
+  if (nilResult || wrapper.text.trim()) throw new SupplierIntegrationError("Autopiter returned an invalid result list");
+  // Both list results have minOccurs=0 in the supplier's WSDL: an empty method response is valid.
+  if (wrapper.children.length === 0) return [];
+  const result = children(wrapper, `${method}Result`)[0];
+  if (!result || wrapper.children.length !== 1 || result.text.trim() || result.children.some((item) => localName(item) !== itemName)) {
     throw new SupplierIntegrationError("Autopiter returned an invalid result list");
   }
   return result.children;
