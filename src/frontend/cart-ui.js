@@ -340,14 +340,14 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   };
   const cartTabs = setupCartTabs({ modal, supplierNames, getCart: () => cart,
     isLocked: () => busy || checking || Boolean(cart?.testing),
-    onChange: () => { status.textContent = ""; render(); }, notify });
+    onChange: () => { status.textContent = ""; render(); }, notify, api });
   const render = () => {
     if (!cart) return;
     const focusedControl = document.activeElement.closest?.("#cart-items input, #cart-items button");
     const focusedId = focusedControl?.closest("tr")?.dataset.cartItemId;
     const focusedSelector = focusedControl?.matches(".cart-item-select") ? ".cart-item-select"
       : focusedControl?.matches("input") ? ".cart-quantity" : ".cart-remove";
-    const locked = busy || checking || cart.testing;
+    const locked = busy || checking || cart.testing || cartTabs.isPending();
     cartTabs.render();
     const supplierView = cartTabs.getSupplier() !== "all";
     const items = cartTabs.getItems();
@@ -399,6 +399,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   };
   const refresh = async () => {
     cart = validateCart(await api("/api/cart"));
+    await cartTabs.load();
     render();
   };
   const flyToCart = (source) => {

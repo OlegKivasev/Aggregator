@@ -2333,8 +2333,150 @@ async function openCartForCustomTabs(page) {
     && document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 2);
 }
 
-const storedCartTabs = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.cartTabs")).tabs);
+const storedCartTabs = async (page) => {
+  await page.waitForFunction(() => {
+    const button = document.querySelector("#cart-new-tab");
+    return button && !button.disabled;
+  });
+  return page.evaluate(async () => (await (await fetch("/api/cart/tabs")).json()).tabs);
+};
 const customCartTabs = (page) => page.locator("#cart-tabs .cart-tab-entry--custom .cart-tab");
+
+test("shared cart tabs are available in another browser profile without local storage and retain cross-profile edits", async () => {
+  await withCartPage(async (page, { origin, orderCalls }) => {
+    await openCartForCustomTabs(page);
+    await page.locator("#cart-new-tab").click();
+    const firstId = (await storedCartTabs(page))[0].id;
+    await page.locator("#cart-new-tab").click();
+    await storedCartTabs(page);
+    await page.locator("#cart-tab-all").click();
+    const itemId = await page.locator("#cart-items tr[data-cart-item-id]").first().getAttribute("data-cart-item-id");
+    await page.locator("#cart-items .cart-item-name").first().dragTo(page.locator(`#cart-tab-${firstId}`));
+    await storedCartTabs(page);
+    await page.locator(`#cart-tab-${firstId}`).click();
+    await page.locator("#cart-tab-exclude").check();
+    const expected = await storedCartTabs(page);
+    const context = await page.context().browser().newContext();
+    try {
+      await context.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+      const other = await context.newPage();
+      await other.addInitScript(() => {
+        const set = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key, value) {
+          if (key.startsWith("autoservice.cartTabs")) throw new Error("Storage unavailable in this test profile");
+          return set.call(this, key, value);
+        };
+      });
+      await other.goto(origin);
+      assert.equal(await other.evaluate(() => localStorage.getItem("autoservice.cartTabs")), null);
+      await other.locator("#cart-toggle").click();
+      assert.deepEqual(await storedCartTabs(other), expected);
+      await other.locator(`#cart-tab-${firstId}`).click();
+      assert.equal(await other.locator("#cart-items tr[data-cart-item-id]").getAttribute("data-cart-item-id"), itemId);
+      assert.equal(await other.locator("#cart-tab-exclude").isChecked(), true);
+      await other.locator(`#cart-tab-${firstId}`).dblclick();
+      await other.locator("#cart-tab-name").fill("Общая корзина");
+      await other.locator('#cart-tab-rename-dialog button[type="submit"]').click();
+      await storedCartTabs(other);
+      await other.reload();
+      await other.locator("#cart-toggle").click();
+      await storedCartTabs(other);
+      assert.equal(await other.locator(`#cart-tab-${firstId} .cart-tab__name`).textContent(), "Общая корзина");
+      await page.locator("#cart-close").click();
+      await page.locator("#cart-toggle").click();
+      await storedCartTabs(page);
+      assert.equal(await page.locator(`#cart-tab-${firstId} .cart-tab__name`).textContent(), "Общая корзина");
+      assert.deepEqual(orderCalls, []);
+    } finally { await context.close(); }
+  }, { reducedMotion: "reduce" });
+});
+
+test("shared cart tabs migrate legacy browser tabs once and do not resurrect a closed tab on a later import", async () => {
+  await withCartPage(async (page) => {
+    await openCartForCustomTabs(page);
+    const itemId = await page.locator("#cart-items tr[data-cart-item-id]").first().getAttribute("data-cart-item-id");
+    const legacy = { version: 1, tabs: [{ id: "custom-00000000-0000-4000-8000-000000000001",
+      name: "Старая вкладка", excludeFromAll: true, itemIds: [itemId] }] };
+    const restoreLegacy = () => page.evaluate((value) => {
+      localStorage.removeItem("autoservice.cartTabs.shared");
+      localStorage.setItem("autoservice.cartTabs", JSON.stringify(value));
+    }, legacy);
+    await restoreLegacy();
+    await page.reload();
+    await page.locator("#cart-toggle").click();
+    assert.deepEqual(await storedCartTabs(page), legacy.tabs);
+    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 1);
+    await page.locator(`[data-cart-close-tab="${legacy.tabs[0].id}"]`).click();
+    assert.deepEqual(await storedCartTabs(page), []);
+    await restoreLegacy();
+    await page.reload();
+    await page.locator("#cart-toggle").click();
+    assert.deepEqual(await storedCartTabs(page), []);
+    assert.equal(await customCartTabs(page).count(), 0);
+    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 2);
+  }, { reducedMotion: "reduce" });
+});
+
+test("shared cart tabs retain legacy browser data after a failed import and merge it on retry", async () => {
+  await withCartPage(async (page) => {
+    await openCartForCustomTabs(page);
+    const itemId = await page.locator("#cart-items tr[data-cart-item-id]").first().getAttribute("data-cart-item-id");
+    const legacy = { version: 1, tabs: [{ id: "custom-00000000-0000-4000-8000-000000000001",
+      name: "Старая вкладка", excludeFromAll: true, itemIds: [itemId] }] };
+    let allowImport = false;
+    await page.route("**/api/cart/tabs/import", (route) => allowImport ? route.continue()
+      : route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "Перенос временно недоступен." }) }));
+    await page.evaluate((value) => {
+      localStorage.removeItem("autoservice.cartTabs.shared");
+      localStorage.setItem("autoservice.cartTabs", JSON.stringify(value));
+    }, legacy);
+    await page.reload();
+    await page.locator("#cart-toggle").click();
+    assert.deepEqual(await storedCartTabs(page), []);
+    await page.locator("#cart-new-tab").click();
+    assert.equal((await storedCartTabs(page)).length, 1);
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem("autoservice.cartTabs"))), legacy);
+    allowImport = true;
+    await page.locator("#cart-close").click();
+    await page.locator("#cart-toggle").click();
+    const shared = await storedCartTabs(page);
+    assert.equal(shared.length, 2);
+    assert.deepEqual(shared[1], legacy.tabs[0]);
+    assert.equal(await page.evaluate(() => localStorage.getItem("autoservice.cartTabs.shared")), "true");
+  }, { reducedMotion: "reduce" });
+});
+
+test("shared cart tabs recover from a profile conflict or failed save without overwriting the server or losing goods", async () => {
+  await withCartPage(async (page, { origin }) => {
+    await openCartForCustomTabs(page);
+    await page.locator("#cart-new-tab").click();
+    const original = await storedCartTabs(page);
+    let failure = "conflict";
+    await page.route("**/api/cart/tabs", async (route) => {
+      if (route.request().method() !== "PUT") return route.continue();
+      if (failure === "conflict") {
+        failure = null;
+        const state = await (await fetch(`${origin}/api/cart/tabs`)).json();
+        const response = await fetch(`${origin}/api/cart/tabs`, { method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ revision: state.revision, tabs: [{ ...original[0], name: "Из другого профиля" }] }) });
+        assert.equal(response.status, 200);
+        return route.continue();
+      }
+      return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "Не удалось сохранить вкладки." }) });
+    });
+    await page.locator("#cart-new-tab").click();
+    const shared = await storedCartTabs(page);
+    assert.equal(shared.length, 1);
+    assert.equal(shared[0].name, "Из другого профиля");
+    assert.equal(await customCartTabs(page).count(), 1);
+    assert.match(await page.locator(".cart-toast").textContent(), /изменены в другом профиле/);
+    await page.locator("#cart-new-tab").click();
+    assert.deepEqual(await storedCartTabs(page), shared);
+    assert.equal(await customCartTabs(page).count(), 1);
+    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 2);
+    assert.match(await page.locator(".cart-toast").textContent(), /Не удалось сохранить/);
+  }, { reducedMotion: "reduce" });
+});
 
 test("custom cart tabs move goods, preserve supplier identity, reorder, persist and close without deleting goods", async () => {
   await withCartPage(async (page) => {
