@@ -10,6 +10,18 @@ export interface StoredCart {
   lines: PurchaseLine[];
 }
 
+export interface CartTab {
+  id: string;
+  name: string;
+  excludeFromAll: boolean;
+  itemIds: string[];
+}
+
+export interface StoredCartTabs {
+  revision: number;
+  tabs: CartTab[];
+}
+
 export class SqliteCartRepository {
   private readonly database: DatabaseSync;
 
@@ -22,6 +34,13 @@ export class SqliteCartRepository {
         id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL, payload TEXT NOT NULL
       ) STRICT;
       INSERT OR IGNORE INTO purchase_cart VALUES (1, 0, '[]');
+      CREATE TABLE IF NOT EXISTS purchase_cart_tabs (
+        id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL, payload TEXT NOT NULL
+      ) STRICT;
+      INSERT OR IGNORE INTO purchase_cart_tabs VALUES (1, 0, '[]');
+      CREATE TABLE IF NOT EXISTS purchase_cart_tab_import (
+        id TEXT PRIMARY KEY
+      ) STRICT;
       CREATE TABLE IF NOT EXISTS purchase_order_attempt (
         id TEXT PRIMARY KEY, supplier TEXT NOT NULL, line_ids TEXT NOT NULL,
         started_at TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'uncertain'))
@@ -77,6 +96,36 @@ export class SqliteCartRepository {
   save(cart: StoredCart, previousRevision: number): boolean {
     return this.database.prepare("UPDATE purchase_cart SET revision = ?, payload = ? WHERE id = 1 AND revision = ?")
       .run(cart.revision, JSON.stringify(cart.lines), previousRevision).changes === 1;
+  }
+
+  loadTabs(): StoredCartTabs {
+    const row = this.database.prepare("SELECT revision, payload FROM purchase_cart_tabs WHERE id = 1").get();
+    if (!row || typeof row.revision !== "number" || typeof row.payload !== "string") throw new Error("Invalid cart tab storage");
+    const tabs: unknown = JSON.parse(row.payload);
+    // Server-owned storage; the application service validates restored tabs.
+    if (!Array.isArray(tabs)) throw new Error("Invalid cart tab storage");
+    return { revision: row.revision, tabs: tabs as CartTab[] };
+  }
+
+  wasTabImported(id: string): boolean {
+    return Boolean(this.database.prepare("SELECT id FROM purchase_cart_tab_import WHERE id = ?").get(id));
+  }
+
+  saveTabs(state: StoredCartTabs, previousRevision: number, importedIds: string[] = []): boolean {
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const changed = this.database.prepare("UPDATE purchase_cart_tabs SET revision = ?, payload = ? WHERE id = 1 AND revision = ?")
+        .run(state.revision, JSON.stringify(state.tabs), previousRevision).changes === 1;
+      if (changed) {
+        const insert = this.database.prepare("INSERT OR IGNORE INTO purchase_cart_tab_import (id) VALUES (?)");
+        for (const id of importedIds) insert.run(id);
+      }
+      this.database.exec(changed ? "COMMIT" : "ROLLBACK");
+      return changed;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   pendingLineIds(): string[] {

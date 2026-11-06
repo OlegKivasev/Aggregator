@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { SupplierIntegrationError, SupplierTimeoutError } from "../errors.ts";
 import type { NormalizedSearchResult } from "../types.ts";
 import { getPurchaseReference, purchaseOfferKey, type PurchaseLine, type PurchaseReference, type TestOrder } from "./purchase-offer.ts";
-import { SqliteCartRepository } from "./sqlite-cart-repository.ts";
+import { SqliteCartRepository, type CartTab } from "./sqlite-cart-repository.ts";
 import type { CheckoutDetails, OrderChoices, OrderGroupResult, OrderSupplier } from "./order-contract.ts";
 import type { OrderHistory } from "./order-history-contract.ts";
 
@@ -41,6 +41,30 @@ function uncertainOrderMessage(supplier: OrderSupplier, error: unknown): string 
 
 const stock = (result: NormalizedSearchResult): number => typeof result.quantity === "number" && Number.isFinite(result.quantity)
   ? Math.min(1_000_000, Math.floor(result.quantity)) : 0;
+
+function validateTabs(value: unknown): CartTab[] {
+  if (!Array.isArray(value) || value.length > 100) throw new CartError("Некорректные вкладки корзины.");
+  const tabIds = new Set<string>();
+  const itemIds = new Set<string>();
+  return value.map((tab: unknown) => {
+    if (!tab || typeof tab !== "object" || !("id" in tab) || typeof tab.id !== "string"
+      || !/^custom-[0-9a-f-]{36}$/.test(tab.id) || tabIds.has(tab.id)
+      || !("name" in tab) || typeof tab.name !== "string" || !tab.name.trim() || tab.name.length > 100
+      || !("excludeFromAll" in tab) || typeof tab.excludeFromAll !== "boolean"
+      || !("itemIds" in tab) || !Array.isArray(tab.itemIds) || tab.itemIds.length > 500) {
+      throw new CartError("Некорректные вкладки корзины.");
+    }
+    tabIds.add(tab.id);
+    const ids = tab.itemIds.map((id: unknown) => {
+      if (typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id) || itemIds.has(id) || itemIds.size >= 500) {
+        throw new CartError("Некорректные товары во вкладках корзины.");
+      }
+      itemIds.add(id);
+      return id;
+    });
+    return { id: tab.id, name: tab.name.trim(), excludeFromAll: tab.excludeFromAll, itemIds: ids };
+  });
+}
 
 function validateQuantity(value: unknown, maximum: number): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > maximum) {
@@ -133,6 +157,48 @@ export class CartApplicationService {
       count: cart.lines.reduce((sum, line) => sum + line.quantity, 0),
       total: cart.lines.reduce((sum, line) => sum + line.result.price * line.quantity, 0), testing: this.testing,
       pendingIds: this.repository.pendingLineIds() };
+  }
+
+  tabs() {
+    const state = this.repository.loadTabs();
+    const currentIds = new Set(this.load().lines.map((line) => line.id));
+    return { revision: state.revision, tabs: validateTabs(state.tabs).map((tab) => ({ ...tab,
+      itemIds: tab.itemIds.filter((id) => currentIds.has(id)) })) };
+  }
+
+  saveTabs(payload: Record<string, unknown>) {
+    const revision = payload.revision;
+    if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0 || revision >= Number.MAX_SAFE_INTEGER) {
+      throw new CartError("Неверная версия вкладок корзины.");
+    }
+    const currentIds = new Set(this.load().lines.map((line) => line.id));
+    const tabs = validateTabs(payload.tabs).map((tab) => ({ ...tab, itemIds: tab.itemIds.filter((id) => currentIds.has(id)) }));
+    if (!this.repository.saveTabs({ revision: revision + 1, tabs }, revision)) {
+      throw new CartError("Вкладки изменены в другом профиле. Повторите изменение после обновления корзины.", 409);
+    }
+    return this.tabs();
+  }
+
+  importTabs(payload: Record<string, unknown>) {
+    if (payload.version !== 1) throw new CartError("Некорректная версия вкладок корзины.");
+    const incoming = validateTabs(payload.tabs);
+    const state = this.tabs();
+    if (incoming.every((tab) => this.repository.wasTabImported(tab.id))) return state;
+    const currentIds = new Set(this.load().lines.map((line) => line.id));
+    const assigned = new Set(state.tabs.flatMap((tab) => tab.itemIds));
+    for (const tab of incoming) {
+      if (state.tabs.some((existing) => existing.id === tab.id) || this.repository.wasTabImported(tab.id)) continue;
+      if (state.tabs.length >= 100) throw new CartError("Для переноса старых вкладок освободите место в общей корзине: максимум 100 вкладок.", 409);
+      state.tabs.push({ ...tab, itemIds: tab.itemIds.filter((id) => {
+        if (!currentIds.has(id) || assigned.has(id)) return false;
+        assigned.add(id);
+        return true;
+      }) });
+    }
+    if (!this.repository.saveTabs({ ...state, revision: state.revision + 1 }, state.revision, incoming.map((tab) => tab.id))) {
+      throw new CartError("Вкладки корзины изменились. Повторите перенос.", 409);
+    }
+    return this.tabs();
   }
 
   withArmtekReturnDays(history: OrderHistory): OrderHistory {

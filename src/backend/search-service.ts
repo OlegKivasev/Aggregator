@@ -16,6 +16,7 @@ import { EncryptedSupplierCredentialStore } from "./session/encrypted-credential
 import { SupplierSessionManager } from "./session/session-manager.ts";
 import { clearArmtekApiAccountState } from "./suppliers/armtek/armtek-api-account-state.ts";
 import { ArmtekApiAdapter, verifyArmtekCredentials } from "./suppliers/armtek/armtek-api-adapter.ts";
+import { AutopiterApiAdapter, verifyAutopiterCredentials } from "./suppliers/autopiter/autopiter-api-adapter.ts";
 import { ForumAutoApiAdapter, verifyForumAutoCredentials } from "./suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { MladovWebAdapter } from "./suppliers/mladov/mladov-web-adapter.ts";
 import {
@@ -36,6 +37,7 @@ import { closeSiteHttpAgent } from "./suppliers/site-http.ts";
 import { StpartsApiAdapter, verifyStpartsApiCredentials } from "./suppliers/stparts/stparts-api-adapter.ts";
 import type {
   ArmtekCredentials,
+  AutopiterCredentials,
   ForumAutoCredentials,
   MladovCredentials,
   MotorDetalCredentials,
@@ -63,6 +65,7 @@ const adapters = [
   new PartKomApiAdapter(),
   new StpartsApiAdapter(),
   new ForumAutoApiAdapter(),
+  new AutopiterApiAdapter(),
   new MotorDetalApiAdapter(),
   new MladovWebAdapter(),
 ];
@@ -70,6 +73,7 @@ const adapters = [
 const sessionService = new SupplierSessionService(adapters, sessionManager, {
   verifyRosskoApiCredentials,
   verifyArmtekCredentials,
+  verifyAutopiterCredentials,
   verifyPartKomApiCredentials: (credentials, signal) => verifyPartKomApiCredentials(credentials, undefined, signal),
   verifyStpartsApiCredentials,
   verifyForumAutoCredentials: (credentials, signal) => verifyForumAutoCredentials(credentials, undefined, signal),
@@ -98,6 +102,11 @@ function bootstrapPersistedSessions(): void {
   const armtekCredentials = credentialStore.get("armtek") ?? getArmtekApiConfig();
   const partKomCredentials = credentialStore.get("part-kom");
   const stpartsCredentials = credentialStore.get("stparts") ?? getStpartsApiConfig();
+  const autopiterCredentials = credentialStore.get("autopiter");
+  if (autopiterCredentials) {
+    sessionManager.setAutopiterCredentials(autopiterCredentials);
+    sessionManager.markAuthorized("autopiter", "Сохранённые данные Автопитера доступны");
+  }
   const forumAutoCredentials = credentialStore.get("forum-auto");
   const motorDetalCredentials = credentialStore.get("motordetal");
   const mladovCredentials = credentialStore.get("mladov");
@@ -153,6 +162,7 @@ export const authorizeRossko = (credentials: RosskoApiCredentials, signal: Abort
 export const authorizeArmtek = (credentials: ArmtekCredentials, signal: AbortSignal) => sessionService.authorizeArmtek(credentials, signal);
 export const authorizePartKom = (credentials: PartKomCredentials, signal: AbortSignal) => sessionService.authorizePartKom(credentials, signal);
 export const authorizeStparts = (credentials: StpartsCredentials, signal: AbortSignal) => sessionService.authorizeStparts(credentials, signal);
+export const authorizeAutopiter = (credentials: AutopiterCredentials, signal: AbortSignal) => sessionService.authorizeAutopiter(credentials, signal);
 export const authorizeForumAuto = (credentials: ForumAutoCredentials, signal: AbortSignal) => sessionService.authorizeForumAuto(credentials, signal);
 export const authorizeMotorDetal = (credentials: MotorDetalCredentials, signal: AbortSignal) => sessionService.authorizeMotorDetal(credentials, signal);
 export const authorizeMladov = (credentials: MladovCredentials, signal: AbortSignal) => sessionService.authorizeMladov(credentials, signal);
@@ -160,6 +170,7 @@ export const logoutRossko = () => sessionService.logoutRossko();
 export const logoutArmtek = () => sessionService.logoutArmtek();
 export const logoutPartKom = () => sessionService.logoutPartKom();
 export const logoutStparts = () => sessionService.logoutStparts();
+export const logoutAutopiter = () => sessionService.logoutAutopiter();
 export const logoutForumAuto = () => sessionService.logoutForumAuto();
 export const logoutMotorDetal = () => sessionService.logoutMotorDetal();
 export const logoutMladov = () => sessionService.logoutMladov();

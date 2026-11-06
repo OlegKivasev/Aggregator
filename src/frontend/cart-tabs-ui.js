@@ -3,8 +3,9 @@ import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { cartTabItems, moveCartItem, normalizeCartTabs, reorderCartTab } from "./cart-tab-state.js";
 
 const storageKey = "autoservice.cartTabs";
+const migratedKey = "autoservice.cartTabs.shared";
 
-export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChange, notify }) => {
+export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChange, notify, api }) => {
   const strip = modal.querySelector("#cart-tabs");
   const options = document.createElement("label");
   options.className = "cart-tab-options";
@@ -39,26 +40,81 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
   document.body.append(rename);
   const nameInput = rename.querySelector("input");
   let customTabs = [];
-  try {
-    const stored = localStorage.getItem(storageKey);
-    if (stored && stored.length <= 256_000) customTabs = normalizeCartTabs(JSON.parse(stored));
-  } catch { /* Corrupt or unavailable browser storage must not prevent cart use. */ }
+  let confirmedTabs = [];
+  let revision = 0;
+  let loaded = false;
+  let saving = false;
+  let loading = null;
+  let pendingSave = Promise.resolve();
+  let migrationPending = false;
   let activeId = "all";
   let contextId = null;
   let renameId = null;
   let drag = null;
   let stripHtml = "";
-  let storageWarningShown = false;
+  const locked = () => isLocked() || saving || !loaded || Boolean(loading);
   const getItems = (tabId = activeId) => cartTabItems(getCart()?.items ?? [], customTabs, tabId);
   const getName = () => customTabs.find((tab) => tab.id === activeId)?.name ?? supplierNames[activeId] ?? "Все";
   const getSupplier = () => Object.hasOwn(supplierNames, activeId) ? activeId : "all";
   const focusActive = () => strip.querySelector('[aria-selected="true"]')?.focus();
+  const request = (method = "GET", body) => api("/api/cart/tabs" + (method === "POST" ? "/import" : ""), {
+    method, signal: AbortSignal.timeout(15_000), ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const applyState = (state) => {
+    const tabs = normalizeCartTabs({ version: 1, tabs: state?.tabs });
+    if (!Number.isSafeInteger(state?.revision) || state.revision < 0 || !Array.isArray(state.tabs)
+      || tabs.length !== state.tabs.length || tabs.some((tab, index) => typeof state.tabs[index].excludeFromAll !== "boolean"
+        || tab.itemIds.length !== state.tabs[index].itemIds.length)) throw new Error("Некорректные вкладки корзины.");
+    revision = state.revision;
+    customTabs = tabs;
+    confirmedTabs = structuredClone(tabs);
+    loaded = true;
+    if (migrationPending) return;
+    try {
+      localStorage.setItem(migratedKey, "true");
+      localStorage.setItem(storageKey, JSON.stringify({ version: 1, tabs }));
+    } catch { /* Browser storage is only a cache; the shared server state is already saved. */ }
+  };
+  const load = () => {
+    if (loading) return loading;
+    loading = (async () => {
+      await pendingSave;
+      let state = await request();
+      if (!loaded || migrationPending) {
+        let legacy = [];
+        try {
+          const stored = localStorage.getItem(storageKey);
+          if (localStorage.getItem(migratedKey) !== "true" && stored && stored.length <= 256_000) {
+            legacy = normalizeCartTabs(JSON.parse(stored));
+          }
+        } catch { /* Invalid or unavailable local storage must not prevent shared cart use. */ }
+        if (legacy.length) {
+          migrationPending = true;
+          try {
+            state = await request("POST", { version: 1, tabs: legacy });
+            migrationPending = false;
+          } catch (error) {
+            // Keep the local source for another attempt; shared tabs remain usable.
+            notify(`Не удалось перенести старые вкладки. ${error.message}`, true);
+          }
+        }
+      }
+      applyState(state);
+    })().finally(() => { loading = null; onChange(); });
+    return loading;
+  };
   const persist = () => {
-    try { localStorage.setItem(storageKey, JSON.stringify({ version: 1, tabs: customTabs })); }
-    catch {
-      if (!storageWarningShown) notify("Не удалось сохранить вкладки в браузере. Изменения доступны до перезагрузки страницы.", true);
-      storageWarningShown = true;
-    }
+    saving = true;
+    const tabs = customTabs;
+    onChange();
+    pendingSave = (async () => {
+      try { applyState(await request("PUT", { revision, tabs })); }
+      catch (error) {
+        try { applyState(await request()); }
+        catch { customTabs = confirmedTabs; loaded = false; /* Reload is required before further edits. */ }
+        notify(error.name === "TimeoutError" ? "Сервер не ответил. Проверьте вкладки после обновления корзины." : error.message, true);
+      } finally { saving = false; onChange(); }
+    })();
   };
   const hideMenu = (restoreFocus = false) => {
     closeMenu.hide();
@@ -67,7 +123,7 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
     contextId = null;
   };
   const closeTabs = (ids) => {
-    if (isLocked()) return;
+    if (locked()) return;
     ids = ids.filter((id) => customTabs.some((tab) => tab.id === id));
     if (!ids.length) return;
     customTabs = customTabs.filter((tab) => !ids.includes(tab.id));
@@ -79,7 +135,7 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
   };
   const closeMenu = setupTabCloseMenu(menu, { getTabs: () => customTabs, getSelectedId: () => contextId, closeTabs });
   const showMenu = (tab, x, y) => {
-    if (isLocked() || !customTabs.some((item) => item.id === tab.dataset.cartSupplier)) return;
+    if (locked() || !customTabs.some((item) => item.id === tab.dataset.cartSupplier)) return;
     contextId = tab.dataset.cartSupplier;
     closeMenu.refresh();
     menu.hidden = false;
@@ -89,7 +145,7 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
     menu.querySelector("button").focus();
   };
   const openRename = (id) => {
-    if (isLocked()) return;
+    if (locked()) return;
     const tab = customTabs.find((item) => item.id === id);
     if (!tab) return;
     renameId = id;
@@ -102,7 +158,7 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
   rename.querySelector("form").addEventListener("submit", (event) => {
     event.preventDefault();
     const name = nameInput.value.trim();
-    if (!name || isLocked()) return;
+    if (!name || locked()) return;
     customTabs = customTabs.map((tab) => tab.id === renameId ? { ...tab, name } : tab);
     persist();
     rename.close();
@@ -112,13 +168,13 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
   rename.querySelector("#cart-tab-rename-cancel").addEventListener("click", () => rename.close());
   rename.addEventListener("close", () => { renameId = null; focusActive(); });
   exclude.addEventListener("change", () => {
-    if (isLocked()) return;
+    if (locked()) return;
     customTabs = customTabs.map((tab) => tab.id === activeId ? { ...tab, excludeFromAll: exclude.checked } : tab);
     persist();
     onChange();
   });
   strip.addEventListener("click", (event) => {
-    if (isLocked()) return;
+    if (locked()) return;
     const close = event.target.closest("[data-cart-close-tab]");
     if (close) return closeTabs([close.dataset.cartCloseTab]);
     if (event.target.closest("#cart-new-tab")) {
@@ -150,7 +206,7 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
   });
   strip.addEventListener("keydown", (event) => {
     const tab = event.target.closest(".cart-tab");
-    if (!tab || isLocked()) return;
+    if (!tab || locked()) return;
     if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") {
       event.preventDefault();
       const bounds = tab.getBoundingClientRect();
@@ -192,7 +248,7 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
   modal.addEventListener("dragstart", (event) => {
     const tab = event.target.closest(".cart-tab");
     const row = event.target.closest("#cart-items tr[data-cart-item-id]");
-    if (isLocked() || !event.dataTransfer || !tab && !row) return event.preventDefault();
+    if (locked() || !event.dataTransfer || !tab && !row) return event.preventDefault();
     if (row && event.target.closest("input, button, a")) return event.preventDefault();
     if (tab && !customTabs.some((item) => item.id === tab.dataset.cartSupplier)) return event.preventDefault();
     drag = tab ? { type: "tab", id: tab.dataset.cartSupplier } : { type: "item", id: row.dataset.cartItemId };
@@ -203,7 +259,7 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
   });
   const dropTarget = (event) => {
     const tab = event.target.closest(".cart-tab-entry")?.querySelector(".cart-tab");
-    if (!drag || isLocked() || !tab) return null;
+    if (!drag || locked() || !tab) return null;
     const id = tab.dataset.cartSupplier;
     const custom = customTabs.some((item) => item.id === id);
     if (drag.type === "tab") return custom && id !== drag.id ? tab : null;
@@ -240,17 +296,9 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
     const cart = getCart();
     if (!cart) return;
     const previousFocus = document.activeElement.closest?.(".cart-tab")?.dataset.cartSupplier;
-    const currentIds = new Set(cart.items.map((item) => item.id));
-    let pruned = false;
-    customTabs = customTabs.map((tab) => {
-      const itemIds = tab.itemIds.filter((id) => currentIds.has(id));
-      pruned ||= itemIds.length !== tab.itemIds.length;
-      return { ...tab, itemIds };
-    });
-    if (pruned) persist();
     const suppliers = Object.keys(supplierNames).filter((supplier) => cart.items.some((item) => item.result.supplier === supplier));
     if (activeId !== "all" && !suppliers.includes(activeId) && !customTabs.some((tab) => tab.id === activeId)) activeId = "all";
-    const locked = isLocked();
+    const locked = isLocked() || saving || !loaded || Boolean(loading);
     const html = [{ id: "all", name: "Все" }, ...suppliers.map((id) => ({ id, name: supplierNames[id] })), ...customTabs].map((tab) => {
       const custom = customTabs.includes(tab);
       const count = getItems(tab.id).reduce((sum, item) => sum + item.quantity, 0);
@@ -274,5 +322,14 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
     modal.querySelector("#cart-tab-panel").setAttribute("aria-labelledby", `cart-tab-${activeId}`);
     if (previousFocus && modal.open) (strip.querySelector(`[data-cart-supplier="${previousFocus}"]`) ?? strip.querySelector('[aria-selected="true"]'))?.focus();
   };
-  return { render, getItems, getName, getSupplier, reset: () => { activeId = "all"; hideMenu(); } };
+  const refreshShared = () => {
+    if (modal.open && !document.hidden && !locked()) {
+      void load().catch(() => notify("Не удалось обновить общие вкладки корзины. Откройте корзину повторно.", true));
+      onChange();
+    }
+  };
+  window.addEventListener("focus", refreshShared);
+  document.addEventListener("visibilitychange", refreshShared);
+  return { render, load, getItems, getName, getSupplier, isPending: () => saving || !loaded || Boolean(loading),
+    reset: () => { activeId = "all"; hideMenu(); } };
 };

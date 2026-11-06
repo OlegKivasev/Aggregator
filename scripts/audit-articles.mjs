@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const supplierIds = ["rossko", "armtek", "part-kom", "stparts", "motordetal", "mladov"];
+const supplierIds = ["rossko", "armtek", "part-kom", "stparts", "autopiter", "motordetal", "mladov"];
 const supplierIdSet = new Set(supplierIds);
 const finalStatuses = new Set(["completed", "timeout", "auth_error", "error"]);
 const sampleArticles = [

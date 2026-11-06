@@ -4,7 +4,7 @@ import type { ApplicabilitySavedArticlesQuery } from "../applicability/types.ts"
 
 const requestBodyLimitBytes = 16 * 1024;
 export const articleLengthLimit = 128;
-export const supplierIds = new Set<SupplierId>(["rossko", "armtek", "part-kom", "stparts", "forum-auto", "motordetal", "mladov"]);
+export const supplierIds = new Set<SupplierId>(["rossko", "armtek", "part-kom", "stparts", "forum-auto", "autopiter", "motordetal", "mladov"]);
 
 export class RequestBodyError extends Error {
   readonly statusCode: number;

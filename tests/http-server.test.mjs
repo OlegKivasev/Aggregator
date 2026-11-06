@@ -716,6 +716,27 @@ test("HTTP server delegates Forum-Auto authorization without exposing credential
   assert.deepEqual(await response.json(), { session: session("forum-auto", true) });
 });
 
+test("HTTP server delegates Автопитер authorization without exposing credentials", async () => {
+  let receivedCredentials;
+  const application = createApplication({
+    authorizeAutopiter: async (credentials) => {
+      receivedCredentials = credentials;
+      return session("autopiter", true);
+    },
+  });
+  const { baseUrl } = await listen(application);
+
+  const response = await fetch(`${baseUrl}/api/suppliers/autopiter/authorize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ login: "api-user", password: " secret " }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(receivedCredentials, { login: "api-user", password: " secret " });
+  assert.deepEqual(await response.json(), { session: session("autopiter", true) });
+});
+
 test("HTTP server transports mixed supplier SSE events without changing them", async () => {
   const expectedEvents = [
     { type: "search_started", article: "ABC-123", suppliers: ["rossko", "armtek"] },

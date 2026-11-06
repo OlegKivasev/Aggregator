@@ -115,6 +115,7 @@ test("HTTP routes preserve response and security contracts", async () => {
     "part-kom",
     "stparts",
     "forum-auto",
+    "autopiter",
     "motordetal",
     "mladov",
   ]);
@@ -146,7 +147,7 @@ test("JSON endpoints reject malformed and incomplete requests", async () => {
   assert.equal(missingRosskoKeys.status, 400);
   assert.deepEqual(await missingRosskoKeys.json(), { message: "K1 and K2 must be strings within the allowed length" });
 
-  for (const supplier of ["armtek", "part-kom", "stparts", "forum-auto", "motordetal", "mladov"]) {
+  for (const supplier of ["armtek", "part-kom", "stparts", "forum-auto", "autopiter", "motordetal", "mladov"]) {
     const missingCredentials = await fetch(`${baseUrl}/api/suppliers/${supplier}/authorize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -314,7 +315,7 @@ test("session validation deduplicates suppliers and reports expired sessions", a
 });
 
 test("supplier logout routes are idempotent", async () => {
-  for (const supplier of ["rossko", "armtek", "part-kom", "stparts", "forum-auto", "motordetal", "mladov"]) {
+  for (const supplier of ["rossko", "armtek", "part-kom", "stparts", "forum-auto", "autopiter", "motordetal", "mladov"]) {
     const response = await fetch(`${baseUrl}/api/suppliers/${supplier}/logout`, { method: "POST" });
     assert.equal(response.status, 200);
     const payload = await response.json();

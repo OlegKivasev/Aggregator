@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { classifyOperationalError, SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError, type OperationalErrorCategory } from "../errors.ts";
 import type {
   ArmtekCredentials,
+  AutopiterCredentials,
   ForumAutoCredentials,
   MladovCredentials,
   MotorDetalCredentials,
@@ -66,6 +67,7 @@ export interface AggregatorApplication extends RosskoOrderSettingsApplication {
   authorizeArmtek(credentials: ArmtekCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizePartKom(credentials: PartKomCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeStparts(credentials: StpartsCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
+  authorizeAutopiter(credentials: AutopiterCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeForumAuto(credentials: ForumAutoCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeMotorDetal(credentials: MotorDetalCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
   authorizeMladov(credentials: MladovCredentials, signal: AbortSignal): Promise<SupplierSessionState>;
@@ -73,6 +75,7 @@ export interface AggregatorApplication extends RosskoOrderSettingsApplication {
   logoutArmtek(): SupplierSessionState;
   logoutPartKom(): SupplierSessionState;
   logoutStparts(): SupplierSessionState;
+  logoutAutopiter(): SupplierSessionState;
   logoutForumAuto(): SupplierSessionState;
   logoutMotorDetal(): SupplierSessionState;
   logoutMladov(): SupplierSessionState;
@@ -338,7 +341,8 @@ export function createAggregatorServer({
     const cartItemMatch = /^\/api\/cart\/items\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (url.pathname === "/api/cart" || url.pathname === "/api/cart/items" || url.pathname === "/api/cart/items/batch" || url.pathname === "/api/cart/test-order"
       || url.pathname === "/api/cart/order-options" || url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh"
-      || url.pathname === "/api/cart/uncertain/resolve" || cartItemMatch) {
+      || url.pathname === "/api/cart/uncertain/resolve" || url.pathname === "/api/cart/tabs"
+      || url.pathname === "/api/cart/tabs/import" || cartItemMatch) {
       response.setHeader("Cache-Control", "no-store");
       const controller = new AbortController();
       const abort = () => { if (!response.writableEnded) controller.abort(new Error("Client disconnected")); };
@@ -346,6 +350,14 @@ export function createAggregatorServer({
       try {
         if (url.pathname === "/api/cart" && request.method === "GET") {
           serveJson(response, 200, cart.view());
+        } else if (url.pathname === "/api/cart/tabs" && request.method === "GET") {
+          serveJson(response, 200, cart.tabs());
+        } else if (url.pathname === "/api/cart/tabs" && request.method === "PUT"
+          || url.pathname === "/api/cart/tabs/import" && request.method === "POST") {
+          const payload = await readJsonBody(request, 256 * 1024);
+          if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new CartError("Неверные параметры вкладок корзины.");
+          const fields = payload as Record<string, unknown>;
+          serveJson(response, 200, url.pathname.endsWith("/import") ? cart.importTabs(fields) : cart.saveTabs(fields));
         } else if (url.pathname === "/api/cart/order-options" && request.method === "GET") {
           const revisionText = url.searchParams.get("revision");
           if (!revisionText || !/^\d{1,15}$/.test(revisionText)) throw new CartError("Неверная версия корзины.");
@@ -699,6 +711,16 @@ export function createAggregatorServer({
 
     if (request.method === "POST" && url.pathname === "/api/suppliers/stparts/logout") {
       serveJson(response, 200, { session: application.logoutStparts() });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/suppliers/autopiter/authorize") {
+      await serveAuthorization(request, response, application.authorizeAutopiter.bind(application), "authorize-autopiter", reportError, parseCredentials);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/suppliers/autopiter/logout") {
+      serveJson(response, 200, { session: application.logoutAutopiter() });
       return;
     }
 

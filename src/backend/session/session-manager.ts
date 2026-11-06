@@ -1,5 +1,6 @@
 import type {
   ArmtekCredentials,
+  AutopiterCredentials,
   ForumAutoCredentials,
   MotorDetalCredentials,
   MladovCredentials,
@@ -20,13 +21,15 @@ export interface SupplierOperation {
 }
 
 const nowIso = () => new Date().toISOString();
-const supplierIds = ["rossko", "armtek", "part-kom", "stparts", "forum-auto", "motordetal", "mladov"] as const;
+const supplierIds = ["rossko", "armtek", "part-kom", "stparts", "forum-auto", "autopiter", "motordetal", "mladov"] as const;
 
 export class SupplierSessionManager {
   private readonly sessions = new Map<SupplierId, SupplierSessionState>();
   private readonly generations = new Map<SupplierId, number>();
   private readonly activeOperations = new Map<SupplierId, Set<AbortController>>();
   private readonly exclusiveOperations = new Map<SupplierId, AbortSignal>();
+  private autopiterCredentials: AutopiterCredentials | null = null;
+  private autopiterCookie: string | null = null;
   private armtekCredentials: ArmtekCredentials | null = null;
   private motorDetalCredentials: MotorDetalCredentials | null = null;
   private mladovCredentials: MladovCredentials | null = null;
@@ -252,6 +255,30 @@ export class SupplierSessionManager {
 
   clearStpartsCredentials(): void {
     this.stpartsCredentials = null;
+  }
+
+  setAutopiterCredentials(credentials: AutopiterCredentials, cookie: string | null = null): void {
+    this.autopiterCredentials = { login: credentials.login.trim(), password: credentials.password };
+    this.autopiterCookie = cookie;
+  }
+
+  getAutopiterCredentials(): AutopiterCredentials | null {
+    return this.autopiterCredentials ? { ...this.autopiterCredentials } : null;
+  }
+
+  getAutopiterCookie(): string | null {
+    return this.autopiterCookie;
+  }
+
+  updateAutopiterCookie(previous: string | null, cookie: string): void {
+    if (this.autopiterCredentials && this.autopiterCookie === previous) {
+      this.autopiterCookie = cookie;
+    }
+  }
+
+  clearAutopiterCredentials(): void {
+    this.autopiterCredentials = null;
+    this.autopiterCookie = null;
   }
 
   setForumAutoCredentials(credentials: ForumAutoCredentials): void {

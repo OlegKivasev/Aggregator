@@ -1,3 +1,4 @@
+import { parseSupplierXml as parseRosskoXml, type XmlElement } from "../soap-xml.ts";
 import { createHash } from "node:crypto";
 import { createBoundedAbortSignal } from "../../abort.ts";
 import { rosskoConfig, supplierMaxResponseBytes } from "../../config.ts";
@@ -19,6 +20,8 @@ import type { PurchaseLine } from "../../purchasing/purchase-offer.ts";
 import type { OrderFulfillment, OrderHistory } from "../../purchasing/order-history-contract.ts";
 import { finishOrderHistory, historyDate, historyNumber, historyText } from "../../purchasing/order-history-values.ts";
 
+export { parseRosskoXml };
+
 const rosskoApiOrigin = "https://api.rossko.ru";
 const rosskoApiVersion = "v2.1";
 const rosskoPortalOrigin = "https://samara.rossko.ru";
@@ -33,12 +36,6 @@ const historyFulfillment: Record<number, OrderFulfillment> = {
   7: "cancelled", 8: "cancelled", 9: "unknown", 31: "returned", 32: "unknown", 33: "unknown",
   34: "unknown", 35: "unknown", 36: "returned",
 };
-
-interface XmlElement {
-  name: string;
-  text: string;
-  children: XmlElement[];
-}
 
 interface RosskoDeliverySelection {
   deliveryId: string;
@@ -71,81 +68,6 @@ let cachedDeliverySelection: {
 
 function localName(name: string): string {
   return name.split(":").at(-1)?.toLowerCase() || "";
-}
-
-function decodeXmlText(value: string): string {
-  return value.replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);/gi, (entity) => {
-    switch (entity.toLowerCase()) {
-      case "&amp;": return "&";
-      case "&lt;": return "<";
-      case "&gt;": return ">";
-      case "&quot;": return '"';
-      case "&apos;": return "'";
-      default: {
-        const hexadecimal = entity[2]?.toLowerCase() === "x";
-        const digits = entity.slice(hexadecimal ? 3 : 2, -1);
-        const codePoint = Number.parseInt(digits, hexadecimal ? 16 : 10);
-        return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
-          ? String.fromCodePoint(codePoint)
-          : "";
-      }
-    }
-  });
-}
-
-export function parseRosskoXml(xml: string): XmlElement {
-  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) {
-    throw new SupplierIntegrationError("Rossko API returned unsupported XML declarations");
-  }
-
-  const root: XmlElement = { name: "#document", text: "", children: [] };
-  const stack = [root];
-  const tokens = xml.match(/<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<[^>]+>|[^<]+/g) || [];
-  if (tokens.join("") !== xml) {
-    throw new SupplierIntegrationError("Rossko API returned malformed XML");
-  }
-
-  for (const token of tokens) {
-    const current = stack.at(-1);
-    if (!current) {
-      throw new SupplierIntegrationError("Rossko API returned malformed XML");
-    }
-    if (token.startsWith("<?") || token.startsWith("<!--")) {
-      continue;
-    }
-    if (token.startsWith("<![CDATA[")) {
-      current.text += token.slice(9, -3);
-      continue;
-    }
-    if (!token.startsWith("<")) {
-      current.text += decodeXmlText(token);
-      continue;
-    }
-    if (token.startsWith("</")) {
-      const match = token.match(/^<\/\s*([A-Za-z_][\w:.-]*)\s*>$/);
-      const open = stack.at(-1);
-      if (!match || !open || open === root || open.name !== match[1]) {
-        throw new SupplierIntegrationError("Rossko API returned malformed XML");
-      }
-      stack.pop();
-      continue;
-    }
-
-    const match = token.match(/^<\s*([A-Za-z_][\w:.-]*)(?:\s[^<>]*?)?\s*(\/?)>$/);
-    if (!match) {
-      throw new SupplierIntegrationError("Rossko API returned malformed XML");
-    }
-    const element: XmlElement = { name: match[1], text: "", children: [] };
-    current.children.push(element);
-    if (!match[2]) {
-      stack.push(element);
-    }
-  }
-
-  if (stack.length !== 1 || root.children.length !== 1) {
-    throw new SupplierIntegrationError("Rossko API returned malformed XML");
-  }
-  return root.children[0];
 }
 
 function children(element: XmlElement, name: string): XmlElement[] {
