@@ -176,16 +176,19 @@ test("Autopiter shares its one recovery attempt across catalog and price request
   let authorizations = 0;
   let priceCalls = 0;
   const results = [];
-  const adapter = new AutopiterApiAdapter(async (method) => {
+  const attempts = new Map();
+  const adapter = new AutopiterApiAdapter(async (method, parameters) => {
     if (method === "FindCatalog") return response(method, catalog() + catalog({ ArticleId: "102" }));
     if (method === "Authorization") { authorizations++; return response(method, "true", { setCookie: [cookie] }); }
     if (method === "IsAuthorization") return response(method, "true");
     priceCalls++;
-    return priceCalls === 2 ? response(method, offer()) : response(method, "", { status: 401 });
+    const attempt = (attempts.get(parameters.ArticleId) ?? 0) + 1;
+    attempts.set(parameters.ArticleId, attempt);
+    return parameters.ArticleId === "101" && attempt === 2 ? response(method, offer()) : response(method, "", { status: 401 });
   });
   await assert.rejects(adapter.search({ article: "A1" }, context(), (value) => results.push(value), manager()), SupplierAuthError);
   assert.equal(authorizations, 1);
-  assert.equal(priceCalls, 3);
+  assert.equal(priceCalls, 4);
   assert.equal(results.length, 1);
 });
 
@@ -207,6 +210,115 @@ test("Autopiter prices every exact catalog once, filters other articles and repl
     quantity: 7, warehouse: "Тестовый склад", deliveryDate: "2026-11-10T00:00:00.000Z", deliveryDateApproximate: false, isReturnable: true, link: "https://autopiter.ru/" });
   assert.equal(getPurchaseReference(results[0]), null);
   assert.equal(adapter.searchAnalogs, undefined);
+});
+
+test("Autopiter overlaps catalog prices with bounded concurrency and preserves offer order", async (t) => {
+  const ids = Array.from({ length: 12 }, (_, index) => String(101 + index));
+  let active = 0;
+  let maximumActive = 0;
+  let calls = 0;
+  const adapter = new AutopiterApiAdapter(async (method, parameters, requestSignal) => {
+    if (method === "FindCatalog") return response(method, ids.map((ArticleId) => catalog({ ArticleId })).join(""));
+    assert.equal(method, "GetPriceId");
+    calls++; active++; maximumActive = Math.max(maximumActive, active);
+    try {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => { requestSignal.removeEventListener("abort", abort); resolve(); }, parameters.ArticleId === "101" ? 80 : 40);
+        const abort = () => { clearTimeout(timeout); reject(requestSignal.reason); };
+        requestSignal.addEventListener("abort", abort, { once: true });
+      });
+      return response(method, offer({ Region: `Тестовый склад ${parameters.ArticleId}`, TypeRefusal: Number(parameters.ArticleId) % 2 ? "3" : "1" }));
+    } finally { active--; }
+  });
+  const results = [];
+  const started = performance.now();
+  await adapter.search({ article: "A1" }, context(), (value) => results.push(value), manager());
+  t.diagnostic(`12 catalog price requests: ${Math.round(performance.now() - started)} ms; peak concurrent requests: ${maximumActive}`);
+  assert.equal(maximumActive, 4);
+  assert.equal(active, 0);
+  assert.equal(calls, ids.length);
+  assert.deepEqual(results.map((value) => value.warehouse), ids.map((id) => `Тестовый склад ${id}`));
+  assert.deepEqual(results.map((value) => value.isReturnable), ids.map((id) => Number(id) % 2 === 0));
+});
+
+test("Autopiter shares one pending authorization between concurrently expired requests", async () => {
+  let authorizations = 0;
+  const attempts = new Map();
+  const freshCookie = "AuthCoocies=renewed-fixture";
+  const ids = Array.from({ length: 6 }, (_, index) => String(101 + index));
+  const adapter = new AutopiterApiAdapter(async (method, parameters, requestSignal, receivedCookie) => {
+    requestSignal.throwIfAborted();
+    if (method === "FindCatalog") return response(method, ids.map((ArticleId) => catalog({ ArticleId })).join(""));
+    if (method === "Authorization") {
+      authorizations++;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return response(method, "true", { setCookie: [freshCookie] });
+    }
+    if (method === "IsAuthorization") return response(method, receivedCookie === freshCookie ? "true" : "false");
+    attempts.set(parameters.ArticleId, (attempts.get(parameters.ArticleId) ?? 0) + 1);
+    return receivedCookie === freshCookie ? response(method, offer({ Region: `Тестовый склад ${parameters.ArticleId}` })) : response(method, "", { status: 401 });
+  });
+  const sessions = manager();
+  const results = [];
+  await adapter.search({ article: "A1" }, context(), (value) => results.push(value), sessions);
+  assert.equal(authorizations, 1);
+  assert.equal(sessions.getAutopiterCookie(), freshCookie);
+  assert.deepEqual([...attempts.values()], [2, 2, 2, 2, 1, 1]);
+  assert.deepEqual(results.map((value) => value.warehouse), ids.map((id) => `Тестовый склад ${id}`));
+});
+
+test("Autopiter cancels all prefetched prices and never starts queued catalogs after cancellation or logout", { timeout: 3000 }, async () => {
+  for (const reason of [new Error("client cancelled"), new SupplierTimeoutError(), "logout"]) {
+    const sessions = manager();
+    const controller = new AbortController();
+    const started = Promise.withResolvers();
+    let active = 0;
+    let requests = 0;
+    let cancelled = 0;
+    const adapter = new AutopiterApiAdapter(async (method, _fields, requestSignal) => {
+      requestSignal.throwIfAborted();
+      if (method === "FindCatalog") return response(method, Array.from({ length: 8 }, (_, index) => catalog({ ArticleId: String(101 + index) })).join(""));
+      active++; requests++;
+      if (active === 4) started.resolve();
+      try {
+        return await new Promise((_resolve, reject) => requestSignal.addEventListener("abort", () => {
+          cancelled++; reject(requestSignal.reason);
+        }, { once: true }));
+      } finally { active--; }
+    });
+    const pending = adapter.search({ article: "A1" }, { signal: controller.signal, timeoutMs: 1000 }, () => assert.fail("late result"), sessions);
+    const rejected = assert.rejects(pending, reason === "logout" ? /invalidated/i : (error) => error === reason);
+    await started.promise;
+    if (reason === "logout") new SupplierSessionService([adapter], sessions, {}).logoutAutopiter();
+    else controller.abort(reason);
+    await rejected;
+    assert.equal(active, 0);
+    assert.equal(requests, 4);
+    assert.equal(cancelled, 4);
+    if (reason === "logout") assert.equal(sessions.getAutopiterCookie(), null);
+  }
+});
+
+test("Autopiter reports a failed catalog and closes outstanding price requests", async () => {
+  const failure = new SupplierIntegrationError("fictional upstream failure");
+  let requests = 0;
+  let active = 0;
+  let cancelled = 0;
+  const adapter = new AutopiterApiAdapter(async (method, parameters, requestSignal) => {
+    if (method === "FindCatalog") return response(method, Array.from({ length: 8 }, (_, index) => catalog({ ArticleId: String(101 + index) })).join(""));
+    requests++;
+    if (parameters.ArticleId === "101") throw failure;
+    active++;
+    try {
+      return await new Promise((_resolve, reject) => requestSignal.addEventListener("abort", () => {
+        cancelled++; reject(requestSignal.reason);
+      }, { once: true }));
+    } finally { active--; }
+  });
+  await assert.rejects(adapter.search({ article: "A1" }, context(), () => assert.fail("unexpected result"), manager()), (error) => error === failure);
+  assert.equal(requests, 4);
+  assert.equal(cancelled, 3);
+  assert.equal(active, 0);
 });
 
 test("Autopiter hides refusal types 3 and 4 by default, including restored unknown returnability", async () => {

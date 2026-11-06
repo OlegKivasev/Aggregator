@@ -10,8 +10,15 @@ type AutopiterMethod = "Authorization" | "IsAuthorization" | "FindCatalog" | "Ge
 type SoapFields = Record<string, string>;
 export type AutopiterRequester = (method: AutopiterMethod, fields: SoapFields, signal: AbortSignal, cookie?: string) => Promise<SiteHttpResponse>;
 
+interface AutopiterSessionRecovery {
+  authorization?: Promise<string>;
+}
+
+type PriceOutcome = { ok: true; offers: XmlElement[] } | { ok: false; error: unknown };
+
 const namespace = "http://www.autopiter.ru/";
 const endpoint = new URL("https://service.autopiter.ru/v2/price");
+const priceRequestConcurrency = 4;
 const localName = (element: XmlElement): string => element.name.split(":").at(-1) || "";
 const children = (element: XmlElement, name: string): XmlElement[] => element.children.filter((item) => localName(item) === name);
 const text = (element: XmlElement, name: string): string => children(element, name)[0]?.text.trim() || "";
@@ -170,22 +177,35 @@ export class AutopiterApiAdapter implements SupplierAdapter {
     context: SupplierSearchContext,
     manager: SupplierSessionManager,
     parse: (response: SiteHttpResponse) => T,
-    recovery?: { attempted: boolean },
+    recovery?: AutopiterSessionRecovery,
   ): Promise<T> {
     const operation = manager.beginOperation(this.id, context.signal);
     try {
       operation.signal.throwIfAborted();
       const credentials = manager.getAutopiterCredentials();
       if (!credentials) throw new SupplierAuthError("Autopiter credentials are not configured");
+      let usedRecovery = Boolean(recovery?.authorization);
+      if (recovery?.authorization) {
+        await recovery.authorization;
+        operation.signal.throwIfAborted();
+      }
       let cookie = manager.getAutopiterCookie();
       while (true) {
         if (!cookie) {
-          if (!recovery || recovery.attempted) throw new SupplierAuthError("Autopiter authorization is required");
-          recovery.attempted = true;
-          const previous = manager.getAutopiterCookie();
-          cookie = await verifyAutopiterCredentials(credentials, operation.signal, this.request);
+          if (!recovery) throw new SupplierAuthError("Autopiter authorization is required");
+          if (!recovery.authorization) {
+            const previous = manager.getAutopiterCookie();
+            // One login belongs to the whole search, including concurrent stale requests.
+            recovery.authorization = verifyAutopiterCredentials(credentials, context.signal, this.request).then((verifiedCookie) => {
+              context.signal.throwIfAborted();
+              manager.updateAutopiterCookie(previous, verifiedCookie);
+              return verifiedCookie;
+            });
+          }
+          const verifiedCookie = await recovery.authorization;
           operation.signal.throwIfAborted();
-          manager.updateAutopiterCookie(previous, cookie);
+          cookie = manager.getAutopiterCookie() ?? verifiedCookie;
+          usedRecovery = true;
         }
         try {
           const response = await this.request(method, fields, operation.signal, cookie);
@@ -197,7 +217,7 @@ export class AutopiterApiAdapter implements SupplierAdapter {
           return result;
         } catch (error) {
           operation.signal.throwIfAborted();
-          if (!(error instanceof SupplierAuthError) || !recovery || recovery.attempted) throw error;
+          if (!(error instanceof SupplierAuthError) || !recovery || usedRecovery) throw error;
           cookie = null;
         }
       }
@@ -218,25 +238,47 @@ export class AutopiterApiAdapter implements SupplierAdapter {
   }
 
   async search(query: SearchQuery, context: SupplierSearchContext, onResult: (result: NormalizedSearchResult) => void, manager: SupplierSessionManager): Promise<void> {
-    const recovery = { attempted: false };
-    const catalogs = await this.requestWithSession("FindCatalog", { Number: query.article }, context, manager, (response) => listResult(response, "FindCatalog", "SearchCatalogModel"), recovery);
-    context.signal.throwIfAborted();
-    const ids = new Set<string>();
-    for (const catalog of catalogs) {
-      const article = text(catalog, "Number");
-      const id = text(catalog, "ArticleId");
-      if (!article || !text(catalog, "CatalogName") || !/^[1-9]\d{0,18}$/.test(id)) throw new SupplierIntegrationError("Autopiter returned an invalid catalog");
-      if (articleKey(article) === articleKey(query.article)) ids.add(id);
-    }
-    if (ids.size > 64) throw new SupplierIntegrationError("Autopiter returned too many catalogs");
-    for (const id of ids) {
-      context.signal.throwIfAborted();
-      const offers = await this.requestWithSession("GetPriceId", { ArticleId: id, Currency: "РУБ", SearchCross: "0", MinSalesRating: "0", MinRealTimeInProc: "0" }, context, manager, (response) => listResult(response, "GetPriceId", "PriceSearchModel"), recovery);
-      context.signal.throwIfAborted();
-      for (const offer of offers) {
-        const result = normalizeOffer(offer, query.article);
-        if (result) onResult(result);
+    const operation = manager.beginOperation(this.id, context.signal);
+    const controller = new AbortController();
+    const searchContext = { ...context, signal: AbortSignal.any([operation.signal, controller.signal]) };
+    const pending = new Map<number, Promise<PriceOutcome>>();
+    try {
+      searchContext.signal.throwIfAborted();
+      const recovery: AutopiterSessionRecovery = {};
+      const catalogs = await this.requestWithSession("FindCatalog", { Number: query.article }, searchContext, manager, (response) => listResult(response, "FindCatalog", "SearchCatalogModel"), recovery);
+      searchContext.signal.throwIfAborted();
+      const ids = new Set<string>();
+      for (const catalog of catalogs) {
+        const article = text(catalog, "Number");
+        const id = text(catalog, "ArticleId");
+        if (!article || !text(catalog, "CatalogName") || !/^[1-9]\d{0,18}$/.test(id)) throw new SupplierIntegrationError("Autopiter returned an invalid catalog");
+        if (articleKey(article) === articleKey(query.article)) ids.add(id);
       }
+      if (ids.size > 64) throw new SupplierIntegrationError("Autopiter returned too many catalogs");
+      const catalogIds = [...ids];
+      const loadPrices = (id: string): Promise<PriceOutcome> => this.requestWithSession(
+        "GetPriceId", { ArticleId: id, Currency: "РУБ", SearchCross: "0", MinSalesRating: "0", MinRealTimeInProc: "0" },
+        searchContext, manager, (response) => listResult(response, "GetPriceId", "PriceSearchModel"), recovery,
+      ).then((offers) => ({ ok: true, offers }), (error: unknown) => ({ ok: false, error }));
+      catalogIds.slice(0, priceRequestConcurrency).forEach((id, index) => pending.set(index, loadPrices(id)));
+      for (let index = 0; index < catalogIds.length; index++) {
+        const outcome = await pending.get(index)!;
+        pending.delete(index);
+        searchContext.signal.throwIfAborted();
+        if (!outcome.ok) throw outcome.error;
+        // Consume in catalog order, keeping only a bounded window of responses ahead.
+        const next = index + priceRequestConcurrency;
+        if (next < catalogIds.length) pending.set(next, loadPrices(catalogIds[next]));
+        for (const offer of outcome.offers) {
+          searchContext.signal.throwIfAborted();
+          const result = normalizeOffer(offer, query.article);
+          if (result) onResult(result);
+        }
+      }
+    } finally {
+      controller.abort();
+      await Promise.allSettled(pending.values());
+      operation.dispose();
     }
   }
 }
