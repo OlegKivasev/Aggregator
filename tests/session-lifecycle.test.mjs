@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,6 +60,60 @@ test("supplier credentials are authenticated, encrypted, and removable", async (
 
     store.delete("rossko");
     assert.equal(existsSync(statePath), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("preserves encrypted credentials for suppliers removed from the current build", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "autoservice-legacy-credentials-test-"));
+  const statePath = join(directory, "credentials.enc.json");
+  const key = randomBytes(32);
+  const authenticatedContext = Buffer.from("autoservice-aggregator:supplier-credentials:v1", "utf8");
+
+  try {
+    const store = new EncryptedSupplierCredentialStore(statePath, key);
+    store.set("rossko", { login: "saved-login", password: "saved-password" });
+
+    const originalEnvelope = JSON.parse(await readFile(statePath, "utf8"));
+    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(originalEnvelope.iv, "base64"));
+    decipher.setAAD(authenticatedContext);
+    decipher.setAuthTag(Buffer.from(originalEnvelope.authTag, "base64"));
+    const payload = JSON.parse(Buffer.concat([
+      decipher.update(Buffer.from(originalEnvelope.ciphertext, "base64")),
+      decipher.final(),
+    ]).toString("utf8"));
+    payload.credentials.autopiter = { login: "legacy-login", password: "legacy-password" };
+
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", key, iv);
+    cipher.setAAD(authenticatedContext);
+    const ciphertext = Buffer.concat([cipher.update(Buffer.from(JSON.stringify(payload))), cipher.final()]);
+    writeJsonStateFileAtomic(statePath, {
+      version: 1,
+      algorithm: "aes-256-gcm",
+      iv: iv.toString("base64"),
+      ciphertext: ciphertext.toString("base64"),
+      authTag: cipher.getAuthTag().toString("base64"),
+    });
+
+    const restored = new EncryptedSupplierCredentialStore(statePath, key);
+    assert.deepEqual(restored.get("rossko"), { login: "saved-login", password: "saved-password" });
+    restored.set("armtek", { login: "new-login", password: "new-password" });
+
+    const reloaded = new EncryptedSupplierCredentialStore(statePath, key);
+    assert.deepEqual(reloaded.get("rossko"), { login: "saved-login", password: "saved-password" });
+    assert.deepEqual(reloaded.get("armtek"), { login: "new-login", password: "new-password" });
+
+    const persistedEnvelope = JSON.parse(await readFile(statePath, "utf8"));
+    const persistedDecipher = createDecipheriv("aes-256-gcm", key, Buffer.from(persistedEnvelope.iv, "base64"));
+    persistedDecipher.setAAD(authenticatedContext);
+    persistedDecipher.setAuthTag(Buffer.from(persistedEnvelope.authTag, "base64"));
+    const persistedPayload = JSON.parse(Buffer.concat([
+      persistedDecipher.update(Buffer.from(persistedEnvelope.ciphertext, "base64")),
+      persistedDecipher.final(),
+    ]).toString("utf8"));
+    assert.deepEqual(persistedPayload.credentials.autopiter, { login: "legacy-login", password: "legacy-password" });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
