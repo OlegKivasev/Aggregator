@@ -1,0 +1,174 @@
+const authScreen = document.querySelector("#auth-screen");
+const loginForm = document.querySelector("#auth-login-form");
+const fioInput = document.querySelector("#auth-fio");
+const passwordInput = document.querySelector("#auth-password");
+const loginButton = document.querySelector("#auth-login-button");
+const loginFeedback = document.querySelector("#auth-login-feedback");
+const userBadge = document.querySelector("#auth-user-badge");
+const logoutButton = document.querySelector("#auth-logout-button");
+const usersSettings = document.querySelector("#users-settings");
+const usersList = document.querySelector("#users-list");
+const usersFeedback = document.querySelector("#users-feedback");
+const userCreateForm = document.querySelector("#user-create-form");
+const userFioInput = document.querySelector("#user-fio");
+const userPasswordInput = document.querySelector("#user-password");
+const permissionInputs = [...document.querySelectorAll("#user-permissions input[type=checkbox]")];
+
+const messageFor = async (response, fallback) => {
+  try {
+    const payload = await response.json();
+    return typeof payload?.message === "string" ? payload.message : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const accessLabel = (user) => user.isAdmin ? "Администратор" : user.permissions.map((permission) => ({
+  markup: "Проценка", applicability: "Применимость", repairs: "Заказ-наряды",
+}[permission] ?? permission)).join(", ") || "Нет доступа";
+
+const applyAccess = (user) => {
+  const isAuthenticated = typeof user?.fio === "string" && user.fio.length > 0;
+  const canMarkup = user?.isAdmin || user?.permissions?.includes("markup");
+  const canApplicability = user?.isAdmin || user?.permissions?.includes("applicability");
+  const canRepairs = user?.isAdmin || user?.permissions?.includes("repairs");
+  const markupTab = document.querySelector("#markup-function-tab");
+  const applicabilityTab = document.querySelector("#applicability-function-tab");
+  const repairsTab = document.querySelector("#repairs-function-tab");
+  const testRepairsTab = document.querySelector("#test-repairs-function-tab");
+  const markupSection = document.querySelector("#markup-function");
+  const applicabilitySection = document.querySelector("#applicability-function");
+  const repairsSection = document.querySelector("#repairs-function");
+  const testRepairsSection = document.querySelector("#test-repairs-function");
+  if (markupTab) markupTab.hidden = !canMarkup;
+  if (applicabilityTab) applicabilityTab.hidden = !canApplicability;
+  if (repairsTab) repairsTab.hidden = !canRepairs;
+  if (testRepairsTab) testRepairsTab.hidden = !canRepairs;
+  if (markupSection) markupSection.hidden = !canMarkup;
+  if (applicabilitySection) applicabilitySection.hidden = !canApplicability;
+  if (repairsSection) repairsSection.hidden = !canRepairs;
+  if (testRepairsSection) testRepairsSection.hidden = !canRepairs;
+  document.querySelectorAll("[data-admin-only]").forEach((element) => { element.hidden = !user?.isAdmin; });
+  const settingsToggle = document.querySelector("#settings-toggle");
+  if (settingsToggle) settingsToggle.hidden = !user?.isAdmin;
+  if (usersSettings) usersSettings.hidden = !user?.isAdmin || !isAuthenticated;
+  if (userBadge) {
+    userBadge.textContent = user ? user.fio : "";
+    userBadge.hidden = !isAuthenticated;
+  }
+  if (logoutButton) logoutButton.hidden = !isAuthenticated;
+  document.dispatchEvent(new CustomEvent("aggregator-auth-ready", { detail: user }));
+};
+
+const renderUsers = (users) => {
+  if (!usersList) return;
+  usersList.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.textContent = "Учетные записи";
+  usersList.append(heading);
+  for (const user of users) {
+    const row = document.createElement("div");
+    row.className = "users-list__row";
+    const info = document.createElement("div");
+    const fio = document.createElement("strong");
+    fio.textContent = user.fio;
+    const permissions = document.createElement("span");
+    permissions.textContent = accessLabel(user);
+    permissions.className = "panel__meta";
+    info.append(fio, permissions);
+    row.append(info);
+    if (!user.isAdmin) {
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "btn btn-light";
+      deleteButton.textContent = "Удалить";
+      deleteButton.addEventListener("click", async () => {
+        if (!window.confirm(`Удалить пользователя «${user.fio}»?`)) return;
+        const response = await fetch("/api/users", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: user.id }) });
+        if (!response.ok) {
+          usersFeedback.textContent = await messageFor(response, "Не удалось удалить пользователя.");
+          return;
+        }
+        await loadUsers();
+      });
+      row.append(deleteButton);
+    }
+    usersList.append(row);
+  }
+};
+
+const loadUsers = async () => {
+  const response = await fetch("/api/users", { cache: "no-store" });
+  if (!response.ok) throw new Error(await messageFor(response, "Не удалось загрузить пользователей."));
+  const payload = await response.json();
+  if (!Array.isArray(payload?.users)) throw new Error("Некорректный список пользователей.");
+  renderUsers(payload.users);
+};
+
+userCreateForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  usersFeedback.textContent = "";
+  const permissions = permissionInputs.filter((input) => input.checked).map((input) => input.value);
+  const response = await fetch("/api/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fio: userFioInput.value, password: userPasswordInput.value, permissions }),
+  });
+  if (!response.ok) {
+    usersFeedback.textContent = await messageFor(response, "Не удалось создать пользователя.");
+    return;
+  }
+  userCreateForm.reset();
+  usersFeedback.textContent = "Пользователь создан.";
+  await loadUsers();
+});
+
+logoutButton?.addEventListener("click", async () => {
+  await fetch("/api/auth/logout", { method: "POST" });
+  window.location.reload();
+});
+
+loginForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  loginButton.disabled = true;
+  loginFeedback.textContent = "";
+  try {
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fio: fioInput.value, password: passwordInput.value }),
+    });
+    if (!response.ok) {
+      loginFeedback.textContent = await messageFor(response, "Не удалось войти.");
+      return;
+    }
+    window.location.reload();
+  } finally {
+    loginButton.disabled = false;
+  }
+});
+
+const bootstrap = async () => {
+  try {
+    const response = await fetch("/api/auth/session", { cache: "no-store" });
+    const payload = await response.json();
+    if (!payload?.enabled) {
+      applyAccess({ isAdmin: true, permissions: ["markup", "applicability", "repairs"] });
+      return;
+    }
+    if (!payload.user) {
+      authScreen.hidden = false;
+      document.body.classList.add("auth-required");
+      return;
+    }
+    applyAccess(payload.user);
+    if (payload.user.isAdmin) {
+      try { await loadUsers(); } catch (error) { usersFeedback.textContent = error instanceof Error ? error.message : "Не удалось загрузить пользователей."; }
+    }
+  } catch {
+    authScreen.hidden = false;
+    loginFeedback.textContent = "Сервер авторизации недоступен.";
+  }
+};
+
+void bootstrap();

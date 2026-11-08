@@ -17,6 +17,22 @@ For persistent runtime credentials and the PartsAPI applicability key, configure
 `STATE_DIR` outside the application checkout in production. The key is stored
 encrypted on the server and can be removed from the applicability settings.
 
+### Интерактивные пользователи
+
+Для интерактивного входа задайте `AGGREGATOR_ADMIN_PASSWORD` (не менее 8
+символов) и, при необходимости, `AGGREGATOR_ADMIN_FIO`. При первом запуске
+агрегатор создаёт постоянную учётную запись администратора с этим ФИО; пароль
+не записывается в исходники и используется только для первичной и последующей
+авторизации. В production без этой переменной запуск останавливается. В режиме
+разработки без неё авторизация отключена, чтобы сохранить локальный запуск.
+
+Администратор открывает «Настройки → Пользователи» и выдаёт сотрудникам доступ
+к «Проценке», «Применимости» и «Заказ-нарядам». Права проверяются на сервере,
+пароли хранятся как salted `scrypt`-хеши, сессия передаётся в HttpOnly-cookie.
+Пользователь с доступом к заказ-нарядам видит только карточки, где `responsibleFio`
+из обмена с 1С совпадает с его ФИО; администратор видит все карточки. Для старых
+карточек без `responsibleFio` доступ остаётся только у администратора.
+
 ## Safe Git Workflow
 
 Changes prepared by AI agents are published only through task branches named
@@ -72,8 +88,11 @@ The frontend uses native browser modules without a bundler. `src/frontend/app.js
 таблице `repair_cards` существующей SQLite-базы `GARAGE_DB_PATH` и переживают
 перезапуск; `GET /api/repairs` возвращает весь список. Приём требует отдельного
 серверного секрета `ONEC_REPAIRS_INTEGRATION_SECRET`; без него возвращается `503`,
-остальные функции работают как прежде. Запчасти и вход сотрудников по коду
-к этому этапу не относятся. Отправка из расширения подключается через его серверные настройки интеграции.
+остальные функции работают как прежде. Для карточек, которые должны видеть
+сотрудники, расширение 1С также передаёт `responsibleFio`; пользовательский
+доступ настраивается администратором в «Настройки → Пользователи». Запчасти и
+вход сотрудников по коду к обмену с 1С не относятся. Отправка из расширения
+подключается через его серверные настройки интеграции.
 
 Точный JSON, ограничения полей, ответы, настройка reverse proxy и правила
 подключения: [API интеграции с 1С](docs/1c-repairs-api.md).
@@ -1236,8 +1255,8 @@ HTTP: `POST /api/notifications/vk/pairing` с пустым JSON-объектом
 беседы и согласования текстов. Отключение ВК удаляет его настройки и ключ,
 сбрасывает отметку теста для выбранной беседы. История и очередь уведомлений
 о заказах сохраняются.
-Эти настройки защищаются существующей аутентификацией доверенного reverse proxy,
-как и настройки поставщиков; отдельная пользовательская авторизация не добавляется.
+Эти настройки доступны только администратору встроенной пользовательской
+авторизации; reverse proxy можно оставить дополнительным внешним контуром.
 
 После включения работает одна серверная проверка каждые **10 минут** независимо
 от открытых браузеров и часового пояса сервера. В настройках можно включить или
@@ -1383,6 +1402,7 @@ reverse proxy, ограничение тела, проверка JSON и зап�
 - Set `STATE_DIR` to a directory outside the application checkout. Restrict it to the dedicated service account because it contains supplier cookies, tokens, and optionally encrypted credentials.
 - Set `GARAGE_DB_PATH` to an absolute SQLite path outside both the checkout and `STATE_DIR`. Restrict and back up its directory, including SQLite WAL/SHM files.
 - Set `SUPPLIER_CREDENTIALS_ENCRYPTION_KEY` from the deployment secret manager to a base64-encoded random 32-byte key. Do not put the key in the checkout or `STATE_DIR`; losing it requires restoring the original key or moving the unreadable credential file aside and authorizing suppliers again.
+- Set `AGGREGATOR_ADMIN_PASSWORD` from the deployment secret manager and optionally `AGGREGATOR_ADMIN_FIO`; the first start creates the administrator account in `GARAGE_DB_PATH`.
 - Connect Rossko from the supplier settings using API keys K1 and K2.
 - Terminate TLS and require authentication at the reverse proxy before exposing `/api/*`.
 - Keep the service bound to loopback and proxy only from a trusted local endpoint.

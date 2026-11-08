@@ -12,6 +12,7 @@ export async function serveRepairs(
   repository: SqliteRepairRepository,
   secret: string | null,
   reportError: () => void,
+  responsibleFio?: string,
 ): Promise<boolean> {
   const importCard = url.pathname === "/api/integration/1c/repairs";
   const checkStatus = url.pathname === "/api/integration/1c/repairs/status";
@@ -77,7 +78,9 @@ export async function serveRepairs(
     } else if (checkStatus) {
       serveJson(response, 200, { ready: true, cards: repository.counts() });
     } else {
-      serveJson(response, 200, { repairs: repository.list() });
+      const repairs = repository.list().filter((repair) => responsibleFio === undefined
+        || (repair.responsibleFio !== undefined && repair.responsibleFio.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU") === responsibleFio));
+      serveJson(response, 200, { repairs });
     }
   } catch (error) {
     if (!response.destroyed) {

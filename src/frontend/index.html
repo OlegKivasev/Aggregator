@@ -18,6 +18,18 @@
     <link rel="stylesheet" href="/order-notifications.css" />
   </head>
   <body>
+    <div class="auth-screen" id="auth-screen" hidden>
+      <section class="auth-screen__card card border-0 shadow-lg" aria-labelledby="auth-title">
+        <h1 id="auth-title">Вход в агрегатор</h1>
+        <p class="settings-drawer__hint">Введите ФИО и пароль, выданные администратором.</p>
+        <form class="auth-form" id="auth-login-form">
+          <label class="field" for="auth-fio"><span>ФИО</span><input id="auth-fio" type="text" autocomplete="username" maxlength="256" required></label>
+          <label class="field" for="auth-password"><span>Пароль</span><input id="auth-password" type="password" autocomplete="current-password" maxlength="4096" required></label>
+          <button class="btn btn-primary" type="submit" id="auth-login-button">Войти</button>
+        </form>
+        <p class="auth-feedback" id="auth-login-feedback" role="status" aria-live="polite"></p>
+      </section>
+    </div>
     <main class="page container-fluid py-4 py-lg-5">
       <div class="function-layout">
       <nav class="function-tabs card border-0 shadow-sm" aria-label="Разделы приложения">
@@ -322,7 +334,7 @@
               <button type="button" class="settings-button applicability-file-button" id="applicability-file-toggle" aria-label="Поиск применимости из текстового файла" title="Поиск из файла" aria-haspopup="dialog" aria-controls="applicability-file-modal">
                 <img src="/applicability-file-import.png" alt="" />
               </button>
-              <button type="button" class="settings-button" id="applicability-settings-toggle" aria-label="Открыть настройки применимости" title="Настройки применимости">
+              <button type="button" class="settings-button" id="applicability-settings-toggle" data-admin-only aria-label="Открыть настройки применимости" title="Настройки применимости">
                 <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" /><path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.46-2.47 1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58 1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 1.55 2 3.46 2.47-1a8.05 8.05 0 0 0 2.58 1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" /></svg>
               </button>
               <button type="submit" class="btn btn-primary applicability-search__submit" id="applicability-submit">
@@ -432,10 +444,32 @@
       <div class="settings-drawer__panel card border-0 shadow-lg">
         <div class="settings-drawer__header">
           <h2>Настройки</h2>
+          <span class="settings-user-badge" id="auth-user-badge"></span>
+          <button type="button" class="button-secondary settings-close btn btn-light" id="auth-logout-button" hidden>Выйти</button>
           <button type="button" class="button-secondary settings-close btn btn-light" id="settings-close" aria-label="Закрыть настройки">×</button>
         </div>
 
-        <details class="vk-notifications-settings suppliers-panel" id="vk-notifications-settings">
+        <details class="users-settings suppliers-panel" id="users-settings" hidden>
+          <summary class="suppliers-panel__summary">Пользователи</summary>
+          <div class="users-settings__content">
+            <p class="settings-drawer__hint">Создавайте учетные записи и выбирайте разделы, доступные каждому сотруднику. Заказ-наряды сотрудник увидит только по своему ФИО в поле «Ответственный».</p>
+            <form id="user-create-form" class="auth-form">
+              <label class="field" for="user-fio"><span>ФИО</span><input id="user-fio" type="text" maxlength="256" required></label>
+              <label class="field" for="user-password"><span>Пароль</span><input id="user-password" type="password" autocomplete="new-password" maxlength="4096" required></label>
+              <fieldset class="supplier-options__list" id="user-permissions">
+                <legend>Доступ</legend>
+                <label><input type="checkbox" value="markup"><span>Проценка</span></label>
+                <label><input type="checkbox" value="applicability"><span>Применимость</span></label>
+                <label><input type="checkbox" value="repairs"><span>Заказ-наряды</span></label>
+              </fieldset>
+              <div class="auth-actions"><button class="btn btn-primary" type="submit">Создать пользователя</button></div>
+            </form>
+            <p class="auth-feedback" id="users-feedback" role="status" aria-live="polite"></p>
+            <div class="users-list" id="users-list"></div>
+          </div>
+        </details>
+
+        <details class="vk-notifications-settings suppliers-panel" id="vk-notifications-settings" data-admin-only>
           <summary class="suppliers-panel__summary">Уведомления ВКонтакте</summary>
           <div class="vk-notifications-settings__content">
             <p class="settings-drawer__hint">Новые заказы, отмены и получение: автоматическая проверка каждые 10 минут, даже при закрытом браузере. Время расписания — самарское (UTC+4).</p>
@@ -508,7 +542,7 @@
           <button type="button" class="table-columns-settings__reset" id="table-columns-reset">Показать все столбцы</button>
         </details>
 
-        <details class="suppliers-panel">
+        <details class="suppliers-panel" data-admin-only>
           <summary class="suppliers-panel__summary">Поставщики</summary>
 
           <details class="supplier-visibility-settings">
@@ -1112,6 +1146,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
       </div>
     </aside>
 
+    <script type="module" src="/auth-ui.js"></script>
     <script type="module" src="/app.js"></script>
     <script type="module" src="/applicability.js"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>

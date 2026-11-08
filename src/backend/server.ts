@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readPort } from "./config.ts";
+import { getGarageDatabasePath, readAggregatorAdminConfig, readPort } from "./config.ts";
+import { UserAuthService } from "./auth/user-auth-service.ts";
 import { createAggregatorServer, type AggregatorApplication } from "./http/create-server.ts";
 import { createOrderNotifications } from "./notifications/create-order-notifications.ts";
 import {
@@ -47,6 +48,8 @@ const publicDir = join(rootDir, "src", "frontend");
 const host = "127.0.0.1";
 
 const port = readPort();
+const adminConfig = readAggregatorAdminConfig();
+const auth = new UserAuthService(getGarageDatabasePath(), adminConfig?.fio ?? "Администратор", adminConfig?.password ?? null);
 
 const application: AggregatorApplication = {
   getRosskoOrderSettings,
@@ -89,7 +92,7 @@ const application: AggregatorApplication = {
 };
 
 const notifications = createOrderNotifications(application);
-const server = createAggregatorServer({ application, publicDir, notifications: notifications.service });
+const server = createAggregatorServer({ application, publicDir, notifications: notifications.service, auth });
 
 server.listen(port, host, () => {
   notifications.service.start();

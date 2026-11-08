@@ -591,6 +591,21 @@ input {
 }
 
 .function-tabs { grid-column: 1; }
+
+.auth-screen { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 24px; background: rgba(244, 247, 251, .96); }
+.auth-screen[hidden] { display: none; }
+.auth-screen__card { width: min(420px, 100%); padding: 28px; }
+.auth-screen__card h1 { margin: 0 0 8px; font-size: 24px; }
+.auth-screen__card .btn { width: 100%; }
+.settings-user-badge { margin-left: auto; color: var(--muted); font-size: 12px; }
+.users-settings__content { padding: 14px 0; }
+.users-settings__content fieldset { margin: 0; padding: 10px 0; border: 0; }
+.users-settings__content legend { margin-bottom: 6px; font-size: 13px; font-weight: 700; }
+.users-list { display: grid; gap: 8px; margin-top: 18px; }
+.users-list h3 { margin: 0; font-size: 15px; }
+.users-list__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.users-list__row strong, .users-list__row span { display: block; }
+.users-list__row .panel__meta { margin-top: 3px; }
 .function-content {
   grid-column: 2;
   min-width: 0;
