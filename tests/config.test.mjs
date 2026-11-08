@@ -9,6 +9,8 @@ const configurationVariables = [
   "PORT",
   "STATE_DIR",
   "SUPPLIER_CREDENTIALS_ENCRYPTION_KEY",
+  "AGGREGATOR_ADMIN_PASSWORD",
+  "AGGREGATOR_ADMIN_FIO",
   "ARMTEK_API_BASE_URL",
   "ARMTEK_LOGIN",
   "ARMTEK_PASSWORD",
@@ -136,6 +138,22 @@ test("configuration validates the supplier credential encryption key", () => {
   `, { SUPPLIER_CREDENTIALS_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" });
   assert.equal(validKey.status, 0, validKey.stderr);
   assert.equal(validKey.stdout.trim(), "32");
+});
+
+test("administrator password accepts three characters and rejects shorter values", () => {
+  const tooShort = runConfig(`
+    const { readAggregatorAdminConfig } = await import("./src/backend/config.ts");
+    readAggregatorAdminConfig();
+  `, { NODE_ENV: "production", AGGREGATOR_ADMIN_PASSWORD: "ab" });
+  assert.notEqual(tooShort.status, 0);
+  assert.match(tooShort.stderr, /AGGREGATOR_ADMIN_PASSWORD must contain 3 to 4096 characters/);
+
+  const minimum = runConfig(`
+    const { readAggregatorAdminConfig } = await import("./src/backend/config.ts");
+    console.log(readAggregatorAdminConfig()?.password);
+  `, { NODE_ENV: "production", AGGREGATOR_ADMIN_PASSWORD: "abc" });
+  assert.equal(minimum.status, 0, minimum.stderr);
+  assert.equal(minimum.stdout.trim(), "abc");
 });
 
 test("production state must be explicitly outside the checkout", () => {

@@ -12,6 +12,7 @@ export async function serveRepairs(
   repository: SqliteRepairRepository,
   secret: string | null,
   reportError: () => void,
+  responsibleFio?: string,
 ): Promise<boolean> {
   const importCard = url.pathname === "/api/integration/1c/repairs";
   const checkStatus = url.pathname === "/api/integration/1c/repairs/status";
@@ -21,13 +22,23 @@ export async function serveRepairs(
   const integration = importCard || checkStatus || clearTest || clearProduction;
   if (!integration && url.pathname !== "/api/repairs") return false;
   response.setHeader("Cache-Control", "no-store");
+  let testPlatformFilter: boolean | undefined;
+  if (!integration) {
+    const searchKeys = [...url.searchParams.keys()];
+    if (searchKeys.length > 1 || searchKeys.length === 1 && searchKeys[0] !== "testPlatform"
+      || searchKeys.length === 1 && !["true", "false"].includes(url.searchParams.get("testPlatform") ?? "")) {
+      serveJson(response, 400, { message: "Параметры URL не поддерживаются." });
+      return true;
+    }
+    if (searchKeys.length === 1) testPlatformFilter = url.searchParams.get("testPlatform") === "true";
+  }
   const method = deleteCard || clearTest || clearProduction ? "DELETE" : importCard ? "POST" : "GET";
   if (request.method !== method) {
     response.setHeader("Allow", importCard ? "POST, DELETE" : method);
     serveJson(response, 405, { message: "Method not allowed" });
     return true;
   }
-  if (url.search) {
+  if (integration && url.search) {
     serveJson(response, 400, { message: "Параметры URL не поддерживаются." });
     return true;
   }
@@ -77,7 +88,10 @@ export async function serveRepairs(
     } else if (checkStatus) {
       serveJson(response, 200, { ready: true, cards: repository.counts() });
     } else {
-      serveJson(response, 200, { repairs: repository.list() });
+      const repairs = repository.list().filter((repair) => (testPlatformFilter === undefined || (repair.testPlatform === true) === testPlatformFilter)
+        && (responsibleFio === undefined
+        || (repair.responsibleFio !== undefined && repair.responsibleFio.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU") === responsibleFio)));
+      serveJson(response, 200, { repairs });
     }
   } catch (error) {
     if (!response.destroyed) {

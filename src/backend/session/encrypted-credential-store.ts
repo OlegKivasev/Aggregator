@@ -25,6 +25,11 @@ interface EncryptedCredentialEnvelope {
   authTag: string;
 }
 
+interface ParsedCredentials {
+  supported: Map<SupplierId, StoredSupplierCredentials>;
+  unsupported: Map<string, unknown>;
+}
+
 const authenticatedContext = Buffer.from("autoservice-aggregator:supplier-credentials:v1", "utf8");
 const supplierIds = new Set<SupplierId>(["rossko", "armtek", "part-kom", "stparts", "forum-auto", "autopiter", "motordetal", "mladov"]);
 
@@ -35,26 +40,37 @@ function decodeBase64Field(value: unknown, name: string): Buffer {
   return Buffer.from(value, "base64");
 }
 
-function parseCredentials(value: unknown): Map<SupplierId, StoredSupplierCredentials> {
+function parseStoredCredential(supplier: string, credentials: unknown): StoredSupplierCredentials {
+  if (!credentials || typeof credentials !== "object" || Array.isArray(credentials)) {
+    throw new Error("Encrypted credential store contains invalid credentials");
+  }
+  const { login, password } = credentials as { login?: unknown; password?: unknown };
+  if (typeof login !== "string" || !login.trim() || typeof password !== "string" || !password) {
+    throw new Error("Encrypted credential store contains invalid credentials");
+  }
+  const rosskoOrder = (credentials as { rosskoOrder?: unknown }).rosskoOrder;
+  if (rosskoOrder !== undefined && supplier !== "rossko") throw new Error("Encrypted credential store contains invalid order settings");
+  return { login, password,
+    ...(rosskoOrder !== undefined ? { rosskoOrder: parseRosskoOrderSettings(rosskoOrder) } : {}) };
+}
+
+function parseCredentials(value: unknown): ParsedCredentials {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Encrypted credential store contains invalid credentials");
   }
 
-  const result = new Map<SupplierId, StoredSupplierCredentials>();
+  const supported = new Map<SupplierId, StoredSupplierCredentials>();
+  const unsupported = new Map<string, unknown>();
   for (const [supplier, credentials] of Object.entries(value)) {
-    if (!supplierIds.has(supplier as SupplierId) || !credentials || typeof credentials !== "object" || Array.isArray(credentials)) {
-      throw new Error("Encrypted credential store contains invalid credentials");
+    if (!supplierIds.has(supplier as SupplierId)) {
+      // Keep data for suppliers removed from the current build. It must survive
+      // a restart and later credential updates instead of taking the whole app down.
+      unsupported.set(supplier, credentials);
+      continue;
     }
-    const { login, password } = credentials as { login?: unknown; password?: unknown };
-    if (typeof login !== "string" || !login.trim() || typeof password !== "string" || !password) {
-      throw new Error("Encrypted credential store contains invalid credentials");
-    }
-    const rosskoOrder = (credentials as { rosskoOrder?: unknown }).rosskoOrder;
-    if (rosskoOrder !== undefined && supplier !== "rossko") throw new Error("Encrypted credential store contains invalid order settings");
-    result.set(supplier as SupplierId, { login, password,
-      ...(rosskoOrder !== undefined ? { rosskoOrder: parseRosskoOrderSettings(rosskoOrder) } : {}) });
+    supported.set(supplier as SupplierId, parseStoredCredential(supplier, credentials));
   }
-  return result;
+  return { supported, unsupported };
 }
 
 function parseEnvelope(value: unknown): EncryptedCredentialEnvelope {
@@ -73,6 +89,7 @@ function parseEnvelope(value: unknown): EncryptedCredentialEnvelope {
 
 export class EncryptedSupplierCredentialStore implements SupplierCredentialRepository {
   private credentials = new Map<SupplierId, StoredSupplierCredentials>();
+  private unsupportedCredentials = new Map<string, unknown>();
   private readonly filePath: string;
   private readonly encryptionKey: Buffer | null;
 
@@ -91,7 +108,7 @@ export class EncryptedSupplierCredentialStore implements SupplierCredentialRepos
 
   set(supplier: SupplierId, credentials: StoredSupplierCredentials): void {
     const previous = this.credentials;
-    const parsed = parseCredentials({ [supplier]: credentials }).get(supplier)!;
+    const parsed = parseStoredCredential(supplier, credentials);
     this.credentials = new Map(previous).set(supplier, parsed);
     try {
       this.persist();
@@ -140,7 +157,9 @@ export class EncryptedSupplierCredentialStore implements SupplierCredentialRepos
       if (payload.version !== 1) {
         throw new Error("Encrypted credential store has an unsupported payload");
       }
-      this.credentials = parseCredentials(payload.credentials);
+      const parsed = parseCredentials(payload.credentials);
+      this.credentials = parsed.supported;
+      this.unsupportedCredentials = parsed.unsupported;
     } catch (error) {
       if (error instanceof Error && error.message.startsWith("Encrypted credential store")) {
         throw error;
@@ -158,7 +177,10 @@ export class EncryptedSupplierCredentialStore implements SupplierCredentialRepos
       return;
     }
 
-    const serializedCredentials = Object.fromEntries(this.credentials);
+    const serializedCredentials = Object.fromEntries([
+      ...this.unsupportedCredentials.entries(),
+      ...this.credentials.entries(),
+    ]);
     const plaintext = Buffer.from(JSON.stringify({ version: 1, credentials: serializedCredentials }), "utf8");
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", this.encryptionKey, iv);

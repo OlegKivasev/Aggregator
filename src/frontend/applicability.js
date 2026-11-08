@@ -14,7 +14,9 @@ const markupTab = document.querySelector("#markup-function-tab");
 const applicabilityTab = document.querySelector("#applicability-function-tab");
 const repairsFunction = document.querySelector("#repairs-function");
 const repairsTab = document.querySelector("#repairs-function-tab");
-const repairsUi = bootstrapRepairs({ onActiveEmpty: () => setActiveFunction("markup") });
+const repairsUi = bootstrapRepairs({
+  onActiveEmpty: () => document.querySelector(".function-tab:not([hidden])")?.click(),
+});
 const testRepairsFunction = document.querySelector("#test-repairs-function");
 const testRepairsTab = document.querySelector("#test-repairs-function-tab");
 const applicabilityTabsList = document.querySelector("#applicability-tabs-list");

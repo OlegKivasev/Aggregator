@@ -9,6 +9,7 @@ export interface RepairCard {
   date: string;
   vehicleName: string;
   status: string;
+  responsibleFio?: string;
   testPlatform?: boolean;
   counterpartyName?: string;
   goodsReadiness?: GoodsReadiness;
@@ -16,7 +17,7 @@ export interface RepairCard {
 
 export class RepairValidationError extends Error {}
 
-const fields = ["documentId", "number", "date", "vehicleName", "status", "testPlatform", "counterpartyName", "goodsReadiness"];
+const fields = ["documentId", "number", "date", "vehicleName", "status", "responsibleFio", "testPlatform", "counterpartyName", "goodsReadiness"];
 
 function cardText(payload: Record<string, unknown>, field: string, limit: number, allowEmpty = false): string {
   const value = payload[field];
@@ -67,12 +68,13 @@ export function parseRepairCard(value: unknown): RepairCard {
   }
   const payload = value as Record<string, unknown>;
   if (Object.keys(payload).some((key) => !fields.includes(key))) {
-    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status, testPlatform, counterpartyName, goodsReadiness.");
+    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status, responsibleFio, testPlatform, counterpartyName, goodsReadiness.");
   }
   if (payload.testPlatform !== undefined && typeof payload.testPlatform !== "boolean") {
     throw new RepairValidationError("testPlatform: требуется логическое значение true или false.");
   }
   const counterpartyName = payload.counterpartyName === undefined ? undefined : cardText(payload, "counterpartyName", 500);
+  const responsibleFio = payload.responsibleFio === undefined ? undefined : cardText(payload, "responsibleFio", 256);
   const documentId = parseDocumentId(payload);
   const date = cardText(payload, "date", 19);
   const timestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(date) ? Date.parse(`${date}Z`) : NaN;
@@ -85,6 +87,7 @@ export function parseRepairCard(value: unknown): RepairCard {
     date,
     vehicleName: cardText(payload, "vehicleName", 500, counterpartyName !== undefined),
     status: cardText(payload, "status", 200),
+    ...(responsibleFio !== undefined ? { responsibleFio } : {}),
     ...(payload.testPlatform === true ? { testPlatform: true } : {}),
     ...(counterpartyName !== undefined ? { counterpartyName } : {}),
     ...(payload.goodsReadiness !== undefined ? { goodsReadiness: parseGoodsReadiness(payload.goodsReadiness) } : {}),

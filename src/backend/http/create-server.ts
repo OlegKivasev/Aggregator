@@ -51,6 +51,7 @@ import type { OrderNotificationService } from "../notifications/order-notificati
 import { serveVkNotifications } from "./vk-notifications.ts";
 import { serveOrderNotifications } from "./order-notifications.ts";
 import { serveRosskoOrderSettings, type RosskoOrderSettingsApplication } from "./rossko-order-settings.ts";
+import type { AuthenticatedUser, UserAuthService, UserPermission } from "../auth/user-auth-service.ts";
 
 export interface AggregatorApplication extends RosskoOrderSettingsApplication {
   testCartOrder?: TestOrder;
@@ -101,12 +102,27 @@ interface CreateAggregatorServerOptions {
   publicDir: string;
   notifications?: OrderNotificationService;
   reportError?: (event: OperationalErrorEvent) => void;
+  auth?: UserAuthService;
 }
 
 export interface OperationalErrorEvent {
   operation: string;
   category: OperationalErrorCategory;
   diagnosticCode?: string;
+}
+
+function requiredPermission(url: URL): UserPermission | "admin" | null {
+  const { pathname } = url;
+  if (pathname === "/api/users" || pathname.startsWith("/api/vk-notifications") || pathname.startsWith("/api/notifications/vk")
+    || pathname.startsWith("/api/suppliers/") && !pathname.endsWith("/sessions/validate")) return "admin";
+  if (pathname === "/api/repairs") {
+    if (url.searchParams.get("testPlatform") === "true") return "testRepairs";
+    if (url.searchParams.get("testPlatform") === "false") return "repairs";
+    return "admin";
+  }
+  if (pathname.startsWith("/api/applicability/")) return "applicability";
+  if (pathname.startsWith("/api/")) return "markup";
+  return null;
 }
 
 function serveAuthorizationError(
@@ -227,6 +243,7 @@ export function createAggregatorServer({
   application,
   publicDir,
   notifications,
+  auth,
   reportError = ({ operation, category, diagnosticCode }) => console.error(
     `[aggregator] ${operation} failed (${category})${diagnosticCode ? ` [${diagnosticCode}]` : ""}`,
   ),
@@ -249,8 +266,24 @@ export function createAggregatorServer({
 
     const url = new URL(request.url, "http://127.0.0.1");
 
+    let authenticatedUser: AuthenticatedUser | null = null;
+    const integrationRequest = url.pathname.startsWith("/api/integration/1c/");
+    const apiRequest = url.pathname.startsWith("/api/");
+    if (auth) {
+      if (await auth.serve(request, response, url)) return;
+      // Keep the static application shell public so an unauthenticated browser
+      // can load the login screen. Authentication is enforced for API routes.
+      if (apiRequest && !integrationRequest) {
+        authenticatedUser = auth.authorize(request, response, requiredPermission(url));
+        if (!authenticatedUser && auth.enabled) return;
+      }
+    }
+
+    const repairFio = authenticatedUser && !authenticatedUser.isAdmin
+      ? authenticatedUser.fio.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU")
+      : undefined;
     if (await serveRepairs(request, response, url, repairs, repairIntegrationSecret,
-      () => reportError({ operation: "repairs", category: "internal" }))) return;
+      () => reportError({ operation: "repairs", category: "internal" }), repairFio)) return;
 
     if (await serveVkNotifications(request, response, url, notifications)) return;
     if (await serveOrderNotifications(request, response, url, notifications)) return;
@@ -831,6 +864,6 @@ export function createAggregatorServer({
 
     serveJson(response, 405, { message: "Method not allowed" });
   });
-  server.once("close", () => { garage.close(); cart.close(); cancellations.close(); repairs.close(); });
+  server.once("close", () => { garage.close(); cart.close(); cancellations.close(); repairs.close(); auth?.close(); });
   return server;
 }

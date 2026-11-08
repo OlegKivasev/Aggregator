@@ -125,6 +125,24 @@ export function readRepairIntegrationSecret(): string | null {
   return value;
 }
 
+export function readAggregatorAdminConfig(): { fio: string; password: string } | null {
+  const rawPassword = process.env.AGGREGATOR_ADMIN_PASSWORD;
+  const rawFio = process.env.AGGREGATOR_ADMIN_FIO?.trim() || "Администратор";
+  if (rawPassword === undefined || rawPassword === "") {
+    if (configuredNodeEnvironment === "production") {
+      throw new Error("AGGREGATOR_ADMIN_PASSWORD is required in production");
+    }
+    return null;
+  }
+  if (rawPassword.length < 3 || rawPassword.length > 4096 || /[\u0000-\u001f\u007f]/.test(rawPassword)) {
+    throw new Error("AGGREGATOR_ADMIN_PASSWORD must contain 3 to 4096 characters without control characters");
+  }
+  if (!rawFio || rawFio.length > 256 || /[\u0000-\u001f\u007f-\u009f]/.test(rawFio)) {
+    throw new Error("AGGREGATOR_ADMIN_FIO must contain a valid FIO");
+  }
+  return { fio: rawFio, password: rawPassword };
+}
+
 export function getStateFilePath(fileName: string): string {
   if (!fileName || fileName === "." || fileName === ".." || basename(fileName) !== fileName) {
     throw new Error("State file name must not contain a path");

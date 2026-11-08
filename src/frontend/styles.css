@@ -591,6 +591,31 @@ input {
 }
 
 .function-tabs { grid-column: 1; }
+
+.auth-screen { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 24px; background: rgba(244, 247, 251, .96); }
+.auth-screen[hidden] { display: none; }
+.auth-screen__card { width: min(420px, 100%); padding: 28px; }
+.auth-screen__card h1 { margin: 0 0 8px; font-size: 24px; }
+.auth-screen__card .btn { width: 100%; min-height: 40px; padding: 9px 14px; border: 1px solid var(--accent); border-radius: 7px; color: #fff; background: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
+.auth-screen__card .btn:hover, .auth-screen__card .btn:focus-visible { border-color: var(--accent-dark); background: var(--accent-dark); outline: 0; }
+.auth-fio-picker { position: relative; display: block; }
+.auth-fio-picker > input { padding-right: 42px; }
+.auth-fio-picker__toggle { position: absolute; top: 50%; right: 8px; display: grid; width: 28px; height: 28px; place-items: center; transform: translateY(-50%); border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+.auth-fio-picker__toggle::before { width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-2px) rotate(45deg); content: ""; }
+.auth-fio-picker__toggle:hover, .auth-fio-picker__toggle:focus-visible { color: var(--accent); background: #fff1eb; outline: 0; }
+.auth-fio-picker__panel { top: calc(100% + 6px); width: 100%; max-height: 240px; overflow-y: auto; }
+.auth-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 40px; margin-bottom: 8px; }
+.auth-toolbar__user { max-width: 260px; color: var(--muted); font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auth-toolbar__logout { min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); font: inherit; cursor: pointer; }
+.auth-toolbar__logout:hover, .auth-toolbar__logout:focus-visible { border-color: var(--accent); color: var(--accent-dark); background: #fff3ed; outline: 0; }
+.users-settings__content { padding: 14px 0; }
+.users-settings__content fieldset { margin: 0; padding: 10px 0; border: 0; }
+.users-settings__content legend { margin-bottom: 6px; font-size: 13px; font-weight: 700; }
+.users-list { display: grid; gap: 8px; margin-top: 18px; }
+.users-list h3 { margin: 0; font-size: 15px; }
+.users-list__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.users-list__row strong, .users-list__row span { display: block; }
+.users-list__row .panel__meta { margin-top: 3px; }
 .function-content {
   grid-column: 2;
   min-width: 0;
