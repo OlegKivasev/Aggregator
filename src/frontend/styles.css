@@ -596,7 +596,8 @@ input {
 .auth-screen[hidden] { display: none; }
 .auth-screen__card { width: min(420px, 100%); padding: 28px; }
 .auth-screen__card h1 { margin: 0 0 8px; font-size: 24px; }
-.auth-screen__card .btn { width: 100%; }
+.auth-screen__card .btn { width: 100%; min-height: 40px; padding: 9px 14px; border: 1px solid var(--accent); border-radius: 7px; color: #fff; background: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
+.auth-screen__card .btn:hover, .auth-screen__card .btn:focus-visible { border-color: var(--accent-dark); background: var(--accent-dark); outline: 0; }
 .settings-user-badge { margin-left: auto; color: var(--muted); font-size: 12px; }
 .users-settings__content { padding: 14px 0; }
 .users-settings__content fieldset { margin: 0; padding: 10px 0; border: 0; }

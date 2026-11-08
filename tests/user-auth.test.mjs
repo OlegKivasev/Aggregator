@@ -47,6 +47,17 @@ test("default administrator creates a restricted user and repair cards are filte
       body: JSON.stringify({ fio: "Иванов Иван Иванович", password: "user-password-123", permissions: ["repairs"] }),
     });
     assert.equal(created.status, 201);
+    const testCreated = await fetch(`${baseUrl}/api/users`, {
+      method: "POST", headers: { Cookie: adminCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ fio: "Тестовый Пользователь", password: "test-password-123", permissions: ["testRepairs"] }),
+    });
+    assert.equal(testCreated.status, 201);
+    const loginUsers = await fetch(`${baseUrl}/api/auth/users`);
+    assert.equal(loginUsers.status, 200);
+    assert.deepEqual((await loginUsers.json()).users, [
+      { fio: "Иванов Иван Иванович" },
+      { fio: "Тестовый Пользователь" },
+    ]);
 
     const put = async (documentId, responsibleFio) => fetch(`${baseUrl}/api/integration/1c/repairs`, {
       method: "POST", headers: { Authorization: `Bearer ${integrationSecret}`, "Content-Type": "application/json" },
@@ -56,11 +67,22 @@ test("default administrator creates a restricted user and repair cards are filte
     assert.equal((await put("12345678-abcd-1234-abcd-123456789abd", "Петров Петр Петрович")).status, 200);
 
     const userCookie = await login(baseUrl, "Иванов Иван Иванович", "user-password-123");
-    const repairs = await fetch(`${baseUrl}/api/repairs`, { headers: { Cookie: userCookie } });
+    const repairs = await fetch(`${baseUrl}/api/repairs?testPlatform=false`, { headers: { Cookie: userCookie } });
     assert.equal(repairs.status, 200);
     assert.deepEqual((await repairs.json()).repairs.map((repair) => repair.responsibleFio), ["Иванов Иван Иванович"]);
+    assert.equal((await fetch(`${baseUrl}/api/repairs?testPlatform=true`, { headers: { Cookie: userCookie } })).status, 403);
+    assert.equal((await fetch(`${baseUrl}/api/repairs`, { headers: { Cookie: userCookie } })).status, 403);
     assert.equal((await fetch(`${baseUrl}/api/applicability/saved-articles`, { headers: { Cookie: userCookie } })).status, 403);
     assert.equal((await fetch(`${baseUrl}/api/users`, { headers: { Cookie: userCookie } })).status, 403);
+
+    const testCookie = await login(baseUrl, "Тестовый Пользователь", "test-password-123");
+    assert.equal((await fetch(`${baseUrl}/api/repairs?testPlatform=false`, { headers: { Cookie: testCookie } })).status, 403);
+    assert.equal((await fetch(`${baseUrl}/api/repairs?testPlatform=true`, { headers: { Cookie: testCookie } })).status, 200);
+    assert.equal((await fetch(`${baseUrl}/api/repairs`, { headers: { Cookie: testCookie } })).status, 403);
+
+    const allRepairs = await fetch(`${baseUrl}/api/repairs`, { headers: { Cookie: adminCookie } });
+    assert.equal(allRepairs.status, 200);
+    assert.equal((await allRepairs.json()).repairs.length, 2);
   });
 });
 

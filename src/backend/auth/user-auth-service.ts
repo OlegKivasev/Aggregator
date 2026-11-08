@@ -6,7 +6,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, RequestBodyError } from "../http/request-body.ts";
 import { serveJson } from "../http/responses.ts";
 
-export const userPermissions = ["markup", "applicability", "repairs"] as const;
+export const userPermissions = ["markup", "applicability", "repairs", "testRepairs"] as const;
 export type UserPermission = typeof userPermissions[number];
 
 export interface AuthenticatedUser {
@@ -62,8 +62,9 @@ function validateFio(value: unknown): string {
 
 function validatePassword(value: unknown, required: boolean): string | undefined {
   if (value === undefined && !required) return undefined;
-  if (typeof value !== "string" || (required && value.length === 0) || value.length > maxPasswordLength || /[\u0000-\u001f\u007f]/.test(value)) {
-    throw new RequestBodyError(400, "password must be a non-empty string within the allowed length");
+  if (typeof value !== "string" || (required && value.length < 3) || (!required && value.length > 0 && value.length < 3)
+    || value.length > maxPasswordLength || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new RequestBodyError(400, "password must contain 3 to 4096 characters without control characters");
   }
   return value;
 }
@@ -207,6 +208,10 @@ export class UserAuthService {
 
   async serve(request: IncomingMessage, response: ServerResponse, url: URL): Promise<boolean> {
     if (url.pathname.startsWith("/api/auth") || url.pathname === "/api/users") response.setHeader("Cache-Control", "no-store");
+    if (url.pathname === "/api/auth/users" && request.method === "GET") {
+      serveJson(response, 200, { users: this.listUsers().filter((user) => !user.isAdmin).map(({ fio }) => ({ fio })) });
+      return true;
+    }
     if (url.pathname === "/api/auth/session" && request.method === "GET") {
       serveJson(response, 200, { enabled: this.enabled, user: this.currentUser(request) });
       return true;

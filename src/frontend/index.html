@@ -23,8 +23,8 @@
         <h1 id="auth-title">Вход в агрегатор</h1>
         <p class="settings-drawer__hint">Введите ФИО и пароль, выданные администратором.</p>
         <form class="auth-form" id="auth-login-form">
-          <label class="field" for="auth-fio"><span>ФИО</span><input id="auth-fio" type="text" autocomplete="username" maxlength="256" required></label>
-          <label class="field" for="auth-password"><span>Пароль</span><input id="auth-password" type="password" autocomplete="current-password" maxlength="4096" required></label>
+          <label class="field" for="auth-fio"><span>ФИО</span><input id="auth-fio" type="text" autocomplete="off" list="auth-fio-options" maxlength="256" required><datalist id="auth-fio-options"></datalist></label>
+          <label class="field" for="auth-password"><span>Пароль</span><span class="password-field"><input id="auth-password" type="password" autocomplete="current-password" minlength="3" maxlength="4096" required><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="auth-password"><span aria-hidden="true">&#128065;</span></button></span></label>
           <button class="btn btn-primary" type="submit" id="auth-login-button">Войти</button>
         </form>
         <p class="auth-feedback" id="auth-login-feedback" role="status" aria-live="polite"></p>
@@ -455,12 +455,13 @@
             <p class="settings-drawer__hint">Создавайте учетные записи и выбирайте разделы, доступные каждому сотруднику. Заказ-наряды сотрудник увидит только по своему ФИО в поле «Ответственный».</p>
             <form id="user-create-form" class="auth-form">
               <label class="field" for="user-fio"><span>ФИО</span><input id="user-fio" type="text" maxlength="256" required></label>
-              <label class="field" for="user-password"><span>Пароль</span><input id="user-password" type="password" autocomplete="new-password" maxlength="4096" required></label>
+              <label class="field" for="user-password"><span>Пароль</span><span class="password-field"><input id="user-password" type="password" autocomplete="new-password" minlength="3" maxlength="4096" required><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="user-password"><span aria-hidden="true">&#128065;</span></button></span></label>
               <fieldset class="supplier-options__list" id="user-permissions">
                 <legend>Доступ</legend>
                 <label><input type="checkbox" value="markup"><span>Проценка</span></label>
                 <label><input type="checkbox" value="applicability"><span>Применимость</span></label>
                 <label><input type="checkbox" value="repairs"><span>Заказ-наряды</span></label>
+                <label><input type="checkbox" value="testRepairs"><span>Тестовые заказ-наряды</span></label>
               </fieldset>
               <div class="auth-actions"><button class="btn btn-primary" type="submit">Создать пользователя</button></div>
             </form>

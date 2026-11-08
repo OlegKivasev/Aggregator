@@ -108,10 +108,15 @@ export interface OperationalErrorEvent {
   diagnosticCode?: string;
 }
 
-function requiredPermission(pathname: string): UserPermission | "admin" | null {
+function requiredPermission(url: URL): UserPermission | "admin" | null {
+  const { pathname } = url;
   if (pathname === "/api/users" || pathname.startsWith("/api/vk-notifications") || pathname.startsWith("/api/notifications/vk")
     || pathname.startsWith("/api/suppliers/") && !pathname.endsWith("/sessions/validate")) return "admin";
-  if (pathname === "/api/repairs") return "repairs";
+  if (pathname === "/api/repairs") {
+    if (url.searchParams.get("testPlatform") === "true") return "testRepairs";
+    if (url.searchParams.get("testPlatform") === "false") return "repairs";
+    return "admin";
+  }
   if (pathname.startsWith("/api/applicability/")) return "applicability";
   if (pathname.startsWith("/api/")) return "markup";
   return null;
@@ -266,7 +271,7 @@ export function createAggregatorServer({
       // Keep the static application shell public so an unauthenticated browser
       // can load the login screen. Authentication is enforced for API routes.
       if (apiRequest && !integrationRequest) {
-        authenticatedUser = auth.authorize(request, response, requiredPermission(url.pathname));
+        authenticatedUser = auth.authorize(request, response, requiredPermission(url));
         if (!authenticatedUser && auth.enabled) return;
       }
     }

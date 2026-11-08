@@ -13,6 +13,9 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
   let loading = false;
   let loaded = false;
   let refreshTimer;
+  let refreshRequested = false;
+  let authReady = false;
+  let authUser = null;
 
   const clearRefreshTimer = () => {
     window.clearTimeout(refreshTimer);
@@ -63,11 +66,64 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     return cell;
   };
 
+  const readRepairs = async (response) => {
+    if (!response.ok) throw new Error("Repairs request failed");
+    const payload = await response.json();
+    if (!Array.isArray(payload?.repairs) || payload.repairs.some((card) => !card
+      || ["documentId", "number", "date", "vehicleName", "status"].some((key) => typeof card[key] !== "string")
+      || (card.counterpartyName !== undefined && (typeof card.counterpartyName !== "string" || !card.counterpartyName.trim()))
+      || !validReadiness(card.goodsReadiness)
+      || (card.testPlatform !== undefined && typeof card.testPlatform !== "boolean")
+      || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(card.date))) {
+      throw new Error("Invalid repairs response");
+    }
+    return payload.repairs;
+  };
+
+  const renderView = (view, repairs) => {
+    const { rows, count, feedback, tab, testPlatform } = view;
+    const fragment = document.createDocumentFragment();
+    for (const card of repairs) {
+      const row = document.createElement("tr");
+      const vehicleCell = document.createElement("td");
+      const vehicle = document.createElement("span");
+      vehicle.className = "repairs-vehicle-name";
+      vehicle.textContent = card.vehicleName || (card.counterpartyName ? "Договор не указан" : "—");
+      vehicleCell.append(vehicle);
+      if (card.counterpartyName) {
+        const counterparty = document.createElement("span");
+        counterparty.className = "repairs-counterparty panel__meta";
+        counterparty.textContent = card.counterpartyName;
+        vehicleCell.append(counterparty);
+      }
+      row.append(vehicleCell, readinessCell(card.goodsReadiness));
+      fragment.append(row);
+    }
+    rows.replaceChildren(fragment);
+    if (!repairs.length) showMessage(rows, testPlatform ? "Тестовых заказ-нарядов в работе нет." : "Заказ-нарядов в работе нет.");
+    count.textContent = String(repairs.length);
+    count.hidden = false;
+    feedback.textContent = "";
+    delete feedback.dataset.tone;
+    tab.hidden = repairs.length === 0;
+  };
+
   async function refresh({ background = false } = {}) {
-    if (loading) return;
+    if (loading) {
+      refreshRequested = true;
+      return;
+    }
     loading = true;
     clearRefreshTimer();
     const view = activeView;
+    const requestedViews = !authReady || authUser?.isAdmin
+      ? views
+      : views.filter(({ testPlatform }) => authUser?.permissions?.includes(testPlatform ? "testRepairs" : "repairs"));
+    if (!requestedViews.length) {
+      loading = false;
+      scheduleRefresh();
+      return;
+    }
     for (const { refreshButton, section } of views) {
       refreshButton.disabled = true;
       section.setAttribute("aria-busy", "true");
@@ -80,43 +136,17 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       showMessage(rows, "Загрузка заказ-нарядов…");
     }
     try {
-      const response = await fetch("/api/repairs", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
-      if (!response.ok) throw new Error("Repairs request failed");
-      const payload = await response.json();
-      if (!Array.isArray(payload?.repairs) || payload.repairs.some((card) => !card
-        || ["documentId", "number", "date", "vehicleName", "status"].some((key) => typeof card[key] !== "string")
-        || (card.counterpartyName !== undefined && (typeof card.counterpartyName !== "string" || !card.counterpartyName.trim()))
-        || !validReadiness(card.goodsReadiness)
-        || (card.testPlatform !== undefined && typeof card.testPlatform !== "boolean")
-        || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(card.date))) {
-        throw new Error("Invalid repairs response");
-      }
-      for (const { testPlatform, rows, count, feedback, tab } of views) {
-        const repairs = payload.repairs.filter((card) => (card.testPlatform === true) === testPlatform);
-        const fragment = document.createDocumentFragment();
-        for (const card of repairs) {
-          const row = document.createElement("tr");
-          const vehicleCell = document.createElement("td");
-          const vehicle = document.createElement("span");
-          vehicle.className = "repairs-vehicle-name";
-          vehicle.textContent = card.vehicleName || (card.counterpartyName ? "Договор не указан" : "—");
-          vehicleCell.append(vehicle);
-          if (card.counterpartyName) {
-            const counterparty = document.createElement("span");
-            counterparty.className = "repairs-counterparty panel__meta";
-            counterparty.textContent = card.counterpartyName;
-            vehicleCell.append(counterparty);
-          }
-          row.append(vehicleCell, readinessCell(card.goodsReadiness));
-          fragment.append(row);
-        }
-        rows.replaceChildren(fragment);
-        if (!repairs.length) showMessage(rows, testPlatform ? "Тестовых заказ-нарядов в работе нет." : "Заказ-нарядов в работе нет.");
-        count.textContent = String(repairs.length);
-        count.hidden = false;
-        feedback.textContent = "";
-        delete feedback.dataset.tone;
-        tab.hidden = repairs.length === 0;
+      const combined = !authReady || authUser?.isAdmin;
+      const responses = combined
+        ? [await fetch("/api/repairs", { cache: "no-store", signal: AbortSignal.timeout(15_000) })]
+        : await Promise.all(requestedViews.map(({ testPlatform }) => fetch(`/api/repairs?testPlatform=${testPlatform}`, {
+          cache: "no-store", signal: AbortSignal.timeout(15_000),
+        })));
+      const payloads = await Promise.all(responses.map(readRepairs));
+      for (const [index, currentView] of requestedViews.entries()) {
+        const repairs = (combined ? payloads[0] : payloads[index])
+          .filter((card) => (card.testPlatform === true) === currentView.testPlatform);
+        renderView(currentView, repairs);
       }
       loaded = true;
       if (activeView?.tab.hidden) onActiveEmpty?.();
@@ -137,7 +167,12 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
         refreshButton.disabled = false;
         section.setAttribute("aria-busy", "false");
       }
-      scheduleRefresh();
+      if (refreshRequested) {
+        refreshRequested = false;
+        void refresh();
+      } else {
+        scheduleRefresh();
+      }
     }
   }
 
@@ -153,6 +188,11 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
 
   document.addEventListener("visibilitychange", resume);
   window.addEventListener("focus", resume);
+  document.addEventListener("aggregator-auth-ready", (event) => {
+    authReady = true;
+    authUser = event.detail ?? null;
+    void refresh();
+  });
   for (const { refreshButton } of views) refreshButton.addEventListener("click", () => { void refresh(); });
   return { setActive, start: resume };
 }

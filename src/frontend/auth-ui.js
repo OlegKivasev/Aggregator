@@ -1,6 +1,7 @@
 const authScreen = document.querySelector("#auth-screen");
 const loginForm = document.querySelector("#auth-login-form");
 const fioInput = document.querySelector("#auth-fio");
+const fioOptions = document.querySelector("#auth-fio-options");
 const passwordInput = document.querySelector("#auth-password");
 const loginButton = document.querySelector("#auth-login-button");
 const loginFeedback = document.querySelector("#auth-login-feedback");
@@ -24,7 +25,7 @@ const messageFor = async (response, fallback) => {
 };
 
 const accessLabel = (user) => user.isAdmin ? "Администратор" : user.permissions.map((permission) => ({
-  markup: "Проценка", applicability: "Применимость", repairs: "Заказ-наряды",
+  markup: "Проценка", applicability: "Применимость", repairs: "Заказ-наряды", testRepairs: "Тестовые заказ-наряды",
 }[permission] ?? permission)).join(", ") || "Нет доступа";
 
 const applyAccess = (user) => {
@@ -32,6 +33,7 @@ const applyAccess = (user) => {
   const canMarkup = user?.isAdmin || user?.permissions?.includes("markup");
   const canApplicability = user?.isAdmin || user?.permissions?.includes("applicability");
   const canRepairs = user?.isAdmin || user?.permissions?.includes("repairs");
+  const canTestRepairs = user?.isAdmin || user?.permissions?.includes("testRepairs");
   const markupTab = document.querySelector("#markup-function-tab");
   const applicabilityTab = document.querySelector("#applicability-function-tab");
   const repairsTab = document.querySelector("#repairs-function-tab");
@@ -43,11 +45,11 @@ const applyAccess = (user) => {
   if (markupTab) markupTab.hidden = !canMarkup;
   if (applicabilityTab) applicabilityTab.hidden = !canApplicability;
   if (repairsTab) repairsTab.hidden = !canRepairs;
-  if (testRepairsTab) testRepairsTab.hidden = !canRepairs;
+  if (testRepairsTab) testRepairsTab.hidden = !canTestRepairs;
   if (markupSection) markupSection.hidden = !canMarkup;
   if (applicabilitySection) applicabilitySection.hidden = !canApplicability;
   if (repairsSection) repairsSection.hidden = !canRepairs;
-  if (testRepairsSection) testRepairsSection.hidden = !canRepairs;
+  if (testRepairsSection) testRepairsSection.hidden = !canTestRepairs;
   document.querySelectorAll("[data-admin-only]").forEach((element) => { element.hidden = !user?.isAdmin; });
   const settingsToggle = document.querySelector("#settings-toggle");
   if (settingsToggle) settingsToggle.hidden = !user?.isAdmin;
@@ -58,6 +60,8 @@ const applyAccess = (user) => {
   }
   if (logoutButton) logoutButton.hidden = !isAuthenticated;
   document.dispatchEvent(new CustomEvent("aggregator-auth-ready", { detail: user }));
+  const activeTab = document.querySelector(".function-tab.active");
+  if (!activeTab || activeTab.hidden) document.querySelector(".function-tab:not([hidden])")?.click();
 };
 
 const renderUsers = (users) => {
@@ -103,6 +107,21 @@ const loadUsers = async () => {
   const payload = await response.json();
   if (!Array.isArray(payload?.users)) throw new Error("Некорректный список пользователей.");
   renderUsers(payload.users);
+};
+
+const loadLoginUsers = async () => {
+  if (!fioOptions) return;
+  const response = await fetch("/api/auth/users", { cache: "no-store" });
+  if (!response.ok) throw new Error("Не удалось загрузить пользователей.");
+  const payload = await response.json();
+  if (!Array.isArray(payload?.users)) throw new Error("Некорректный список пользователей.");
+  fioOptions.replaceChildren(...payload.users
+    .filter((user) => user && typeof user.fio === "string" && user.fio.trim())
+    .map((user) => {
+      const option = document.createElement("option");
+      option.value = user.fio;
+      return option;
+    }));
 };
 
 userCreateForm?.addEventListener("submit", async (event) => {
@@ -157,6 +176,7 @@ const bootstrap = async () => {
       return;
     }
     if (!payload.user) {
+      try { await loadLoginUsers(); } catch { /* Login still works without suggestions. */ }
       authScreen.hidden = false;
       document.body.classList.add("auth-required");
       return;

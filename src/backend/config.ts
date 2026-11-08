@@ -134,8 +134,8 @@ export function readAggregatorAdminConfig(): { fio: string; password: string } |
     }
     return null;
   }
-  if (rawPassword.length < 8 || rawPassword.length > 4096 || /[\u0000-\u001f\u007f]/.test(rawPassword)) {
-    throw new Error("AGGREGATOR_ADMIN_PASSWORD must contain 8 to 4096 characters without control characters");
+  if (rawPassword.length < 3 || rawPassword.length > 4096 || /[\u0000-\u001f\u007f]/.test(rawPassword)) {
+    throw new Error("AGGREGATOR_ADMIN_PASSWORD must contain 3 to 4096 characters without control characters");
   }
   if (!rawFio || rawFio.length > 256 || /[\u0000-\u001f\u007f-\u009f]/.test(rawFio)) {
     throw new Error("AGGREGATOR_ADMIN_FIO must contain a valid FIO");
