@@ -127,6 +127,10 @@ const selectLoginUser = (user) => {
 const openLoginUsers = () => {
   if (!fioOptions || !fioInput || !fioToggle) return;
   const filter = fioInput.value.trim().toLocaleLowerCase("ru-RU");
+  if (!filter) {
+    closeLoginUsers();
+    return;
+  }
   const shown = loginUsers.filter((user) => user.fio.toLocaleLowerCase("ru-RU").includes(filter));
   activeLoginUserIndex = -1;
   fioInput.removeAttribute("aria-activedescendant");
@@ -153,10 +157,9 @@ const openLoginUsers = () => {
   fioToggle.setAttribute("aria-expanded", "true");
 };
 
-fioInput?.addEventListener("focus", () => openLoginUsers());
 fioInput?.addEventListener("input", () => openLoginUsers());
 fioToggle?.addEventListener("click", () => {
-  if (fioOptions?.hidden) openLoginUsers();
+  if (fioOptions?.hidden && fioInput?.value.trim()) openLoginUsers();
   else closeLoginUsers();
 });
 fioInput?.addEventListener("keydown", (event) => {
