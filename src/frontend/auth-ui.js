@@ -32,6 +32,7 @@ const accessLabel = (user) => user.isAdmin ? "Администратор" : user
 }[permission] ?? permission)).join(", ") || "Нет доступа";
 
 const applyAccess = (user) => {
+  window.aggregatorAuthState = { ready: true, user };
   const isAuthenticated = typeof user?.fio === "string" && user.fio.length > 0;
   const canMarkup = user?.isAdmin || user?.permissions?.includes("markup");
   const canApplicability = user?.isAdmin || user?.permissions?.includes("applicability");

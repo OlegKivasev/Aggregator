@@ -31,6 +31,10 @@
       </section>
     </div>
     <main class="page container-fluid py-4 py-lg-5">
+      <div class="auth-toolbar" id="auth-toolbar" hidden>
+        <span class="auth-toolbar__user" id="auth-user-badge"></span>
+        <button type="button" class="button-secondary btn btn-light auth-toolbar__logout" id="auth-logout-button">Выйти</button>
+      </div>
       <div class="function-layout">
       <nav class="function-tabs card border-0 shadow-sm" aria-label="Разделы приложения">
         <button type="button" class="function-tab active" id="markup-function-tab" aria-controls="markup-function" aria-selected="true">Проценка</button>
@@ -153,10 +157,6 @@
               <img src="/shopping-cart.png" alt="" aria-hidden="true">
               <span class="cart-badge" id="cart-badge" hidden>0</span>
             </button>
-            <div class="auth-toolbar" id="auth-toolbar" hidden>
-              <span class="auth-toolbar__user" id="auth-user-badge"></span>
-              <button type="button" class="button-secondary btn btn-light auth-toolbar__logout" id="auth-logout-button">Выйти</button>
-            </div>
           </div>
 
           <div class="article-variant-notice" id="article-variant-notice" role="status" aria-live="polite" hidden><span aria-hidden="true">!</span><p id="article-variant-notice-text"></p></div>

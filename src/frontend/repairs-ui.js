@@ -14,8 +14,9 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
   let loaded = false;
   let refreshTimer;
   let refreshRequested = false;
-  let authReady = false;
-  let authUser = null;
+  const initialAuthState = window.aggregatorAuthState;
+  let authReady = initialAuthState?.ready === true;
+  let authUser = initialAuthState?.user ?? null;
 
   const clearRefreshTimer = () => {
     window.clearTimeout(refreshTimer);
@@ -109,6 +110,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
   };
 
   async function refresh({ background = false } = {}) {
+    if (!authReady) return;
     if (loading) {
       refreshRequested = true;
       return;
