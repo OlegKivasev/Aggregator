@@ -42,6 +42,13 @@ async function login(baseUrl, fio, password) {
 test("default administrator creates a restricted user and repair cards are filtered by responsible FIO", async () => {
   await withServer(async (baseUrl) => {
     const adminCookie = await login(baseUrl, "Администратор", "admin-password-123");
+    const restartedAuth = new UserAuthService(process.env.GARAGE_DB_PATH, "Администратор", "admin-password-123");
+    try {
+      const restored = restartedAuth.currentUser({ headers: { cookie: adminCookie } });
+      assert.equal(restored?.fio, "Администратор");
+    } finally {
+      restartedAuth.close();
+    }
     const created = await fetch(`${baseUrl}/api/users`, {
       method: "POST", headers: { Cookie: adminCookie, "Content-Type": "application/json" },
       body: JSON.stringify({ fio: "Иванов Иван Иванович", password: "user-password-123", permissions: ["repairs"] }),

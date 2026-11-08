@@ -2,9 +2,12 @@ const authScreen = document.querySelector("#auth-screen");
 const loginForm = document.querySelector("#auth-login-form");
 const fioInput = document.querySelector("#auth-fio");
 const fioOptions = document.querySelector("#auth-fio-options");
+const fioPicker = document.querySelector(".auth-fio-picker");
+const fioToggle = document.querySelector("#auth-fio-toggle");
 const passwordInput = document.querySelector("#auth-password");
 const loginButton = document.querySelector("#auth-login-button");
 const loginFeedback = document.querySelector("#auth-login-feedback");
+const authToolbar = document.querySelector("#auth-toolbar");
 const userBadge = document.querySelector("#auth-user-badge");
 const logoutButton = document.querySelector("#auth-logout-button");
 const usersSettings = document.querySelector("#users-settings");
@@ -59,6 +62,7 @@ const applyAccess = (user) => {
     userBadge.hidden = !isAuthenticated;
   }
   if (logoutButton) logoutButton.hidden = !isAuthenticated;
+  if (authToolbar) authToolbar.hidden = !isAuthenticated;
   document.dispatchEvent(new CustomEvent("aggregator-auth-ready", { detail: user }));
   const activeTab = document.querySelector(".function-tab.active");
   if (!activeTab || activeTab.hidden) document.querySelector(".function-tab:not([hidden])")?.click();
@@ -101,6 +105,90 @@ const renderUsers = (users) => {
   }
 };
 
+let loginUsers = [];
+let activeLoginUserIndex = -1;
+
+const closeLoginUsers = () => {
+  if (!fioOptions || !fioInput || !fioToggle) return;
+  fioOptions.hidden = true;
+  fioInput.setAttribute("aria-expanded", "false");
+  fioToggle.setAttribute("aria-expanded", "false");
+  fioInput.removeAttribute("aria-activedescendant");
+  activeLoginUserIndex = -1;
+};
+
+const selectLoginUser = (user) => {
+  fioInput.value = user.fio;
+  closeLoginUsers();
+  fioInput.focus();
+};
+
+const openLoginUsers = () => {
+  if (!fioOptions || !fioInput || !fioToggle) return;
+  const filter = fioInput.value.trim().toLocaleLowerCase("ru-RU");
+  const shown = loginUsers.filter((user) => user.fio.toLocaleLowerCase("ru-RU").includes(filter));
+  activeLoginUserIndex = -1;
+  fioInput.removeAttribute("aria-activedescendant");
+  fioOptions.replaceChildren(...shown.map((user, index) => {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "search-history__option";
+    option.id = `${fioOptions.id}-${index}`;
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", "false");
+    option.tabIndex = -1;
+    option.textContent = user.fio;
+    option.addEventListener("click", () => selectLoginUser(user));
+    return option;
+  }));
+  if (!shown.length) {
+    const empty = document.createElement("p");
+    empty.className = "search-history__empty";
+    empty.textContent = loginUsers.length ? "Совпадений нет" : "Пользователей пока нет";
+    fioOptions.append(empty);
+  }
+  fioOptions.hidden = false;
+  fioInput.setAttribute("aria-expanded", "true");
+  fioToggle.setAttribute("aria-expanded", "true");
+};
+
+fioInput?.addEventListener("focus", () => openLoginUsers());
+fioInput?.addEventListener("input", () => openLoginUsers());
+fioToggle?.addEventListener("click", () => {
+  if (fioOptions?.hidden) openLoginUsers();
+  else closeLoginUsers();
+});
+fioInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && fioOptions && !fioOptions.hidden) {
+    event.preventDefault();
+    closeLoginUsers();
+    return;
+  }
+  if (!["ArrowDown", "ArrowUp"].includes(event.key)) {
+    if (event.key === "Enter" && fioOptions && !fioOptions.hidden && activeLoginUserIndex >= 0) {
+      event.preventDefault();
+      const option = fioOptions.children[activeLoginUserIndex];
+      if (option?.getAttribute("role") === "option") option.click();
+    }
+    return;
+  }
+  event.preventDefault();
+  if (fioOptions?.hidden) openLoginUsers();
+  const options = fioOptions ? [...fioOptions.querySelectorAll('[role="option"]')] : [];
+  if (!options.length) return;
+  activeLoginUserIndex = (activeLoginUserIndex + (event.key === "ArrowDown" ? 1 : activeLoginUserIndex < 0 ? 0 : -1) + options.length) % options.length;
+  options.forEach((option, index) => option.setAttribute("aria-selected", String(index === activeLoginUserIndex)));
+  const active = options[activeLoginUserIndex];
+  fioInput.setAttribute("aria-activedescendant", active.id);
+  active.scrollIntoView({ block: "nearest" });
+});
+fioPicker?.addEventListener("focusout", (event) => {
+  if (!fioPicker.contains(event.relatedTarget)) closeLoginUsers();
+});
+document.addEventListener("pointerdown", (event) => {
+  if (fioPicker && !fioPicker.contains(event.target)) closeLoginUsers();
+});
+
 const loadUsers = async () => {
   const response = await fetch("/api/users", { cache: "no-store" });
   if (!response.ok) throw new Error(await messageFor(response, "Не удалось загрузить пользователей."));
@@ -115,13 +203,9 @@ const loadLoginUsers = async () => {
   if (!response.ok) throw new Error("Не удалось загрузить пользователей.");
   const payload = await response.json();
   if (!Array.isArray(payload?.users)) throw new Error("Некорректный список пользователей.");
-  fioOptions.replaceChildren(...payload.users
+  loginUsers = payload.users
     .filter((user) => user && typeof user.fio === "string" && user.fio.trim())
-    .map((user) => {
-      const option = document.createElement("option");
-      option.value = user.fio;
-      return option;
-    }));
+    .map((user) => ({ fio: user.fio.trim() }));
 };
 
 userCreateForm?.addEventListener("submit", async (event) => {

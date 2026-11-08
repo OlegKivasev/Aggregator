@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -26,13 +26,8 @@ interface StoredUser extends AuthenticatedUser {
   passwordSalt: string;
 }
 
-interface Session {
-  userId: string;
-  expiresAt: number;
-}
-
 const sessionCookie = "aggregator_session";
-const sessionLifetimeMs = 8 * 60 * 60 * 1000;
+const sessionLifetimeMs = 30 * 24 * 60 * 60 * 1000;
 const maxFioLength = 256;
 const maxPasswordLength = 4096;
 
@@ -106,6 +101,10 @@ function clearSessionCookie(response: ServerResponse): void {
   response.setHeader("Set-Cookie", `${sessionCookie}=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`);
 }
 
+function sessionTokenHash(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 function storedUser(row: Record<string, unknown>): StoredUser {
   if (typeof row.id !== "string" || typeof row.fio !== "string" || typeof row.password_hash !== "string"
     || typeof row.password_salt !== "string" || (row.is_admin !== 0 && row.is_admin !== 1) || typeof row.permissions !== "string") {
@@ -130,10 +129,14 @@ function publicUser(user: StoredUser): AuthenticatedUser {
 export class UserAuthService {
   readonly enabled: boolean;
   private readonly database: DatabaseSync;
-  private readonly sessions = new Map<string, Session>();
   private readonly findByIdStatement: StatementSync;
   private readonly findByFioStatement: StatementSync;
   private readonly listStatement: StatementSync;
+  private readonly findSessionStatement: StatementSync;
+  private readonly createSessionStatement: StatementSync;
+  private readonly deleteSessionStatement: StatementSync;
+  private readonly deleteExpiredSessionsStatement: StatementSync;
+  private readonly deleteUserSessionsStatement: StatementSync;
 
   constructor(path: string, adminFio: string, adminPassword: string | null) {
     this.enabled = adminPassword !== null;
@@ -151,10 +154,23 @@ export class UserAuthService {
         permissions TEXT NOT NULL,
         created_at TEXT NOT NULL
       ) STRICT;
+      CREATE TABLE IF NOT EXISTS aggregator_sessions (
+        token_hash TEXT PRIMARY KEY NOT NULL,
+        user_id TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS aggregator_sessions_user_idx ON aggregator_sessions (user_id);
     `);
     this.findByIdStatement = this.database.prepare("SELECT id, fio, password_hash, password_salt, is_admin, permissions FROM aggregator_users WHERE id = ?");
     this.findByFioStatement = this.database.prepare("SELECT id, fio, password_hash, password_salt, is_admin, permissions FROM aggregator_users WHERE fio_key = ?");
     this.listStatement = this.database.prepare("SELECT id, fio, password_hash, password_salt, is_admin, permissions FROM aggregator_users ORDER BY is_admin DESC, fio_key ASC");
+    this.findSessionStatement = this.database.prepare("SELECT user_id, expires_at FROM aggregator_sessions WHERE token_hash = ?");
+    this.createSessionStatement = this.database.prepare("INSERT INTO aggregator_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)");
+    this.deleteSessionStatement = this.database.prepare("DELETE FROM aggregator_sessions WHERE token_hash = ?");
+    this.deleteExpiredSessionsStatement = this.database.prepare("DELETE FROM aggregator_sessions WHERE expires_at <= ?");
+    this.deleteUserSessionsStatement = this.database.prepare("DELETE FROM aggregator_sessions WHERE user_id = ?");
+    this.deleteExpiredSessionsStatement.run(Date.now());
     if (this.enabled) {
       const existingAdmin = this.database.prepare("SELECT id FROM aggregator_users WHERE is_admin = 1 LIMIT 1").get();
       if (!existingAdmin) {
@@ -174,12 +190,13 @@ export class UserAuthService {
     if (!this.enabled) return null;
     const token = cookieValue(request);
     if (!token) return null;
-    const session = this.sessions.get(token);
-    if (!session || session.expiresAt <= Date.now()) {
-      if (session) this.sessions.delete(token);
+    const session = this.findSessionStatement.get(sessionTokenHash(token)) as Record<string, unknown> | undefined;
+    if (!session || typeof session.user_id !== "string" || typeof session.expires_at !== "number" || session.expires_at <= Date.now()) {
+      this.deleteSessionStatement.run(sessionTokenHash(token));
       return null;
     }
-    const row = this.findByIdStatement.get(session.userId) as Record<string, unknown> | undefined;
+    const row = this.findByIdStatement.get(session.user_id) as Record<string, unknown> | undefined;
+    if (!row) this.deleteSessionStatement.run(sessionTokenHash(token));
     return row ? publicUser(storedUser(row)) : null;
   }
 
@@ -229,7 +246,9 @@ export class UserAuthService {
           return true;
         }
         const token = randomBytes(32).toString("base64url");
-        this.sessions.set(token, { userId: user.id, expiresAt: Date.now() + sessionLifetimeMs });
+        const expiresAt = Date.now() + sessionLifetimeMs;
+        this.deleteExpiredSessionsStatement.run(Date.now());
+        this.createSessionStatement.run(sessionTokenHash(token), user.id, expiresAt, new Date().toISOString());
         setSessionCookie(response, token);
         serveJson(response, 200, { user: publicUser(user) });
       } catch (error) {
@@ -239,7 +258,7 @@ export class UserAuthService {
     }
     if (url.pathname === "/api/auth/logout" && request.method === "POST") {
       const token = cookieValue(request);
-      if (token) this.sessions.delete(token);
+      if (token) this.deleteSessionStatement.run(sessionTokenHash(token));
       clearSessionCookie(response);
       serveJson(response, 200, { ok: true });
       return true;
@@ -324,6 +343,6 @@ export class UserAuthService {
     const user = storedUser(row);
     if (id === currentUserId || user.isAdmin) throw new Error("Администратора удалить нельзя.");
     this.database.prepare("DELETE FROM aggregator_users WHERE id = ?").run(id);
-    for (const [token, session] of this.sessions) if (session.userId === id) this.sessions.delete(token);
+    this.deleteUserSessionsStatement.run(id);
   }
 }

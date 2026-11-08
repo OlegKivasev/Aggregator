@@ -23,7 +23,7 @@
         <h1 id="auth-title">Вход в агрегатор</h1>
         <p class="settings-drawer__hint">Введите ФИО и пароль, выданные администратором.</p>
         <form class="auth-form" id="auth-login-form">
-          <label class="field" for="auth-fio"><span>ФИО</span><input id="auth-fio" type="text" autocomplete="off" list="auth-fio-options" maxlength="256" required><datalist id="auth-fio-options"></datalist></label>
+          <label class="field" for="auth-fio"><span>ФИО</span><span class="auth-fio-picker"><input id="auth-fio" type="text" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="auth-fio-options" aria-expanded="false" maxlength="256" required><button class="auth-fio-picker__toggle" id="auth-fio-toggle" type="button" aria-label="Показать список пользователей" aria-controls="auth-fio-options" aria-expanded="false"></button><div class="search-history__panel auth-fio-picker__panel" id="auth-fio-options" role="listbox" aria-label="Пользователи" hidden></div></span></label>
           <label class="field" for="auth-password"><span>Пароль</span><span class="password-field"><input id="auth-password" type="password" autocomplete="current-password" minlength="3" maxlength="4096" required><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="auth-password"><span aria-hidden="true">&#128065;</span></button></span></label>
           <button class="btn btn-primary" type="submit" id="auth-login-button">Войти</button>
         </form>
@@ -153,6 +153,10 @@
               <img src="/shopping-cart.png" alt="" aria-hidden="true">
               <span class="cart-badge" id="cart-badge" hidden>0</span>
             </button>
+            <div class="auth-toolbar" id="auth-toolbar" hidden>
+              <span class="auth-toolbar__user" id="auth-user-badge"></span>
+              <button type="button" class="button-secondary btn btn-light auth-toolbar__logout" id="auth-logout-button">Выйти</button>
+            </div>
           </div>
 
           <div class="article-variant-notice" id="article-variant-notice" role="status" aria-live="polite" hidden><span aria-hidden="true">!</span><p id="article-variant-notice-text"></p></div>
@@ -444,8 +448,6 @@
       <div class="settings-drawer__panel card border-0 shadow-lg">
         <div class="settings-drawer__header">
           <h2>Настройки</h2>
-          <span class="settings-user-badge" id="auth-user-badge"></span>
-          <button type="button" class="button-secondary settings-close btn btn-light" id="auth-logout-button" hidden>Выйти</button>
           <button type="button" class="button-secondary settings-close btn btn-light" id="settings-close" aria-label="Закрыть настройки">×</button>
         </div>
 
