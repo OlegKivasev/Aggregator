@@ -63,3 +63,14 @@ test("default administrator creates a restricted user and repair cards are filte
     assert.equal((await fetch(`${baseUrl}/api/users`, { headers: { Cookie: userCookie } })).status, 403);
   });
 });
+
+test("serves the login page before authentication while protecting API routes", async () => {
+  await withServer(async (baseUrl) => {
+    const page = await fetch(`${baseUrl}/`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /id="auth-screen"/);
+
+    const protectedResponse = await fetch(`${baseUrl}/api/repairs`);
+    assert.equal(protectedResponse.status, 401);
+  });
+});

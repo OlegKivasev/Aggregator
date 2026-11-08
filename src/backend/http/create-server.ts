@@ -260,9 +260,12 @@ export function createAggregatorServer({
 
     let authenticatedUser: AuthenticatedUser | null = null;
     const integrationRequest = url.pathname.startsWith("/api/integration/1c/");
+    const apiRequest = url.pathname.startsWith("/api/");
     if (auth) {
       if (await auth.serve(request, response, url)) return;
-      if (!integrationRequest) {
+      // Keep the static application shell public so an unauthenticated browser
+      // can load the login screen. Authentication is enforced for API routes.
+      if (apiRequest && !integrationRequest) {
         authenticatedUser = auth.authorize(request, response, requiredPermission(url.pathname));
         if (!authenticatedUser && auth.enabled) return;
       }
