@@ -45,6 +45,7 @@
       <nav class="function-tabs card border-0 shadow-sm" aria-label="Разделы приложения">
         <button type="button" class="function-tab active" id="markup-function-tab" aria-controls="markup-function" aria-selected="true">Проценка</button>
         <button type="button" class="function-tab" id="applicability-function-tab" aria-controls="applicability-function" aria-selected="false">Применимость</button>
+        <button type="button" class="function-tab" id="nomenclature-function-tab" aria-controls="nomenclature-function" aria-selected="false" hidden>Номенклатура</button>
         <button type="button" class="function-tab" id="repairs-function-tab" aria-controls="repairs-function" aria-selected="false" hidden>Заказ-наряды</button>
         <button type="button" class="function-tab" id="test-repairs-function-tab" aria-controls="test-repairs-function" aria-selected="false" hidden>Заказ-наряды (тест)</button>
       </nav>
@@ -397,6 +398,30 @@
           <button type="button" class="garage-vehicles__button" id="applicability-oem-more" hidden>Показать ещё</button>
           <div class="garage-sidebar__resize" id="applicability-oem-resize" role="separator" aria-label="Изменить ширину сохранённых OEM-артикулов" aria-orientation="vertical" tabindex="0"></div>
         </aside>
+        </div>
+      </section>
+      <section id="nomenclature-function" class="nomenclature-function card border-0 shadow-sm" aria-labelledby="nomenclature-title" hidden>
+        <header>
+          <h2 id="nomenclature-title">Номенклатура</h2>
+          <p class="panel__meta">Отсканируйте штрихкод или QR-код и сверьте считанное значение с этикеткой.</p>
+        </header>
+        <div class="nomenclature-actions">
+          <button type="button" class="btn btn-primary" id="nomenclature-scan">Сканировать камерой</button>
+          <button type="button" class="btn btn-light" id="nomenclature-photo">Считать с фото</button>
+          <button type="button" class="btn btn-light" id="nomenclature-stop" hidden>Остановить</button>
+          <input type="file" id="nomenclature-file" accept="image/*" aria-label="Фото штрихкода" hidden>
+        </div>
+        <p class="nomenclature-feedback" id="nomenclature-feedback" role="status" aria-live="polite">Нажмите «Сканировать камерой» и разрешите доступ к камере.</p>
+        <div class="nomenclature-preview" id="nomenclature-preview" hidden>
+          <video id="nomenclature-video" autoplay muted playsinline aria-label="Камера для сканирования штрихкода"></video>
+          <div class="nomenclature-viewfinder" aria-hidden="true"></div>
+          <p>Держите код крупно и целиком в центре кадра. Избегайте бликов и дождитесь фокуса.</p>
+        </div>
+        <div class="nomenclature-result" id="nomenclature-result" hidden>
+          <label for="nomenclature-code">Результат сканирования</label>
+          <textarea id="nomenclature-code" rows="2" readonly spellcheck="false" aria-describedby="nomenclature-result-hint"></textarea>
+          <p class="panel__meta" id="nomenclature-result-hint">Сверьте код с этикеткой. Чтобы проверить следующий товар, запустите сканирование ещё раз.</p>
+          <button type="button" class="btn btn-light" id="nomenclature-copy">Копировать код</button>
         </div>
       </section>
       <section id="repairs-function" class="repairs-function results-panel card border-0 shadow-sm overflow-hidden" aria-labelledby="repairs-title" hidden>
@@ -848,6 +873,7 @@
           <legend>Доступные формы</legend>
           <label><input type="checkbox" value="markup"><span>Проценка</span></label>
           <label><input type="checkbox" value="applicability"><span>Применимость</span></label>
+          <label><input type="checkbox" value="nomenclature"><span>Номенклатура</span></label>
           <label><input type="checkbox" value="repairs"><span>Заказ-наряды</span></label>
           <label><input type="checkbox" value="testRepairs"><span>Тестовые заказ-наряды</span></label>
         </fieldset>

@@ -716,6 +716,31 @@ input {
 
 .applicability-function[hidden] { display: none; }
 
+.nomenclature-function[hidden], .nomenclature-function [hidden] { display: none; }
+.nomenclature-function { display: flex; flex-direction: column; gap: 18px; max-width: 880px; padding: 24px; border-radius: 14px; }
+.nomenclature-function h2 { margin: 0 0 8px; color: var(--ink); font-size: 22px; font-weight: 800; }
+.nomenclature-function p { margin: 0; }
+.nomenclature-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.nomenclature-function .btn { min-height: 44px; padding: 10px 16px; border-radius: 8px; font-weight: 700; }
+.nomenclature-function .btn-primary { color: #fff; border-color: var(--accent); background: var(--accent); }
+.nomenclature-function .btn-primary:hover:enabled, .nomenclature-function .btn-primary:focus-visible { border-color: var(--accent-dark); background: var(--accent-dark); }
+.nomenclature-feedback { color: var(--muted); font-size: 14px; }
+.nomenclature-feedback[data-tone="error"] { color: #b42318; }
+.nomenclature-feedback[data-tone="success"] { color: #18794e; }
+.nomenclature-preview { position: relative; overflow: hidden; border-radius: 12px; background: #17202a; }
+.nomenclature-preview video { display: block; width: 100%; max-height: 480px; aspect-ratio: 4 / 3; object-fit: contain; }
+.nomenclature-preview p { padding: 12px 16px; color: #fff; font-size: 13px; }
+.nomenclature-viewfinder { position: absolute; top: 27%; right: 8%; left: 8%; height: 30%; border: 2px solid #fff; border-radius: 12px; pointer-events: none; }
+.nomenclature-result { display: grid; gap: 12px; padding: 18px; border: 1px solid #a6d9b8; border-radius: 12px; background: #f4fbf6; }
+.nomenclature-result > label { font-weight: 800; }
+.nomenclature-result textarea { width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font-family: monospace; font-size: clamp(18px, 3vw, 28px); overflow-wrap: anywhere; resize: vertical; }
+.nomenclature-result > button { justify-self: start; }
+@media (max-width: 800px) {
+  .nomenclature-function { padding: 18px; }
+  .nomenclature-actions > button { flex: 1 1 100%; }
+  .nomenclature-result { padding: 14px; }
+}
+
 .repairs-function[hidden] { display: none; }
 .repairs-function [hidden] { display: none; }
 .repairs-function { margin: 0; height: calc(100dvh - 100px); min-height: 320px; }

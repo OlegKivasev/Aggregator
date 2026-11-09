@@ -1,0 +1,225 @@
+let decoderModule;
+
+const createReader = async () => {
+  decoderModule ??= import("/vendor/zxing-browser.min.js").catch((error) => {
+    decoderModule = undefined;
+    throw error;
+  });
+  await decoderModule;
+  // The standalone bundle omits DecodeHintType. TRY_HARDER is 3 in the pinned
+  // @zxing/library 0.23.0; it also enables rotated and more densely sampled scans.
+  return new window.ZXingBrowser.BrowserMultiFormatReader(new Map([[3, true]]), {
+    delayBetweenScanAttempts: 200,
+    delayBetweenScanSuccess: 500,
+  });
+};
+
+const stopTracks = (stream) => stream?.getTracks().forEach((track) => track.stop());
+const stopControls = (controls) => {
+  // Some devices return an asynchronous stop while switching off the torch.
+  try { void Promise.resolve(controls?.stop()).catch(() => {}); } catch { /* Tracks are also stopped directly. */ }
+};
+
+const cameraErrorMessage = (error) => {
+  if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
+    return "Нет доступа к камере. Разрешите его в настройках браузера или считайте код с фото.";
+  }
+  if (error?.name === "NotFoundError" || error?.name === "OverconstrainedError") {
+    return "Камера не найдена. Попробуйте другое устройство или считайте код с фото.";
+  }
+  if (error?.name === "NotReadableError") {
+    return "Камера недоступна. Закройте другие приложения, использующие камеру, и повторите попытку.";
+  }
+  return "Не удалось запустить сканирование. Повторите попытку или считайте код с фото.";
+};
+
+export function bootstrapNomenclature() {
+  const section = document.querySelector("#nomenclature-function");
+  const scanButton = document.querySelector("#nomenclature-scan");
+  const photoButton = document.querySelector("#nomenclature-photo");
+  const stopButton = document.querySelector("#nomenclature-stop");
+  const fileInput = document.querySelector("#nomenclature-file");
+  const preview = document.querySelector("#nomenclature-preview");
+  let video = document.querySelector("#nomenclature-video");
+  const feedback = document.querySelector("#nomenclature-feedback");
+  const resultPanel = document.querySelector("#nomenclature-result");
+  const code = document.querySelector("#nomenclature-code");
+  const copyButton = document.querySelector("#nomenclature-copy");
+  let active = false;
+  let busy = false;
+  let generation = 0;
+  let stream;
+  let controls;
+
+  const setFeedback = (message, tone = "notice") => {
+    feedback.textContent = message;
+    feedback.dataset.tone = tone;
+  };
+
+  const setBusy = (value) => {
+    busy = value;
+    scanButton.disabled = value;
+    photoButton.disabled = value;
+    fileInput.disabled = value;
+    stopButton.hidden = !value;
+  };
+
+  const stop = () => {
+    generation += 1;
+    stopControls(controls);
+    controls = undefined;
+    stopTracks(stream);
+    stream = undefined;
+    video.pause();
+    video.srcObject = null;
+    preview.hidden = true;
+    setBusy(false);
+  };
+
+  const current = (attempt) => attempt === generation && active && !document.hidden;
+  const begin = () => {
+    stop();
+    code.value = "";
+    resultPanel.hidden = true;
+    setBusy(true);
+    return generation;
+  };
+
+  const showResult = (result) => {
+    code.value = result.getText();
+    resultPanel.hidden = false;
+    stop();
+    setFeedback("Код считан. Результат показан ниже.", "success");
+  };
+
+  const startCamera = async () => {
+    if (!active || busy) return;
+    if (!window.isSecureContext) {
+      setFeedback("Для доступа к камере откройте агрегатор по HTTPS. Сейчас можно считать код с фото.", "error");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setFeedback("Этот браузер не поддерживает доступ к камере. Считайте код с фото или откройте другой браузер.", "error");
+      return;
+    }
+    const attempt = begin();
+    // Late cleanup from a cancelled camera startup must not detach a newer stream.
+    const cameraVideo = video.cloneNode();
+    video.replaceWith(cameraVideo);
+    video = cameraVideo;
+    preview.hidden = false;
+    setFeedback("Запускаем камеру. Разрешите доступ, если браузер его запросит.");
+    try {
+      const reader = await createReader();
+      if (!current(attempt)) return;
+      const acquired = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+      if (!current(attempt)) {
+        stopTracks(acquired);
+        return;
+      }
+      stream = acquired;
+      for (const track of acquired.getVideoTracks()) {
+        track.addEventListener("ended", () => {
+          if (!current(attempt)) return;
+          stop();
+          setFeedback("Камера отключилась. Запустите сканирование ещё раз.", "error");
+        });
+      }
+      const started = await reader.decodeFromStream(acquired, cameraVideo, (result, error, scannerControls) => {
+        if (!current(attempt)) {
+          stopControls(scannerControls);
+          return;
+        }
+        if (result) {
+          stopControls(scannerControls);
+          showResult(result);
+        } else if (error && !["NotFoundException", "ChecksumException", "FormatException"].includes(error.getKind?.())) {
+          stopControls(scannerControls);
+          stop();
+          setFeedback("Не удалось прочитать кадр камеры. Повторите попытку или считайте код с фото.", "error");
+        }
+      });
+      if (!current(attempt)) {
+        stopControls(started);
+        return;
+      }
+      controls = started;
+      setFeedback("Наведите камеру на код и держите телефон неподвижно до распознавания.");
+    } catch (error) {
+      if (!current(attempt)) return;
+      stop();
+      setFeedback(cameraErrorMessage(error), "error");
+    }
+  };
+
+  const readPhoto = async (file) => {
+    if (!active || busy || !file) return;
+    if ((file.type && !file.type.startsWith("image/")) || file.size > 20 * 1024 * 1024) {
+      setFeedback("Выберите изображение размером до 20 МБ.", "error");
+      return;
+    }
+    const attempt = begin();
+    const imageUrl = URL.createObjectURL(file);
+    setFeedback("Ищем код на фотографии…");
+    try {
+      const reader = await createReader();
+      if (!current(attempt)) return;
+      const result = await reader.decodeFromImageUrl(imageUrl);
+      if (current(attempt)) showResult(result);
+    } catch {
+      if (!current(attempt)) return;
+      stop();
+      setFeedback("Код на фото не распознан. Снимите его ближе, целиком и без бликов, затем повторите попытку.", "error");
+    } finally {
+      URL.revokeObjectURL(imageUrl);
+    }
+  };
+
+  const cancel = () => {
+    if (!busy) return;
+    stop();
+    setFeedback("Сканирование остановлено. Можно начать снова.");
+  };
+
+  scanButton.addEventListener("click", () => { void startCamera(); });
+  photoButton.addEventListener("click", () => { fileInput.click(); });
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    fileInput.value = "";
+    void readPhoto(file);
+  });
+  stopButton.addEventListener("click", cancel);
+  copyButton.addEventListener("click", async () => {
+    const value = code.value;
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      if (code.value === value) setFeedback("Код скопирован.", "success");
+    } catch {
+      if (code.value !== value) return;
+      code.focus();
+      code.select();
+      setFeedback("Код выделен. Скопируйте его через меню телефона или клавишами Ctrl+C.");
+    }
+  });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) cancel(); });
+  window.addEventListener("pagehide", cancel);
+  document.addEventListener("aggregator-auth-ready", (event) => {
+    if (!event.detail?.isAdmin && !event.detail?.permissions?.includes("nomenclature")) {
+      active = false;
+      cancel();
+      code.value = "";
+      resultPanel.hidden = true;
+    }
+  });
+
+  return {
+    setActive(name) {
+      active = name === "nomenclature" && !section.hidden;
+      if (!active) cancel();
+    },
+  };
+}

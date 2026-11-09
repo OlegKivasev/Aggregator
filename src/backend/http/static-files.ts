@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { ServerResponse } from "node:http";
 import { extname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { securityHeaders, serveJson } from "./responses.ts";
 
 const contentTypes = new Map<string, string>([
@@ -13,8 +14,11 @@ const contentTypes = new Map<string, string>([
 ]);
 
 export async function serveStatic(pathname: string, response: ServerResponse, publicDir: string): Promise<void> {
-  const filePath = pathname === "/" ? resolve(publicDir, "index.html") : resolve(publicDir, `.${pathname}`);
-  if (!filePath.startsWith(`${publicDir}${sep}`)) {
+  const isScannerScript = pathname === "/vendor/zxing-browser.min.js";
+  const filePath = isScannerScript
+    ? fileURLToPath(import.meta.resolve("@zxing/browser/umd/zxing-browser.min.js"))
+    : pathname === "/" ? resolve(publicDir, "index.html") : resolve(publicDir, `.${pathname}`);
+  if (!isScannerScript && !filePath.startsWith(`${publicDir}${sep}`)) {
     serveJson(response, 404, { message: "Not found" });
     return;
   }

@@ -6,7 +6,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, RequestBodyError } from "../http/request-body.ts";
 import { serveJson } from "../http/responses.ts";
 
-export const userPermissions = ["markup", "applicability", "repairs", "testRepairs"] as const;
+export const userPermissions = ["markup", "applicability", "repairs", "testRepairs", "nomenclature"] as const;
 export type UserPermission = typeof userPermissions[number];
 
 export interface AuthenticatedUser {

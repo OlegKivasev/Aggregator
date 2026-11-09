@@ -1,0 +1,227 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { test } from "node:test";
+import { chromium } from "playwright";
+import { createAggregatorServer } from "../../src/backend/http/create-server.ts";
+
+const barcode = "2000043626425";
+
+// EAN-13 with a leading 2: left-side parity is LLGGLG. Render real bars so
+// these tests exercise the shipped decoder rather than a mocked scan result.
+function barcodeSvg() {
+  const left = ["0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011"];
+  const even = ["0100111", "0110011", "0011011", "0100001", "0011101", "0111001", "0000101", "0010001", "0001001", "0010111"];
+  const right = left.map((pattern) => [...pattern].map((bit) => bit === "1" ? "0" : "1").join(""));
+  const bits = "101" + [...barcode.slice(1, 7)].map((digit, index) =>
+    ("LLGGLG"[index] === "L" ? left : even)[Number(digit)]).join("") + "01010"
+    + [...barcode.slice(7)].map((digit) => right[Number(digit)]).join("") + "101";
+  const bars = [...bits].map((bit, index) => bit === "1" ? `<rect x="${50 + index * 4}" y="70" width="4" height="150"/>` : "").join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="480" height="300" fill="white"/><g fill="black">${bars}</g></svg>`;
+}
+
+async function withPage(check) {
+  const directory = await mkdtemp(join(tmpdir(), "aggregator-nomenclature-"));
+  const previousPath = process.env.GARAGE_DB_PATH;
+  process.env.GARAGE_DB_PATH = join(directory, "garage.sqlite");
+  const server = createAggregatorServer({ application: { streamSearch: async () => {} }, publicDir: resolve("src/frontend") });
+  let browser;
+  try {
+    await new Promise((resolvePromise, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolvePromise); });
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER_EXECUTABLE_PATH });
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    const errors = [];
+    const apiRequests = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.route("**/*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.href === "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" && process.env.REPAIRS_BOOTSTRAP_CSS_PATH) {
+        return route.fulfill({ contentType: "text/css", body: await readFile(process.env.REPAIRS_BOOTSTRAP_CSS_PATH) });
+      }
+      if (url.origin !== origin) return route.abort();
+      if (!url.pathname.startsWith("/api/")) return route.continue();
+      apiRequests.push(url.pathname);
+      const responses = {
+        "/api/auth/session": { enabled: false, user: null },
+        "/api/repairs": { repairs: [] },
+        "/api/suppliers/sessions": { sessions: [] },
+        "/api/applicability/api-key": { configured: false, persistent: false, maskedKey: null },
+        "/api/applicability/proxies": { persistent: false, activeRouteId: null, proxies: [], usage: { requestCount: 0 }, directUsage: {} },
+        "/api/garage/vehicles": { vehicles: [] },
+      };
+      return route.fulfill({ json: responses[url.pathname] ?? { articles: [], brandCounts: [], hasMore: false } });
+    });
+    await page.goto(origin);
+    await page.waitForFunction(() => window.aggregatorAuthState?.ready);
+    await page.waitForLoadState("networkidle");
+    await page.locator("#nomenclature-function-tab").click();
+    assert.equal(await page.locator("#nomenclature-function").isVisible(), true);
+    await check({ page, context, apiRequests });
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser?.close();
+    server.closeAllConnections();
+    await new Promise((resolvePromise) => server.close(resolvePromise));
+    if (previousPath === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previousPath;
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function uploadSvg(page, svg, expected) {
+  await page.locator("#nomenclature-file").setInputFiles({ name: "code.svg", mimeType: "image/svg+xml", buffer: Buffer.from(svg) });
+  await page.waitForFunction(() => !document.querySelector("#nomenclature-file").disabled);
+  assert.equal(await page.locator("#nomenclature-code").inputValue(), expected);
+  assert.equal(await page.locator("#nomenclature-result").isVisible(), true);
+  assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
+}
+
+async function installCamera(page, svg) {
+  await page.evaluate(async (source) => {
+    const image = new Image();
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = 480;
+    canvas.height = 300;
+    const drawing = canvas.getContext("2d");
+    const paint = () => drawing.drawImage(image, 0, 0);
+    paint();
+    clearInterval(window.cameraPaint);
+    window.cameraPaint = setInterval(paint, 50);
+    window.testCameraStreams = [];
+    navigator.mediaDevices.getUserMedia = async (constraints) => {
+      window.cameraConstraints = constraints;
+      const stream = canvas.captureStream(20);
+      window.testCameraStreams.push(stream);
+      return stream;
+    };
+  }, svg);
+}
+
+test("nomenclature reads real EAN-13 and QR images safely, copies, restores and fits a phone", async () => {
+  await withPage(async ({ page, context, apiRequests }) => {
+    await uploadSvg(page, barcodeSvg(), barcode);
+    const offCenter = barcodeSvg().replaceAll('height="300"', 'height="1000"');
+    await uploadSvg(page, offCenter, barcode);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.locator("#nomenclature-copy").click();
+    await page.getByText("Код скопирован.", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), barcode);
+    const qrText = '0000123\n<img src=x onerror="window.scanXss=1">';
+    const qrSvg = await page.evaluate((text) => {
+      const svg = new window.ZXingBrowser.BrowserQRCodeSvgWriter().write(text, 400, 400);
+      const background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      background.setAttribute("width", "100%");
+      background.setAttribute("height", "100%");
+      background.setAttribute("fill", "white");
+      svg.prepend(background);
+      return new XMLSerializer().serializeToString(svg);
+    }, qrText);
+    await uploadSvg(page, qrSvg, qrText);
+    assert.equal(await page.evaluate(() => window.scanXss), undefined);
+    assert.equal(await page.locator("#nomenclature-result img").count(), 0);
+    assert.equal(await page.locator("#nomenclature-function").evaluate((element) => element.scrollWidth <= element.clientWidth), true);
+    await uploadSvg(page, barcodeSvg(), barcode);
+    if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-mobile.png"), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-desktop.png"), fullPage: true });
+    await page.locator("#nomenclature-file").setInputFiles({ name: "blank.svg", mimeType: "image/svg+xml", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="white"/></svg>') });
+    await page.getByText(/Код на фото не распознан/).waitFor();
+    assert.equal(await page.locator("#nomenclature-result").isVisible(), false);
+    assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
+    assert.equal(apiRequests.some((path) => /nomenclature|barcode|integration/.test(path)), false);
+    await page.reload();
+    await page.waitForFunction(() => window.aggregatorAuthState?.ready);
+    assert.equal(await page.locator("#nomenclature-function").isVisible(), true);
+  });
+});
+
+test("camera decodes actual frames and releases tracks on result, stop, section change and page hiding", async () => {
+  await withPage(async ({ page }) => {
+    await installCamera(page, barcodeSvg());
+    await page.locator("#nomenclature-scan").click();
+    await page.waitForFunction((value) => document.querySelector("#nomenclature-code").value === value, barcode);
+    assert.equal(await page.evaluate(() => window.testCameraStreams.every((stream) => stream.getTracks().every((track) => track.readyState === "ended"))), true);
+    assert.equal(await page.evaluate(() => window.cameraConstraints.audio), false);
+    assert.equal(await page.evaluate(() => window.cameraConstraints.video.facingMode.ideal), "environment");
+    assert.equal(await page.locator("#nomenclature-preview").isVisible(), false);
+    const blank = '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="480" height="300" fill="white"/></svg>';
+    await installCamera(page, blank);
+    for (const action of ["stop", "section", "hidden"]) {
+      await page.locator("#nomenclature-scan").click();
+      await page.waitForFunction(() => document.querySelector("#nomenclature-video").readyState >= 2);
+      if (action === "stop") await page.locator("#nomenclature-stop").click();
+      if (action === "section") await page.locator("#markup-function-tab").click();
+      if (action === "hidden") await page.evaluate(() => {
+        Object.defineProperty(document, "hidden", { configurable: true, value: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      assert.equal(await page.evaluate(() => window.testCameraStreams.every((stream) => stream.getTracks().every((track) => track.readyState === "ended"))), true);
+      assert.equal(await page.locator("#nomenclature-video").evaluate((video) => video.srcObject), null);
+      if (action === "section") await page.locator("#nomenclature-function-tab").click();
+    }
+  });
+});
+
+test("camera handles denial and a permission response arriving after cancellation", async () => {
+  await withPage(async ({ page }) => {
+    await page.evaluate(() => {
+      navigator.mediaDevices.getUserMedia = async () => { throw new DOMException("Denied", "NotAllowedError"); };
+    });
+    await page.locator("#nomenclature-scan").click();
+    await page.getByText(/Нет доступа к камере/).waitFor();
+    assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
+    await page.evaluate(() => {
+      navigator.mediaDevices.getUserMedia = () => new Promise((resolvePromise) => { window.allowCamera = resolvePromise; });
+    });
+    await page.locator("#nomenclature-scan").click();
+    await page.waitForFunction(() => typeof window.allowCamera === "function");
+    await page.locator("#nomenclature-stop").click();
+    await page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 100;
+      canvas.height = 100;
+      window.lateStream = canvas.captureStream();
+      window.allowCamera(window.lateStream);
+    });
+    await page.waitForFunction(() => window.lateStream.getTracks().every((track) => track.readyState === "ended"));
+    assert.equal(await page.locator("#nomenclature-result").isVisible(), false);
+    assert.equal(await page.locator("#nomenclature-preview").isVisible(), false);
+    assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
+    const blank = '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="480" height="300" fill="white"/></svg>';
+    await installCamera(page, blank);
+    await page.evaluate(() => {
+      const reader = window.ZXingBrowser.BrowserMultiFormatReader.prototype;
+      const decode = reader.decodeFromStream;
+      let first = true;
+      reader.decodeFromStream = async function (stream, video, callback) {
+        if (!first) return decode.call(this, stream, video, callback);
+        first = false;
+        video.srcObject = stream;
+        await video.play();
+        return new Promise((resolvePromise) => {
+          window.finishOldCameraSetup = () => resolvePromise({ stop() { video.srcObject = null; } });
+        });
+      };
+    });
+    await page.locator("#nomenclature-scan").click();
+    await page.waitForFunction(() => typeof window.finishOldCameraSetup === "function");
+    await page.locator("#nomenclature-stop").click();
+    await page.locator("#nomenclature-scan").click();
+    await page.waitForFunction(() => document.querySelector("#nomenclature-video").readyState >= 2);
+    await page.evaluate(async () => {
+      window.finishOldCameraSetup();
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+    });
+    assert.equal(await page.locator("#nomenclature-video").evaluate((video) => !!video.srcObject), true);
+    await page.locator("#nomenclature-stop").click();
+    assert.equal(await page.evaluate(() => window.testCameraStreams.every((stream) => stream.getTracks().every((track) => track.readyState === "ended"))), true);
+    await page.evaluate(() => Object.defineProperty(window, "isSecureContext", { configurable: true, value: false }));
+    await page.locator("#nomenclature-scan").click();
+    await page.getByText(/откройте агрегатор по HTTPS/).waitFor();
+    await uploadSvg(page, barcodeSvg(), barcode);
+  });
+});
