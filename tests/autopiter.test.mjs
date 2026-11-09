@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { AutopiterApiAdapter, verifyAutopiterCredentials } from "../src/backend/suppliers/autopiter/autopiter-api-adapter.ts";
 import { SupplierSessionManager } from "../src/backend/session/session-manager.ts";
 import { SupplierSessionService } from "../src/backend/application/supplier-session-service.ts";
+import { SearchApplicationService } from "../src/backend/application/search-application-service.ts";
+import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 import { EncryptedSupplierCredentialStore } from "../src/backend/session/encrypted-credential-store.ts";
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../src/backend/errors.ts";
 import { runSupplierSearch } from "../src/backend/suppliers/run-supplier-search.ts";
@@ -209,7 +211,152 @@ test("Autopiter prices every exact catalog once, filters other articles and repl
   assert.deepEqual(results[0], { supplier: "autopiter", article: "A-1", brand: "TEST", title: "Тестовый фильтр & комплект", price: 125.5,
     quantity: 7, warehouse: "Тестовый склад", deliveryDate: "2026-11-10T00:00:00.000Z", deliveryDateApproximate: false, isReturnable: true, link: "https://autopiter.ru/" });
   assert.equal(getPurchaseReference(results[0]), null);
-  assert.equal(adapter.searchAnalogs, undefined);
+  assert.equal(typeof adapter.searchAnalogs, "function");
+});
+
+test("Autopiter analogs use selected-brand catalogs and preserve distinct offers without originals or duplicates", async () => {
+  const calls = [];
+  const cross = { Number: "B-1", CatalogName: "CROSS", DetailUid: "cross-1", SellerId: "10" };
+  const adapter = new AutopiterApiAdapter(async (method, parameters) => {
+    calls.push({ method, parameters });
+    if (method === "FindCatalog") return response(method, catalog({ CatalogName: "TEST.CO" })
+      + catalog({ ArticleId: "102", CatalogName: "OTHER" }) + catalog({ ArticleId: "103", CatalogName: "Test-Co" })
+      + catalog({ ArticleId: "104", Number: "UNRELATED", CatalogName: "TEST.CO" }));
+    return response(method, offer({ CatalogName: "TEST.CO" }) + offer(cross) + offer(cross)
+      + offer({ Number: "A1", CatalogName: "OTHER", DetailUid: "same-number-cross" })
+      + offer({ ...cross, Region: "Другой склад" }) + offer({ ...cross, SalePrice: "200" })
+      + offer({ ...cross, TypeRefusal: "3" }) + offer({ ...cross, SellerId: "11" })
+      + offer({ ...cross, DetailUid: "different-offer" }) + offer({ ...cross, NumberChange: "C1" }));
+  });
+  const results = [];
+  await adapter.searchAnalogs({ mode: "analogs", article: "A1", brand: " test co " }, context(), (value) => results.push(value), manager());
+  assert.deepEqual(calls.map((call) => call.method), ["FindCatalog", "GetPriceId", "GetPriceId"]);
+  assert.deepEqual(calls.slice(1).map((call) => call.parameters.ArticleId), ["101", "103"]);
+  assert.ok(calls.slice(1).every((call) => call.parameters.SearchCross === "1" && call.parameters.Currency === "РУБ"));
+  assert.equal(results.length, 7);
+  assert.ok(results.every((result) => result.isAnalog === true && getPurchaseReference(result) === null));
+  assert.equal(results.filter((result) => result.brand === "OTHER" && result.article === "A1").length, 1);
+  assert.ok(results.some((result) => result.price === 200));
+  assert.ok(results.some((result) => result.warehouse === "Другой склад"));
+  assert.equal(results.filter((result) => !result.isReturnable).length, 1);
+  const before = calls.length;
+  await adapter.searchAnalogs({ mode: "analogs", article: "A1", brand: "NO MATCH" }, context(), () => assert.fail("wrong-brand analog"), manager());
+  assert.deepEqual(calls.slice(before).map((call) => call.method), ["FindCatalog"]);
+});
+
+test("Autopiter discovery and analogs participate in the shared search lifecycle", async () => {
+  const calls = [];
+  const adapter = new AutopiterApiAdapter(async (method, parameters) => {
+    calls.push({ method, parameters });
+    return method === "FindCatalog"
+      ? response(method, catalog() + catalog({ ArticleId: "102", CatalogName: "test" })
+        + catalog({ ArticleId: "103", CatalogName: "OTHER" }) + catalog({ ArticleId: "104", Number: "UNRELATED", CatalogName: "SKIP" }))
+      : response(method, offer({ Number: "B1", CatalogName: "CROSS" }));
+  });
+  const service = new SearchApplicationService([adapter], manager(), () => assert.fail("unexpected disconnection"));
+  const events = [];
+  await service.streamSearch({ mode: "brands", article: "A1", suppliers: ["autopiter"] }, (event) => events.push(event), signal());
+  assert.deepEqual(events[0].suppliers, ["autopiter"]);
+  assert.deepEqual(events.find((event) => event.type === "brand_candidates"), { type: "brand_candidates", supplier: "autopiter", brands: ["TEST", "OTHER"] });
+  assert.deepEqual(calls.map((call) => call.method), ["FindCatalog"]);
+  events.length = 0;
+  await service.streamSearch({ mode: "analogs", article: "A1", brand: "TEST", suppliers: ["autopiter"] }, (event) => events.push(event), signal());
+  assert.deepEqual(events[0].suppliers, ["autopiter"]);
+  assert.equal(events.filter((event) => event.type === "result").length, 1);
+  assert.equal(events.find((event) => event.type === "result").result.isAnalog, true);
+  assert.equal(events.at(-2).status, "completed");
+  assert.equal(events.at(-1).type, "search_completed");
+});
+
+test("Autopiter analog and brand searches recover expired sessions and accept optional empty results", async () => {
+  for (const mode of ["brands", "analogs"]) {
+    let authorizations = 0;
+    const sessions = new SupplierSessionManager();
+    sessions.setAutopiterCredentials(credentials);
+    sessions.markAuthorized("autopiter");
+    const adapter = new AutopiterApiAdapter(async (method, parameters, _signal, receivedCookie) => {
+      if (method === "Authorization") { authorizations++; return response(method, "true", { setCookie: [cookie] }); }
+      assert.equal(receivedCookie, cookie);
+      if (method === "IsAuthorization") return response(method, "true");
+      if (method === "FindCatalog") return response(method, catalog());
+      assert.equal(parameters.SearchCross, "1");
+      return emptyResponse(method);
+    });
+    const events = [];
+    await runSupplierSearch({ adapter, sessionManager: sessions, query: { mode, article: "A1", ...(mode === "analogs" ? { brand: "TEST" } : {}) },
+      signal: signal(), emit: (event) => events.push(event) });
+    assert.equal(authorizations, 1);
+    assert.equal(events.at(-1).status, "completed");
+    assert.equal(events.filter((event) => event.type === "result").length, 0);
+    const empty = new AutopiterApiAdapter(async (method) => emptyResponse(method));
+    const values = [];
+    await empty[mode === "brands" ? "searchBrands" : "searchAnalogs"]({ mode, article: "A1", brand: "TEST" }, context(), (value) => values.push(value), manager());
+    assert.deepEqual(values, mode === "brands" ? [[]] : []);
+  }
+});
+
+test("Autopiter brand and analog HTTP streams include real adapter results in the shared API", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "autopiter-search-http-"));
+  const previousPath = process.env.GARAGE_DB_PATH;
+  process.env.GARAGE_DB_PATH = join(directory, "garage.sqlite");
+  const requests = [];
+  const adapter = new AutopiterApiAdapter(async (method, parameters) => {
+    requests.push({ method, parameters });
+    return response(method, method === "FindCatalog" ? catalog() : offer({ Number: "B1", CatalogName: "CROSS" }));
+  });
+  const service = new SearchApplicationService([adapter], manager(), () => assert.fail("unexpected disconnection"));
+  const server = createAggregatorServer({ application: { streamSearch: service.streamSearch.bind(service) }, publicDir: resolve("src/frontend") });
+  try {
+    await new Promise((resolvePromise, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolvePromise); });
+    for (const mode of ["brands", "analogs"]) {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/search?stream=once&article=A1&supplier=autopiter&mode=${mode}&brand=TEST`);
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("content-type"), /text\/event-stream/);
+      const events = (await response.text()).split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)));
+      assert.deepEqual(events[0].suppliers, ["autopiter"]);
+      assert.equal(events.at(-1).type, "search_completed");
+      if (mode === "brands") {
+        assert.deepEqual(events.find((event) => event.type === "brand_candidates").brands, ["TEST"]);
+      } else {
+        const offer = events.find((event) => event.type === "result");
+        assert.equal(offer.result.article, "B1");
+        assert.equal(offer.result.isAnalog, true);
+        assert.equal(typeof offer.offerId, "string");
+      }
+    }
+    assert.deepEqual(requests.map((request) => request.method), ["FindCatalog", "FindCatalog", "GetPriceId"]);
+    assert.equal(requests.at(-1).parameters.SearchCross, "1");
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolvePromise) => server.close(resolvePromise));
+    if (previousPath === undefined) delete process.env.GARAGE_DB_PATH;
+    else process.env.GARAGE_DB_PATH = previousPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Autopiter analog search aborts all pending catalog prices without late offers", { timeout: 3000 }, async () => {
+  const controller = new AbortController();
+  const started = Promise.withResolvers();
+  let active = 0;
+  let requests = 0;
+  const adapter = new AutopiterApiAdapter(async (method, parameters, requestSignal) => {
+    if (method === "FindCatalog") return response(method, Array.from({ length: 8 }, (_, index) => catalog({ ArticleId: String(101 + index) })).join(""));
+    assert.equal(parameters.SearchCross, "1");
+    requests++;
+    active++;
+    if (active === 4) started.resolve();
+    try {
+      return await new Promise((_resolve, reject) => requestSignal.addEventListener("abort", () => reject(requestSignal.reason), { once: true }));
+    } finally { active--; }
+  });
+  const pending = adapter.searchAnalogs({ mode: "analogs", article: "A1", brand: "TEST" }, { signal: controller.signal, timeoutMs: 1000 }, () => assert.fail("late offer"), manager());
+  const rejected = assert.rejects(pending, /cancelled/);
+  await started.promise;
+  controller.abort(new Error("cancelled"));
+  await rejected;
+  assert.equal(active, 0);
+  assert.equal(requests, 4);
 });
 
 test("Autopiter overlaps catalog prices with bounded concurrency and preserves offer order", async (t) => {

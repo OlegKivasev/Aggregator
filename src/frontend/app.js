@@ -257,7 +257,7 @@ const supplierNames = {
   mladov: "Механик Ладов",
 };
 const supplierIds = Object.keys(supplierNames);
-const analogSupplierIds = ["rossko", "armtek", "part-kom", "stparts", "forum-auto"];
+const analogSupplierIds = ["rossko", "armtek", "part-kom", "stparts", "forum-auto", "autopiter"];
 const visibleSuppliers = new Set(supplierIds);
 let supplierSearchSelectionsRestored = false;
 const tableColumnIds = tableColumnInputs.map((input) => input.value);

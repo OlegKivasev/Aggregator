@@ -348,7 +348,7 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /brands: \[result\.brand\]/);
   assert.match(app, /formatBrand\(result\.brand\)/);
   assert.match(app, /formatArticle\(result\.article\)/);
-  assert.match(app, /const analogSupplierIds = \["rossko", "armtek", "part-kom", "stparts", "forum-auto"\]/);
+  assert.match(app, /const analogSupplierIds = \["rossko", "armtek", "part-kom", "stparts", "forum-auto", "autopiter"\]/);
   assert.match(app, /analogSupplierIds\.filter\(isSupplierVisible\)/);
   assert.doesNotMatch(html, /id="analogs-search-status"/);
   assert.doesNotMatch(app, /setAnalogSearchStatus|updateAnalogSearchProgress/);

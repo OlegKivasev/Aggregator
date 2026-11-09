@@ -39,12 +39,15 @@ test("Autopiter SOAP transport uses a fixed HTTPS origin, escapes credentials an
     assert.deepEqual(response.setCookie, ["AuthCoocies=fixture"]);
     await autopiterSoapRequest("IsAuthorization", {}, new AbortController().signal, "AuthCoocies=fixture");
     assert.equal(calls[1].options.headers.Cookie, "AuthCoocies=fixture");
+    await autopiterSoapRequest("GetPriceId", { ArticleId: "101", Currency: "РУБ", SearchCross: "1", MinSalesRating: "0", MinRealTimeInProc: "0" }, new AbortController().signal, "AuthCoocies=fixture");
+    assert.equal(calls[2].options.headers.SOAPAction, '"http://www.autopiter.ru/GetPriceId"');
+    assert.match(calls[2].body, /<ArticleId>101<\/ArticleId><Currency>РУБ<\/Currency><SearchCross>1<\/SearchCross>/);
     oversized = true;
     await assert.rejects(autopiterSoapRequest("FindCatalog", { Number: "A1" }, new AbortController().signal, "AuthCoocies=fixture"), SupplierIntegrationError);
     const aborted = new AbortController();
     aborted.abort(new Error("cancelled before request"));
     await assert.rejects(autopiterSoapRequest("FindCatalog", { Number: "A1" }, aborted.signal), /cancelled before request/);
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 4);
   } finally {
     replacement.mock.restore(); syncBuiltinESMExports();
   }

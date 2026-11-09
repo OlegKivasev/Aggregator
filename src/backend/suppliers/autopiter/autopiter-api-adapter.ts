@@ -1,6 +1,6 @@
 import { autopiterConfig, supplierMaxResponseBytes } from "../../config.ts";
 import type { SupplierSessionManager } from "../../session/session-manager.ts";
-import type { AutopiterCredentials, NormalizedSearchResult, SearchQuery, SupplierSearchContext } from "../../types.ts";
+import type { AnalogSearchQuery, AutopiterCredentials, BrandDiscoveryQuery, NormalizedSearchResult, SearchQuery, SupplierSearchContext } from "../../types.ts";
 import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
 import { siteHttpRequest, type SiteHttpResponse } from "../site-http.ts";
 import { parseSupplierXml, type XmlElement } from "../soap-xml.ts";
@@ -15,6 +15,7 @@ interface AutopiterSessionRecovery {
 }
 
 type PriceOutcome = { ok: true; offers: XmlElement[] } | { ok: false; error: unknown };
+interface CatalogMatch { id: string; brand: string; }
 
 const namespace = "http://www.autopiter.ru/";
 const endpoint = new URL("https://service.autopiter.ru/v2/price");
@@ -23,6 +24,7 @@ const localName = (element: XmlElement): string => element.name.split(":").at(-1
 const children = (element: XmlElement, name: string): XmlElement[] => element.children.filter((item) => localName(item) === name);
 const text = (element: XmlElement, name: string): string => children(element, name)[0]?.text.trim() || "";
 const articleKey = (value: string): string => value.replace(/[^\p{L}\p{N}]/gu, "").toUpperCase();
+const brandKey = (value: string): string => articleKey(value.normalize("NFKC"));
 const escapeXml = (value: string): string => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 
 export const autopiterSoapRequest: AutopiterRequester = (method, fields, signal, cookie) => siteHttpRequest(endpoint, {
@@ -135,11 +137,26 @@ function deliveryDate(value: string): string | null {
   return calendarDate.toISOString().slice(0, 10) === match[1] ? calendarDate.toISOString() : null;
 }
 
-function normalizeOffer(offer: XmlElement, requestedArticle: string): NormalizedSearchResult | null {
+function parseCatalogs(response: SiteHttpResponse, requestedArticle: string): CatalogMatch[] {
+  const matches = new Map<string, CatalogMatch>();
+  for (const catalog of listResult(response, "FindCatalog", "SearchCatalogModel")) {
+    const article = text(catalog, "Number");
+    const id = text(catalog, "ArticleId");
+    const brand = text(catalog, "CatalogName");
+    if (!article || !brand || !/^[1-9]\d{0,18}$/.test(id)) throw new SupplierIntegrationError("Autopiter returned an invalid catalog");
+    if (articleKey(article) === articleKey(requestedArticle) && !matches.has(id)) matches.set(id, { id, brand });
+  }
+  if (matches.size > 64) throw new SupplierIntegrationError("Autopiter returned too many catalogs");
+  return [...matches.values()];
+}
+
+function normalizeOffer(offer: XmlElement, requestedArticle: string, analogBrand?: string): NormalizedSearchResult | null {
   const article = text(offer, "Number");
   if (!article) throw new SupplierIntegrationError("Autopiter offer has no article");
-  if (articleKey(article) !== articleKey(requestedArticle) || text(offer, "NumberChange")) return null;
   const brand = text(offer, "CatalogName");
+  if (text(offer, "NumberChange")) return null;
+  if (analogBrand === undefined ? articleKey(article) !== articleKey(requestedArticle)
+    : articleKey(article) === articleKey(requestedArticle) && brandKey(brand) === brandKey(analogBrand)) return null;
   const title = text(offer, "Name");
   const rawPrice = text(offer, "SalePrice");
   const price = /^\d+(?:\.\d+)?$/.test(rawPrice) ? Number(rawPrice) : NaN;
@@ -160,6 +177,7 @@ function normalizeOffer(offer: XmlElement, requestedArticle: string): Normalized
     deliveryDate: date, deliveryDateApproximate: false,
     isReturnable: Number(refusal) !== 3 && Number(refusal) !== 4,
     link: "https://autopiter.ru/",
+    ...(analogBrand !== undefined ? { isAnalog: true } : {}),
   };
 }
 
@@ -238,6 +256,29 @@ export class AutopiterApiAdapter implements SupplierAdapter {
   }
 
   async search(query: SearchQuery, context: SupplierSearchContext, onResult: (result: NormalizedSearchResult) => void, manager: SupplierSessionManager): Promise<void> {
+    await this.searchPrices(query, context, onResult, manager);
+  }
+
+  async searchAnalogs(query: AnalogSearchQuery, context: SupplierSearchContext, onResult: (result: NormalizedSearchResult) => void, manager: SupplierSessionManager): Promise<void> {
+    await this.searchPrices(query, context, onResult, manager, query.brand);
+  }
+
+  async searchBrands(query: BrandDiscoveryQuery, context: SupplierSearchContext, onBrands: (brands: string[]) => void, manager: SupplierSessionManager): Promise<void> {
+    const operation = manager.beginOperation(this.id, context.signal);
+    const searchContext = { ...context, signal: operation.signal };
+    try {
+      const catalogs = await this.requestWithSession("FindCatalog", { Number: query.article }, searchContext, manager,
+        (response) => parseCatalogs(response, query.article), {});
+      operation.signal.throwIfAborted();
+      const brands = new Map<string, string>();
+      for (const { brand } of catalogs) {
+        if (!brands.has(brandKey(brand))) brands.set(brandKey(brand), brand);
+      }
+      onBrands([...brands.values()]);
+    } finally { operation.dispose(); }
+  }
+
+  private async searchPrices(query: SearchQuery, context: SupplierSearchContext, onResult: (result: NormalizedSearchResult) => void, manager: SupplierSessionManager, analogBrand?: string): Promise<void> {
     const operation = manager.beginOperation(this.id, context.signal);
     const controller = new AbortController();
     const searchContext = { ...context, signal: AbortSignal.any([operation.signal, controller.signal]) };
@@ -245,19 +286,12 @@ export class AutopiterApiAdapter implements SupplierAdapter {
     try {
       searchContext.signal.throwIfAborted();
       const recovery: AutopiterSessionRecovery = {};
-      const catalogs = await this.requestWithSession("FindCatalog", { Number: query.article }, searchContext, manager, (response) => listResult(response, "FindCatalog", "SearchCatalogModel"), recovery);
+      const catalogs = await this.requestWithSession("FindCatalog", { Number: query.article }, searchContext, manager, (response) => parseCatalogs(response, query.article), recovery);
       searchContext.signal.throwIfAborted();
-      const ids = new Set<string>();
-      for (const catalog of catalogs) {
-        const article = text(catalog, "Number");
-        const id = text(catalog, "ArticleId");
-        if (!article || !text(catalog, "CatalogName") || !/^[1-9]\d{0,18}$/.test(id)) throw new SupplierIntegrationError("Autopiter returned an invalid catalog");
-        if (articleKey(article) === articleKey(query.article)) ids.add(id);
-      }
-      if (ids.size > 64) throw new SupplierIntegrationError("Autopiter returned too many catalogs");
-      const catalogIds = [...ids];
+      const catalogIds = catalogs.filter(({ brand }) => analogBrand === undefined || brandKey(brand) === brandKey(analogBrand)).map(({ id }) => id);
+      const emittedAnalogs = new Set<string>();
       const loadPrices = (id: string): Promise<PriceOutcome> => this.requestWithSession(
-        "GetPriceId", { ArticleId: id, Currency: "РУБ", SearchCross: "0", MinSalesRating: "0", MinRealTimeInProc: "0" },
+        "GetPriceId", { ArticleId: id, Currency: "РУБ", SearchCross: analogBrand === undefined ? "0" : "1", MinSalesRating: "0", MinRealTimeInProc: "0" },
         searchContext, manager, (response) => listResult(response, "GetPriceId", "PriceSearchModel"), recovery,
       ).then((offers) => ({ ok: true, offers }), (error: unknown) => ({ ok: false, error }));
       catalogIds.slice(0, priceRequestConcurrency).forEach((id, index) => pending.set(index, loadPrices(id)));
@@ -271,8 +305,15 @@ export class AutopiterApiAdapter implements SupplierAdapter {
         if (next < catalogIds.length) pending.set(next, loadPrices(catalogIds[next]));
         for (const offer of outcome.offers) {
           searchContext.signal.throwIfAborted();
-          const result = normalizeOffer(offer, query.article);
-          if (result) onResult(result);
+          const result = normalizeOffer(offer, query.article, analogBrand);
+          if (!result) continue;
+          if (analogBrand !== undefined) {
+            const key = JSON.stringify([text(offer, "DetailUid"), text(offer, "SellerId"), brandKey(result.brand), articleKey(result.article),
+              result.title, result.price, result.quantity, result.warehouse, result.deliveryDate, result.isReturnable]);
+            if (emittedAnalogs.has(key)) continue;
+            emittedAnalogs.add(key);
+          }
+          onResult(result);
         }
       }
     } finally {
