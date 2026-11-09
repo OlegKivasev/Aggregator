@@ -1,3 +1,5 @@
+import { splitRepairVehicleName } from "./repair-vehicle-presentation.js";
+
 export function bootstrapRepairs({ onActiveEmpty } = {}) {
   const views = [false, true].map((testPlatform) => {
     const prefix = testPlatform ? "test-repairs" : "repairs";
@@ -89,8 +91,15 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       const vehicleCell = document.createElement("td");
       const vehicle = document.createElement("span");
       vehicle.className = "repairs-vehicle-name";
-      vehicle.textContent = card.vehicleName || (card.counterpartyName ? "Договор не указан" : "—");
+      const { name, plate } = splitRepairVehicleName(card.vehicleName);
+      vehicle.textContent = name || (card.counterpartyName ? "Договор не указан" : "—");
       vehicleCell.append(vehicle);
+      if (plate) {
+        const registration = document.createElement("span");
+        registration.className = "repairs-vehicle-plate";
+        registration.textContent = plate;
+        vehicleCell.append(registration);
+      }
       if (card.counterpartyName) {
         const counterparty = document.createElement("span");
         counterparty.className = "repairs-counterparty panel__meta";

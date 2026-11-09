@@ -615,6 +615,7 @@ input {
 .users-settings__content > p { margin: 0; }
 .users-settings__content > .users-list { margin-top: 0; }
 .users-settings__content > .auth-feedback:empty { display: none; }
+.users-settings__content > .auth-feedback[data-state="success"] { color: #18794e; }
 .users-settings__create { justify-self: start; color: #fff; border-color: var(--accent); background: var(--accent); }
 .users-settings__create:hover, .users-settings__create:focus-visible { color: #fff; border-color: var(--accent-dark); background: var(--accent-dark); }
 .user-create-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 24px; overflow: auto; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); background: var(--surface); box-shadow: 0 16px 48px rgba(23, 32, 42, .2); }
@@ -631,12 +632,20 @@ input {
 .users-settings__content legend { margin-bottom: 6px; font-size: 13px; font-weight: 700; }
 .users-list { display: grid; gap: 8px; margin-top: 18px; }
 .users-list h3 { margin: 0; font-size: 15px; }
-.users-list__row { min-width: 0; border: 1px solid var(--line); border-radius: 10px; }
+.users-list__row { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: 10px; }
 .users-list__summary { display: flex; align-items: center; gap: 10px; padding: 12px; cursor: pointer; list-style: none; }
 .users-list__summary::-webkit-details-marker { display: none; }
 .users-list__summary::before { width: 8px; height: 8px; flex: 0 0 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); content: ""; }
 .users-list__row[open] > .users-list__summary::before { transform: rotate(45deg); }
-.users-list__summary > div { min-width: 0; overflow-wrap: anywhere; }
+.users-list__summary > div { flex: 1; min-width: 0; overflow-wrap: anywhere; user-select: text; }
+.users-list__handle { display: grid; flex: 0 0 28px; width: 28px; min-height: 36px; padding: 0; place-items: center; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 22px; cursor: grab; touch-action: none; user-select: none; }
+.users-list__handle:hover, .users-list__handle:focus-visible { color: var(--accent); background: #fff1eb; outline: 2px solid var(--accent); outline-offset: 1px; }
+.users-list__row.is-user-dragging { opacity: .5; }
+.users-list__row.is-user-dragging .users-list__handle { cursor: grabbing; }
+.users-list__row.is-user-drop-before::before, .users-list__row.is-user-drop-after::after { position: absolute; right: 0; left: 0; height: 3px; border-radius: 2px; background: var(--accent); content: ""; pointer-events: none; }
+.users-list__row.is-user-drop-before::before { top: -6px; }
+.users-list__row.is-user-drop-after::after { bottom: -6px; }
+.users-list[aria-busy="true"] .users-list__handle { cursor: wait; }
 .users-list__summary strong, .users-list__summary span { display: block; }
 .users-list__summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
 .users-list__row .panel__meta { margin-top: 3px; }
@@ -710,7 +719,10 @@ input {
 .repairs-table .results-data-table { width: 100%; min-width: 0; }
 .repairs-table .results-data-table th { white-space: normal; overflow: visible; text-overflow: clip; }
 .repairs-table .results-data-table td { white-space: normal; overflow-wrap: anywhere; }
-.repairs-vehicle-name { display: block; font-weight: 600; line-height: 1.4; }
+.repairs-vehicle-name { display: block; font-size: 18px; font-weight: 800; line-height: 1.4; }
+.repairs-vehicle-plate { display: block; margin-top: 6px; color: var(--ink); font-size: 17px; font-weight: 700; line-height: 1.4; letter-spacing: .04em; }
+.repairs-function .results-panel__controls > .btn-primary { min-height: 40px; padding: 8px 16px; color: #fff; border-color: var(--accent); background: var(--accent); }
+.repairs-function .results-panel__controls > .btn-primary:hover:enabled, .repairs-function .results-panel__controls > .btn-primary:focus-visible { border-color: var(--accent-dark); background: var(--accent-dark); }
 .repairs-counterparty { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .repairs-name-column { width: 58%; }
 .repairs-readiness-column { width: 42%; }

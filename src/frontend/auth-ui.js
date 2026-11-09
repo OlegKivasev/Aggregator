@@ -1,3 +1,5 @@
+import { setupUserListOrder } from "./user-list-order.js";
+
 const authScreen = document.querySelector("#auth-screen");
 const loginForm = document.querySelector("#auth-login-form");
 const fioInput = document.querySelector("#auth-fio");
@@ -87,6 +89,7 @@ const renderUsers = (users) => {
   for (const user of users) {
     const row = document.createElement("details");
     row.className = "users-list__row";
+    row.dataset.userId = user.id;
     const summary = document.createElement("summary");
     summary.className = "users-list__summary";
     const info = document.createElement("div");
@@ -97,6 +100,17 @@ const renderUsers = (users) => {
     permissions.className = "panel__meta";
     info.append(fio, permissions);
     summary.append(info);
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "users-list__handle";
+    handle.textContent = "⠿";
+    handle.setAttribute("aria-label", `Переместить пользователя ${user.fio}`);
+    handle.title = "Перетащите за край карточки или используйте стрелки ↑/↓";
+    summary.append(handle);
+    summary.addEventListener("click", (event) => {
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && info.contains(selection.anchorNode)) event.preventDefault();
+    });
     row.append(summary);
     const form = document.createElement("form");
     form.className = "auth-form users-list__form";
@@ -152,6 +166,7 @@ const renderUsers = (users) => {
         const payload = await response.json();
         Object.assign(user, payload.user);
         fio.textContent = user.fio;
+        handle.setAttribute("aria-label", `Переместить пользователя ${user.fio}`);
         fioInput.value = user.fio;
         permissions.textContent = accessLabel(user);
         passwordInput.value = "";
@@ -187,6 +202,7 @@ const renderUsers = (users) => {
           if (!response.ok) throw new Error(await messageFor(response, "Не удалось удалить пользователя."));
           row.remove();
           usersFeedback.textContent = "Пользователь удалён.";
+          usersFeedback.dataset.state = "success";
         } catch (error) {
           feedback.textContent = error instanceof Error ? error.message : "Не удалось удалить пользователя.";
         } finally {
@@ -227,6 +243,11 @@ const openLoginUsers = () => {
     return;
   }
   const shown = loginUsers.filter((user) => user.fio.toLocaleLowerCase("ru-RU").includes(filter));
+  if (!shown.length) {
+    fioOptions.replaceChildren();
+    closeLoginUsers();
+    return;
+  }
   activeLoginUserIndex = -1;
   fioInput.removeAttribute("aria-activedescendant");
   fioOptions.replaceChildren(...shown.map((user, index) => {
@@ -241,12 +262,6 @@ const openLoginUsers = () => {
     option.addEventListener("click", () => selectLoginUser(user));
     return option;
   }));
-  if (!shown.length) {
-    const empty = document.createElement("p");
-    empty.className = "search-history__empty";
-    empty.textContent = loginUsers.length ? "Совпадений нет" : "Пользователей пока нет";
-    fioOptions.append(empty);
-  }
   fioOptions.hidden = false;
   fioInput.setAttribute("aria-expanded", "true");
   fioToggle.setAttribute("aria-expanded", "true");
@@ -296,6 +311,25 @@ const loadUsers = async () => {
   renderUsers(payload.users);
 };
 
+setupUserListOrder({
+  list: usersList,
+  save: async (userIds) => {
+    usersFeedback.textContent = "";
+    delete usersFeedback.dataset.state;
+    const response = await fetch("/api/users/order", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userIds }), signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) throw new Error(await messageFor(response, "Не удалось сохранить порядок пользователей."));
+    usersFeedback.textContent = "Порядок пользователей сохранён.";
+    usersFeedback.dataset.state = "success";
+  },
+  onError: (message) => {
+    usersFeedback.textContent = message;
+    delete usersFeedback.dataset.state;
+  },
+});
+
 const loadLoginUsers = async () => {
   if (!fioOptions) return;
   const response = await fetch("/api/auth/users", { cache: "no-store" });
@@ -311,6 +345,7 @@ let creatingUser = false;
 
 userCreateOpen?.addEventListener("click", () => {
   usersFeedback.textContent = "";
+  delete usersFeedback.dataset.state;
   userCreateDialog.showModal();
 });
 for (const button of userCreateCancelButtons) {
@@ -350,10 +385,12 @@ userCreateForm?.addEventListener("submit", async (event) => {
     if (!response.ok) throw new Error(await messageFor(response, "Не удалось создать пользователя."));
     userCreateDialog.close();
     usersFeedback.textContent = "Пользователь создан.";
+    usersFeedback.dataset.state = "success";
     try {
       await loadUsers();
     } catch {
       usersFeedback.textContent = "Пользователь создан, но не удалось обновить список. Обновите страницу.";
+      delete usersFeedback.dataset.state;
     }
   } catch (error) {
     userCreateFeedback.textContent = error instanceof Error && error.name !== "TimeoutError"

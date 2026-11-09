@@ -103,3 +103,57 @@ test("serves the login page before authentication while protecting API routes", 
     assert.equal(protectedResponse.status, 401);
   });
 });
+
+test("only admins can persist a complete user order; invalid or stale orders leave it intact", async () => {
+  await withServer(async (baseUrl) => {
+    const cookie = await login(baseUrl, "Администратор", "admin-password-123");
+    const headers = { Cookie: cookie, "Content-Type": "application/json" };
+    const create = async (fio) => {
+      const response = await fetch(`${baseUrl}/api/users`, { method: "POST", headers,
+        body: JSON.stringify({ fio, password: "order-test-password", permissions: ["repairs"] }) });
+      assert.equal(response.status, 201);
+      return (await response.json()).user;
+    };
+    const alpha = await create("Альфа Сотрудник");
+    const beta = await create("Бета Сотрудник");
+    const list = async () => (await (await fetch(`${baseUrl}/api/users`, { headers })).json()).users;
+    const initial = await list();
+    const admin = initial.find((user) => user.isAdmin);
+    assert.deepEqual(initial.map((user) => user.id), [admin.id, alpha.id, beta.id]);
+    const ids = [beta.id, alpha.id, admin.id];
+    const put = (payload, customHeaders = headers) => fetch(`${baseUrl}/api/users/order`, {
+      method: "PUT", headers: customHeaders, body: JSON.stringify(payload),
+    });
+    assert.equal((await put({ userIds: ids }, { "Content-Type": "application/json" })).status, 401);
+    const employeeCookie = await login(baseUrl, alpha.fio, "order-test-password");
+    assert.equal((await put({ userIds: ids }, { Cookie: employeeCookie, "Content-Type": "application/json" })).status, 403);
+    assert.equal((await put({ userIds: ids })).status, 200);
+    assert.deepEqual((await list()).map((user) => user.id), ids);
+    for (const [payload, status] of [[null, 400], [{}, 400], [{ userIds: "invalid" }, 400],
+      [{ userIds: [alpha.id, alpha.id, admin.id] }, 400], [{ userIds: [alpha.id, 1, admin.id] }, 400],
+      [{ userIds: [alpha.id] }, 409], [{ userIds: [beta.id, alpha.id, "unknown-user"] }, 409]]) {
+      assert.equal((await put(payload)).status, status);
+      assert.deepEqual((await list()).map((user) => user.id), ids);
+    }
+    assert.equal((await fetch(`${baseUrl}/api/users/order`, { headers })).status, 405);
+    const restartedAuth = new UserAuthService(process.env.GARAGE_DB_PATH, "Администратор", "admin-password-123");
+    const restartedServer = createAggregatorServer({ application: { streamSearch: async () => {}, listSupplierSessions: () => [] },
+      publicDir: resolve("src/frontend"), auth: restartedAuth });
+    try {
+      await new Promise((resolvePromise, reject) => { restartedServer.once("error", reject); restartedServer.listen(0, "127.0.0.1", resolvePromise); });
+      const response = await fetch(`http://127.0.0.1:${restartedServer.address().port}/api/users`, { headers });
+      assert.deepEqual((await response.json()).users.map((user) => user.id), ids);
+    } finally {
+      restartedServer.closeAllConnections();
+      await new Promise((resolvePromise) => restartedServer.close(resolvePromise));
+    }
+    const added = await create("А Новый сотрудник");
+    assert.deepEqual((await list()).map((user) => user.id), [...ids, added.id]);
+    assert.equal((await put({ userIds: ids })).status, 409);
+    const removed = await fetch(`${baseUrl}/api/users`, { method: "DELETE", headers, body: JSON.stringify({ id: alpha.id }) });
+    assert.equal(removed.status, 204);
+    assert.deepEqual((await list()).map((user) => user.id), [beta.id, admin.id, added.id]);
+    const suggestions = await (await fetch(`${baseUrl}/api/auth/users`)).json();
+    assert.deepEqual(suggestions.users.map((user) => user.fio), [beta.fio, added.fio]);
+  });
+});

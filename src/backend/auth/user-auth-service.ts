@@ -161,10 +161,16 @@ export class UserAuthService {
         created_at TEXT NOT NULL
       ) STRICT;
       CREATE INDEX IF NOT EXISTS aggregator_sessions_user_idx ON aggregator_sessions (user_id);
+      CREATE TABLE IF NOT EXISTS aggregator_user_order (
+        user_id TEXT PRIMARY KEY NOT NULL,
+        position INTEGER NOT NULL CHECK (position >= 0)
+      ) STRICT;
     `);
     this.findByIdStatement = this.database.prepare("SELECT id, fio, password_hash, password_salt, is_admin, permissions FROM aggregator_users WHERE id = ?");
     this.findByFioStatement = this.database.prepare("SELECT id, fio, password_hash, password_salt, is_admin, permissions FROM aggregator_users WHERE fio_key = ?");
-    this.listStatement = this.database.prepare("SELECT id, fio, password_hash, password_salt, is_admin, permissions FROM aggregator_users ORDER BY is_admin DESC, fio_key ASC");
+    this.listStatement = this.database.prepare(`SELECT id, fio, password_hash, password_salt, is_admin, permissions
+      FROM aggregator_users LEFT JOIN aggregator_user_order ON user_id = id
+      ORDER BY position IS NULL, position, is_admin DESC, fio_key ASC`);
     this.findSessionStatement = this.database.prepare("SELECT user_id, expires_at FROM aggregator_sessions WHERE token_hash = ?");
     this.createSessionStatement = this.database.prepare("INSERT INTO aggregator_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)");
     this.deleteSessionStatement = this.database.prepare("DELETE FROM aggregator_sessions WHERE token_hash = ?");
@@ -224,7 +230,7 @@ export class UserAuthService {
   }
 
   async serve(request: IncomingMessage, response: ServerResponse, url: URL): Promise<boolean> {
-    if (url.pathname.startsWith("/api/auth") || url.pathname === "/api/users") response.setHeader("Cache-Control", "no-store");
+    if (url.pathname.startsWith("/api/auth") || url.pathname === "/api/users" || url.pathname === "/api/users/order") response.setHeader("Cache-Control", "no-store");
     if (url.pathname === "/api/auth/users" && request.method === "GET") {
       serveJson(response, 200, { users: this.listUsers().filter((user) => !user.isAdmin).map(({ fio }) => ({ fio })) });
       return true;
@@ -263,11 +269,19 @@ export class UserAuthService {
       serveJson(response, 200, { ok: true });
       return true;
     }
-    if (url.pathname === "/api/users") {
+    if (url.pathname === "/api/users" || url.pathname === "/api/users/order") {
       const user = this.requireAdmin(request, response);
       if (!user) return true;
       try {
-        if (request.method === "GET") {
+        if (url.pathname === "/api/users/order") {
+          if (request.method !== "PUT") {
+            response.setHeader("Allow", "PUT");
+            serveJson(response, 405, { message: "Method not allowed" });
+          } else {
+            this.reorderUsers(await readJsonBody(request));
+            serveJson(response, 200, { ok: true });
+          }
+        } else if (request.method === "GET") {
           serveJson(response, 200, { users: this.listUsers() });
         } else if (request.method === "POST") {
           const payload = await readJsonBody(request);
@@ -315,6 +329,29 @@ export class UserAuthService {
     return this.listStatement.all().map((row) => publicUser(storedUser(row as Record<string, unknown>)));
   }
 
+  private reorderUsers(payload: unknown): void {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new RequestBodyError(400, "userIds is required");
+    const ids = (payload as Record<string, unknown>).userIds;
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string") || new Set(ids).size !== ids.length) {
+      throw new RequestBodyError(400, "userIds must contain unique user IDs");
+    }
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const users = this.database.prepare("SELECT id FROM aggregator_users").all();
+      const knownIds = new Set(users.map((user) => user.id));
+      if (ids.length !== knownIds.size || ids.some((id) => !knownIds.has(id))) {
+        throw new RequestBodyError(409, "Список пользователей изменился. Обновите страницу и повторите перестановку.");
+      }
+      this.database.exec("DELETE FROM aggregator_user_order");
+      const insert = this.database.prepare("INSERT INTO aggregator_user_order (user_id, position) VALUES (?, ?)");
+      ids.forEach((id, position) => insert.run(id, position));
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   private createUser(input: UserInput): AuthenticatedUser {
     if (!input.password) throw new RequestBodyError(400, "password is required");
     if (this.findByFioStatement.get(fioKey(input.fio))) throw new Error("User with this FIO already exists");
@@ -343,6 +380,7 @@ export class UserAuthService {
     const user = storedUser(row);
     if (id === currentUserId || user.isAdmin) throw new Error("Администратора удалить нельзя.");
     this.database.prepare("DELETE FROM aggregator_users WHERE id = ?").run(id);
+    this.database.prepare("DELETE FROM aggregator_user_order WHERE user_id = ?").run(id);
     this.deleteUserSessionsStatement.run(id);
   }
 }

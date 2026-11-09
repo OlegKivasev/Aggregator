@@ -118,20 +118,35 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
       if (detail) assert.equal(await page.locator("#repairs-function .repairs-readiness-detail").textContent(), detail);
       else assert.equal(await page.locator("#repairs-function .repairs-readiness-detail").count(), 0);
     }
-    const legal = { ...updated, goodsReadiness: { totalPositions: 5, availablePositions: 2 }, vehicleName: "Toyota Camry А123ВС", counterpartyName: 'ООО «Тестовый автопарк»' };
+    const legal = { ...updated, goodsReadiness: { totalPositions: 5, availablePositions: 2 }, vehicleName: "Toyota Camry А123ВС163", counterpartyName: 'ООО «Тестовый автопарк»' };
     await send(legal);
     await page.locator("#repairs-refresh").click();
     await page.locator("#repairs-function .repairs-counterparty").waitFor();
     assert.equal(await page.locator("#repairs-rows td").count(), 2);
-    assert.equal(await page.locator("#repairs-function .repairs-vehicle-name").textContent(), legal.vehicleName);
+    assert.equal(await page.locator("#repairs-function .repairs-vehicle-name").textContent(), "Toyota Camry");
+    assert.equal(await page.locator("#repairs-function .repairs-vehicle-plate").textContent(), "А123ВС163");
     assert.equal(await page.locator("#repairs-function .repairs-counterparty").textContent(), legal.counterpartyName);
     assert.equal(await page.locator("#repairs-rows img").count(), 0);
     assert.equal(await page.evaluate(() => window.repairsXss), undefined);
     const vehicleBox = await page.locator("#repairs-function .repairs-vehicle-name").boundingBox();
+    const plateBox = await page.locator("#repairs-function .repairs-vehicle-plate").boundingBox();
     const counterpartyBox = await page.locator("#repairs-function .repairs-counterparty").boundingBox();
-    assert.ok(counterpartyBox.y >= vehicleBox.y + vehicleBox.height);
+    assert.ok(plateBox.y >= vehicleBox.y + vehicleBox.height);
+    assert.ok(counterpartyBox.y >= plateBox.y + plateBox.height);
+    const assertVehicleStyles = async () => {
+      assert.equal(await page.locator("#repairs-function .repairs-vehicle-name").evaluate((element) => getComputedStyle(element).fontSize), "18px");
+      assert.equal(await page.locator("#repairs-function .repairs-vehicle-plate").evaluate((element) => getComputedStyle(element).fontSize), "17px");
+      for (const id of ["repairs-refresh", "test-repairs-refresh"]) {
+        assert.equal(await page.locator(`#${id}`).evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(255, 75, 19)");
+        assert.equal(await page.locator(`#${id}`).evaluate((element) => getComputedStyle(element).color), "rgb(255, 255, 255)");
+      }
+    };
+    await page.mouse.move(0, 0);
+    await page.addStyleTag({ content: ".repairs-function button { transition: none !important; }" });
+    await assertVehicleStyles();
     if (process.env.REPAIRS_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.REPAIRS_SCREENSHOT_DIR, "repairs-desktop.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
+    await assertVehicleStyles();
     assert.equal(await page.locator("#repairs-function-tab").isVisible(), true);
     assert.equal(await page.locator("#repairs-refresh").isVisible(), true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
