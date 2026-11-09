@@ -63,7 +63,7 @@ export function bootstrapNomenclatureLookup() {
     }
     choices.hidden = true;
     card.hidden = false;
-    feedback("Карточка получена из 1С.", "success");
+    feedback("");
     card.scrollIntoView({ block: "nearest" });
   };
   const validateLookup = (lookup, id, barcode) => {
@@ -86,7 +86,7 @@ export function bootstrapNomenclatureLookup() {
     const abort = new AbortController();
     const timeout = setTimeout(() => abort.abort(new DOMException("Lookup timeout", "TimeoutError")), 40_000);
     controller = abort;
-    feedback("Ищем товар в 1С…");
+    feedback("Выполняется поиск", "loading");
     try {
       await (sourcesPromise ?? loadSources());
       if (attempt !== generation || !active) return;
@@ -135,8 +135,7 @@ export function bootstrapNomenclatureLookup() {
       retry.hidden = false;
     } finally { clearTimeout(timeout); }
   };
-  retry.addEventListener("click", async () => { await loadSources(); if (lastBarcode) void start(lastBarcode); });
-  document.querySelector("#nomenclature-source-refresh").addEventListener("click", () => { void loadSources(); });
+  retry.addEventListener("click", () => { void loadSources(); if (lastBarcode) void start(lastBarcode); });
   return {
     start,
     clear() { lastBarcode = ""; clear(); },

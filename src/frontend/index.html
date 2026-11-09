@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=nomenclature-single-1" />
+    <link rel="stylesheet" href="/styles.css?v=nomenclature-search-progress-1" />
     <link rel="stylesheet" href="/order-notifications.css" />
   </head>
   <body>
@@ -407,18 +407,17 @@
         </header>
         <div class="nomenclature-source-row">
           <span class="panel__meta" id="nomenclature-source-status" role="status">Проверяем подключение…</span>
-          <button type="button" class="btn btn-light" id="nomenclature-source-refresh">Проверить связь</button>
         </div>
         <div class="nomenclature-actions">
           <button type="button" class="btn btn-primary" id="nomenclature-scan">Сканировать камерой</button>
         </div>
         <p class="nomenclature-feedback" id="nomenclature-feedback" role="status" aria-live="polite">Нажмите «Сканировать камерой» и разрешите доступ к камере.</p>
-        <p class="nomenclature-feedback" id="nomenclature-lookup-feedback" role="status" aria-live="polite"></p>
         <div class="nomenclature-result" id="nomenclature-result" hidden>
           <label for="nomenclature-code">Штрихкод</label>
           <textarea id="nomenclature-code" rows="1" readonly spellcheck="false"></textarea>
           <button type="button" class="btn btn-light" id="nomenclature-copy">Копировать</button>
         </div>
+        <p class="nomenclature-feedback" id="nomenclature-lookup-feedback" role="status" aria-live="polite"></p>
         <div class="nomenclature-choices" id="nomenclature-choices" hidden></div>
         <article class="nomenclature-product" id="nomenclature-product" hidden aria-labelledby="nomenclature-product-name">
           <h3 id="nomenclature-product-name"></h3>
@@ -1268,7 +1267,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
 
     <script type="module" src="/auth-ui.js"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=nomenclature-single-1"></script>
+    <script type="module" src="/applicability.js?v=nomenclature-search-progress-1"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>

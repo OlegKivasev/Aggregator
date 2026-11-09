@@ -90,8 +90,22 @@ test("a real scan uses the single connection and shows a compact barcode above t
     await scanSvg(page, scanFile(barcode), barcode);
     const job = await waiting;
     assert.equal(job.barcode, barcode);
+    const progress = page.locator("#nomenclature-lookup-feedback");
+    await progress.getByText("Выполняется поиск", { exact: true }).waitFor();
+    assert.equal(await progress.getAttribute("data-tone"), "loading");
+    assert.equal(await progress.evaluate((element) => getComputedStyle(element, "::before").animationName), "search-loading-spin");
+    assert.equal(await progress.evaluate((element) => element.getBoundingClientRect().top >= document.querySelector("#nomenclature-result").getBoundingClientRect().bottom), true);
+    assert.equal(await page.locator("#nomenclature-source-refresh").count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Проверить связь", exact: true }).count(), 0);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    assert.equal(await progress.evaluate((element) => getComputedStyle(element, "::before").animationName), "none");
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-search-mobile.png"), fullPage: true });
     assert.equal(await complete(token, job, [product]), 200);
     await page.locator("#nomenclature-product").waitFor();
+    assert.equal(await progress.textContent(), "");
+    assert.equal(await progress.isVisible(), false);
+    assert.equal(await page.getByText("Карточка получена из 1С.", { exact: true }).count(), 0);
     assert.equal(await page.locator("#nomenclature-product-name").textContent(), product.name);
     assert.equal(await page.locator("#nomenclature-source").count(), 0);
     assert.equal(await page.locator("#nomenclature-code").inputValue(), barcode);
@@ -112,6 +126,7 @@ test("a real scan uses the single connection and shows a compact barcode above t
     ];
     assert.equal(await complete(token, await next, variants), 200);
     await page.locator("#nomenclature-choices").waitFor();
+    assert.notEqual(await progress.getAttribute("data-tone"), "loading");
     assert.equal(await page.locator("#nomenclature-product").isVisible(), false);
     await page.locator("#nomenclature-choices button").filter({ hasText: "Красный" }).click();
     assert.equal(await page.locator("#nomenclature-product-characteristic").textContent(), "Красный");
@@ -121,6 +136,7 @@ test("a real scan uses the single connection and shows a compact barcode above t
     await scanSvg(page, scanFile("missing-code"), "missing-code");
     assert.equal(await complete(token, await missing, []), 200);
     await page.locator("#nomenclature-lookup-feedback").getByText(/не найден/).waitFor();
+    assert.notEqual(await progress.getAttribute("data-tone"), "loading");
     assert.equal(await page.locator("#nomenclature-product").isVisible(), false);
   });
 });
@@ -145,6 +161,7 @@ test("a new scan cancels the old request and never displays its late result; ret
     const repeated = poll(token, 20);
     await page.locator("#nomenclature-lookup-retry").click();
     const retry = await repeated;
+    assert.equal(await page.locator("#nomenclature-lookup-feedback").getAttribute("data-tone"), "loading");
     assert.equal(retry.barcode, "next-code");
     assert.equal(await complete(token, retry, [product]), 200);
     await page.locator("#nomenclature-product").waitFor();

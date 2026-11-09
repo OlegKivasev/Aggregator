@@ -728,6 +728,9 @@ input {
 .nomenclature-feedback:empty { display: none; }
 .nomenclature-feedback[data-tone="error"] { color: #b42318; }
 .nomenclature-feedback[data-tone="success"] { color: #18794e; }
+.nomenclature-feedback[data-tone="loading"] { display: flex; align-items: center; gap: 8px; }
+.nomenclature-feedback[data-tone="loading"]::before { content: ""; flex: 0 0 auto; width: 16px; height: 16px; box-sizing: border-box; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: search-loading-spin .75s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .nomenclature-feedback[data-tone="loading"]::before { animation: none; } }
 body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .nomenclature-preview:not([open]) { display: none; }
 .nomenclature-preview { position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; overflow: hidden; overscroll-behavior: none; touch-action: none; border: 0; border-radius: 0; color: #fff; background: #101419; }
