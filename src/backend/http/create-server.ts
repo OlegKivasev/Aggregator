@@ -123,7 +123,7 @@ function requiredPermission(url: URL): UserPermission | "admin" | null {
     return "admin";
   }
   if (pathname.startsWith("/api/applicability/")) return "applicability";
-  if (pathname === "/api/nomenclature/settings" || pathname.startsWith("/api/nomenclature/connections/")) return "admin";
+  if (pathname === "/api/nomenclature/settings") return "admin";
   if (pathname.startsWith("/api/nomenclature/")) return "nomenclature";
   if (pathname.startsWith("/api/")) return "markup";
   return null;

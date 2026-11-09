@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AuthenticatedUser } from "../auth/user-auth-service.ts";
-import { NomenclatureError, objectFields, parseBarcode, parseLookupResult, parseSource, parseUuid } from "../nomenclature/contract.ts";
+import { NomenclatureError, objectFields, parseBarcode, parseLookupResult, parseUuid } from "../nomenclature/contract.ts";
 import type { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
 import { serveJson } from "./responses.ts";
@@ -23,36 +23,35 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
   };
   try {
     if (integration) {
-      const match = /^\/api\/integration\/1c\/nomenclature\/(production|test)\/(requests|results|status)$/.exec(url.pathname);
+      const match = /^\/api\/integration\/1c\/nomenclature\/(requests|results|status)$/.exec(url.pathname);
       if (!match) throw new NomenclatureError(404, "not_found", "Маршрут не найден.");
-      const source = parseSource(match[1]);
       const token = /^Bearer ([A-Za-z0-9_-]{32,256})$/.exec(request.headers.authorization ?? "")?.[1];
-      service.authenticate(source, token);
-      if (match[2] === "status") {
+      service.authenticate(token);
+      if (match[1] === "status") {
         onlyMethod("GET");
         if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
-        serveJson(response, 200, { ready: true, sourceId: source });
-      } else if (match[2] === "results") {
+        serveJson(response, 200, { ready: true });
+      } else if (match[1] === "results") {
         onlyMethod("POST");
         if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
         const result = parseLookupResult(await jsonBody(64 * 1024));
-        service.complete(source, token, result);
+        service.complete(token, result);
         serveJson(response, 200, { accepted: true, requestId: result.requestId });
       } else {
         onlyMethod("GET");
         const wait = url.searchParams.get("waitSeconds") ?? "20";
         if ([...url.searchParams.keys()].some((key) => key !== "waitSeconds") || url.searchParams.getAll("waitSeconds").length > 1
           || !/^(?:\d|1\d|20)$/.test(wait)) throw new NomenclatureError(400, "wait", "Ожидание должно быть от 0 до 20 секунд.");
-        const release = service.beginPoll(source);
+        const release = service.beginPoll();
         const controller = new AbortController();
         const abort = () => controller.abort();
         response.once("close", abort);
         try {
           const deadline = Date.now() + Number(wait) * 1000;
           while (!controller.signal.aborted) {
-            const job = service.claim(source, token);
+            const job = service.claim(token);
             if (job || Date.now() >= deadline) { serveJson(response, 200, { request: job }); break; }
-            await service.wait(source, controller.signal, deadline - Date.now());
+            await service.wait(controller.signal, deadline - Date.now());
           }
         } finally { response.removeListener("close", abort); release(); }
       }
@@ -60,33 +59,28 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
     }
 
     if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
-    if (url.pathname === "/api/nomenclature/sources") {
+    if (url.pathname === "/api/nomenclature/connection" && request.method === "GET") {
       onlyMethod("GET");
       serveJson(response, 200, service.state());
     } else if (url.pathname === "/api/nomenclature/settings") {
       if (!admin) throw new NomenclatureError(403, "forbidden", "Настройки доступны администратору.");
-      onlyMethod("GET", "PUT");
-      if (request.method === "PUT") {
-        const data = objectFields(await jsonBody(), ["defaultSource"]);
-        service.setDefault(parseSource(data.defaultSource));
-      }
+      onlyMethod("GET");
       serveJson(response, 200, service.state());
-    } else if (/^\/api\/nomenclature\/connections\/(production|test)$/.test(url.pathname)) {
+    } else if (url.pathname === "/api/nomenclature/connection") {
       if (!admin) throw new NomenclatureError(403, "forbidden", "Настройки доступны администратору.");
       onlyMethod("POST", "DELETE");
-      const source = parseSource(url.pathname.split("/").at(-1));
       if (request.method === "POST") {
         objectFields(await jsonBody(), []);
-        const token = service.rotateKey(source);
+        const token = service.rotateKey();
         serveJson(response, 200, { ...service.state(), token });
       } else {
-        service.disconnect(source);
+        service.disconnect();
         serveJson(response, 200, service.state());
       }
     } else if (url.pathname === "/api/nomenclature/lookups") {
       onlyMethod("POST");
-      const data = objectFields(await jsonBody(), ["sourceId", "barcode"]);
-      serveJson(response, 202, { lookup: service.create(parseSource(data.sourceId), parseBarcode(data.barcode), owner) });
+      const data = objectFields(await jsonBody(), ["barcode"]);
+      serveJson(response, 202, { lookup: service.create(parseBarcode(data.barcode), owner) });
     } else {
       const match = /^\/api\/nomenclature\/lookups\/([^/]+)$/.exec(url.pathname);
       if (!match) throw new NomenclatureError(404, "not_found", "Маршрут не найден.");

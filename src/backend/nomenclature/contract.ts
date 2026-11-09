@@ -1,5 +1,3 @@
-export const sourceNames = { production: "Основная база", test: "Тестовая база" } as const;
-export type NomenclatureSource = keyof typeof sourceNames;
 export interface ProductPrice { amount: number; currency: string }
 export interface NomenclatureProduct {
   id: string;
@@ -20,10 +18,6 @@ export function objectFields(value: unknown, allowed: string[]): Record<string, 
     throw new NomenclatureError(400, "invalid_payload", "Некорректные данные запроса.");
   }
   return value as Record<string, unknown>;
-}
-export function parseSource(value: unknown): NomenclatureSource {
-  if (value !== "production" && value !== "test") throw new NomenclatureError(400, "invalid_source", "Выберите основную или тестовую базу.");
-  return value;
 }
 export function parseBarcode(value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200 || /[\u0000-\u001f\u007f-\u009f]/.test(value)) {

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { chromium, webkit } from "playwright";
+import { installCamera, scanSvg } from "./nomenclature-camera.mjs";
 import { createAggregatorServer } from "../../src/backend/http/create-server.ts";
 
 const barcode = "2000043626425";
@@ -58,11 +59,9 @@ async function withPage(check) {
         "/api/applicability/api-key": { configured: false, persistent: false, maskedKey: null },
         "/api/applicability/proxies": { persistent: false, activeRouteId: null, proxies: [], usage: { requestCount: 0 }, directUsage: {} },
         "/api/garage/vehicles": { vehicles: [] },
-        "/api/nomenclature/sources": { defaultSource: "production", sources: [
-          { id: "production", configured: false, online: false }, { id: "test", configured: false, online: false },
-        ] },
+        "/api/nomenclature/connection": { configured: false, online: false, lastSeenAt: null },
       };
-      if (url.pathname === "/api/nomenclature/lookups") return route.fulfill({ status: 503, json: { message: "Подключение выбранной базы 1С ещё не настроено." } });
+      if (url.pathname === "/api/nomenclature/lookups") return route.fulfill({ status: 503, json: { message: "Подключение номенклатуры ещё не настроено." } });
       return route.fulfill({ json: responses[url.pathname] ?? { articles: [], brandCounts: [], hasMore: false } });
     });
     await page.goto(origin);
@@ -81,58 +80,6 @@ async function withPage(check) {
   }
 }
 
-async function uploadSvg(page, svg, expected) {
-  await page.locator("#nomenclature-file").setInputFiles({ name: "code.svg", mimeType: "image/svg+xml", buffer: Buffer.from(svg) });
-  await page.waitForFunction(() => !document.querySelector("#nomenclature-file").disabled);
-  assert.equal(await page.locator("#nomenclature-code").inputValue(), expected);
-  assert.equal(await page.locator("#nomenclature-result").isVisible(), true);
-  assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
-}
-
-async function installCamera(page, svg, torch = "unsupported") {
-  await page.evaluate(async ({ source, torch }) => {
-    const image = new Image();
-    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
-    await image.decode();
-    const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    const drawing = canvas.getContext("2d");
-    const paint = () => drawing.drawImage(image, 0, 0);
-    paint();
-    clearInterval(window.cameraPaint);
-    window.cameraPaint = setInterval(paint, 50);
-    window.updateCameraScene = async (nextSource) => {
-      image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(nextSource)}`;
-      await image.decode();
-      canvas.width = image.naturalWidth;
-      canvas.height = image.naturalHeight;
-      paint();
-    };
-    window.testCameraStreams = [];
-    window.torchRequests = [];
-    navigator.mediaDevices.getUserMedia = async (constraints) => {
-      window.cameraConstraints = constraints;
-      const stream = canvas.captureStream(20);
-      if (torch !== "unsupported") {
-        const index = window.testCameraStreams.length;
-        const track = stream.getVideoTracks()[0];
-        track.getCapabilities = () => ({ torch: true });
-        track.applyConstraints = async (settings) => {
-          const enabled = settings.advanced?.[0]?.torch;
-          window.torchRequests.push({ index, enabled });
-          if (enabled && torch === "rejected") throw new DOMException("Torch unavailable", "NotSupportedError");
-          if (enabled && torch === "delayed" && index === 0) {
-            await new Promise((resolvePromise) => { window.finishTorchSetup = resolvePromise; });
-          }
-        };
-      }
-      window.testCameraStreams.push(stream);
-      return stream;
-    };
-  }, { source: svg, torch });
-}
-
 test("scanner works when the host serves only physical frontend files", async () => {
   await withPage(async ({ page }) => {
     await page.route("**/vendor/**", async (route) => {
@@ -143,15 +90,13 @@ test("scanner works when the host serves only physical frontend files", async ()
         return route.fulfill({ status: 404, contentType: "text/plain", body: "Not found" });
       }
     });
-    await uploadSvg(page, barcodeSvg(), barcode);
+    await scanSvg(page, barcodeSvg(), barcode);
   });
 });
 
 test("nomenclature reads real EAN-13 and QR images safely, copies, restores and fits a phone", async () => {
   await withPage(async ({ page, context, apiRequests }) => {
-    await uploadSvg(page, barcodeSvg(), barcode);
-    const offCenter = barcodeSvg().replaceAll('height="300"', 'height="1000"');
-    await uploadSvg(page, offCenter, barcode);
+    await scanSvg(page, barcodeSvg(), barcode);
     const useWebkit = process.env.NOMENCLATURE_BROWSER === "webkit";
     if (useWebkit) await page.evaluate(() => Object.defineProperty(navigator, "clipboard", {
       configurable: true, value: { writeText: async () => { throw new Error("Clipboard unavailable"); } },
@@ -175,18 +120,15 @@ test("nomenclature reads real EAN-13 and QR images safely, copies, restores and 
       svg.prepend(background);
       return new XMLSerializer().serializeToString(svg);
     }, qrText);
-    await uploadSvg(page, qrSvg, qrText);
+    await scanSvg(page, qrSvg, qrText);
     assert.equal(await page.evaluate(() => window.scanXss), undefined);
     assert.equal(await page.locator("#nomenclature-result img").count(), 0);
     assert.equal(await page.locator("#nomenclature-function").evaluate((element) => element.scrollWidth <= element.clientWidth), true);
-    await uploadSvg(page, barcodeSvg(), barcode);
+    await scanSvg(page, barcodeSvg(), barcode);
     if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-mobile.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 1000 });
     if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-desktop.png"), fullPage: true });
-    await page.locator("#nomenclature-file").setInputFiles({ name: "blank.svg", mimeType: "image/svg+xml", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="white"/></svg>') });
-    await page.getByText(/Код на фото не распознан/).waitFor();
-    assert.equal(await page.locator("#nomenclature-result").isVisible(), false);
-    assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
+    assert.equal(await page.locator("#nomenclature-photo, #nomenclature-file").count(), 0);
     assert.equal(apiRequests.some((path) => /integration/.test(path)), false);
     await page.reload();
     await page.waitForFunction(() => window.aggregatorAuthState?.ready);
@@ -247,12 +189,54 @@ test("camera automatically enables the torch and switches it off on result, stop
   });
 });
 
+test("the camera torch can be toggled off and on, and defaults to on for every new scan", async () => {
+  await withPage(async ({ page }) => {
+    const blank = '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280"><rect width="100%" height="100%" fill="white"/></svg>';
+    await installCamera(page, blank, "supported");
+    await page.locator("#nomenclature-scan").click();
+    const toggle = page.locator("#nomenclature-torch");
+    await page.waitForFunction(() => document.querySelector("#nomenclature-torch").getAttribute("aria-pressed") === "true");
+    assert.equal(await toggle.getAttribute("aria-label"), "Выключить фонарик");
+    await toggle.click();
+    await page.waitForFunction(() => document.querySelector("#nomenclature-torch").getAttribute("aria-pressed") === "false");
+    assert.equal(await toggle.getAttribute("aria-label"), "Включить фонарик");
+    assert.equal(await page.evaluate(() => window.torchRequests.at(-1).enabled), false);
+    assert.equal(await page.locator("#nomenclature-preview").isVisible(), true);
+    await toggle.click();
+    await page.waitForFunction(() => document.querySelector("#nomenclature-torch").getAttribute("aria-pressed") === "true");
+    await toggle.click();
+    await page.waitForFunction(() => document.querySelector("#nomenclature-torch").getAttribute("aria-pressed") === "false");
+    await page.locator("#nomenclature-stop").click();
+    await page.locator("#nomenclature-scan").click();
+    await page.waitForFunction(() => document.querySelector("#nomenclature-torch").getAttribute("aria-pressed") === "true");
+    assert.equal(await page.evaluate(() => window.torchRequests.some((request) => request.index === 1 && request.enabled)), true);
+    if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-camera-torch.png") });
+    await toggle.click();
+    await page.waitForFunction(() => document.querySelector("#nomenclature-torch").getAttribute("aria-pressed") === "false");
+    await page.evaluate((scene) => window.updateCameraScene(scene), cameraScene(720, 1280));
+    await page.waitForFunction((value) => document.querySelector("#nomenclature-code").value === value, barcode);
+    assert.equal(await page.evaluate(() => window.testCameraStreams.every((stream) => stream.getTracks().every((track) => track.readyState === "ended"))), true);
+  });
+});
+
+test("an unsupported camera leaves the torch control disabled and continues scanning", async () => {
+  await withPage(async ({ page }) => {
+    const blank = '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280"><rect width="100%" height="100%" fill="white"/></svg>';
+    await installCamera(page, blank);
+    await page.locator("#nomenclature-scan").click();
+    await page.getByText("Наведите камеру на код и держите телефон неподвижно до распознавания.", { exact: true }).last().waitFor();
+    assert.equal(await page.locator("#nomenclature-torch").isDisabled(), true);
+    await page.evaluate((scene) => window.updateCameraScene(scene), cameraScene(720, 1280));
+    await page.waitForFunction((value) => document.querySelector("#nomenclature-code").value === value, barcode);
+  });
+});
+
 test("a rejected torch setting still allows a real barcode to be scanned", async () => {
   await withPage(async ({ page }) => {
     const blank = '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280"><rect width="100%" height="100%" fill="white"/></svg>';
     await installCamera(page, blank, "rejected");
     await page.locator("#nomenclature-scan").click();
-    await page.getByText("Наведите камеру на код и держите телефон неподвижно до распознавания.", { exact: true }).last().waitFor();
+    await page.getByText("Не удалось переключить фонарик. Сканирование продолжается.", { exact: true }).last().waitFor();
     assert.equal(await page.evaluate(() => window.torchRequests.some((request) => request.enabled)), true);
     await page.evaluate((scene) => window.updateCameraScene(scene), cameraScene(720, 1280));
     await page.waitForFunction((value) => document.querySelector("#nomenclature-code").value === value, barcode);
@@ -282,7 +266,7 @@ test("late torch activation after cancellation cannot stop a newer camera stream
 
 test("camera ignores a real barcode outside the frame and reads it only after moving inside across rotations", async () => {
   await withPage(async ({ page }) => {
-    await uploadSvg(page, barcodeSvg(), barcode);
+    await scanSvg(page, barcodeSvg(), barcode);
     await page.evaluate(() => {
       const reader = window.ZXingBrowser.BrowserMultiFormatReader.prototype;
       const decode = reader.decodeFromCanvas;
@@ -326,7 +310,7 @@ test("camera ignores a real barcode outside the frame and reads it only after mo
 
 test("camera ignores a neighboring QR outside the frame and returns the QR inside it", async () => {
   await withPage(async ({ page }) => {
-    await uploadSvg(page, barcodeSvg(), barcode);
+    await scanSvg(page, barcodeSvg(), barcode);
     const [outside, inside] = await page.evaluate(() => ["OUTSIDE-QR", "INSIDE-TARGET-QR"].map((text) =>
       new XMLSerializer().serializeToString(new window.ZXingBrowser.BrowserQRCodeSvgWriter().write(text, 160, 160))));
     const scene = (includeInside) => `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280">
@@ -378,7 +362,7 @@ test("camera handles denial and a permission response arriving after cancellatio
     assert.equal(await page.locator("#nomenclature-preview").isVisible(), false);
     assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
     const blank = '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="480" height="300" fill="white"/></svg>';
-    await uploadSvg(page, barcodeSvg(), barcode);
+    await scanSvg(page, barcodeSvg(), barcode);
     await installCamera(page, blank);
     await page.evaluate(() => {
       const reader = window.ZXingBrowser.BrowserMultiFormatReader.prototype;
@@ -409,7 +393,6 @@ test("camera handles denial and a permission response arriving after cancellatio
     await page.evaluate(() => Object.defineProperty(window, "isSecureContext", { configurable: true, value: false }));
     await page.locator("#nomenclature-scan").click();
     await page.getByText(/откройте агрегатор по HTTPS/).waitFor();
-    await uploadSvg(page, barcodeSvg(), barcode);
   });
 });
 
@@ -440,11 +423,12 @@ test("decoder loading failure is distinguished from an unreadable code and can b
     let unavailable = true;
     await page.route("**/vendor/**", (route) => unavailable
       ? route.fulfill({ status: 404, body: "Not found" }) : route.fallback());
-    await page.locator("#nomenclature-file").setInputFiles({ name: "code.svg", mimeType: "image/svg+xml", buffer: Buffer.from(barcodeSvg()) });
+    await installCamera(page, cameraScene(720, 1280));
+    await page.locator("#nomenclature-scan").click();
     await page.getByText(/Не удалось загрузить сканер/).waitFor();
     assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
     unavailable = false;
-    await uploadSvg(page, barcodeSvg(), barcode);
+    await scanSvg(page, barcodeSvg(), barcode);
   });
 });
 

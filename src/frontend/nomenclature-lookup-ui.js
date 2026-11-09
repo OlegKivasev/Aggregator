@@ -1,11 +1,10 @@
-const names = { production: "Основная база", test: "Тестовая база" };
 const message = async (response, fallback) => {
   try { const value = await response.json(); return typeof value?.message === "string" ? value.message : fallback; } catch { return fallback; }
 };
 const readState = (value) => {
-  if (!value || !Object.hasOwn(names, value.defaultSource) || !Array.isArray(value.sources) || value.sources.length !== 2
-    || value.sources.some((source) => !source || !Object.hasOwn(names, source.id) || typeof source.configured !== "boolean" || typeof source.online !== "boolean")
-    || new Set(value.sources.map((source) => source.id)).size !== 2) throw new Error("Не удалось проверить подключение к 1С.");
+  if (!value || typeof value.configured !== "boolean" || typeof value.online !== "boolean") {
+    throw new Error("Не удалось проверить подключение к 1С.");
+  }
   return value;
 };
 const connectionText = (source) => !source?.configured ? "Подключение не настроено" : source.online ? "1С на связи" : "Нет связи с 1С";
@@ -14,7 +13,6 @@ const priceText = (price) => price === null ? "—" : new Intl.NumberFormat("ru-
 }).format(price.amount);
 
 export function bootstrapNomenclatureLookup() {
-  const sourceInput = document.querySelector("#nomenclature-source");
   const sourceStatus = document.querySelector("#nomenclature-source-status");
   const lookupStatus = document.querySelector("#nomenclature-lookup-feedback");
   const retry = document.querySelector("#nomenclature-lookup-retry");
@@ -22,9 +20,7 @@ export function bootstrapNomenclatureLookup() {
   const card = document.querySelector("#nomenclature-product");
   const title = document.querySelector("#nomenclature-product-name");
   const characteristic = document.querySelector("#nomenclature-product-characteristic");
-  const sourceLabel = document.querySelector("#nomenclature-product-source");
   let state;
-  let sourceChosen = false;
   let active = false;
   let generation = 0;
   let controller;
@@ -34,16 +30,14 @@ export function bootstrapNomenclatureLookup() {
 
   const feedback = (text, tone = "notice") => { lookupStatus.textContent = text; lookupStatus.dataset.tone = tone; };
   const paintSource = () => {
-    const source = state?.sources.find((item) => item.id === sourceInput.value);
-    sourceStatus.textContent = connectionText(source);
-    sourceStatus.dataset.tone = source?.online ? "success" : "notice";
+    sourceStatus.textContent = connectionText(state);
+    sourceStatus.dataset.tone = state?.online ? "success" : "notice";
   };
   const loadSources = () => {
     sourcesPromise = (async () => {
-      const response = await fetch("/api/nomenclature/sources", { cache: "no-store", signal: AbortSignal.timeout(10_000) });
+      const response = await fetch("/api/nomenclature/connection", { cache: "no-store", signal: AbortSignal.timeout(10_000) });
       if (!response.ok) throw new Error(await message(response, "Не удалось проверить подключение к 1С."));
       state = readState(await response.json());
-      if (!sourceChosen) sourceInput.value = state.defaultSource;
       paintSource();
     })().catch(() => { state = undefined; sourceStatus.textContent = "Не удалось проверить подключение"; });
     return sourcesPromise;
@@ -60,12 +54,10 @@ export function bootstrapNomenclatureLookup() {
     retry.hidden = true;
     feedback("");
   };
-  const showProduct = (product, sourceId) => {
+  const showProduct = (product) => {
     title.textContent = product.name;
     characteristic.textContent = product.characteristicName ?? "";
     characteristic.hidden = !product.characteristicName;
-    sourceLabel.textContent = names[sourceId];
-    sourceLabel.dataset.test = String(sourceId === "test");
     for (const key of ["purchase", "retail", "retailCashless"]) {
       document.querySelector(`[data-nomenclature-price="${key}"]`).textContent = priceText(product.prices[key]);
     }
@@ -74,8 +66,8 @@ export function bootstrapNomenclatureLookup() {
     feedback("Карточка получена из 1С.", "success");
     card.scrollIntoView({ block: "nearest" });
   };
-  const validateLookup = (lookup, id, barcode, sourceId) => {
-    if (!lookup || typeof lookup.id !== "string" || !/^[a-f0-9-]{36}$/i.test(lookup.id) || (id && lookup.id !== id) || lookup.barcode !== barcode || lookup.sourceId !== sourceId
+  const validateLookup = (lookup, id, barcode) => {
+    if (!lookup || typeof lookup.id !== "string" || !/^[a-f0-9-]{36}$/i.test(lookup.id) || (id && lookup.id !== id) || lookup.barcode !== barcode
       || !["pending", "found", "not_found", "error", "expired", "cancelled"].includes(lookup.status) || !Array.isArray(lookup.products)
       || lookup.products.length > 20 || !Number.isFinite(Date.parse(lookup.expiresAt))
       || lookup.products.some((product) => !product || typeof product.name !== "string" || !product.prices
@@ -99,12 +91,10 @@ export function bootstrapNomenclatureLookup() {
       await (sourcesPromise ?? loadSources());
       if (attempt !== generation || !active) return;
       if (!state) throw new Error("Не удалось проверить подключение к 1С. Нажмите «Повторить поиск».");
-      const sourceId = sourceInput.value;
-      sourceChosen = true;
       const response = await fetch("/api/nomenclature/lookups", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceId, barcode }), signal: abort.signal });
+        body: JSON.stringify({ barcode }), signal: abort.signal });
       if (!response.ok) throw new Error(await message(response, "Не удалось начать поиск товара."));
-      let lookup = validateLookup((await response.json()).lookup, null, barcode, sourceId);
+      let lookup = validateLookup((await response.json()).lookup, null, barcode);
       if (attempt !== generation) return;
       requestId = lookup.id;
       const deadline = Math.min(Date.parse(lookup.expiresAt) + 2000, Date.now() + 35_000);
@@ -118,11 +108,11 @@ export function bootstrapNomenclatureLookup() {
         const poll = await fetch(`/api/nomenclature/lookups/${lookup.id}`, { cache: "no-store",
           signal: abort.signal });
         if (!poll.ok) throw new Error(await message(poll, "Не удалось получить карточку товара."));
-        lookup = validateLookup((await poll.json()).lookup, requestId, barcode, sourceId);
+        lookup = validateLookup((await poll.json()).lookup, requestId, barcode);
         if (attempt !== generation || !active) return;
       }
       requestId = undefined;
-      if (lookup.status === "found" && lookup.products.length === 1) showProduct(lookup.products[0], sourceId);
+      if (lookup.status === "found" && lookup.products.length === 1) showProduct(lookup.products[0]);
       else if (lookup.status === "found" && lookup.products.length > 1) {
         feedback("По коду найдено несколько товаров. Выберите нужный.");
         choices.hidden = false;
@@ -131,11 +121,11 @@ export function bootstrapNomenclatureLookup() {
           button.type = "button";
           button.className = "btn btn-light";
           button.textContent = [product.name, product.characteristicName].filter(Boolean).join(" · ");
-          button.addEventListener("click", () => { if (attempt === generation) showProduct(product, sourceId); });
+          button.addEventListener("click", () => { if (attempt === generation) showProduct(product); });
           choices.append(button);
         }
         choices.scrollIntoView({ block: "nearest" });
-      } else if (lookup.status === "not_found") feedback("Товар с таким кодом в выбранной базе не найден.");
+      } else if (lookup.status === "not_found") feedback("Товар с таким кодом в 1С не найден.");
       else throw new Error(lookup.status === "expired" ? "1С не ответила вовремя. Повторите поиск." : "1С не смогла получить карточку товара. Проверьте настройки и повторите поиск.");
       retry.hidden = false;
     } catch (error) {
@@ -145,11 +135,6 @@ export function bootstrapNomenclatureLookup() {
       retry.hidden = false;
     } finally { clearTimeout(timeout); }
   };
-  sourceInput.addEventListener("change", () => {
-    sourceChosen = true;
-    paintSource();
-    if (lastBarcode) void start(lastBarcode); else clear();
-  });
   retry.addEventListener("click", async () => { await loadSources(); if (lastBarcode) void start(lastBarcode); });
   document.querySelector("#nomenclature-source-refresh").addEventListener("click", () => { void loadSources(); });
   return {
@@ -162,7 +147,6 @@ export function bootstrapNomenclatureLookup() {
 export function bootstrapNomenclatureSettings() {
   const section = document.querySelector("#nomenclature-settings");
   const feedback = document.querySelector("#nomenclature-settings-feedback");
-  const defaultSource = document.querySelector("#nomenclature-default-source");
   const keyPanel = document.querySelector("#nomenclature-new-key");
   const keyInput = document.querySelector("#nomenclature-key-value");
   const drawer = document.querySelector("#settings-drawer");
@@ -171,20 +155,16 @@ export function bootstrapNomenclatureSettings() {
   let keyGeneration = 0;
   const clearKey = () => { keyGeneration += 1; keyInput.value = ""; keyPanel.hidden = true; };
   const paint = () => {
-    defaultSource.value = state.defaultSource;
-    for (const source of state.sources) {
-      const row = section.querySelector(`[data-nomenclature-connection="${source.id}"]`);
-      row.querySelector("[data-connection-status]").textContent = connectionText(source);
-      row.querySelector("[data-connection-key]").textContent = source.configured ? "Заменить ключ" : "Создать ключ";
-      row.querySelector("[data-connection-disconnect]").disabled = !source.configured;
-    }
+    section.querySelector("[data-connection-status]").textContent = connectionText(state);
+    section.querySelector("[data-connection-key]").textContent = state.configured ? "Заменить ключ" : "Создать ключ";
+    section.querySelector("[data-connection-disconnect]").disabled = !state.configured;
   };
   const request = async (path, options) => {
     if (busy) return;
     const attempt = keyGeneration;
     busy = true;
     feedback.textContent = "";
-    section.querySelectorAll("button, select").forEach((element) => { element.disabled = true; });
+    section.querySelectorAll("button").forEach((element) => { element.disabled = true; });
     try {
       const response = await fetch(path, { cache: "no-store", ...options, signal: AbortSignal.timeout(10_000) });
       if (!response.ok) throw new Error(await message(response, "Не удалось сохранить настройки подключения."));
@@ -197,29 +177,22 @@ export function bootstrapNomenclatureSettings() {
     } catch (error) { feedback.textContent = error instanceof Error ? error.message : "Не удалось проверить подключение."; }
     finally {
       busy = false;
-      section.querySelectorAll("button, select").forEach((element) => { element.disabled = false; });
+      section.querySelectorAll("button").forEach((element) => { element.disabled = false; });
       if (state) paint();
     }
   };
   section.addEventListener("toggle", () => { if (section.open) void request("/api/nomenclature/settings"); else clearKey(); });
   section.querySelector("summary").addEventListener("click", () => { if (section.open) clearKey(); });
   new MutationObserver(() => { if (drawer.hidden) clearKey(); }).observe(drawer, { attributes: true, attributeFilter: ["hidden"] });
-  for (const row of section.querySelectorAll("[data-nomenclature-connection]")) {
-    const source = row.dataset.nomenclatureConnection;
-    row.querySelector("[data-connection-key]").addEventListener("click", () => {
-      if (state?.sources.find((item) => item.id === source)?.configured && !window.confirm("Заменить ключ? В 1С потребуется указать новый ключ подключения.")) return;
-      clearKey();
-      document.querySelector("#nomenclature-key-source").textContent = names[source];
-      void request(`/api/nomenclature/connections/${source}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    });
-    row.querySelector("[data-connection-disconnect]").addEventListener("click", () => {
-      if (!window.confirm("Отключить эту базу от поиска номенклатуры?")) return;
-      clearKey();
-      void request(`/api/nomenclature/connections/${source}`, { method: "DELETE" });
-    });
-  }
-  document.querySelector("#nomenclature-settings-save").addEventListener("click", () => {
-    void request("/api/nomenclature/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ defaultSource: defaultSource.value }) });
+  section.querySelector("[data-connection-key]").addEventListener("click", () => {
+    if (state?.configured && !window.confirm("Заменить ключ? В 1С потребуется указать новый ключ подключения.")) return;
+    clearKey();
+    void request("/api/nomenclature/connection", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  });
+  section.querySelector("[data-connection-disconnect]").addEventListener("click", () => {
+    if (!window.confirm("Отключить поиск номенклатуры?")) return;
+    clearKey();
+    void request("/api/nomenclature/connection", { method: "DELETE" });
   });
   document.querySelector("#nomenclature-key-copy").addEventListener("click", async () => {
     try { await navigator.clipboard.writeText(keyInput.value); }

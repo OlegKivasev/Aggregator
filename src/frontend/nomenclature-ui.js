@@ -1,5 +1,5 @@
 import { getVideoScanRegion } from "./nomenclature-scan-region.js";
-import { bootstrapNomenclatureLookup, bootstrapNomenclatureSettings } from "./nomenclature-lookup-ui.js";
+import { bootstrapNomenclatureLookup, bootstrapNomenclatureSettings } from "./nomenclature-lookup-ui.js?v=single-connection-1";
 
 let decoderModule;
 
@@ -86,18 +86,18 @@ const cameraErrorMessage = (error) => {
     return "Не удалось загрузить сканер. Обновите страницу и повторите попытку.";
   }
   if (error?.name === "CameraPreviewError") {
-    return "Камера подключена, но браузер не показал изображение. Повторите запуск или считайте код с фото.";
+    return "Камера подключена, но браузер не показал изображение. Повторите запуск.";
   }
   if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
-    return "Нет доступа к камере. Разрешите его в настройках браузера или считайте код с фото.";
+    return "Нет доступа к камере. Разрешите его в настройках браузера.";
   }
   if (error?.name === "NotFoundError" || error?.name === "OverconstrainedError") {
-    return "Камера не найдена. Попробуйте другое устройство или считайте код с фото.";
+    return "Камера не найдена. Попробуйте другое устройство.";
   }
   if (error?.name === "NotReadableError") {
     return "Камера недоступна. Закройте другие приложения, использующие камеру, и повторите попытку.";
   }
-  return "Не удалось запустить сканирование. Повторите попытку или считайте код с фото.";
+  return "Не удалось запустить сканирование. Повторите попытку.";
 };
 
 export function bootstrapNomenclature() {
@@ -105,9 +105,8 @@ export function bootstrapNomenclature() {
   bootstrapNomenclatureSettings();
   const section = document.querySelector("#nomenclature-function");
   const scanButton = document.querySelector("#nomenclature-scan");
-  const photoButton = document.querySelector("#nomenclature-photo");
   const stopButton = document.querySelector("#nomenclature-stop");
-  const fileInput = document.querySelector("#nomenclature-file");
+  const torchButton = document.querySelector("#nomenclature-torch");
   const preview = document.querySelector("#nomenclature-preview");
   const viewfinder = preview.querySelector(".nomenclature-viewfinder");
   let video = document.querySelector("#nomenclature-video");
@@ -122,6 +121,16 @@ export function bootstrapNomenclature() {
   let stream;
   let controls;
   let cameraMode = false;
+  let torchEnabled = false;
+  let torchChanging = false;
+
+  const paintTorch = (available) => {
+    torchButton.disabled = !available || torchChanging;
+    torchButton.setAttribute("aria-pressed", String(torchEnabled));
+    const label = available ? (torchEnabled ? "Выключить фонарик" : "Включить фонарик") : "Фонарик недоступен";
+    torchButton.setAttribute("aria-label", label);
+    torchButton.title = label;
+  };
 
   const setFeedback = (message, tone = "notice") => {
     feedback.textContent = message;
@@ -132,8 +141,6 @@ export function bootstrapNomenclature() {
   const setBusy = (value) => {
     busy = value;
     scanButton.disabled = value;
-    photoButton.disabled = value;
-    fileInput.disabled = value;
     stopButton.hidden = !value;
   };
 
@@ -144,6 +151,9 @@ export function bootstrapNomenclature() {
     controls = undefined;
     stopTracks(stream);
     stream = undefined;
+    torchEnabled = false;
+    torchChanging = false;
+    paintTorch(false);
     video.pause();
     video.srcObject = null;
     setBusy(false);
@@ -154,6 +164,25 @@ export function bootstrapNomenclature() {
   };
 
   const current = (attempt) => attempt === generation && active && !document.hidden;
+  const changeTorch = async (enabled, attempt = generation, scannerControls = controls) => {
+    if (!current(attempt) || typeof scannerControls?.switchTorch !== "function") return;
+    torchChanging = true;
+    paintTorch(true);
+    try {
+      await scannerControls.switchTorch(enabled);
+      if (current(attempt) && controls === scannerControls) torchEnabled = enabled;
+    } catch {
+      // Torch failure must not interrupt recognition or disable the camera.
+      if (current(attempt) && controls === scannerControls) {
+        setFeedback("Не удалось переключить фонарик. Сканирование продолжается.");
+      }
+    } finally {
+      if (current(attempt) && controls === scannerControls) {
+        torchChanging = false;
+        paintTorch(true);
+      } else stopControls(scannerControls);
+    }
+  };
   const begin = () => {
     stop();
     lookup.clear();
@@ -167,18 +196,18 @@ export function bootstrapNomenclature() {
     code.value = result.getText();
     resultPanel.hidden = false;
     stop();
-    setFeedback("Код считан. Результат показан ниже.", "success");
+    setFeedback("");
     void lookup.start(code.value);
   };
 
   const startCamera = async () => {
     if (!active || busy) return;
     if (!window.isSecureContext) {
-      setFeedback("Для доступа к камере откройте агрегатор по HTTPS. Сейчас можно считать код с фото.", "error");
+      setFeedback("Для доступа к камере откройте агрегатор по HTTPS.", "error");
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
-      setFeedback("Этот браузер не поддерживает доступ к камере. Считайте код с фото или откройте другой браузер.", "error");
+      setFeedback("Этот браузер не поддерживает доступ к камере. Откройте другой браузер.", "error");
       return;
     }
     const attempt = begin();
@@ -235,7 +264,7 @@ export function bootstrapNomenclature() {
         } else if (error && !["NotFoundException", "ChecksumException", "FormatException"].includes(error.getKind?.())) {
           stopControls(scannerControls);
           stop();
-          setFeedback("Не удалось прочитать кадр камеры. Повторите попытку или считайте код с фото.", "error");
+          setFeedback("Не удалось прочитать кадр камеры. Повторите попытку.", "error");
         }
       });
       if (!current(attempt)) {
@@ -243,44 +272,13 @@ export function bootstrapNomenclature() {
         return;
       }
       controls = started;
-      try {
-        await started.switchTorch?.(true);
-      } catch {
-        // Lighting is optional: a rejected torch setting must not stop decoding.
-      }
-      if (!current(attempt)) {
-        stopControls(started);
-        return;
-      }
       setFeedback("Наведите камеру на код и держите телефон неподвижно до распознавания.");
+      paintTorch(typeof started.switchTorch === "function");
+      await changeTorch(true, attempt, started);
     } catch (error) {
       if (!current(attempt)) return;
       stop();
       setFeedback(cameraErrorMessage(error), "error");
-    }
-  };
-
-  const readPhoto = async (file) => {
-    if (!active || busy || !file) return;
-    if ((file.type && !file.type.startsWith("image/")) || file.size > 20 * 1024 * 1024) {
-      setFeedback("Выберите изображение размером до 20 МБ.", "error");
-      return;
-    }
-    const attempt = begin();
-    const imageUrl = URL.createObjectURL(file);
-    setFeedback("Ищем код на фотографии…");
-    try {
-      const reader = await createReader();
-      if (!current(attempt)) return;
-      const result = await reader.decodeFromImageUrl(imageUrl);
-      if (current(attempt)) showResult(result);
-    } catch (error) {
-      if (!current(attempt)) return;
-      stop();
-      setFeedback(error?.name === "ScannerLoadError" ? cameraErrorMessage(error)
-        : "Код на фото не распознан. Снимите его ближе, целиком и без бликов, затем повторите попытку.", "error");
-    } finally {
-      URL.revokeObjectURL(imageUrl);
     }
   };
 
@@ -291,12 +289,7 @@ export function bootstrapNomenclature() {
   };
 
   scanButton.addEventListener("click", () => { void startCamera(); });
-  photoButton.addEventListener("click", () => { fileInput.click(); });
-  fileInput.addEventListener("change", () => {
-    const file = fileInput.files?.[0];
-    fileInput.value = "";
-    void readPhoto(file);
-  });
+  torchButton.addEventListener("click", () => { if (!torchChanging) void changeTorch(!torchEnabled); });
   stopButton.addEventListener("click", cancel);
   preview.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
