@@ -21,6 +21,12 @@ function barcodeSvg() {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="480" height="300" fill="white"/><g fill="black">${bars}</g></svg>`;
 }
 
+function cameraScene(width, height, position = "inside") {
+  const code = barcodeSvg();
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="white"/>
+    <g transform="translate(${(width - 480) / 2} ${position === "inside" ? (height - 300) / 2 : 20})">${code}</g></svg>`;
+}
+
 async function withPage(check) {
   const directory = await mkdtemp(join(tmpdir(), "aggregator-nomenclature-"));
   const previousPath = process.env.GARAGE_DB_PATH;
@@ -85,13 +91,20 @@ async function installCamera(page, svg) {
     image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
     await image.decode();
     const canvas = document.createElement("canvas");
-    canvas.width = 480;
-    canvas.height = 300;
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
     const drawing = canvas.getContext("2d");
     const paint = () => drawing.drawImage(image, 0, 0);
     paint();
     clearInterval(window.cameraPaint);
     window.cameraPaint = setInterval(paint, 50);
+    window.updateCameraScene = async (nextSource) => {
+      image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(nextSource)}`;
+      await image.decode();
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      paint();
+    };
     window.testCameraStreams = [];
     navigator.mediaDevices.getUserMedia = async (constraints) => {
       window.cameraConstraints = constraints;
@@ -165,7 +178,7 @@ test("nomenclature reads real EAN-13 and QR images safely, copies, restores and 
 
 test("camera decodes actual frames and releases tracks on result, stop, section change and page hiding", async () => {
   await withPage(async ({ page }) => {
-    await installCamera(page, barcodeSvg());
+    await installCamera(page, cameraScene(720, 1280));
     await page.locator("#nomenclature-scan").click();
     await page.waitForFunction((value) => document.querySelector("#nomenclature-code").value === value, barcode);
     assert.equal(await page.evaluate(() => window.testCameraStreams.every((stream) => stream.getTracks().every((track) => track.readyState === "ended"))), true);
@@ -187,6 +200,78 @@ test("camera decodes actual frames and releases tracks on result, stop, section 
       assert.equal(await page.locator("#nomenclature-video").evaluate((video) => video.srcObject), null);
       if (action === "section") await page.locator("#nomenclature-function-tab").click();
     }
+  });
+});
+
+test("camera ignores a real barcode outside the frame and reads it only after moving inside across rotations", async () => {
+  await withPage(async ({ page }) => {
+    await uploadSvg(page, barcodeSvg(), barcode);
+    await page.evaluate(() => {
+      const reader = window.ZXingBrowser.BrowserMultiFormatReader.prototype;
+      const decode = reader.decodeFromCanvas;
+      window.regionScanAttempts = 0;
+      reader.decodeFromCanvas = function (canvas) {
+        window.regionScanAttempts += 1;
+        return decode.call(this, canvas);
+      };
+    });
+    await installCamera(page, cameraScene(720, 1280, "outside"));
+    await page.locator("#nomenclature-scan").click();
+    await page.waitForFunction(() => window.regionScanAttempts >= 1);
+    assert.equal(await page.locator("#nomenclature-code").inputValue(), "");
+    for (const { viewport, width, height } of [
+      { viewport: { width: 390, height: 844 }, width: 720, height: 1280 },
+      { viewport: { width: 844, height: 390 }, width: 1280, height: 720 },
+      { viewport: { width: 1440, height: 900 }, width: 1280, height: 720 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.evaluate((scene) => window.updateCameraScene(scene), cameraScene(width, height, "outside"));
+      await page.waitForFunction(({ width, height }) => {
+        const video = document.querySelector("#nomenclature-video");
+        return video.videoWidth === width && video.videoHeight === height;
+      }, { width, height });
+      const attempts = await page.evaluate(() => window.regionScanAttempts);
+      await page.waitForFunction((previous) => window.regionScanAttempts >= previous + 3, attempts);
+      assert.equal(await page.locator("#nomenclature-code").inputValue(), "");
+      assert.equal(await page.locator("#nomenclature-preview").isVisible(), true);
+    }
+    await page.locator(".nomenclature-viewfinder").evaluate((element) => { element.style.display = "none"; });
+    await page.evaluate((scene) => window.updateCameraScene(scene), cameraScene(1280, 720));
+    const attempts = await page.evaluate(() => window.regionScanAttempts);
+    await page.waitForFunction((previous) => window.regionScanAttempts >= previous + 3, attempts);
+    assert.equal(await page.locator("#nomenclature-code").inputValue(), "");
+    await page.locator(".nomenclature-viewfinder").evaluate((element) => { element.style.removeProperty("display"); });
+    await page.waitForFunction((value) => document.querySelector("#nomenclature-code").value === value, barcode);
+    assert.equal(await page.locator("#nomenclature-preview").isVisible(), false);
+    assert.equal(await page.evaluate(() => window.testCameraStreams.every((stream) => stream.getTracks().every((track) => track.readyState === "ended"))), true);
+  });
+});
+
+test("camera ignores a neighboring QR outside the frame and returns the QR inside it", async () => {
+  await withPage(async ({ page }) => {
+    await uploadSvg(page, barcodeSvg(), barcode);
+    const [outside, inside] = await page.evaluate(() => ["OUTSIDE-QR", "INSIDE-TARGET-QR"].map((text) =>
+      new XMLSerializer().serializeToString(new window.ZXingBrowser.BrowserQRCodeSvgWriter().write(text, 160, 160))));
+    const scene = (includeInside) => `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280">
+      <rect width="100%" height="100%" fill="white"/><g transform="translate(280 80)">${outside}</g>
+      ${includeInside ? `<g transform="translate(280 560)">${inside}</g>` : ""}</svg>`;
+    await page.evaluate(() => {
+      const reader = window.ZXingBrowser.BrowserMultiFormatReader.prototype;
+      const decode = reader.decodeFromCanvas;
+      window.regionScanAttempts = 0;
+      reader.decodeFromCanvas = function (canvas) {
+        window.regionScanAttempts += 1;
+        return decode.call(this, canvas);
+      };
+    });
+    await installCamera(page, scene(false));
+    await page.locator("#nomenclature-scan").click();
+    await page.waitForFunction(() => window.regionScanAttempts >= 3);
+    assert.equal(await page.locator("#nomenclature-code").inputValue(), "");
+    await page.evaluate((next) => window.updateCameraScene(next), scene(true));
+    await page.waitForFunction(() => document.querySelector("#nomenclature-code").value === "INSIDE-TARGET-QR");
+    assert.equal(await page.locator("#nomenclature-preview").isVisible(), false);
+    assert.equal(await page.evaluate(() => window.testCameraStreams.every((stream) => stream.getTracks().every((track) => track.readyState === "ended"))), true);
   });
 });
 

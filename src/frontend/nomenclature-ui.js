@@ -1,3 +1,5 @@
+import { getVideoScanRegion } from "./nomenclature-scan-region.js";
+
 let decoderModule;
 
 class ScannerLoadError extends Error {
@@ -47,6 +49,37 @@ const stopControls = (controls) => {
   try { void Promise.resolve(controls?.stop()).catch(() => {}); } catch { /* Tracks are also stopped directly. */ }
 };
 
+const restrictReaderToViewfinder = (reader, video, viewfinder) => {
+  const canvas = document.createElement("canvas");
+  const drawing = canvas.getContext("2d", { willReadFrequently: true });
+  if (!drawing) throw new Error("Scanner canvas is unavailable");
+  const decode = reader.decodeFromCanvas.bind(reader);
+  reader.decodeFromCanvas = () => {
+    const frame = viewfinder.getBoundingClientRect();
+    const style = getComputedStyle(viewfinder);
+    const left = parseFloat(style.borderLeftWidth) || 0;
+    const top = parseFloat(style.borderTopWidth) || 0;
+    const right = parseFloat(style.borderRightWidth) || 0;
+    const bottom = parseFloat(style.borderBottomWidth) || 0;
+    const region = getVideoScanRegion(video.videoWidth, video.videoHeight, video.getBoundingClientRect(), {
+      left: frame.left + left, top: frame.top + top,
+      width: frame.width - left - right, height: frame.height - top - bottom,
+    });
+    if (canvas.width !== (region?.width ?? 1)) canvas.width = region?.width ?? 1;
+    if (canvas.height !== (region?.height ?? 1)) canvas.height = region?.height ?? 1;
+    if (region) {
+      // Read the live video's current dimensions, including after rotation;
+      // ZXing's original full-frame capture canvas retains its initial size.
+      drawing.drawImage(video, region.x, region.y, region.width, region.height, 0, 0, region.width, region.height);
+    } else {
+      // During layout changes an empty frame must never fall back to the full image.
+      drawing.fillStyle = "white";
+      drawing.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    return decode(canvas);
+  };
+};
+
 const cameraErrorMessage = (error) => {
   if (error?.name === "ScannerLoadError") {
     return "Не удалось загрузить сканер. Обновите страницу и повторите попытку.";
@@ -73,6 +106,7 @@ export function bootstrapNomenclature() {
   const stopButton = document.querySelector("#nomenclature-stop");
   const fileInput = document.querySelector("#nomenclature-file");
   const preview = document.querySelector("#nomenclature-preview");
+  const viewfinder = preview.querySelector(".nomenclature-viewfinder");
   let video = document.querySelector("#nomenclature-video");
   const feedback = document.querySelector("#nomenclature-feedback");
   const cameraFeedback = document.querySelector("#nomenclature-camera-feedback");
@@ -184,6 +218,7 @@ export function bootstrapNomenclature() {
       setFeedback("Камера включена. Подготавливаем сканирование…");
       const reader = await createReader();
       if (!current(attempt)) return;
+      restrictReaderToViewfinder(reader, cameraVideo, viewfinder);
       const started = await reader.decodeFromStream(acquired, cameraVideo, (result, error, scannerControls) => {
         if (!current(attempt)) {
           stopControls(scannerControls);
