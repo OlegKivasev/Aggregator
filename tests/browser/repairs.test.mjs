@@ -118,7 +118,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
       if (detail) assert.equal(await page.locator("#repairs-function .repairs-readiness-detail").textContent(), detail);
       else assert.equal(await page.locator("#repairs-function .repairs-readiness-detail").count(), 0);
     }
-    const legal = { ...updated, goodsReadiness: { totalPositions: 5, availablePositions: 2 }, vehicleName: "Toyota Camry А123ВС163", counterpartyName: 'ООО «Тестовый автопарк»' };
+    const legal = { ...updated, goodsReadiness: { totalPositions: 5, availablePositions: 2 }, vehicleName: "Toyota Camry | А123ВС163", counterpartyName: 'ООО «Тестовый автопарк»' };
     await send(legal);
     await page.locator("#repairs-refresh").click();
     await page.locator("#repairs-function .repairs-counterparty").waitFor();
@@ -133,9 +133,9 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     const counterpartyBox = await page.locator("#repairs-function .repairs-counterparty").boundingBox();
     assert.ok(plateBox.y >= vehicleBox.y + vehicleBox.height);
     assert.ok(counterpartyBox.y >= plateBox.y + plateBox.height);
-    const assertVehicleStyles = async () => {
-      assert.equal(await page.locator("#repairs-function .repairs-vehicle-name").evaluate((element) => getComputedStyle(element).fontSize), "18px");
-      assert.equal(await page.locator("#repairs-function .repairs-vehicle-plate").evaluate((element) => getComputedStyle(element).fontSize), "17px");
+    const assertVehicleStyles = async (mobile) => {
+      assert.equal(await page.locator("#repairs-function .repairs-vehicle-name").evaluate((element) => getComputedStyle(element).fontSize), mobile ? "18px" : "12px");
+      assert.equal(await page.locator("#repairs-function .repairs-vehicle-plate").evaluate((element) => getComputedStyle(element).fontSize), mobile ? "17px" : "12px");
       for (const id of ["repairs-refresh", "test-repairs-refresh"]) {
         assert.equal(await page.locator(`#${id}`).evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(255, 75, 19)");
         assert.equal(await page.locator(`#${id}`).evaluate((element) => getComputedStyle(element).color), "rgb(255, 255, 255)");
@@ -143,10 +143,40 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     };
     await page.mouse.move(0, 0);
     await page.addStyleTag({ content: ".repairs-function button { transition: none !important; }" });
-    await assertVehicleStyles();
+    await assertVehicleStyles(false);
+    assert.equal(await page.locator("#repairs-rows td").first().textContent().then((text) => text.includes("|")), false);
+    assert.equal(await page.locator("#auth-toolbar #settings-toggle").isVisible(), true);
+    assert.equal(await page.locator("#search-form #settings-toggle").count(), 0);
+    await page.locator("#settings-toggle").click();
+    assert.equal(await page.locator("#settings-drawer").isVisible(), true);
+    await page.locator("#settings-close").click();
+    const search = page.locator("#repairs-search");
+    const beforeSearch = repairRequests.length;
+    for (const query of ["tOyOtA", "camry", "A123BC163", "а 123 вс 163", "автопарк"]) {
+      await search.fill(query);
+      assert.equal(await page.locator("#repairs-rows .repairs-vehicle-name").textContent(), "Toyota Camry");
+      assert.equal(await page.locator("#repairs-count").textContent(), "1 из 1");
+    }
+    await search.fill("несуществующая машина");
+    assert.equal(await page.locator("#repairs-rows .repairs-vehicle-name").count(), 0);
+    assert.equal(await page.locator("#repairs-count").textContent(), "0 из 1");
+    assert.equal(await page.locator("#repairs-function-tab").isVisible(), true);
+    assert.equal(await page.locator("#repairs-function").isVisible(), true);
+    assert.equal(repairRequests.length, beforeSearch);
+    await page.locator("#repairs-refresh").click();
+    await waitForRepairIdle();
+    assert.equal(await search.inputValue(), "несуществующая машина");
+    assert.equal(await page.locator("#repairs-count").textContent(), "0 из 1");
+    await search.fill("Toyota");
+    await pollRepairs();
+    assert.equal(await search.inputValue(), "Toyota");
+    assert.equal(await page.locator("#repairs-rows .repairs-vehicle-name").textContent(), "Toyota Camry");
+    await search.fill("");
+    assert.equal(await page.locator("#repairs-count").textContent(), "1");
     if (process.env.REPAIRS_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.REPAIRS_SCREENSHOT_DIR, "repairs-desktop.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
-    await assertVehicleStyles();
+    await assertVehicleStyles(true);
+    assert.equal(await search.isVisible(), true);
     assert.equal(await page.locator("#repairs-function-tab").isVisible(), true);
     assert.equal(await page.locator("#repairs-refresh").isVisible(), true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -197,6 +227,12 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.deepEqual(await page.locator("#test-repairs-function thead th").allTextContents(), ["Наименование", "Готовность товаров"]);
     assert.equal(await page.locator("#test-repairs-rows .repairs-readiness").textContent(), "Есть товары к получению");
     assert.equal(await page.locator("#test-repairs-rows .repairs-readiness-detail").textContent(), "В наличии 2 из 5 позиций");
+    await page.locator("#test-repairs-search").fill("нет такой машины");
+    assert.equal(await page.locator("#test-repairs-count").textContent(), "0 из 1");
+    assert.equal(await page.locator("#test-repairs-function").isVisible(), true);
+    assert.equal(await page.locator("#repairs-search").inputValue(), "");
+    await page.locator("#test-repairs-search").fill("ТЕСТОВАЯ машина");
+    assert.equal(await page.locator("#test-repairs-rows .repairs-vehicle-name").textContent(), testVehicle);
     await page.reload();
     await page.locator("#test-repairs-rows").getByText(testVehicle, { exact: true }).waitFor();
     assert.equal(await page.locator("#test-repairs-function-tab").getAttribute("aria-selected"), "true");

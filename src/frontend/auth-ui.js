@@ -74,7 +74,7 @@ const applyAccess = (user) => {
     userBadge.hidden = !isAuthenticated;
   }
   if (logoutButton) logoutButton.hidden = !isAuthenticated;
-  if (authToolbar) authToolbar.hidden = !isAuthenticated;
+  if (authToolbar) authToolbar.hidden = !isAuthenticated && !user?.isAdmin;
   document.dispatchEvent(new CustomEvent("aggregator-auth-ready", { detail: user }));
   const activeTab = document.querySelector(".function-tab.active");
   (activeTab && !activeTab.hidden ? activeTab : document.querySelector(".function-tab:not([hidden])"))?.click();

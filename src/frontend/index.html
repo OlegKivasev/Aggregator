@@ -33,6 +33,12 @@
     <main class="page container-fluid py-4 py-lg-5">
       <div class="auth-toolbar" id="auth-toolbar" hidden>
         <span class="auth-toolbar__user" id="auth-user-badge"></span>
+        <button type="button" class="settings-button" id="settings-toggle" aria-label="Открыть настройки" title="Настройки">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" />
+            <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.46-2.47 1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58 1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 1.55 2 3.46 2.47-1a8.05 8.05 0 0 0 2.58 1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" />
+          </svg>
+        </button>
         <button type="button" class="button-secondary btn btn-light auth-toolbar__logout" id="auth-logout-button">Выйти</button>
       </div>
       <div class="function-layout">
@@ -136,12 +142,6 @@
                   autocomplete="off"
                   required
                 />
-                <button type="button" class="settings-button" id="settings-toggle" aria-label="Открыть настройки" title="Настройки">
-                  <svg aria-hidden="true" viewBox="0 0 24 24">
-                    <path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" />
-                    <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.46-2.47 1a8.05 8.05 0 0 0-2.58-1.5L14 2.35h-4l-.35 2.64a8.05 8.05 0 0 0-2.58 1.5l-2.47-1-2 3.46 2 1.55a7.8 7.8 0 0 0 0 3l-2 1.55 2 3.46 2.47-1a8.05 8.05 0 0 0 2.58 1.5l.35 2.64h4l.35-2.64a8.05 8.05 0 0 0 2.58-1.5l2.47 1 2-3.46-2-1.55Z" />
-                  </svg>
-                </button>
                 <button type="submit" id="submit-button" class="btn btn-primary">
                   <svg aria-hidden="true" viewBox="0 0 24 24">
                     <circle cx="10.75" cy="10.75" r="6.25" />
@@ -405,7 +405,10 @@
             <h2 id="repairs-title">Заказ-наряды</h2>
             <span class="panel__meta results-count" id="repairs-count" aria-label="Количество заказ-нарядов" hidden></span>
           </div>
-          <div class="results-panel__controls"><button type="button" class="btn btn-primary garage-inline-action" id="repairs-refresh">Обновить</button></div>
+          <div class="results-panel__controls">
+            <label class="table-search-control repairs-search" for="repairs-search"><span class="visually-hidden">Поиск по данным автомобиля</span><input id="repairs-search" type="search" placeholder="Марка, модель или госномер" autocomplete="off" aria-controls="repairs-rows"></label>
+            <button type="button" class="btn btn-primary garage-inline-action" id="repairs-refresh">Обновить</button>
+          </div>
         </header>
         <p class="repairs-feedback panel__meta" id="repairs-feedback" role="status" aria-live="polite"></p>
         <div class="results-table repairs-table">
@@ -423,7 +426,10 @@
             <h2 id="test-repairs-title">Заказ-наряды (тест)</h2>
             <span class="panel__meta results-count" id="test-repairs-count" aria-label="Количество тестовых заказ-нарядов" hidden></span>
           </div>
-          <div class="results-panel__controls"><button type="button" class="btn btn-primary garage-inline-action" id="test-repairs-refresh">Обновить</button></div>
+          <div class="results-panel__controls">
+            <label class="table-search-control repairs-search" for="test-repairs-search"><span class="visually-hidden">Поиск по данным автомобиля в тестовых заказ-нарядах</span><input id="test-repairs-search" type="search" placeholder="Марка, модель или госномер" autocomplete="off" aria-controls="test-repairs-rows"></label>
+            <button type="button" class="btn btn-primary garage-inline-action" id="test-repairs-refresh">Обновить</button>
+          </div>
         </header>
         <p class="repairs-feedback panel__meta" id="test-repairs-feedback" role="status" aria-live="polite"></p>
         <div class="results-table repairs-table">

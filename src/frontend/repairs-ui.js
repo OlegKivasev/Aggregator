@@ -1,4 +1,5 @@
 import { splitRepairVehicleName } from "./repair-vehicle-presentation.js";
+import { filterRepairCards } from "./repair-search.js";
 
 export function bootstrapRepairs({ onActiveEmpty } = {}) {
   const views = [false, true].map((testPlatform) => {
@@ -9,7 +10,8 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     const count = document.querySelector(`#${prefix}-count`);
     const refreshButton = document.querySelector(`#${prefix}-refresh`);
     const tab = document.querySelector(`#${prefix}-function-tab`);
-    return { testPlatform, prefix, section, rows, feedback, count, refreshButton, tab };
+    const search = document.querySelector(`#${prefix}-search`);
+    return { testPlatform, prefix, section, rows, feedback, count, refreshButton, tab, search, repairs: null };
   });
   let activeView;
   let loading = false;
@@ -83,10 +85,11 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     return payload.repairs;
   };
 
-  const renderView = (view, repairs) => {
-    const { rows, count, feedback, tab, testPlatform } = view;
+  const renderRows = (view) => {
+    const { rows, count, testPlatform, search, repairs } = view;
+    const visible = filterRepairCards(repairs, search.value);
     const fragment = document.createDocumentFragment();
-    for (const card of repairs) {
+    for (const card of visible) {
       const row = document.createElement("tr");
       const vehicleCell = document.createElement("td");
       const vehicle = document.createElement("span");
@@ -111,8 +114,15 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     }
     rows.replaceChildren(fragment);
     if (!repairs.length) showMessage(rows, testPlatform ? "Тестовых заказ-нарядов в работе нет." : "Заказ-нарядов в работе нет.");
-    count.textContent = String(repairs.length);
+    else if (!visible.length) showMessage(rows, "По вашему запросу заказ-наряды не найдены.");
+    count.textContent = search.value.trim() ? `${visible.length} из ${repairs.length}` : String(repairs.length);
     count.hidden = false;
+  };
+
+  const renderView = (view, repairs) => {
+    const { feedback, tab } = view;
+    view.repairs = repairs;
+    renderRows(view);
     feedback.textContent = "";
     delete feedback.dataset.tone;
     const singleForm = !authUser?.isAdmin && authUser?.permissions?.length === 1;
@@ -171,6 +181,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       } else {
         feedback.textContent = "Не удалось загрузить заказ-наряды. Нажмите «Обновить».";
         showMessage(rows, "Список недоступен.");
+        view.repairs = null;
         loaded = false;
       }
     } finally {
@@ -205,6 +216,11 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     authUser = event.detail ?? null;
     void refresh();
   });
-  for (const { refreshButton } of views) refreshButton.addEventListener("click", () => { void refresh(); });
+  for (const view of views) {
+    view.refreshButton.addEventListener("click", () => { void refresh(); });
+    view.search.addEventListener("input", () => {
+      if (view.repairs !== null && view.section.getAttribute("aria-busy") !== "true") renderRows(view);
+    });
+  }
   return { setActive, start: resume };
 }

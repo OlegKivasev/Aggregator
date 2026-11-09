@@ -57,6 +57,12 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
     await login("Администратор", "test-admin-password");
     await page.goto(origin);
     await ready();
+    assert.equal(await page.locator("#auth-toolbar #settings-toggle").isVisible(), true);
+    await page.locator("#applicability-function-tab").click();
+    await page.locator("#settings-toggle").click();
+    assert.equal(await page.locator("#settings-drawer").isVisible(), true);
+    await page.locator("#settings-close").click();
+    await page.locator("#markup-function-tab").click();
     await openSettings();
     const create = page.locator("#user-create-form");
     const createDialog = page.locator("#user-create-dialog");
@@ -188,6 +194,8 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
     await login("Петров Пётр Петрович", "replacement-test-password");
     await page.goto(origin);
     await ready();
+    assert.equal(await page.locator("#settings-toggle").isVisible(), false);
+    assert.equal(await page.locator("#auth-logout-button").isVisible(), true);
     assert.equal(await page.locator(".function-tabs").isVisible(), true);
     assert.equal(await page.locator("#applicability-function-tab").isVisible(), true);
 

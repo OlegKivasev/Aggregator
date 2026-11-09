@@ -8,8 +8,13 @@ test("repair vehicle display separates a trailing registration while retaining v
     ["LADA Vesta, А 123 ВС 63", "LADA Vesta", "А 123 ВС 63"],
     ["BMW X5 (A123BC777)", "BMW X5", "A123BC777"],
     ["Kia Rio А123ВС", "Kia Rio", "А123ВС"],
+    ["Toyota | Camry | А123ВС163", "Toyota Camry", "А123ВС163"],
     ["Hyundai Solaris — А123ВС 163 RUS", "Hyundai Solaris", "А123ВС 163 RUS"],
   ]) assert.deepEqual(splitRepairVehicleName(value), { name, plate });
+});
+
+test("repair vehicle display removes pipe separators even without a recognized registration", () => {
+  assert.deepEqual(splitRepairVehicleName("LADA | Vesta | 123"), { name: "LADA Vesta 123", plate: "" });
 });
 
 test("repair vehicle display preserves names without an unambiguous trailing plate", () => {
