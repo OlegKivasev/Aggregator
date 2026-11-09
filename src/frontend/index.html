@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=nomenclature-fullscreen-1" />
     <link rel="stylesheet" href="/order-notifications.css" />
   </head>
   <body>
@@ -408,15 +408,9 @@
         <div class="nomenclature-actions">
           <button type="button" class="btn btn-primary" id="nomenclature-scan">Сканировать камерой</button>
           <button type="button" class="btn btn-light" id="nomenclature-photo">Считать с фото</button>
-          <button type="button" class="btn btn-light" id="nomenclature-stop" hidden>Остановить</button>
           <input type="file" id="nomenclature-file" accept="image/*" aria-label="Фото штрихкода" hidden>
         </div>
         <p class="nomenclature-feedback" id="nomenclature-feedback" role="status" aria-live="polite">Нажмите «Сканировать камерой» и разрешите доступ к камере.</p>
-        <div class="nomenclature-preview" id="nomenclature-preview" hidden>
-          <video id="nomenclature-video" autoplay muted playsinline aria-label="Камера для сканирования штрихкода"></video>
-          <div class="nomenclature-viewfinder" aria-hidden="true"></div>
-          <p>Держите код крупно и целиком в центре кадра. Избегайте бликов и дождитесь фокуса.</p>
-        </div>
         <div class="nomenclature-result" id="nomenclature-result" hidden>
           <label for="nomenclature-code">Результат сканирования</label>
           <textarea id="nomenclature-code" rows="2" readonly spellcheck="false" aria-describedby="nomenclature-result-hint"></textarea>
@@ -469,6 +463,21 @@
       </div>
       </div>
     </main>
+
+    <dialog class="nomenclature-preview" id="nomenclature-preview" aria-labelledby="nomenclature-camera-title" aria-describedby="nomenclature-camera-hint">
+      <video id="nomenclature-video" autoplay muted playsinline aria-label="Камера для сканирования штрихкода"></video>
+      <header class="nomenclature-camera-header">
+        <button type="button" class="nomenclature-camera-back" id="nomenclature-stop" aria-label="Выйти из сканирования" title="Назад" autofocus>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7" /></svg>
+        </button>
+        <h2 id="nomenclature-camera-title">Сканирование</h2>
+      </header>
+      <div class="nomenclature-viewfinder" aria-hidden="true"></div>
+      <footer class="nomenclature-camera-footer">
+        <p id="nomenclature-camera-hint">Поместите штрихкод или QR-код<br>целиком в рамку</p>
+        <p id="nomenclature-camera-feedback" role="status" aria-live="polite"></p>
+      </footer>
+    </dialog>
 
     <div class="garage-context-menu card border-0 shadow" id="applicability-oem-context-menu" role="menu" hidden>
       <button type="button" id="applicability-oem-add" role="menuitem">Добавить в активную вкладку</button>
@@ -1233,7 +1242,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
 
     <script type="module" src="/auth-ui.js"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=nomenclature-camera-2"></script>
+    <script type="module" src="/applicability.js?v=nomenclature-fullscreen-3"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>

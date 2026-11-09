@@ -75,6 +75,7 @@ export function bootstrapNomenclature() {
   const preview = document.querySelector("#nomenclature-preview");
   let video = document.querySelector("#nomenclature-video");
   const feedback = document.querySelector("#nomenclature-feedback");
+  const cameraFeedback = document.querySelector("#nomenclature-camera-feedback");
   const resultPanel = document.querySelector("#nomenclature-result");
   const code = document.querySelector("#nomenclature-code");
   const copyButton = document.querySelector("#nomenclature-copy");
@@ -83,10 +84,12 @@ export function bootstrapNomenclature() {
   let generation = 0;
   let stream;
   let controls;
+  let cameraMode = false;
 
   const setFeedback = (message, tone = "notice") => {
     feedback.textContent = message;
     feedback.dataset.tone = tone;
+    cameraFeedback.textContent = preview.open ? message : "";
   };
 
   const setBusy = (value) => {
@@ -98,6 +101,7 @@ export function bootstrapNomenclature() {
   };
 
   const stop = () => {
+    const returnFocus = cameraMode && active && !section.hidden && !document.hidden;
     generation += 1;
     stopControls(controls);
     controls = undefined;
@@ -105,8 +109,11 @@ export function bootstrapNomenclature() {
     stream = undefined;
     video.pause();
     video.srcObject = null;
-    preview.hidden = true;
     setBusy(false);
+    cameraMode = false;
+    if (preview.open) preview.close();
+    cameraFeedback.textContent = "";
+    if (returnFocus) scanButton.focus({ preventScroll: true });
   };
 
   const current = (attempt) => attempt === generation && active && !document.hidden;
@@ -144,7 +151,9 @@ export function bootstrapNomenclature() {
     cameraVideo.defaultMuted = true;
     cameraVideo.playsInline = true;
     cameraVideo.autoplay = true;
-    preview.hidden = false;
+    cameraMode = true;
+    preview.showModal();
+    stopButton.focus({ preventScroll: true });
     setFeedback("Запускаем камеру. Разрешите доступ, если браузер его запросит.");
     try {
       const acquired = await navigator.mediaDevices.getUserMedia({
@@ -240,6 +249,19 @@ export function bootstrapNomenclature() {
     void readPhoto(file);
   });
   stopButton.addEventListener("click", cancel);
+  preview.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    cancel();
+  });
+  preview.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    cancel();
+  });
+  preview.addEventListener("close", () => {
+    if (!preview.open && cameraMode) cancel();
+  });
   copyButton.addEventListener("click", async () => {
     const value = code.value;
     if (!value) return;

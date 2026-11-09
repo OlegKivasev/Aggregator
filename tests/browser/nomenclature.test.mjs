@@ -178,7 +178,7 @@ test("camera decodes actual frames and releases tracks on result, stop, section 
       await page.locator("#nomenclature-scan").click();
       await page.waitForFunction(() => document.querySelector("#nomenclature-video").readyState >= 2);
       if (action === "stop") await page.locator("#nomenclature-stop").click();
-      if (action === "section") await page.locator("#markup-function-tab").click();
+      if (action === "section") await page.locator("#markup-function-tab").evaluate((button) => button.click());
       if (action === "hidden") await page.evaluate(() => {
         Object.defineProperty(document, "hidden", { configurable: true, value: true });
         document.dispatchEvent(new Event("visibilitychange"));
@@ -283,5 +283,50 @@ test("decoder loading failure is distinguished from an unreadable code and can b
     assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
     unavailable = false;
     await uploadSvg(page, barcodeSvg(), barcode);
+  });
+});
+
+test("fullscreen scanner covers the viewport, keeps the frame centered and exits by arrow or Escape", async () => {
+  await withPage(async ({ page }) => {
+    await page.evaluate(() => Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: {
+      getUserMedia() { return new Promise(() => {}); },
+    } }));
+    const preview = page.locator("#nomenclature-preview");
+    const scanButton = page.locator("#nomenclature-scan");
+    await scanButton.click();
+    assert.equal(await preview.evaluate((element) => element.matches(":modal")), true);
+    for (const viewport of [{ width: 390, height: 844 }, { width: 375, height: 667 }, { width: 844, height: 390 }, { width: 1440, height: 900 }]) {
+      await page.setViewportSize(viewport);
+      const bounds = await preview.boundingBox();
+      const video = await page.locator("#nomenclature-video").boundingBox();
+      const frame = await page.locator(".nomenclature-viewfinder").boundingBox();
+      const back = await page.locator("#nomenclature-stop").boundingBox();
+      assert.ok(Math.abs(bounds.x) < 1 && Math.abs(bounds.y) < 1);
+      assert.ok(Math.abs(bounds.width - viewport.width) < 1 && Math.abs(bounds.height - viewport.height) < 1);
+      assert.deepEqual(video, bounds);
+      assert.ok(Math.abs(frame.x + frame.width / 2 - viewport.width / 2) < 1);
+      assert.ok(Math.abs(frame.y + frame.height / 2 - viewport.height / 2) < 1);
+      assert.ok(back.x >= 8 && back.y >= 8 && back.width >= 44 && back.height >= 44);
+      const footer = await page.locator(".nomenclature-camera-footer").boundingBox();
+      assert.ok(frame.y >= back.y + back.height && frame.y + frame.height < footer.y);
+      assert.equal(await page.locator("#nomenclature-video").evaluate((element) => getComputedStyle(element).objectFit), "cover");
+      assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).overflow), "hidden");
+      if (process.env.NOMENCLATURE_SCREENSHOT_DIR && viewport.width !== 375) {
+        await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, `scanner-${viewport.width}x${viewport.height}.png`) });
+      }
+    }
+    await page.getByRole("button", { name: "Выйти из сканирования" }).click();
+    assert.equal(await preview.isVisible(), false);
+    assert.equal(await scanButton.isEnabled(), true);
+    assert.equal(await page.evaluate(() => document.activeElement.id), "nomenclature-scan");
+    assert.notEqual(await page.locator("body").evaluate((element) => getComputedStyle(element).overflow), "hidden");
+    await scanButton.click();
+    await page.keyboard.press("Escape");
+    assert.equal(await preview.isVisible(), false);
+    assert.equal(await scanButton.isEnabled(), true);
+    await scanButton.click();
+    await preview.evaluate((element) => element.close());
+    await page.waitForFunction(() => !document.querySelector("#nomenclature-scan").disabled);
+    assert.equal(await preview.isVisible(), false);
   });
 });

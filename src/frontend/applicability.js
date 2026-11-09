@@ -6,7 +6,7 @@ import { createApplicabilityMakeMatcher } from "./applicability-make-aliases.js"
 import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { setupSearchHistory } from "./search-history-ui.js";
 import { bootstrapRepairs } from "./repairs-ui.js";
-import { bootstrapNomenclature } from "./nomenclature-ui.js?v=2";
+import { bootstrapNomenclature } from "./nomenclature-ui.js?v=3";
 import { moveApplicabilityGroupRelative, moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, moveApplicabilityTabRelative, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "./applicability-tab-groups.js";
 
 const markupFunction = document.querySelector("#markup-function");
