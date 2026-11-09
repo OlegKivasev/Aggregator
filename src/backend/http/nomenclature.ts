@@ -30,7 +30,9 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
       if (match[1] === "status") {
         onlyMethod("GET");
         if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
-        serveJson(response, 200, { ready: true });
+        // Checking a key must not make a stopped worker appear online.
+        const state = service.state();
+        serveJson(response, 200, { ready: true, workerOnline: state.online, lastSeenAt: state.lastSeenAt });
       } else if (match[1] === "results") {
         onlyMethod("POST");
         if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");

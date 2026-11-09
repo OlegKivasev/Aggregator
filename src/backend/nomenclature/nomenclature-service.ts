@@ -121,7 +121,7 @@ export class NomenclatureService {
     this.cleanup();
     const connection = this.state();
     if (!connection.configured) throw new NomenclatureError(503, "source_unconfigured", "Подключение номенклатуры ещё не настроено.");
-    if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с 1С. Проверьте подключение и открытый сеанс 1С.");
+    if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.");
     const id = randomUUID();
     this.database.exec("BEGIN IMMEDIATE");
     try {
