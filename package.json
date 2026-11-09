@@ -8,6 +8,7 @@
     "dev": "node --watch src/backend/server.ts",
     "audit:articles": "node scripts/audit-articles.mjs",
     "rossko:search": "node scripts/rossko-soap-search.mjs",
+    "sync:barcode-scanner": "node scripts/sync-barcode-scanner.mjs",
     "test": "node --import ./tests/test-environment.mjs --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },

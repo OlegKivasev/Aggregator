@@ -1,14 +1,41 @@
 let decoderModule;
 
+class ScannerLoadError extends Error {
+  constructor() {
+    super("Scanner library could not be loaded");
+    this.name = "ScannerLoadError";
+  }
+}
+
 const createReader = async () => {
-  decoderModule ??= import("/vendor/zxing-browser.min.js").catch((error) => {
+  decoderModule ??= new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = new URL("./vendor/zxing-browser.min.js?v=0.2.1", import.meta.url).href;
+    script.async = true;
+    const finish = (failed) => {
+      clearTimeout(timeout);
+      script.onload = null;
+      script.onerror = null;
+      const Reader = window.ZXingBrowser?.BrowserMultiFormatReader;
+      if (failed || typeof Reader !== "function") {
+        script.remove();
+        reject(new ScannerLoadError());
+      } else {
+        resolve(Reader);
+      }
+    };
+    const timeout = setTimeout(() => finish(true), 15_000);
+    script.onload = () => finish(false);
+    script.onerror = () => finish(true);
+    document.head.append(script);
+  }).catch((error) => {
     decoderModule = undefined;
     throw error;
   });
-  await decoderModule;
+  const Reader = await decoderModule;
   // The standalone bundle omits DecodeHintType. TRY_HARDER is 3 in the pinned
   // @zxing/library 0.23.0; it also enables rotated and more densely sampled scans.
-  return new window.ZXingBrowser.BrowserMultiFormatReader(new Map([[3, true]]), {
+  return new Reader(new Map([[3, true]]), {
     delayBetweenScanAttempts: 200,
     delayBetweenScanSuccess: 500,
   });
@@ -21,6 +48,12 @@ const stopControls = (controls) => {
 };
 
 const cameraErrorMessage = (error) => {
+  if (error?.name === "ScannerLoadError") {
+    return "Не удалось загрузить сканер. Обновите страницу и повторите попытку.";
+  }
+  if (error?.name === "CameraPreviewError") {
+    return "Камера подключена, но браузер не показал изображение. Повторите запуск или считайте код с фото.";
+  }
   if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
     return "Нет доступа к камере. Разрешите его в настройках браузера или считайте код с фото.";
   }
@@ -107,11 +140,13 @@ export function bootstrapNomenclature() {
     const cameraVideo = video.cloneNode();
     video.replaceWith(cameraVideo);
     video = cameraVideo;
+    cameraVideo.muted = true;
+    cameraVideo.defaultMuted = true;
+    cameraVideo.playsInline = true;
+    cameraVideo.autoplay = true;
     preview.hidden = false;
     setFeedback("Запускаем камеру. Разрешите доступ, если браузер его запросит.");
     try {
-      const reader = await createReader();
-      if (!current(attempt)) return;
       const acquired = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -128,6 +163,18 @@ export function bootstrapNomenclature() {
           setFeedback("Камера отключилась. Запустите сканирование ещё раз.", "error");
         });
       }
+      cameraVideo.srcObject = acquired;
+      try {
+        await cameraVideo.play();
+      } catch {
+        const error = new Error("Camera preview could not be played");
+        error.name = "CameraPreviewError";
+        throw error;
+      }
+      if (!current(attempt)) return;
+      setFeedback("Камера включена. Подготавливаем сканирование…");
+      const reader = await createReader();
+      if (!current(attempt)) return;
       const started = await reader.decodeFromStream(acquired, cameraVideo, (result, error, scannerControls) => {
         if (!current(attempt)) {
           stopControls(scannerControls);
@@ -169,10 +216,11 @@ export function bootstrapNomenclature() {
       if (!current(attempt)) return;
       const result = await reader.decodeFromImageUrl(imageUrl);
       if (current(attempt)) showResult(result);
-    } catch {
+    } catch (error) {
       if (!current(attempt)) return;
       stop();
-      setFeedback("Код на фото не распознан. Снимите его ближе, целиком и без бликов, затем повторите попытку.", "error");
+      setFeedback(error?.name === "ScannerLoadError" ? cameraErrorMessage(error)
+        : "Код на фото не распознан. Снимите его ближе, целиком и без бликов, затем повторите попытку.", "error");
     } finally {
       URL.revokeObjectURL(imageUrl);
     }

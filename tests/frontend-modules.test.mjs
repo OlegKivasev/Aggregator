@@ -673,7 +673,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(html, /class="search-row applicability-search-row"/);
   assert.ok(html.indexOf('class="function-content"') < html.indexOf('id="applicability-function"'));
   assert.ok(html.indexOf('id="applicability-function"') < html.indexOf("</main>"));
-  assert.match(html, /src="\/applicability\.js"/);
+  assert.match(html, /src="\/applicability\.js(?:\?[^\"]*)?"/);
   assert.match(applicability, /fetch\("\/api\/applicability\/search"/);
   assert.match(applicability, /fetch\(`\/api\/applicability\/cached-brands\?sku=/);
   assert.match(applicability, /const duplicateSearch =/);

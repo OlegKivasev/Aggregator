@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import { createAggregatorServer } from "../../src/backend/http/create-server.ts";
 
 const barcode = "2000043626425";
@@ -30,8 +30,9 @@ async function withPage(check) {
   try {
     await new Promise((resolvePromise, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolvePromise); });
     const origin = `http://127.0.0.1:${server.address().port}`;
-    browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER_EXECUTABLE_PATH });
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const useWebkit = process.env.NOMENCLATURE_BROWSER === "webkit";
+    browser = await (useWebkit ? webkit : chromium).launch({ headless: true, executablePath: useWebkit ? undefined : process.env.TEST_BROWSER_EXECUTABLE_PATH });
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, ...(useWebkit ? { isMobile: true, hasTouch: true } : {}) });
     const page = await context.newPage();
     const errors = [];
     const apiRequests = [];
@@ -101,15 +102,38 @@ async function installCamera(page, svg) {
   }, svg);
 }
 
+test("scanner works when the host serves only physical frontend files", async () => {
+  await withPage(async ({ page }) => {
+    await page.route("**/vendor/**", async (route) => {
+      const { pathname } = new URL(route.request().url());
+      try {
+        return route.fulfill({ contentType: "application/javascript", body: await readFile(resolve("src/frontend", `.${pathname}`)) });
+      } catch {
+        return route.fulfill({ status: 404, contentType: "text/plain", body: "Not found" });
+      }
+    });
+    await uploadSvg(page, barcodeSvg(), barcode);
+  });
+});
+
 test("nomenclature reads real EAN-13 and QR images safely, copies, restores and fits a phone", async () => {
   await withPage(async ({ page, context, apiRequests }) => {
     await uploadSvg(page, barcodeSvg(), barcode);
     const offCenter = barcodeSvg().replaceAll('height="300"', 'height="1000"');
     await uploadSvg(page, offCenter, barcode);
-    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    const useWebkit = process.env.NOMENCLATURE_BROWSER === "webkit";
+    if (useWebkit) await page.evaluate(() => Object.defineProperty(navigator, "clipboard", {
+      configurable: true, value: { writeText: async () => { throw new Error("Clipboard unavailable"); } },
+    }));
+    else await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.locator("#nomenclature-copy").click();
-    await page.getByText("Код скопирован.", { exact: true }).waitFor();
-    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), barcode);
+    if (useWebkit) {
+      await page.getByText(/Код выделен/).waitFor();
+      assert.equal(await page.locator("#nomenclature-code").evaluate((element) => element.selectionEnd - element.selectionStart), barcode.length);
+    } else {
+      await page.getByText("Код скопирован.", { exact: true }).waitFor();
+      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), barcode);
+    }
     const qrText = '0000123\n<img src=x onerror="window.scanXss=1">';
     const qrSvg = await page.evaluate((text) => {
       const svg = new window.ZXingBrowser.BrowserQRCodeSvgWriter().write(text, 400, 400);
@@ -192,6 +216,7 @@ test("camera handles denial and a permission response arriving after cancellatio
     assert.equal(await page.locator("#nomenclature-preview").isVisible(), false);
     assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
     const blank = '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="480" height="300" fill="white"/></svg>';
+    await uploadSvg(page, barcodeSvg(), barcode);
     await installCamera(page, blank);
     await page.evaluate(() => {
       const reader = window.ZXingBrowser.BrowserMultiFormatReader.prototype;
@@ -222,6 +247,41 @@ test("camera handles denial and a permission response arriving after cancellatio
     await page.evaluate(() => Object.defineProperty(window, "isSecureContext", { configurable: true, value: false }));
     await page.locator("#nomenclature-scan").click();
     await page.getByText(/откройте агрегатор по HTTPS/).waitFor();
+    await uploadSvg(page, barcodeSvg(), barcode);
+  });
+});
+
+test("camera requests permission immediately while the decoder is unavailable", async () => {
+  await withPage(async ({ page }) => {
+    const decoderRequests = [];
+    await page.route("**/vendor/**", (route) => {
+      decoderRequests.push(route.request().url());
+      return route.fulfill({ status: 404, body: "Not found" });
+    });
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: {
+        getUserMedia() { window.cameraPermissionRequested = true; return new Promise(() => {}); },
+      } });
+    });
+    await page.locator("#nomenclature-scan").click();
+    assert.equal(await page.evaluate(() => window.cameraPermissionRequested), true);
+    assert.equal(await page.locator("#nomenclature-preview").isVisible(), true);
+    assert.equal(await page.locator("#nomenclature-video").evaluate((video) => video.muted && video.defaultMuted && video.playsInline), true);
+    assert.deepEqual(decoderRequests, []);
+    await page.locator("#nomenclature-stop").click();
+    assert.equal(await page.locator("#nomenclature-preview").isVisible(), false);
+  });
+});
+
+test("decoder loading failure is distinguished from an unreadable code and can be retried", async () => {
+  await withPage(async ({ page }) => {
+    let unavailable = true;
+    await page.route("**/vendor/**", (route) => unavailable
+      ? route.fulfill({ status: 404, body: "Not found" }) : route.fallback());
+    await page.locator("#nomenclature-file").setInputFiles({ name: "code.svg", mimeType: "image/svg+xml", buffer: Buffer.from(barcodeSvg()) });
+    await page.getByText(/Не удалось загрузить сканер/).waitFor();
+    assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
+    unavailable = false;
     await uploadSvg(page, barcodeSvg(), barcode);
   });
 });
