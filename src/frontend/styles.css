@@ -405,14 +405,15 @@ body:has(.garage-add-modal:not([hidden])) { overflow: hidden; }
     max-height: calc(100dvh - 16px);
     min-height: 0;
     margin: auto;
-    overflow: hidden;
+    overflow: auto;
+    overscroll-behavior: contain;
     border-radius: 12px;
   }
   :is(#cart-modal, #history-modal, #cart-order-confirm) .analogs-modal__header { flex: 0 0 auto; padding: 12px; gap: 8px; }
   :is(#cart-modal, #history-modal, #cart-order-confirm) .analogs-modal__header h2 { min-width: 0; font-size: 20px; overflow-wrap: anywhere; }
   :is(#cart-modal, #history-modal, #cart-order-confirm) .cart-tabs { flex: 0 0 auto; padding-inline: 12px; }
-  #cart-modal .cart-tabs { flex-wrap: wrap; max-height: 156px; overflow: auto; }
-  :is(#cart-modal, #history-modal, #cart-order-confirm) .cart-content { flex: 1 1 auto; min-width: 0; min-height: 0; padding: 12px; overflow: auto; }
+  #cart-modal .cart-tabs { flex-wrap: wrap; max-height: none; overflow: visible; }
+  :is(#cart-modal, #history-modal, #cart-order-confirm) .cart-content { flex: 0 0 auto; min-width: 0; min-height: 0; padding: 12px; overflow: visible; }
   :is(#cart-modal, #history-modal, #cart-order-confirm) .cart-footer { min-width: 0; padding: 12px; gap: 12px; }
   #cart-modal .cart-footer__summary { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
   #cart-modal .cart-footer__summary > * { min-width: 0; overflow-wrap: anywhere; }
@@ -745,9 +746,6 @@ input {
   .repairs-function .repairs-search { max-width: none; }
   .repairs-function .repairs-search input { font-size: 16px; }
 }
-@media (max-width: 720px) {
-  .repairs-function { height: calc(100dvh - 160px); }
-}
 
 .applicability-function {
   display: flex;
@@ -757,7 +755,7 @@ input {
   gap: 18px;
 }
 
-@media (min-width: 721px) {
+@media (min-width: 801px) {
   .applicability-function {
     height: calc(100dvh - 140px);
     overflow: hidden;
@@ -1017,7 +1015,7 @@ input {
 .applicability-key-delete:focus-visible { background: #fff1eb; outline: 0; }
 .applicability-key-delete img { width: 16px; height: 16px; object-fit: contain; }
 
-@media (max-width: 720px) {
+@media (max-width: 800px) {
   .function-layout { grid-template-columns: minmax(0, 1fr); }
   .function-tabs { position: static; flex-direction: row; }
   .function-content { grid-column: 1; }
@@ -3754,7 +3752,7 @@ th[aria-sort="descending"] .analogs-sort span::after {
   .workspace > .garage-control,
   .workspace:has(#garage-sidebar:not([hidden])) > .garage-control { display: flex; grid-column: 2; grid-row: 1; align-self: start; justify-self: end; max-width: 100%; z-index: 1; }
   .workspace > .search-shell { grid-column: 1 / -1; grid-row: 3; height: auto; gap: 12px; }
-  #garage-sidebar { position: static; grid-column: 1 / -1; grid-row: 2; width: 100%; min-width: 0; max-width: none; height: auto; max-height: 45dvh; z-index: auto; }
+  #garage-sidebar { position: static; grid-column: 1 / -1; grid-row: 2; width: 100%; min-width: 0; max-width: none; height: auto; max-height: none; z-index: auto; }
   #garage-resize { display: none; }
   #garage-sidebar .garage-create { margin-left: auto; }
   .garage-sidebar__close { display: grid; flex: 0 0 44px; width: 44px; height: 44px; padding: 0; place-items: center; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); font-size: 24px; }
@@ -3790,7 +3788,7 @@ th[aria-sort="descending"] .analogs-sort span::after {
     min-width: 0;
     max-width: none;
     height: auto;
-    max-height: 45dvh;
+    max-height: none;
     flex: 0 1 auto;
     padding: 14px;
   }
@@ -3811,9 +3809,8 @@ th[aria-sort="descending"] .analogs-sort span::after {
   .analogs-workspace { display: flex; flex-direction: column; gap: 8px; }
   .analogs-filters-control { display: flex; flex: 0 0 auto; flex-direction: column; align-items: stretch; height: auto; }
   .analogs-filters-control .filters-toggle { align-self: start; margin-left: 12px; }
-  .analogs-filters-sidebar { max-height: 30dvh; }
-  .analogs-shell { flex: 1 1 auto; overflow: hidden; }
-  .analogs-results { overflow-x: hidden; }
+  .analogs-shell { flex: 0 0 auto; overflow: visible; }
+  .analogs-results { flex: 0 0 auto; overflow: visible; }
   #results-table > table,
   #analogs-results > table { display: block; width: 100%; min-width: 0; }
   #results-table thead,
@@ -3893,7 +3890,7 @@ th[aria-sort="descending"] .analogs-sort span::after {
   #garage-filters-toggle::after, #garage-groups-toggle::after { min-width: 0; white-space: normal; line-height: 1.3; }
   #garage-groups-toggle::after { content: "Группы"; font-size: 13px; }
   #garage-groups-toggle[aria-expanded="true"]::after { content: "Скрыть группы"; }
-  #garage-filters-sidebar, #garage-groups-sidebar { position: static; width: 100%; min-width: 0; max-width: none; height: auto; max-height: 40dvh; flex: 0 1 auto; }
+  #garage-filters-sidebar, #garage-groups-sidebar { position: static; width: 100%; min-width: 0; max-width: none; height: auto; max-height: none; flex: 0 1 auto; }
   #garage-groups-sidebar { grid-column: 1 / -1; grid-row: 2; }
   #garage-filters-resize, #garage-groups-resize { display: none; }
   #garage-view { grid-column: 1 / -1; grid-row: 3; overflow: visible !important; }
@@ -3933,6 +3930,62 @@ th[aria-sort="descending"] .analogs-sort span::after {
   #garage-titlebar .garage-titlebar__actions { grid-column: 1 / -1; justify-content: space-between; }
   #garage-titlebar .garage-tools { width: 100%; justify-content: flex-end; border-left: 0; padding-left: 0; }
   #garage-refresh { min-height: 44px; max-width: calc(100% - 50px); white-space: normal; }
+}
+
+/* On phones, scroll the whole page or dialog instead of nested desktop panes. */
+@media (max-width: 800px) {
+  .repairs-function,
+  .applicability-function { height: auto; min-height: 0; overflow: visible !important; }
+  .repairs-function .results-panel__header { flex-direction: column; align-items: stretch; padding: 12px; }
+  .repairs-function .results-panel__controls { width: 100%; flex-wrap: wrap; }
+  .repairs-function .results-panel__controls > .btn-primary { min-height: 44px; }
+  .repairs-table { flex: 0 0 auto; overflow: visible; background: var(--page); }
+  .repairs-table .results-data-table { display: block; }
+  .repairs-table colgroup,
+  .repairs-table thead { display: none; }
+  .repairs-table tbody { display: grid; gap: 10px; padding: 10px; }
+  .repairs-table tr { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  .repairs-table .results-data-table td { display: block; width: auto; min-width: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
+  .repairs-table .results-data-table td + td { padding-top: 12px; border-top: 1px solid var(--line); }
+
+  .applicability-workspace { flex: 0 0 auto; grid-template-columns: minmax(0, 1fr); }
+  .applicability-workspace > .applicability-oem-control,
+  .applicability-workspace > .applicability-oem-sidebar { grid-column: 1; grid-row: 1; }
+  .applicability-workspace > .applicability-shell { grid-row: 2; }
+  .applicability-shell,
+  .applicability-results-table { flex: 0 0 auto; overflow: visible; }
+  .applicability-results-panel { flex: 0 0 auto; min-height: 0; overflow: visible !important; }
+  .applicability-results-table table { min-width: 0; table-layout: fixed; }
+  .applicability-results-table th { white-space: normal; }
+  .applicability-results-table th,
+  .applicability-results-table td { padding: 10px 8px; }
+  .applicability-article-cell { min-width: 0; align-items: flex-start; }
+  .applicability-raw { max-height: none; overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  .filters-sidebar,
+  .garage-sidebar,
+  .garage-vehicles,
+  .applicability-proxy-routes,
+  .applicability-file-preview,
+  .garage-add-modal__vehicles { max-height: none; overflow: visible; overscroll-behavior: auto; }
+  .garage-search-form .search-input { flex: 1 1 auto; min-width: 0; }
+  .garage-vehicles__button { overflow-wrap: anywhere; }
+  .applicability-workspace > .applicability-oem-sidebar { width: 100%; min-width: 0; max-width: none; height: auto; }
+  #applicability-oem-resize { display: none; }
+
+  .analogs-modal__card { height: auto; overflow: auto; overscroll-behavior: contain; }
+  .analogs-modal__card > * { flex-shrink: 0; }
+  .analogs-workspace { height: auto; flex: 0 0 auto; overflow: visible; }
+  .applicability-file-modal__content { overflow: visible; }
+  .applicability-file-preview table { min-width: 0; table-layout: fixed; }
+  .applicability-file-preview th { white-space: normal; }
+  .applicability-file-preview td { overflow-wrap: anywhere; }
+  .garage-add-modal { overflow: auto; align-items: start; overscroll-behavior: contain; }
+  .garage-add-modal__backdrop { position: fixed; }
+  .garage-add-modal__card { margin-block: 12px; }
+  .auth-screen,
+  .settings-drawer { overflow: auto; overscroll-behavior: contain; }
+  .auth-screen__card { margin-block: auto; }
 }
 .vk-notifications-settings { margin: 0 0 14px; background: var(--surface); }
 .vk-notifications-settings__content { display: grid; min-width: 0; gap: 14px; margin-top: 14px; }

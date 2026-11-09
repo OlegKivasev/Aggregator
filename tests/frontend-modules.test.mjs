@@ -757,7 +757,7 @@ test("applicability is a separate static function with safe client-side renderin
   assert.match(styles, /\.function-content\s*\{[^}]*grid-column: 2;/s);
   assert.match(styles, /\.applicability-function\s*\{[\s\S]*min-height: calc\(100dvh - 140px\);/s);
   assert.match(styles, /\.applicability-results-footer\s*\{[^}]*flex: 0 0 auto;/s);
-  assert.match(styles, /@media \(min-width: 721px\)\s*\{[\s\S]*?\.applicability-function\s*\{[^}]*height: calc\(100dvh - 140px\);[^}]*overflow: hidden;/s);
+  assert.match(styles, /@media \(min-width: 801px\)\s*\{[\s\S]*?\.applicability-function\s*\{[^}]*height: calc\(100dvh - 140px\);[^}]*overflow: hidden;/s);
   assert.match(styles, /\.applicability-results-table tr\.is-selected > td\s*\{[^}]*background: #fff1eb !important;/s);
   assert.match(styles, /\.applicability-document-modal \.analogs-modal__card/);
   assert.match(styles, /\.applicability-article-name-modal \.analogs-modal__card/);

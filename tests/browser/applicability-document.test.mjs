@@ -197,7 +197,8 @@ test("applicability lists retain empty OEM blocks at the end of each article sec
       assert.ok(summaryBounds.x + summaryBounds.width <= actionsBounds.x, "Counts stay to the left of list actions");
     }
     await page.setViewportSize({ width: 320, height: 760 });
-    assert.ok(await page.locator(".applicability-results-table").evaluate((element) => element.scrollWidth > element.clientWidth), "Narrow screens retain necessary table scrolling");
+    assert.ok(await page.locator(".applicability-results-table").evaluate((element) => element.scrollWidth <= element.clientWidth + 1), "Mobile results fit without horizontal table scrolling");
+    assert.ok(await page.locator(".applicability-results-table").evaluate((element) => element.scrollHeight <= element.clientHeight + 1), "Mobile results grow with the page instead of scrolling in a nested pane");
     assert.ok(await page.locator("#applicability-results-summary").evaluate((element) => element.getBoundingClientRect().right <= window.innerWidth), "Counts remain inside the viewport");
     assert.deepEqual(errors, []);
   } finally {

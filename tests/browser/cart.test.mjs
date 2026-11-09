@@ -174,6 +174,8 @@ async function assertMobileDialogFits(page, selector) {
     return problems;
   });
   assert.deepEqual(clipped, [], `${selector} must fit without horizontal scrolling`);
+  assert.equal(await page.locator(`${selector} .cart-content`).evaluate((node) => node.scrollHeight <= node.clientHeight + 1), true,
+    "The whole mobile dialog scrolls; its content must not become a separate vertical pane");
 }
 
 async function openGarageWithFirstOffer(page, { all = false, quantity = 1, beforeOpen } = {}) {
@@ -812,6 +814,8 @@ test("mobile offers show prices, full titles and actions without horizontal scro
       await row.scrollIntoViewIfNeeded();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       assert.equal(await page.locator(scope).evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true);
+      assert.equal(await page.locator(scope).evaluate((node) => node.scrollHeight <= node.clientHeight + 1), true,
+        "Mobile offers must grow inside the page or dialog instead of scrolling in a nested pane");
       const clipped = await row.evaluate((node) => [...node.querySelectorAll("td")].filter((cell) => {
         const box = cell.getBoundingClientRect();
         return box.left < 0 || box.right > innerWidth || cell.scrollWidth > cell.clientWidth + 1;
@@ -887,7 +891,7 @@ test("mobile offers show prices, full titles and actions without horizontal scro
     assert.equal(await page.locator("#analogs-filters-sidebar").isVisible(), true);
     await page.locator("#analogs-filters-toggle").click();
     if (process.env.TEST_CAPTURE_DIR) {
-      await page.locator("#analogs-results").evaluate((node) => { node.scrollTop = 0; });
+      await page.locator("#analogs-modal .analogs-modal__card").evaluate((node) => { node.scrollTop = 0; });
       await page.locator(".cart-toast").waitFor({ state: "hidden" });
       await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "mobile-offer-analogs.png") });
     }
@@ -981,7 +985,10 @@ test("mobile garage expands in the page and can be hidden by its toggle, close b
       const bounds = await sidebar.boundingBox();
       const filterBounds = await page.locator("#filters-sidebar").boundingBox();
       const searchBounds = await page.locator(".search-toolbar").boundingBox();
-      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width && bounds.height <= 844 * .45 + 1);
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width);
+      assert.equal(await sidebar.evaluate((node) => node.scrollHeight <= node.clientHeight + 1), true,
+        "The garage list expands in the page without an internal height limit");
+      assert.equal(await page.locator("#garage-vehicles").evaluate((node) => node.scrollHeight <= node.clientHeight + 1), true);
       assert.ok(bounds.y >= filterBounds.y + filterBounds.height && searchBounds.y >= bounds.y + bounds.height);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       assert.equal(await page.locator("#garage-resize").isVisible(), false);
@@ -1037,7 +1044,7 @@ test("mobile garage item cards keep filters, groups, sorting and quantity editin
       })), true, "expanded filter and group buttons fit the phone width");
       const panels = await page.evaluate(() => ["garage-filters-sidebar", "garage-groups-sidebar"].map((id) => {
         const node = document.getElementById(id); const box = node.getBoundingClientRect();
-        return { id, fits: box.left >= 0 && box.right <= innerWidth && box.height <= innerHeight * .4 + 1, position: getComputedStyle(node).position };
+        return { id, fits: box.left >= 0 && box.right <= innerWidth && node.scrollHeight <= node.clientHeight + 1, position: getComputedStyle(node).position };
       }));
       assert.ok(panels.every((panel) => panel.fits && panel.position === "static"), JSON.stringify(panels));
       if (process.env.TEST_CAPTURE_DIR && width === 390) {
@@ -2162,8 +2169,10 @@ test("mobile cart and checkout show complete item cards with working selection, 
       await assertMobileDialogFits(page, "#cart-modal");
       assert.equal(await page.locator("#cart-items .cart-item-name").first().innerText(), title);
       assert.equal(await page.locator("#cart-modal th").filter({ hasText: "Наименование" }).isVisible(), false);
+      await page.locator("#cart-test-order").scrollIntoViewIfNeeded();
       const button = await page.locator("#cart-test-order").boundingBox();
       assert.ok(button.y >= 0 && button.y + button.height <= viewport.height);
+      assert.equal(await page.locator("#cart-modal .cart-content").evaluate((node) => node.scrollTop), 0);
     }
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator("#cart-select-all").check();
@@ -2177,7 +2186,7 @@ test("mobile cart and checkout show complete item cards with working selection, 
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "6");
     assert.equal(await first.locator(".cart-item-sum .cart-price").textContent(), "405,00");
     if (process.env.TEST_CAPTURE_DIR) {
-      await page.locator("#cart-modal .cart-content").evaluate((node) => { node.scrollTop = 0; });
+      await page.locator("#cart-modal").evaluate((node) => { node.scrollTop = 0; });
       await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "mobile-cart-cards.png") });
     }
     await page.locator("#cart-tab-part-kom").click();
@@ -2190,12 +2199,14 @@ test("mobile cart and checkout show complete item cards with working selection, 
       await page.setViewportSize({ width, height: 740 });
       await assertMobileDialogFits(page, "#cart-order-confirm");
       assert.equal(await page.locator("#cart-order-confirm thead").first().isVisible(), false);
+      await page.locator("#cart-order-accept").scrollIntoViewIfNeeded();
       const button = await page.locator("#cart-order-accept").boundingBox();
       assert.ok(button.y >= 0 && button.y + button.height <= 740);
+      assert.equal(await page.locator("#cart-order-confirm .cart-content").evaluate((node) => node.scrollTop), 0);
     }
     if (process.env.TEST_CAPTURE_DIR) {
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.locator("#cart-order-confirm .cart-content").evaluate((node) => { node.scrollTop = 0; });
+      await page.locator("#cart-order-confirm").evaluate((node) => { node.scrollTop = 0; });
       await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "mobile-checkout-cards.png") });
     }
     await page.locator("#cart-order-cancel").click();
@@ -2237,7 +2248,7 @@ test("mobile order history shows full item details and retains supplier, status 
     await page.locator("#history-search").fill("A1");
     assert.equal(await page.locator(".history-card").count(), 4);
     if (process.env.TEST_CAPTURE_DIR) {
-      await page.locator("#history-modal .cart-content").evaluate((node) => { node.scrollTop = 0; });
+      await page.locator("#history-modal").evaluate((node) => { node.scrollTop = 0; });
       await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "mobile-history-cards.png") });
     }
     await page.setViewportSize({ width: 1366, height: 850 });
