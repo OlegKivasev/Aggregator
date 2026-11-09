@@ -89,8 +89,8 @@ async function uploadSvg(page, svg, expected) {
   assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
 }
 
-async function installCamera(page, svg) {
-  await page.evaluate(async (source) => {
+async function installCamera(page, svg, torch = "unsupported") {
+  await page.evaluate(async ({ source, torch }) => {
     const image = new Image();
     image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`;
     await image.decode();
@@ -110,13 +110,27 @@ async function installCamera(page, svg) {
       paint();
     };
     window.testCameraStreams = [];
+    window.torchRequests = [];
     navigator.mediaDevices.getUserMedia = async (constraints) => {
       window.cameraConstraints = constraints;
       const stream = canvas.captureStream(20);
+      if (torch !== "unsupported") {
+        const index = window.testCameraStreams.length;
+        const track = stream.getVideoTracks()[0];
+        track.getCapabilities = () => ({ torch: true });
+        track.applyConstraints = async (settings) => {
+          const enabled = settings.advanced?.[0]?.torch;
+          window.torchRequests.push({ index, enabled });
+          if (enabled && torch === "rejected") throw new DOMException("Torch unavailable", "NotSupportedError");
+          if (enabled && torch === "delayed" && index === 0) {
+            await new Promise((resolvePromise) => { window.finishTorchSetup = resolvePromise; });
+          }
+        };
+      }
       window.testCameraStreams.push(stream);
       return stream;
     };
-  }, svg);
+  }, { source: svg, torch });
 }
 
 test("scanner works when the host serves only physical frontend files", async () => {
@@ -204,6 +218,65 @@ test("camera decodes actual frames and releases tracks on result, stop, section 
       assert.equal(await page.locator("#nomenclature-video").evaluate((video) => video.srcObject), null);
       if (action === "section") await page.locator("#nomenclature-function-tab").click();
     }
+  });
+});
+
+test("camera automatically enables the torch and switches it off on result, stop, section change and page hiding", async () => {
+  await withPage(async ({ page }) => {
+    const blank = '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280"><rect width="100%" height="100%" fill="white"/></svg>';
+    await installCamera(page, blank, "supported");
+    for (const [index, action] of ["result", "stop", "section", "hidden"].entries()) {
+      await page.locator("#nomenclature-scan").click();
+      await page.waitForFunction((index) => window.torchRequests.some((request) => request.index === index && request.enabled), index);
+      if (action === "result") {
+        await page.evaluate((scene) => window.updateCameraScene(scene), cameraScene(720, 1280));
+        await page.waitForFunction((value) => document.querySelector("#nomenclature-code").value === value, barcode);
+        await page.evaluate((scene) => window.updateCameraScene(scene), blank);
+      }
+      if (action === "stop") await page.locator("#nomenclature-stop").click();
+      if (action === "section") await page.locator("#markup-function-tab").evaluate((button) => button.click());
+      if (action === "hidden") await page.evaluate(() => {
+        Object.defineProperty(document, "hidden", { configurable: true, value: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await page.waitForFunction((index) => window.torchRequests.some((request) => request.index === index && request.enabled === false), index);
+      assert.equal(await page.evaluate(() => window.testCameraStreams.every((stream) => stream.getTracks().every((track) => track.readyState === "ended"))), true);
+      assert.equal(await page.locator("#nomenclature-preview").isVisible(), false);
+      if (action === "section") await page.locator("#nomenclature-function-tab").click();
+    }
+  });
+});
+
+test("a rejected torch setting still allows a real barcode to be scanned", async () => {
+  await withPage(async ({ page }) => {
+    const blank = '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280"><rect width="100%" height="100%" fill="white"/></svg>';
+    await installCamera(page, blank, "rejected");
+    await page.locator("#nomenclature-scan").click();
+    await page.getByText("Наведите камеру на код и держите телефон неподвижно до распознавания.", { exact: true }).last().waitFor();
+    assert.equal(await page.evaluate(() => window.torchRequests.some((request) => request.enabled)), true);
+    await page.evaluate((scene) => window.updateCameraScene(scene), cameraScene(720, 1280));
+    await page.waitForFunction((value) => document.querySelector("#nomenclature-code").value === value, barcode);
+    assert.equal(await page.evaluate(() => window.testCameraStreams.every((stream) => stream.getTracks().every((track) => track.readyState === "ended"))), true);
+  });
+});
+
+test("late torch activation after cancellation cannot stop a newer camera stream", async () => {
+  await withPage(async ({ page }) => {
+    const blank = '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280"><rect width="100%" height="100%" fill="white"/></svg>';
+    await installCamera(page, blank, "delayed");
+    await page.locator("#nomenclature-scan").click();
+    await page.waitForFunction(() => typeof window.finishTorchSetup === "function");
+    await page.locator("#nomenclature-stop").click();
+    await page.locator("#nomenclature-scan").click();
+    await page.waitForFunction(() => window.torchRequests.some((request) => request.index === 1 && request.enabled));
+    const oldStops = await page.evaluate(() => window.torchRequests.filter((request) => request.index === 0 && request.enabled === false).length);
+    await page.evaluate(() => window.finishTorchSetup());
+    await page.waitForFunction((count) => window.torchRequests.filter((request) => request.index === 0 && request.enabled === false).length > count, oldStops);
+    assert.equal(await page.locator("#nomenclature-video").evaluate((video) => video.srcObject === window.testCameraStreams[1]), true);
+    assert.equal(await page.evaluate(() => window.testCameraStreams[1].getVideoTracks()[0].readyState), "live");
+    assert.equal(await page.locator("#nomenclature-preview").isVisible(), true);
+    await page.locator("#nomenclature-stop").click();
+    assert.equal(await page.evaluate(() => window.testCameraStreams.every((stream) => stream.getTracks().every((track) => track.readyState === "ended"))), true);
   });
 });
 

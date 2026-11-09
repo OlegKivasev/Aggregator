@@ -243,6 +243,15 @@ export function bootstrapNomenclature() {
         return;
       }
       controls = started;
+      try {
+        await started.switchTorch?.(true);
+      } catch {
+        // Lighting is optional: a rejected torch setting must not stop decoding.
+      }
+      if (!current(attempt)) {
+        stopControls(started);
+        return;
+      }
       setFeedback("Наведите камеру на код и держите телефон неподвижно до распознавания.");
     } catch (error) {
       if (!current(attempt)) return;
