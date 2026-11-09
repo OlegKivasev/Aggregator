@@ -35,7 +35,7 @@ const messageFor = async (response, fallback) => {
 };
 
 const accessLabel = (user) => user.isAdmin ? "Администратор" : user.permissions.map((permission) => ({
-  markup: "Проценка", applicability: "Применимость", repairs: "Заказ-наряды", testRepairs: "Тестовые заказ-наряды",
+  markup: "Проценка", applicability: "Применимость", repairs: "Заказ-наряды", testRepairs: "Тестовые заказ-наряды", nomenclature: "Номенклатура",
 }[permission] ?? permission)).join(", ") || "Нет доступа";
 
 const applyAccess = (user) => {
@@ -45,6 +45,7 @@ const applyAccess = (user) => {
   const canApplicability = user?.isAdmin || user?.permissions?.includes("applicability");
   const canRepairs = user?.isAdmin || user?.permissions?.includes("repairs");
   const canTestRepairs = user?.isAdmin || user?.permissions?.includes("testRepairs");
+  const canNomenclature = user?.isAdmin || user?.permissions?.includes("nomenclature");
   const singleForm = !user?.isAdmin && user?.permissions?.length === 1;
   const functionTabs = document.querySelector(".function-tabs");
   if (functionTabs) functionTabs.hidden = singleForm;
@@ -53,18 +54,22 @@ const applyAccess = (user) => {
   const applicabilityTab = document.querySelector("#applicability-function-tab");
   const repairsTab = document.querySelector("#repairs-function-tab");
   const testRepairsTab = document.querySelector("#test-repairs-function-tab");
+  const nomenclatureTab = document.querySelector("#nomenclature-function-tab");
   const markupSection = document.querySelector("#markup-function");
   const applicabilitySection = document.querySelector("#applicability-function");
   const repairsSection = document.querySelector("#repairs-function");
   const testRepairsSection = document.querySelector("#test-repairs-function");
+  const nomenclatureSection = document.querySelector("#nomenclature-function");
   if (markupTab) markupTab.hidden = !canMarkup;
   if (applicabilityTab) applicabilityTab.hidden = !canApplicability;
   if (repairsTab) repairsTab.hidden = !canRepairs;
   if (testRepairsTab) testRepairsTab.hidden = !canTestRepairs;
+  if (nomenclatureTab) nomenclatureTab.hidden = !canNomenclature;
   if (markupSection) markupSection.hidden = !canMarkup;
   if (applicabilitySection) applicabilitySection.hidden = !canApplicability;
   if (repairsSection) repairsSection.hidden = !canRepairs;
   if (testRepairsSection) testRepairsSection.hidden = !canTestRepairs;
+  if (nomenclatureSection) nomenclatureSection.hidden = !canNomenclature;
   document.querySelectorAll("[data-admin-only]").forEach((element) => { element.hidden = !user?.isAdmin; });
   const settingsToggle = document.querySelector("#settings-toggle");
   if (settingsToggle) settingsToggle.hidden = !user?.isAdmin;

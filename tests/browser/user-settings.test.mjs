@@ -73,7 +73,7 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
         const bounds = elements.filter((element) => !element.hidden).map((element) => element.getBoundingClientRect());
         return bounds.slice(1).map((rect, index) => rect.top - bounds[index].bottom);
       });
-      assert.deepEqual(spacing, [14, 14, 14]);
+      assert.deepEqual(spacing, [14, 14, 14, 14]);
     };
     await assertSettingsSpacing();
     await page.locator("#users-settings > summary").click();
@@ -200,7 +200,7 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
     assert.equal(await page.locator("#applicability-function-tab").isVisible(), true);
 
     // Each sole permission must win over an inaccessible saved section, including empty repairs.
-    for (const [permission, section] of [["markup", "markup"], ["applicability", "applicability"], ["repairs", "repairs"], ["testRepairs", "test-repairs"]]) {
+    for (const [permission, section] of [["markup", "markup"], ["applicability", "applicability"], ["repairs", "repairs"], ["testRepairs", "test-repairs"], ["nomenclature", "nomenclature"]]) {
       await login("Администратор", "test-admin-password");
       const users = await (await context.request.get(`${origin}/api/users`)).json();
       const user = users.users.find((user) => user.fio === "Петров Пётр Петрович");

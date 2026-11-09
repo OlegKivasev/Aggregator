@@ -716,6 +716,76 @@ input {
 
 .applicability-function[hidden] { display: none; }
 
+.nomenclature-function[hidden], .nomenclature-function [hidden] { display: none; }
+.nomenclature-function { display: flex; flex-direction: column; gap: 18px; max-width: 880px; padding: 24px; border-radius: 14px; }
+.nomenclature-function h2 { margin: 0 0 8px; color: var(--ink); font-size: 22px; font-weight: 800; }
+.nomenclature-function p { margin: 0; }
+.nomenclature-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.nomenclature-function .btn, .nomenclature-settings .btn { min-height: 40px; padding: 8px 16px; border-radius: 7px; font-family: inherit; font-size: 13px; font-weight: 700; }
+.nomenclature-function .btn-primary { color: #fff; border-color: var(--accent); background: var(--accent); }
+.nomenclature-function .btn-primary:hover:enabled, .nomenclature-function .btn-primary:focus-visible { border-color: var(--accent-dark); background: var(--accent-dark); }
+.nomenclature-feedback { color: var(--muted); font-size: 14px; }
+.nomenclature-feedback:empty { display: none; }
+.nomenclature-feedback[data-tone="error"] { color: #b42318; }
+.nomenclature-feedback[data-tone="success"] { color: #18794e; }
+.nomenclature-feedback[data-tone="loading"] { display: flex; align-items: center; gap: 8px; }
+.nomenclature-feedback[data-tone="loading"]::before { content: ""; flex: 0 0 auto; width: 16px; height: 16px; box-sizing: border-box; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: search-loading-spin .75s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .nomenclature-feedback[data-tone="loading"]::before { animation: none; } }
+body:has(.nomenclature-preview[open]) { overflow: hidden; }
+.nomenclature-preview:not([open]) { display: none; }
+.nomenclature-preview { position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; overflow: hidden; overscroll-behavior: none; touch-action: none; border: 0; border-radius: 0; color: #fff; background: #101419; }
+.nomenclature-preview::backdrop { background: #101419; }
+.nomenclature-preview video { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.nomenclature-camera-header { position: absolute; z-index: 2; inset: 0 0 auto; display: grid; grid-template-columns: 48px 1fr 48px; align-items: center; gap: 12px; padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left)); background: linear-gradient(#0009, transparent); }
+.nomenclature-camera-header h2 { margin: 0; color: #fff; font-size: 18px; font-weight: 700; text-align: center; }
+.nomenclature-camera-back { display: grid; width: 48px; height: 48px; padding: 12px; place-items: center; border: 1px solid #ffffff45; border-radius: 50%; color: #fff; background: #0005; }
+.nomenclature-camera-back svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.nomenclature-camera-back:focus-visible { outline: 3px solid #fff; outline-offset: 4px; }
+.nomenclature-camera-back:hover { background: #0009; }
+.nomenclature-camera-torch[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: #fff; }
+.nomenclature-camera-torch:disabled { opacity: .45; cursor: default; }
+.nomenclature-viewfinder { position: absolute; z-index: 1; top: 50%; left: 50%; width: min(84%, 640px); height: clamp(120px, 24dvh, 240px); max-height: 40%; transform: translate(-50%, -50%); border: 2px solid #fff; border-radius: 18px; box-shadow: 0 0 0 100vmax #0006; pointer-events: none; }
+.nomenclature-camera-footer { position: absolute; z-index: 2; inset: auto 0 0; display: grid; gap: 12px; padding: 40px max(24px, env(safe-area-inset-right)) max(28px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); background: linear-gradient(transparent, #000b); text-align: center; pointer-events: none; }
+.nomenclature-camera-footer p { margin: 0; color: #fff; font-size: 16px; line-height: 1.5; }
+#nomenclature-camera-feedback { color: #ffffffc4; font-size: 13px; }
+@media (max-height: 480px) {
+  .nomenclature-camera-header { padding-top: max(8px, env(safe-area-inset-top)); padding-bottom: 12px; }
+  .nomenclature-camera-footer { gap: 4px; padding-top: 12px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .nomenclature-camera-footer p { font-size: 13px; }
+  #nomenclature-camera-feedback { font-size: 11px; }
+}
+.nomenclature-result { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; padding-top: 6px; }
+.nomenclature-result > label { color: var(--muted); font-size: 13px; }
+.nomenclature-result textarea { width: 100%; min-width: 0; height: 32px; padding: 5px 0; border: 0; border-radius: 4px; color: var(--ink); background: transparent; font: inherit; font-size: 14px; font-weight: 700; overflow-wrap: anywhere; resize: none; }
+.nomenclature-result textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.nomenclature-result > button { flex-shrink: 0; }
+.nomenclature-source-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.nomenclature-source-row .panel__meta { flex: 1; }
+#nomenclature-lookup-feedback:empty { display: none; }
+#nomenclature-lookup-feedback[data-tone="error"] { color: #b42318; }
+#nomenclature-lookup-feedback[data-tone="success"] { color: #18794e; }
+.nomenclature-product { padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.nomenclature-product h3 { margin: 0 0 8px; color: var(--ink); font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+.nomenclature-prices { margin: 18px 0 0; }
+.nomenclature-prices > div { display: flex; gap: 16px; justify-content: space-between; padding: 14px 0; border-top: 1px solid var(--line); }
+.nomenclature-prices dt { color: var(--muted); font-weight: 600; }
+.nomenclature-prices dd { flex-shrink: 0; margin: 0; color: var(--ink); font-size: 18px; font-weight: 800; }
+.nomenclature-choices { display: grid; gap: 10px; }
+.nomenclature-choices > button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.nomenclature-settings [hidden] { display: none !important; }
+.nomenclature-settings__content { display: grid; gap: 16px; padding: 16px 0; }
+.nomenclature-settings .btn-primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+.nomenclature-settings .btn-primary:hover:enabled, .nomenclature-settings .btn-primary:focus-visible { background: var(--accent-dark); border-color: var(--accent-dark); }
+.nomenclature-function .btn-light, .nomenclature-settings .btn-light { color: var(--ink); border: 1px solid var(--line); background: #f7f9fb; }
+.nomenclature-function .btn-light:hover:enabled, .nomenclature-settings .btn-light:hover:enabled { background: #edf1f5; }
+.nomenclature-key { display: grid; gap: 10px; min-width: 0; padding-top: 14px; border-top: 1px solid var(--line); }
+.nomenclature-key input { width: 100%; min-width: 0; }
+@media (max-width: 800px) {
+  .nomenclature-function { padding: 18px; }
+  .nomenclature-actions > button { flex: 1 1 100%; }
+  .nomenclature-prices > div { flex-wrap: wrap; gap: 6px; }
+}
+
 .repairs-function[hidden] { display: none; }
 .repairs-function [hidden] { display: none; }
 .repairs-function { margin: 0; height: calc(100dvh - 100px); min-height: 320px; }
@@ -740,6 +810,10 @@ input {
 .repairs-feedback { margin: 0; padding: 0 18px 12px; color: var(--muted); }
 .repairs-feedback:empty { display: none; }
 .repairs-feedback[data-tone="error"] { color: #b42318; }
+.repairs-feedback[data-tone="loading"] { display: flex; align-items: center; gap: 10px; }
+.repairs-feedback[data-tone="loading"]::before { content: ""; flex: 0 0 auto; width: 20px; height: 20px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: search-loading-spin .75s linear infinite; }
+.repairs-function.is-refreshing .repairs-table { opacity: .65; pointer-events: none; transition: opacity .2s ease; }
+@media (prefers-reduced-motion: reduce) { .repairs-feedback[data-tone="loading"]::before { animation: none; } .repairs-function.is-refreshing .repairs-table { transition: none; } }
 @media (max-width: 800px) {
   .repairs-vehicle-name { font-size: 18px; font-weight: 800; }
   .repairs-vehicle-plate { margin-top: 6px; font-size: 17px; font-weight: 700; letter-spacing: .04em; }

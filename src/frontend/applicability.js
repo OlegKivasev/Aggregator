@@ -5,7 +5,8 @@ import { applicabilityFileMaxBytes, decodeApplicabilityFile, parseApplicabilityF
 import { createApplicabilityMakeMatcher } from "./applicability-make-aliases.js";
 import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { setupSearchHistory } from "./search-history-ui.js";
-import { bootstrapRepairs } from "./repairs-ui.js";
+import { bootstrapRepairs } from "./repairs-ui.js?v=live-refresh-1";
+import { bootstrapNomenclature } from "./nomenclature-ui.js?v=search-progress-1";
 import { moveApplicabilityGroupRelative, moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, moveApplicabilityTabRelative, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "./applicability-tab-groups.js";
 
 const markupFunction = document.querySelector("#markup-function");
@@ -19,6 +20,9 @@ const repairsUi = bootstrapRepairs({
 });
 const testRepairsFunction = document.querySelector("#test-repairs-function");
 const testRepairsTab = document.querySelector("#test-repairs-function-tab");
+const nomenclatureFunction = document.querySelector("#nomenclature-function");
+const nomenclatureTab = document.querySelector("#nomenclature-function-tab");
+const nomenclatureUi = bootstrapNomenclature();
 const applicabilityTabsList = document.querySelector("#applicability-tabs-list");
 const applicabilityTabs = applicabilityTabsList.closest(".applicability-tabs");
 const tabUngroupDrop = document.querySelector("#applicability-tab-ungroup-drop");
@@ -185,7 +189,7 @@ const getActiveTab = () => tabs.find((tab) => tab.id === activeTabId);
 
 const setActiveFunction = (name) => {
   const user = window.aggregatorAuthState?.user;
-  const permissionFor = { markup: "markup", applicability: "applicability", repairs: "repairs", "test-repairs": "testRepairs" };
+  const permissionFor = { markup: "markup", applicability: "applicability", repairs: "repairs", "test-repairs": "testRepairs", nomenclature: "nomenclature" };
   if (user && !user.isAdmin && !user.permissions.includes(permissionFor[name])) {
     name = Object.keys(permissionFor).find((key) => user.permissions.includes(permissionFor[key]));
   }
@@ -194,6 +198,7 @@ const setActiveFunction = (name) => {
   for (const [key, section, button] of [
     ["markup", markupFunction, markupTab], ["applicability", applicabilityFunction, applicabilityTab], ["repairs", repairsFunction, repairsTab],
     ["test-repairs", testRepairsFunction, testRepairsTab],
+    ["nomenclature", nomenclatureFunction, nomenclatureTab],
   ]) {
     section.hidden = name !== key;
     button.classList.toggle("active", name === key);
@@ -209,6 +214,7 @@ const setActiveFunction = (name) => {
     skuInput.focus();
   }
   repairsUi.setActive(name);
+  nomenclatureUi.setActive(name);
 };
 
 const setFeedback = (message, tone = "error") => {
@@ -1516,6 +1522,7 @@ markupTab.addEventListener("click", () => setActiveFunction("markup"));
 applicabilityTab.addEventListener("click", () => setActiveFunction("applicability"));
 repairsTab.addEventListener("click", () => setActiveFunction("repairs"));
 testRepairsTab.addEventListener("click", () => setActiveFunction("test-repairs"));
+nomenclatureTab.addEventListener("click", () => setActiveFunction("nomenclature"));
 newApplicabilityTabButton.addEventListener("click", addTab);
 listButton.addEventListener("click", () => openDocumentModal());
 multiListButton.addEventListener("click", openGroupDocument);
@@ -2061,7 +2068,7 @@ const makesReady = loadMakes();
 const apiKeyReady = loadApiKeyState();
 try {
   const savedFunction = localStorage.getItem(activeFunctionStorageKey);
-  setActiveFunction(["applicability", "repairs", "test-repairs"].includes(savedFunction) ? savedFunction : "markup");
+  setActiveFunction(["applicability", "repairs", "test-repairs", "nomenclature"].includes(savedFunction) ? savedFunction : "markup");
 } catch {
   // The selected function is a convenience preference.
 }

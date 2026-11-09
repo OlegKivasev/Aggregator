@@ -52,6 +52,8 @@ import { serveVkNotifications } from "./vk-notifications.ts";
 import { serveOrderNotifications } from "./order-notifications.ts";
 import { serveRosskoOrderSettings, type RosskoOrderSettingsApplication } from "./rossko-order-settings.ts";
 import type { AuthenticatedUser, UserAuthService, UserPermission } from "../auth/user-auth-service.ts";
+import { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
+import { serveNomenclature } from "./nomenclature.ts";
 
 export interface AggregatorApplication extends RosskoOrderSettingsApplication {
   testCartOrder?: TestOrder;
@@ -115,12 +117,14 @@ function requiredPermission(url: URL): UserPermission | "admin" | null {
   const { pathname } = url;
   if (pathname === "/api/users" || pathname.startsWith("/api/vk-notifications") || pathname.startsWith("/api/notifications/vk")
     || pathname.startsWith("/api/suppliers/") && !pathname.endsWith("/sessions/validate")) return "admin";
-  if (pathname === "/api/repairs") {
+  if (pathname === "/api/repairs" || pathname.startsWith("/api/repairs/refresh")) {
     if (url.searchParams.get("testPlatform") === "true") return "testRepairs";
     if (url.searchParams.get("testPlatform") === "false") return "repairs";
     return "admin";
   }
   if (pathname.startsWith("/api/applicability/")) return "applicability";
+  if (pathname === "/api/nomenclature/settings") return "admin";
+  if (pathname.startsWith("/api/nomenclature/")) return "nomenclature";
   if (pathname.startsWith("/api/")) return "markup";
   return null;
 }
@@ -257,6 +261,7 @@ export function createAggregatorServer({
   }, application.realCartOrder ?? null);
   const cancellations = new OrderCancellationService(new SqliteOrderCancellationRepository(getGarageDatabasePath()));
   const repairs = new SqliteRepairRepository(getGarageDatabasePath());
+  const nomenclature = new NomenclatureService(getGarageDatabasePath());
 
   const server = createServer(async (request, response) => {
     if (!request.url) {
@@ -283,7 +288,9 @@ export function createAggregatorServer({
       ? authenticatedUser.fio.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU")
       : undefined;
     if (await serveRepairs(request, response, url, repairs, repairIntegrationSecret,
-      () => reportError({ operation: "repairs", category: "internal" }), repairFio)) return;
+      () => reportError({ operation: "repairs", category: "internal" }), repairFio, authenticatedUser?.id)) return;
+    if (await serveNomenclature(request, response, url, nomenclature, authenticatedUser,
+      () => reportError({ operation: "nomenclature", category: "internal" }))) return;
 
     if (await serveVkNotifications(request, response, url, notifications)) return;
     if (await serveOrderNotifications(request, response, url, notifications)) return;
@@ -864,6 +871,6 @@ export function createAggregatorServer({
 
     serveJson(response, 405, { message: "Method not allowed" });
   });
-  server.once("close", () => { garage.close(); cart.close(); cancellations.close(); repairs.close(); auth?.close(); });
+  server.once("close", () => { garage.close(); cart.close(); cancellations.close(); repairs.close(); nomenclature.close(); auth?.close(); });
   return server;
 }

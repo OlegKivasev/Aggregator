@@ -29,6 +29,26 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, timezoneId: "America/Los_Angeles" });
     const errors = [];
     const repairRequests = [];
+    const manualRefreshRequests = [];
+    const sourceCards = new Map();
+    const workerHeaders = { Authorization: `Bearer ${secret}` };
+    const pollSource = async (testPlatform) => {
+      const response = await fetch(`${origin}/api/integration/1c/repairs/refresh/requests?testPlatform=${testPlatform}&waitSeconds=0`, { headers: workerHeaders });
+      assert.equal(response.status, 200); return (await response.json()).request;
+    };
+    const confirmRefresh = async (created, testPlatform) => {
+      const job = await pollSource(testPlatform);
+      assert.equal(job.id, created.refresh.id);
+      const repairs = [], removedDocumentIds = [];
+      for (const id of job.documentIds) {
+        const current = sourceCards.get(`${testPlatform}:${id}`);
+        if (current?.status === "В работе") repairs.push({ ...current, goodsReadiness: current.goodsReadiness ?? { totalPositions: 0, availablePositions: 0 } });
+        else removedDocumentIds.push(id);
+      }
+      const response = await fetch(`${origin}/api/integration/1c/repairs/refresh/results`, { method: "POST", headers: { ...workerHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId: job.id, leaseId: job.leaseId, testPlatform, status: "success", repairs, removedDocumentIds }) });
+      assert.equal(response.status, 200);
+    };
     let failList = false;
     let holdList = false;
     let onListHeld;
@@ -40,6 +60,21 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
         return route.fulfill({ contentType: "text/css", body: await readFile(process.env.REPAIRS_BOOTSTRAP_CSS_PATH) });
       }
       if (url.origin !== origin) return route.abort();
+      if (url.pathname.startsWith("/api/repairs/refresh")) {
+        if (request.method() === "POST") manualRefreshRequests.push(request);
+        if (failList) return route.fulfill({ status: 503, json: { message: "Test source unavailable" } });
+        if (request.method() === "POST") {
+          const testPlatform = url.searchParams.get("testPlatform") === "true";
+          await pollSource(testPlatform);
+          const response = await route.fetch();
+          const created = await response.json();
+          assert.equal(response.status(), 202);
+          await confirmRefresh(created, testPlatform);
+          const completed = await fetch(`${origin}/api/repairs/refresh/${created.refresh.id}?testPlatform=${testPlatform}`);
+          return route.fulfill({ status: 202, json: await completed.json() });
+        }
+        return route.continue();
+      }
       if (url.pathname === "/api/repairs") {
         repairRequests.push(request);
         if (holdList) await new Promise((resolve) => {
@@ -82,6 +117,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` }, body: JSON.stringify(value) });
       assert.equal(response.status, 200);
       await response.arrayBuffer();
+      sourceCards.set(`${value.testPlatform === true}:${value.documentId}`, value);
     };
     await send(card);
     await pollRepairs();
@@ -199,7 +235,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#repairs-function .repairs-counterparty").count(), 0);
     failList = true;
     await page.locator("#repairs-refresh").click();
-    await page.getByText("Не удалось загрузить заказ-наряды. Нажмите «Обновить».").waitFor();
+    await page.getByText(/Произошёл сбой обновления.*Обратитесь в магазин/).waitFor();
     assert.equal(await page.locator("#repairs-count").isVisible(), false);
     assert.equal(await page.locator("#repairs-refresh").isEnabled(), true);
     failList = false;
@@ -238,7 +274,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#test-repairs-function-tab").getAttribute("aria-selected"), "true");
     failList = true;
     await page.locator("#test-repairs-refresh").click();
-    await page.locator("#test-repairs-feedback").getByText("Не удалось загрузить заказ-наряды. Нажмите «Обновить».").waitFor();
+    await page.locator("#test-repairs-feedback").getByText(/Произошёл сбой обновления.*Обратитесь в магазин/).waitFor();
     failList = false;
     await page.locator("#test-repairs-refresh").click();
     await page.locator("#test-repairs-rows").getByText(testVehicle, { exact: true }).waitFor();
@@ -247,7 +283,8 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
       body: JSON.stringify({ confirmTestCleanup: true }) });
     assert.equal(cleanup.status, 200);
     assert.deepEqual(await cleanup.json(), { deleted: 1 });
-    await page.locator("#test-repairs-refresh").click();
+    sourceCards.delete(`true:${card.documentId}`);
+    await pollRepairs();
     await page.locator("#test-repairs-function-tab").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#test-repairs-function").isVisible(), false);
     assert.equal(await page.locator("#markup-function").isVisible(), true);
@@ -287,24 +324,29 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
 
     failList = true;
     await pollRepairs();
-    await page.getByText("Не удалось обновить заказ-наряды. Показаны ранее загруженные данные.", { exact: true }).waitFor();
-    assert.equal(await page.getByText("В наличии 3 из 4 позиций", { exact: true }).isVisible(), true);
-    assert.equal(await page.locator("#repairs-count").isVisible(), true);
+    await page.getByText(/Произошёл сбой обновления.*Обратитесь в магазин/).waitFor();
+    assert.equal(await page.getByText("В наличии 3 из 4 позиций", { exact: true }).isVisible(), false);
+    assert.equal(await page.locator("#repairs-count").isVisible(), false);
     failList = false;
     await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 4 } });
-    await pollRepairs();
+    await page.locator("#repairs-refresh").click();
     await page.getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
-    assert.equal(await page.locator("#repairs-feedback").textContent(), "");
+    assert.match(await page.locator("#repairs-feedback").textContent(), /обновлены/);
 
-    // An unposting command from 1C removes the card without manual browser refresh.
+    // A closed order leaves the list on the normal timer without issuing a manual 1C refresh.
+    const beforeClose = manualRefreshRequests.length;
+    await waitForRepairIdle();
     const removed = await fetch(`${origin}/api/integration/1c/repairs`, { method: "DELETE",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
       body: JSON.stringify({ documentId: card.documentId, testPlatform: false }) });
     assert.equal(removed.status, 200);
+    sourceCards.delete(`false:${card.documentId}`);
     await removed.arrayBuffer();
+    assert.equal(await page.locator("#repairs-rows .repairs-readiness").count(), 1);
     await pollRepairs();
     await page.locator("#repairs-function-tab").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#markup-function").isVisible(), true);
+    assert.equal(manualRefreshRequests.length, beforeClose);
     await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 4 } });
     await pollRepairs();
     await page.locator("#repairs-function-tab").waitFor();

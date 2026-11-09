@@ -11,16 +11,37 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     const refreshButton = document.querySelector(`#${prefix}-refresh`);
     const tab = document.querySelector(`#${prefix}-function-tab`);
     const search = document.querySelector(`#${prefix}-search`);
-    return { testPlatform, prefix, section, rows, feedback, count, refreshButton, tab, search, repairs: null };
+    return { testPlatform, prefix, section, rows, feedback, count, refreshButton, tab, search, repairs: null, failed: false, unverified: new Set() };
   });
   let activeView;
   let loading = false;
   let loaded = false;
   let refreshTimer;
   let refreshRequested = false;
+  let pendingLiveView;
+  let liveController;
+  let liveRequest;
+  let liveGeneration = 0;
+  const failureMessage = "Произошёл сбой обновления заказ-нарядов. Достоверность данных не подтверждена. Обратитесь в магазин.";
   const initialAuthState = window.aggregatorAuthState;
   let authReady = initialAuthState?.ready === true;
   let authUser = initialAuthState?.user ?? null;
+  const verificationKey = (view) => `autoservice.repairs-unverified.${authUser?.id ?? "shared"}.${view.testPlatform}`;
+  const rememberVerification = (view) => {
+    try {
+      if (view.unverified.size) sessionStorage.setItem(verificationKey(view), JSON.stringify([...view.unverified]));
+      else if (view.failed && view.repairs === null) sessionStorage.setItem(verificationKey(view), "true");
+      else sessionStorage.removeItem(verificationKey(view));
+    } catch { /* SQLite also preserves requests that reached the server. */ }
+  };
+  const restoreVerification = (view, repairs) => {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(verificationKey(view)) ?? "[]");
+      for (const id of stored === true ? repairs.map((card) => card.documentId) : Array.isArray(stored) ? stored : []) {
+        if (typeof id === "string") view.unverified.add(id);
+      }
+    } catch { /* The server's verification state remains authoritative. */ }
+  };
 
   const clearRefreshTimer = () => {
     window.clearTimeout(refreshTimer);
@@ -71,23 +92,32 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     return cell;
   };
 
-  const readRepairs = async (response) => {
-    if (!response.ok) throw new Error("Repairs request failed");
-    const payload = await response.json();
+  const parseRepairs = (payload, fresh = false) => {
     if (!Array.isArray(payload?.repairs) || payload.repairs.some((card) => !card
       || ["documentId", "number", "date", "vehicleName", "status"].some((key) => typeof card[key] !== "string")
+      || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(card.documentId)
       || (card.counterpartyName !== undefined && (typeof card.counterpartyName !== "string" || !card.counterpartyName.trim()))
-      || !validReadiness(card.goodsReadiness)
+      || !validReadiness(card.goodsReadiness) || fresh && !card.goodsReadiness
       || (card.testPlatform !== undefined && typeof card.testPlatform !== "boolean")
       || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(card.date))) {
       throw new Error("Invalid repairs response");
     }
     return payload.repairs;
   };
+  const readRepairs = async (response) => {
+    if (!response.ok) throw new Error("Repairs request failed");
+    const payload = await response.json();
+    const repairs = parseRepairs(payload);
+    if (payload.unverified !== undefined && (!Array.isArray(payload.unverified) || payload.unverified.some((item) => !item
+      || typeof item.documentId !== "string" || typeof item.testPlatform !== "boolean"))) throw new Error("Invalid verification state");
+    return { repairs, unverified: payload.unverified ?? [] };
+  };
 
   const renderRows = (view) => {
     const { rows, count, testPlatform, search, repairs } = view;
     const visible = filterRepairCards(repairs, search.value);
+    if (visible.some((card) => view.unverified.has(card.documentId))) { invalidateView(view, []); return; }
+    view.failed = false;
     const fragment = document.createDocumentFragment();
     for (const card of visible) {
       const row = document.createElement("tr");
@@ -123,20 +153,149 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     const { feedback, tab } = view;
     view.repairs = repairs;
     renderRows(view);
-    feedback.textContent = "";
-    delete feedback.dataset.tone;
+    if (!view.failed) { feedback.textContent = ""; delete feedback.dataset.tone; }
     const singleForm = !authUser?.isAdmin && authUser?.permissions?.length === 1;
-    tab.hidden = repairs.length === 0 && !singleForm;
+    tab.hidden = !view.failed && repairs.length === 0 && !singleForm;
   };
 
-  async function refresh({ background = false } = {}) {
-    if (!authReady) return;
-    if (loading) {
-      refreshRequested = true;
+  const invalidateView = (view, ids = view.repairs?.map((card) => card.documentId) ?? []) => {
+    for (const id of ids) view.unverified.add(id);
+    view.failed = true;
+    rememberVerification(view);
+    view.count.hidden = true;
+    view.feedback.dataset.tone = "error";
+    view.feedback.textContent = failureMessage;
+    showMessage(view.rows, "Актуальные данные недоступны.");
+  };
+  const paintBusy = (view, busy) => {
+    view.section.classList.toggle("is-refreshing", busy);
+    view.section.setAttribute("aria-busy", String(busy));
+    view.refreshButton.disabled = busy;
+    view.refreshButton.textContent = busy ? "Обновляем…" : "Обновить";
+    view.search.disabled = busy;
+  };
+  const finishRefresh = () => {
+    loading = false;
+    if (pendingLiveView) {
+      const view = pendingLiveView;
+      pendingLiveView = undefined;
+      refreshRequested = false;
+      void refresh({ live: true, target: view });
+    } else if (refreshRequested) { refreshRequested = false; void refresh({ background: true }); }
+    else scheduleRefresh();
+  };
+  const refreshLive = async (view) => {
+    // If the initial list failed, discover its permitted IDs before requesting fresh data.
+    if (view.repairs === null) {
+      loading = true;
+      clearRefreshTimer();
+      const generation = liveGeneration;
+      paintBusy(view, true);
+      try {
+        const payload = await readRepairs(await fetch(`/api/repairs?testPlatform=${view.testPlatform}`, {
+          cache: "no-store", signal: AbortSignal.timeout(15_000),
+        }));
+        if (generation !== liveGeneration) return;
+        view.repairs = payload.repairs;
+        restoreVerification(view, payload.repairs);
+        for (const item of payload.unverified) if (item.testPlatform === view.testPlatform) view.unverified.add(item.documentId);
+      } catch {
+        if (generation === liveGeneration) { invalidateView(view); paintBusy(view, false); finishRefresh(); }
+        return;
+      }
+      if (generation !== liveGeneration) return;
+      loading = false;
+      paintBusy(view, false);
+    }
+    // Freeze the visible subset. An order outside the current search is never requested.
+    const visible = filterRepairCards(view.repairs ?? [], view.search.value);
+    const ids = visible.map((card) => card.documentId);
+    if (!ids.length) {
+      view.feedback.textContent = view.failed ? failureMessage : "Нет показанных заказ-нарядов для обновления.";
+      scheduleRefresh();
       return;
     }
     loading = true;
     clearRefreshTimer();
+    const attempt = ++liveGeneration;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 65_000);
+    liveController = controller;
+    const current = () => attempt === liveGeneration;
+    const route = `/api/repairs/refresh?testPlatform=${view.testPlatform}`;
+    paintBusy(view, true);
+    for (const id of ids) view.unverified.add(id);
+    rememberVerification(view);
+    view.count.hidden = true;
+    view.feedback.dataset.tone = "loading";
+    view.feedback.textContent = "Обновляем данные из 1С…";
+    showMessage(view.rows, "Проверяем показанные заказ-наряды…");
+    try {
+      const created = await fetch(route, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ documentIds: ids }), signal: controller.signal });
+      if (!created.ok) throw new Error("Refresh failed");
+      let result = (await created.json()).refresh;
+      const requestId = result?.id;
+      if (typeof requestId !== "string" || !/^[a-f0-9-]{36}$/i.test(requestId)) throw new Error("Invalid refresh ID");
+      const requestRoute = `/api/repairs/refresh/${requestId}?testPlatform=${view.testPlatform}`;
+      if (!current()) { void fetch(requestRoute, { method: "DELETE", keepalive: true }).catch(() => {}); return; }
+      liveRequest = requestRoute;
+      const deadline = Math.min(Date.parse(result.expiresAt), Date.now() + 60_000);
+      if (!Number.isFinite(deadline)) throw new Error("Invalid refresh deadline");
+      while (result.status === "pending") {
+        if (Date.now() >= deadline) throw new Error("Refresh timeout");
+        await new Promise((resolve, reject) => {
+          const stop = () => { clearTimeout(timer); reject(new Error("Cancelled")); };
+          const timer = setTimeout(() => { controller.signal.removeEventListener("abort", stop); resolve(); }, 650);
+          if (controller.signal.aborted) stop(); else controller.signal.addEventListener("abort", stop, { once: true });
+        });
+        const response = await fetch(requestRoute, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error("Refresh poll failed");
+        result = (await response.json()).refresh;
+        if (!current()) return;
+        if (result?.id !== requestId) throw new Error("Unrelated refresh");
+      }
+      if (result.status !== "completed" || !Array.isArray(result.removedDocumentIds)) throw new Error("Refresh not confirmed");
+      const cards = parseRepairs(result, true);
+      const covered = [...cards.map((card) => card.documentId), ...result.removedDocumentIds];
+      if (covered.length !== ids.length || new Set(covered).size !== ids.length || covered.some((id) => !ids.includes(id))
+        || cards.some((card) => (card.testPlatform === true) !== view.testPlatform || card.status !== "В работе")) throw new Error("Incomplete refresh");
+      const fresh = new Map(cards.map((card) => [card.documentId, card]));
+      const repairs = view.repairs.flatMap((card) => ids.includes(card.documentId) ? (fresh.has(card.documentId) ? [fresh.get(card.documentId)] : []) : [card]);
+      liveRequest = undefined;
+      for (const id of ids) view.unverified.delete(id);
+      rememberVerification(view);
+      renderView(view, repairs);
+      if (!view.failed) {
+        view.feedback.dataset.tone = "success";
+        view.feedback.textContent = "Показанные заказ-наряды обновлены.";
+      }
+      if (activeView?.tab.hidden) onActiveEmpty?.();
+    } catch {
+      if (current()) invalidateView(view, ids);
+    } finally {
+      clearTimeout(timeout);
+      if (current()) {
+        if (liveRequest) void fetch(liveRequest, { method: "DELETE", keepalive: true }).catch(() => {});
+        liveRequest = undefined;
+        liveController = undefined;
+        paintBusy(view, false);
+        finishRefresh();
+      }
+    }
+  };
+
+  async function refresh({ background = false, live = false, target = activeView } = {}) {
+    if (!authReady) return;
+    if (loading) {
+      if (live) pendingLiveView = target;
+      else refreshRequested = true;
+      return;
+    }
+    if (live && target) return refreshLive(target);
+    loading = true;
+    clearRefreshTimer();
+    const generation = liveGeneration;
     const view = activeView;
     const requestedViews = !authReady || authUser?.isAdmin
       ? views
@@ -150,7 +309,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       refreshButton.disabled = true;
       section.setAttribute("aria-busy", "true");
     }
-    if (view && (!background || !loaded)) {
+    if (view && !view.failed && (!background || !loaded)) {
       const { feedback, count, rows } = view;
       feedback.textContent = "Загрузка…";
       delete feedback.dataset.tone;
@@ -165,37 +324,28 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
           cache: "no-store", signal: AbortSignal.timeout(15_000),
         })));
       const payloads = await Promise.all(responses.map(readRepairs));
+      if (generation !== liveGeneration) return;
       for (const [index, currentView] of requestedViews.entries()) {
-        const repairs = (combined ? payloads[0] : payloads[index])
+        // A cache read cannot repair a failed request to 1C or restore unconfirmed values.
+        const payload = combined ? payloads[0] : payloads[index];
+        const repairs = payload.repairs
           .filter((card) => (card.testPlatform === true) === currentView.testPlatform);
+        restoreVerification(currentView, repairs);
+        for (const item of payload.unverified) if (item.testPlatform === currentView.testPlatform) currentView.unverified.add(item.documentId);
         renderView(currentView, repairs);
       }
       loaded = true;
       if (activeView?.tab.hidden) onActiveEmpty?.();
     } catch {
-      if (!view) return;
-      const { feedback, rows } = view;
-      feedback.dataset.tone = "error";
-      if (background && loaded) {
-        feedback.textContent = "Не удалось обновить заказ-наряды. Показаны ранее загруженные данные.";
-      } else {
-        feedback.textContent = "Не удалось загрузить заказ-наряды. Нажмите «Обновить».";
-        showMessage(rows, "Список недоступен.");
-        view.repairs = null;
-        loaded = false;
-      }
+      if (!view || generation !== liveGeneration) return;
+      invalidateView(view);
     } finally {
-      loading = false;
+      if (generation !== liveGeneration) return;
       for (const { refreshButton, section } of views) {
         refreshButton.disabled = false;
         section.setAttribute("aria-busy", "false");
       }
-      if (refreshRequested) {
-        refreshRequested = false;
-        void refresh();
-      } else {
-        scheduleRefresh();
-      }
+      finishRefresh();
     }
   }
 
@@ -212,14 +362,28 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
   document.addEventListener("visibilitychange", resume);
   window.addEventListener("focus", resume);
   document.addEventListener("aggregator-auth-ready", (event) => {
+    liveGeneration += 1;
+    liveController?.abort();
+    if (liveRequest) void fetch(liveRequest, { method: "DELETE", keepalive: true }).catch(() => {});
+    liveRequest = undefined;
+    liveController = undefined;
+    pendingLiveView = undefined;
+    loading = false;
+    loaded = false;
+    for (const view of views) {
+      view.failed = false; view.repairs = null; view.unverified.clear(); view.rows.replaceChildren(); paintBusy(view, false);
+    }
     authReady = true;
     authUser = event.detail ?? null;
     void refresh();
   });
   for (const view of views) {
-    view.refreshButton.addEventListener("click", () => { void refresh(); });
+    view.refreshButton.addEventListener("click", () => { void refresh({ live: true, target: view }); });
     view.search.addEventListener("input", () => {
-      if (view.repairs !== null && view.section.getAttribute("aria-busy") !== "true") renderRows(view);
+      if (view.repairs !== null && view.section.getAttribute("aria-busy") !== "true") {
+        renderRows(view);
+        if (!view.failed && view.feedback.dataset.tone === "error") { view.feedback.textContent = ""; delete view.feedback.dataset.tone; }
+      }
     });
   }
   return { setActive, start: resume };
