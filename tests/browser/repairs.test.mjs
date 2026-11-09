@@ -29,6 +29,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, timezoneId: "America/Los_Angeles" });
     const errors = [];
     const repairRequests = [];
+    const manualRefreshRequests = [];
     const sourceCards = new Map();
     const workerHeaders = { Authorization: `Bearer ${secret}` };
     const pollSource = async (testPlatform) => {
@@ -60,6 +61,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
       }
       if (url.origin !== origin) return route.abort();
       if (url.pathname.startsWith("/api/repairs/refresh")) {
+        if (request.method() === "POST") manualRefreshRequests.push(request);
         if (failList) return route.fulfill({ status: 503, json: { message: "Test source unavailable" } });
         if (request.method() === "POST") {
           const testPlatform = url.searchParams.get("testPlatform") === "true";
@@ -331,16 +333,20 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
     assert.match(await page.locator("#repairs-feedback").textContent(), /обновлены/);
 
-    // An unposting command from 1C removes the card without manual browser refresh.
+    // A closed order leaves the list on the normal timer without issuing a manual 1C refresh.
+    const beforeClose = manualRefreshRequests.length;
+    await waitForRepairIdle();
     const removed = await fetch(`${origin}/api/integration/1c/repairs`, { method: "DELETE",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
       body: JSON.stringify({ documentId: card.documentId, testPlatform: false }) });
     assert.equal(removed.status, 200);
     sourceCards.delete(`false:${card.documentId}`);
     await removed.arrayBuffer();
+    assert.equal(await page.locator("#repairs-rows .repairs-readiness").count(), 1);
     await pollRepairs();
     await page.locator("#repairs-function-tab").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#markup-function").isVisible(), true);
+    assert.equal(manualRefreshRequests.length, beforeClose);
     await send({ ...updated, goodsReadiness: { totalPositions: 4, availablePositions: 4 } });
     await pollRepairs();
     await page.locator("#repairs-function-tab").waitFor();
