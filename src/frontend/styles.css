@@ -810,6 +810,10 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .repairs-feedback { margin: 0; padding: 0 18px 12px; color: var(--muted); }
 .repairs-feedback:empty { display: none; }
 .repairs-feedback[data-tone="error"] { color: #b42318; }
+.repairs-feedback[data-tone="loading"] { display: flex; align-items: center; gap: 10px; }
+.repairs-feedback[data-tone="loading"]::before { content: ""; flex: 0 0 auto; width: 20px; height: 20px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: search-loading-spin .75s linear infinite; }
+.repairs-function.is-refreshing .repairs-table { opacity: .65; pointer-events: none; transition: opacity .2s ease; }
+@media (prefers-reduced-motion: reduce) { .repairs-feedback[data-tone="loading"]::before { animation: none; } .repairs-function.is-refreshing .repairs-table { transition: none; } }
 @media (max-width: 800px) {
   .repairs-vehicle-name { font-size: 18px; font-weight: 800; }
   .repairs-vehicle-plate { margin-top: 6px; font-size: 17px; font-weight: 700; letter-spacing: .04em; }

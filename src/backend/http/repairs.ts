@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { parseRepairCard, parseRepairRemoval, RepairValidationError } from "../repairs/repair-card.ts";
 import type { SqliteRepairRepository } from "../repairs/sqlite-repair-repository.ts";
+import { RepairRefreshError, refreshFailure } from "../repairs/repair-refresh-service.ts";
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
 import { serveJson } from "./responses.ts";
 
@@ -13,14 +14,18 @@ export async function serveRepairs(
   secret: string | null,
   reportError: () => void,
   responsibleFio?: string,
+  ownerId = "shared",
 ): Promise<boolean> {
   const importCard = url.pathname === "/api/integration/1c/repairs";
   const checkStatus = url.pathname === "/api/integration/1c/repairs/status";
   const clearTest = url.pathname === "/api/integration/1c/repairs/test";
   const clearProduction = url.pathname === "/api/integration/1c/repairs/production";
   const deleteCard = importCard && request.method === "DELETE";
-  const integration = importCard || checkStatus || clearTest || clearProduction;
-  if (!integration && url.pathname !== "/api/repairs") return false;
+  const workerRequests = url.pathname === "/api/integration/1c/repairs/refresh/requests";
+  const workerResults = url.pathname === "/api/integration/1c/repairs/refresh/results";
+  const refreshRoute = /^\/api\/repairs\/refresh(?:\/([a-f0-9-]{36}))?$/.exec(url.pathname);
+  const integration = importCard || checkStatus || clearTest || clearProduction || workerRequests || workerResults;
+  if (!integration && !refreshRoute && url.pathname !== "/api/repairs") return false;
   response.setHeader("Cache-Control", "no-store");
   let testPlatformFilter: boolean | undefined;
   if (!integration) {
@@ -31,14 +36,16 @@ export async function serveRepairs(
       return true;
     }
     if (searchKeys.length === 1) testPlatformFilter = url.searchParams.get("testPlatform") === "true";
+    if (refreshRoute && testPlatformFilter === undefined) { serveJson(response, 400, { message: "Укажите режим заказ-нарядов." }); return true; }
   }
-  const method = deleteCard || clearTest || clearProduction ? "DELETE" : importCard ? "POST" : "GET";
-  if (request.method !== method) {
-    response.setHeader("Allow", importCard ? "POST, DELETE" : method);
+  const method = deleteCard || clearTest || clearProduction ? "DELETE" : importCard || workerResults || refreshRoute && !refreshRoute[1] ? "POST" : "GET";
+  const methods = refreshRoute?.[1] ? ["GET", "DELETE"] : [method];
+  if (!methods.includes(request.method ?? "")) {
+    response.setHeader("Allow", importCard ? "POST, DELETE" : methods.join(", "));
     serveJson(response, 405, { message: "Method not allowed" });
     return true;
   }
-  if (integration && url.search) {
+  if (integration && !workerRequests && url.search) {
     serveJson(response, 400, { message: "Параметры URL не поддерживаются." });
     return true;
   }
@@ -56,13 +63,45 @@ export async function serveRepairs(
       serveJson(response, 401, { message: "Неверный секрет интеграции." });
       return true;
     }
-    if (!checkStatus && request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+    if (!checkStatus && !workerRequests && request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
       serveJson(response, 415, { message: "Требуется Content-Type: application/json." });
       return true;
     }
   }
   try {
-    if (deleteCard) {
+    if (workerRequests) {
+      if ([...url.searchParams.keys()].some((key) => !["testPlatform", "waitSeconds"].includes(key))
+        || url.searchParams.getAll("testPlatform").length !== 1 || !["true", "false"].includes(url.searchParams.get("testPlatform") ?? "")
+        || url.searchParams.getAll("waitSeconds").length > 1 || !/^(?:\d|1\d|20)$/.test(url.searchParams.get("waitSeconds") ?? "20")) {
+        throw new RepairRefreshError(400);
+      }
+      const release = repository.refreshes.beginPoll();
+      const abort = new AbortController();
+      const stop = () => abort.abort();
+      response.once("close", stop);
+      try {
+        const deadline = Date.now() + Number(url.searchParams.get("waitSeconds") ?? "20") * 1000;
+        while (!abort.signal.aborted) {
+          const job = repository.refreshes.claim(url.searchParams.get("testPlatform") === "true");
+          if (job || Date.now() >= deadline) { serveJson(response, 200, { request: job }); break; }
+          await repository.refreshes.wait(abort.signal, deadline - Date.now());
+        }
+      } finally { release(); response.removeListener("close", stop); }
+    } else if (workerResults) {
+      const result = repository.refreshes.complete(await readJsonBody(request, 512 * 1024));
+      if (!response.destroyed) serveJson(response, 200, result);
+    } else if (refreshRoute) {
+      if (!secret) throw new RepairRefreshError(503);
+      const id = refreshRoute[1];
+      if (!id) {
+        if (request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") throw new RepairRefreshError(415);
+        const payload = await readJsonBody(request, 16 * 1024);
+        if (!response.destroyed) serveJson(response, 202, { refresh: repository.refreshes.create(payload, testPlatformFilter!, ownerId, responsibleFio) });
+      } else if (request.method === "DELETE") {
+        repository.refreshes.cancel(id, testPlatformFilter!, ownerId);
+        serveJson(response, 200, { cancelled: true });
+      } else serveJson(response, 200, { refresh: repository.refreshes.get(id, testPlatformFilter!, ownerId, responsibleFio) });
+    } else if (deleteCard) {
       const identity = parseRepairRemoval(await readJsonBody(request));
       if (!response.destroyed) {
         const deleted = repository.remove(identity.documentId, identity.testPlatform);
@@ -91,15 +130,20 @@ export async function serveRepairs(
       const repairs = repository.list().filter((repair) => (testPlatformFilter === undefined || (repair.testPlatform === true) === testPlatformFilter)
         && (responsibleFio === undefined
         || (repair.responsibleFio !== undefined && repair.responsibleFio.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU") === responsibleFio)));
-      serveJson(response, 200, { repairs });
+      const unverified = [false, true].flatMap((test) => repository.refreshes.unverified(
+        repairs.filter((card) => (card.testPlatform === true) === test).map((card) => card.documentId), test)
+        .map((documentId) => ({ documentId, testPlatform: test })));
+      serveJson(response, 200, { repairs, ...(unverified.length ? { unverified } : {}) });
     }
   } catch (error) {
     if (!response.destroyed) {
-      if (error instanceof RequestBodyError || error instanceof RepairValidationError) {
+      if (error instanceof RepairRefreshError) {
+        serveJson(response, error.statusCode, { message: error.message });
+      } else if (error instanceof RequestBodyError || error instanceof RepairValidationError) {
         serveJson(response, error instanceof RequestBodyError ? error.statusCode : 400, { message: error.message });
       } else {
         reportError();
-        serveJson(response, 500, { message: "Не удалось сохранить или прочитать заказ-наряды." });
+        serveJson(response, 500, { message: refreshRoute || workerResults || workerRequests ? refreshFailure : "Не удалось сохранить или прочитать заказ-наряды." });
       }
     }
   }

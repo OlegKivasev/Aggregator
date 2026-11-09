@@ -2,8 +2,10 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import type { GoodsReadiness, RepairCard } from "./repair-card.ts";
+import { RepairRefreshService } from "./repair-refresh-service.ts";
 
 export class SqliteRepairRepository {
+  readonly refreshes: RepairRefreshService;
   private readonly database: DatabaseSync;
   private readonly saveStatement: StatementSync;
   private readonly listStatement: StatementSync;
@@ -76,12 +78,19 @@ export class SqliteRepairRepository {
           vehicle_name = excluded.vehicle_name, status = excluded.status, responsible_fio = excluded.responsible_fio, counterparty_name = excluded.counterparty_name,
           goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions
       `);
+      this.refreshes = new RepairRefreshService(this.database, () => this.list(true), (id, test) => {
+        const table = test ? "test_repair_cards" : "repair_cards";
+        return JSON.stringify(this.database.prepare(`SELECT * FROM ${table} WHERE document_id=?`).get(id) ?? null);
+      }, (result, test) => {
+        for (const card of result.repairs) this.save(card);
+        for (const id of result.removedDocumentIds) this.remove(id, test);
+      });
       this.listStatement = this.database.prepare(`
         SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, 0 AS testPlatform
-        FROM repair_cards WHERE status = 'В работе'
+        FROM repair_cards WHERE status = 'В работе' OR ? = 1
         UNION ALL
         SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, 1 AS testPlatform
-        FROM test_repair_cards WHERE status = 'В работе'
+        FROM test_repair_cards WHERE status = 'В работе' OR ? = 1
         ORDER BY date DESC, documentId ASC, testPlatform ASC
       `);
     } catch (error) {
@@ -95,8 +104,8 @@ export class SqliteRepairRepository {
     statement.run(card.documentId, card.number, card.date, card.vehicleName, card.status, card.responsibleFio ?? null, card.counterpartyName ?? null, card.goodsReadiness?.totalPositions ?? null, card.goodsReadiness?.availablePositions ?? null);
   }
 
-  list(): RepairCard[] {
-    return this.listStatement.all().map((row) => {
+  list(includeInactive = false): RepairCard[] {
+    return this.listStatement.all(Number(includeInactive), Number(includeInactive)).map((row) => {
       const { documentId, number, date, vehicleName, status, responsibleFio, counterpartyName } = row;
       if (typeof documentId !== "string" || typeof number !== "string" || typeof date !== "string"
         || typeof vehicleName !== "string" || typeof status !== "string") {
@@ -149,6 +158,7 @@ export class SqliteRepairRepository {
   }
 
   close(): void {
+    this.refreshes.close();
     this.database.close();
   }
 }
