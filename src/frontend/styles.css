@@ -611,7 +611,22 @@ input {
 .auth-toolbar__user { max-width: 260px; color: var(--muted); font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .auth-toolbar__logout { min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); font: inherit; cursor: pointer; }
 .auth-toolbar__logout:hover, .auth-toolbar__logout:focus-visible { border-color: var(--accent); color: var(--accent-dark); background: #fff3ed; outline: 0; }
-.users-settings__content { padding: 14px 0; }
+.users-settings__content { display: grid; gap: 14px; padding-top: 14px; }
+.users-settings__content > p { margin: 0; }
+.users-settings__content > .users-list { margin-top: 0; }
+.users-settings__content > .auth-feedback:empty { display: none; }
+.users-settings__create { justify-self: start; color: #fff; border-color: var(--accent); background: var(--accent); }
+.users-settings__create:hover, .users-settings__create:focus-visible { color: #fff; border-color: var(--accent-dark); background: var(--accent-dark); }
+.user-create-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 24px; overflow: auto; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); background: var(--surface); box-shadow: 0 16px 48px rgba(23, 32, 42, .2); }
+.user-create-dialog::backdrop { background: rgba(23, 32, 42, .25); }
+.user-create-dialog__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.user-create-dialog__header h2 { margin: 0; font-size: 22px; font-weight: 800; }
+.user-create-dialog .field { min-width: 0; }
+.user-create-dialog fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.user-create-dialog legend { grid-column: 1 / -1; margin: 0; font-size: 13px; font-weight: 700; }
+.user-create-dialog .auth-feedback { margin: 0; }
+.user-create-dialog .auth-feedback:empty { display: none; }
+.user-create-dialog__actions { justify-content: flex-end; flex-wrap: wrap; margin-top: 8px; }
 .users-settings__content fieldset { margin: 0; padding: 10px 0; border: 0; }
 .users-settings__content legend { margin-bottom: 6px; font-size: 13px; font-weight: 700; }
 .users-list { display: grid; gap: 8px; margin-top: 18px; }
@@ -3126,6 +3141,10 @@ th[aria-sort="descending"] .analogs-sort span::after {
   padding: 28px;
   border-radius: 18px;
 }
+
+#settings-drawer > .settings-drawer__panel { display: flex; flex-direction: column; gap: 14px; }
+#settings-drawer > .settings-drawer__panel > .settings-drawer__header { margin: 0 0 6px; }
+#settings-drawer > .settings-drawer__panel > details { margin: 0; padding: 16px; border-radius: 14px; }
 
 .settings-drawer__header,
 .auth-card__header {

@@ -59,6 +59,67 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
     await ready();
     await openSettings();
     const create = page.locator("#user-create-form");
+    const createDialog = page.locator("#user-create-dialog");
+    const createOpen = page.locator("#user-create-open");
+    assert.equal(await create.isVisible(), false);
+    const assertSettingsSpacing = async () => {
+      const spacing = await page.locator("#settings-drawer > .settings-drawer__panel > details").evaluateAll((elements) => {
+        const bounds = elements.filter((element) => !element.hidden).map((element) => element.getBoundingClientRect());
+        return bounds.slice(1).map((rect, index) => rect.top - bounds[index].bottom);
+      });
+      assert.deepEqual(spacing, [14, 14, 14]);
+    };
+    await assertSettingsSpacing();
+    await page.locator("#users-settings > summary").click();
+    await assertSettingsSpacing();
+    if (process.env.USER_SETTINGS_SCREENSHOT_DIR) {
+      await page.screenshot({ path: join(process.env.USER_SETTINGS_SCREENSHOT_DIR, "settings-overview-desktop.png"), fullPage: true });
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await assertSettingsSpacing();
+    if (process.env.USER_SETTINGS_SCREENSHOT_DIR) {
+      await page.screenshot({ path: join(process.env.USER_SETTINGS_SCREENSHOT_DIR, "settings-overview-mobile.png"), fullPage: true });
+    }
+    await page.locator("#users-settings > summary").click();
+    const createRequests = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/users" && request.method() === "POST") createRequests.push(request);
+    });
+    await createOpen.click();
+    assert.equal(await createDialog.isVisible(), true);
+    assert.equal(await create.locator("#user-fio").evaluate((element) => element === document.activeElement), true);
+    await create.locator("#user-fio").fill("Отменённый пользователь");
+    await create.locator("#user-password").fill("cancelled-test-password");
+    await create.locator('input[value="markup"]').check();
+    await create.getByRole("button", { name: "Отмена", exact: true }).click();
+    await createDialog.waitFor({ state: "hidden" });
+    assert.equal(createRequests.length, 0);
+    assert.equal(await createOpen.evaluate((element) => element === document.activeElement), true);
+    await createOpen.click();
+    assert.equal(await create.locator("#user-fio").inputValue(), "");
+    assert.equal(await create.locator("#user-password").inputValue(), "");
+    assert.equal(await create.locator("input[type=checkbox]:checked").count(), 0);
+    await create.locator("#user-fio").fill("Пробное имя");
+    assert.equal(await createDialog.evaluate((element) => element.scrollWidth <= element.clientWidth), true);
+    if (process.env.USER_SETTINGS_SCREENSHOT_DIR) {
+      await page.screenshot({ path: join(process.env.USER_SETTINGS_SCREENSHOT_DIR, "user-create-mobile.png"), fullPage: true });
+    }
+    await page.keyboard.press("Escape");
+    await createDialog.waitFor({ state: "hidden" });
+    await createOpen.click();
+    assert.equal(await create.locator("#user-fio").inputValue(), "");
+    await createDialog.getByRole("button", { name: "Закрыть создание пользователя" }).click();
+    await createDialog.waitFor({ state: "hidden" });
+    assert.equal(createRequests.length, 0);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await createOpen.click();
+    await create.locator("#user-fio").fill("Администратор");
+    await create.locator("#user-password").fill("original-test-password");
+    await create.locator('[type="submit"]').click();
+    await create.getByText("User with this FIO already exists", { exact: true }).waitFor();
+    assert.equal(await createDialog.isVisible(), true);
+    assert.equal(await create.locator("#user-fio").inputValue(), "Администратор");
+    assert.equal(await create.locator("#user-password").inputValue(), "original-test-password");
     await create.locator("#user-fio").fill("Иванов Иван Иванович");
     await create.locator("#user-password").fill("original-test-password");
     await create.locator(".password-toggle").click();
@@ -66,8 +127,14 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
     await create.locator(".password-toggle").click();
     assert.equal(await create.locator("#user-password").getAttribute("type"), "password");
     await create.locator('input[value="repairs"]').check();
+    if (process.env.USER_SETTINGS_SCREENSHOT_DIR) {
+      await page.screenshot({ path: join(process.env.USER_SETTINGS_SCREENSHOT_DIR, "user-create-desktop.png"), fullPage: true });
+    }
     await create.locator('[type="submit"]').click();
     await userRow("Иванов").waitFor();
+    await createDialog.waitFor({ state: "hidden" });
+    assert.equal(createRequests.length, 2);
+    assert.equal(await userRow("Отменённый").count(), 0);
     const employee = userRow("Иванов");
     assert.equal(await employee.getAttribute("open"), null);
     assert.equal(await employee.locator("form").isVisible(), false);

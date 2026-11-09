@@ -14,6 +14,11 @@ const usersSettings = document.querySelector("#users-settings");
 const usersList = document.querySelector("#users-list");
 const usersFeedback = document.querySelector("#users-feedback");
 const userCreateForm = document.querySelector("#user-create-form");
+const userCreateDialog = document.querySelector("#user-create-dialog");
+const userCreateOpen = document.querySelector("#user-create-open");
+const userCreateSubmit = document.querySelector("#user-create-submit");
+const userCreateFeedback = document.querySelector("#user-create-feedback");
+const userCreateCancelButtons = [...document.querySelectorAll("[data-user-create-cancel]")];
 const userFioInput = document.querySelector("#user-fio");
 const userPasswordInput = document.querySelector("#user-password");
 const permissionInputs = [...document.querySelectorAll("#user-permissions input[type=checkbox]")];
@@ -302,22 +307,62 @@ const loadLoginUsers = async () => {
     .map((user) => ({ fio: user.fio.trim() }));
 };
 
+let creatingUser = false;
+
+userCreateOpen?.addEventListener("click", () => {
+  usersFeedback.textContent = "";
+  userCreateDialog.showModal();
+});
+for (const button of userCreateCancelButtons) {
+  button.addEventListener("click", () => { if (!creatingUser) userCreateDialog.close(); });
+}
+userCreateDialog?.addEventListener("cancel", (event) => {
+  if (creatingUser) event.preventDefault();
+});
+userCreateDialog?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" || event.key === "Tab") event.stopPropagation();
+});
+userCreateDialog?.addEventListener("close", () => {
+  userCreateForm.reset();
+  userCreateFeedback.textContent = "";
+  userPasswordInput.type = "password";
+  const toggle = userCreateForm.querySelector(".password-toggle");
+  toggle.setAttribute("aria-label", "Показать пароль");
+  toggle.setAttribute("aria-pressed", "false");
+  userCreateOpen.focus({ preventScroll: true });
+});
+
 userCreateForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  usersFeedback.textContent = "";
+  if (creatingUser) return;
+  creatingUser = true;
+  userCreateSubmit.disabled = true;
+  userCreateCancelButtons.forEach((button) => { button.disabled = true; });
+  userCreateFeedback.textContent = "";
   const permissions = permissionInputs.filter((input) => input.checked).map((input) => input.value);
-  const response = await fetch("/api/users", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fio: userFioInput.value, password: userPasswordInput.value, permissions }),
-  });
-  if (!response.ok) {
-    usersFeedback.textContent = await messageFor(response, "Не удалось создать пользователя.");
-    return;
+  try {
+    const response = await fetch("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fio: userFioInput.value, password: userPasswordInput.value, permissions }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) throw new Error(await messageFor(response, "Не удалось создать пользователя."));
+    userCreateDialog.close();
+    usersFeedback.textContent = "Пользователь создан.";
+    try {
+      await loadUsers();
+    } catch {
+      usersFeedback.textContent = "Пользователь создан, но не удалось обновить список. Обновите страницу.";
+    }
+  } catch (error) {
+    userCreateFeedback.textContent = error instanceof Error && error.name !== "TimeoutError"
+      ? error.message : "Не удалось создать пользователя. Повторите попытку.";
+  } finally {
+    creatingUser = false;
+    userCreateSubmit.disabled = false;
+    userCreateCancelButtons.forEach((button) => { button.disabled = false; });
   }
-  userCreateForm.reset();
-  usersFeedback.textContent = "Пользователь создан.";
-  await loadUsers();
 });
 
 logoutButton?.addEventListener("click", async () => {

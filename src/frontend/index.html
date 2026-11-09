@@ -456,18 +456,7 @@
           <summary class="suppliers-panel__summary">Пользователи</summary>
           <div class="users-settings__content">
             <p class="settings-drawer__hint">Создавайте учетные записи и выбирайте разделы, доступные каждому сотруднику. Заказ-наряды сотрудник увидит только по своему ФИО в поле «Ответственный».</p>
-            <form id="user-create-form" class="auth-form">
-              <label class="field" for="user-fio"><span>ФИО</span><input id="user-fio" type="text" maxlength="256" required></label>
-              <label class="field" for="user-password"><span>Пароль</span><span class="password-field"><input id="user-password" type="password" autocomplete="new-password" minlength="3" maxlength="4096" required><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="user-password"><span aria-hidden="true">&#128065;</span></button></span></label>
-              <fieldset class="supplier-options__list" id="user-permissions">
-                <legend>Доступ</legend>
-                <label><input type="checkbox" value="markup"><span>Проценка</span></label>
-                <label><input type="checkbox" value="applicability"><span>Применимость</span></label>
-                <label><input type="checkbox" value="repairs"><span>Заказ-наряды</span></label>
-                <label><input type="checkbox" value="testRepairs"><span>Тестовые заказ-наряды</span></label>
-              </fieldset>
-              <div class="auth-actions"><button class="btn btn-primary" type="submit">Создать пользователя</button></div>
-            </form>
+            <button class="btn btn-primary users-settings__create" id="user-create-open" type="button" aria-haspopup="dialog" aria-controls="user-create-dialog">Создать пользователя</button>
             <p class="auth-feedback" id="users-feedback" role="status" aria-live="polite"></p>
             <div class="users-list" id="users-list"></div>
           </div>
@@ -840,6 +829,29 @@
         </details>
       </div>
     </aside>
+
+    <dialog class="user-create-dialog" id="user-create-dialog" aria-labelledby="user-create-title">
+      <header class="user-create-dialog__header">
+        <h2 id="user-create-title">Создание пользователя</h2>
+        <button class="btn btn-light settings-close" type="button" data-user-create-cancel aria-label="Закрыть создание пользователя">×</button>
+      </header>
+      <form id="user-create-form" class="auth-form">
+        <label class="field" for="user-fio"><span>ФИО</span><input id="user-fio" type="text" autocomplete="off" maxlength="256" required autofocus></label>
+        <label class="field" for="user-password"><span>Пароль</span><span class="password-field"><input id="user-password" type="password" autocomplete="new-password" minlength="3" maxlength="4096" required><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="user-password"><span aria-hidden="true">&#128065;</span></button></span></label>
+        <fieldset class="supplier-options__list" id="user-permissions">
+          <legend>Доступные формы</legend>
+          <label><input type="checkbox" value="markup"><span>Проценка</span></label>
+          <label><input type="checkbox" value="applicability"><span>Применимость</span></label>
+          <label><input type="checkbox" value="repairs"><span>Заказ-наряды</span></label>
+          <label><input type="checkbox" value="testRepairs"><span>Тестовые заказ-наряды</span></label>
+        </fieldset>
+        <p class="auth-feedback" id="user-create-feedback" role="status" aria-live="polite"></p>
+        <footer class="auth-actions user-create-dialog__actions">
+          <button class="btn btn-light" type="button" data-user-create-cancel>Отмена</button>
+          <button class="btn btn-primary" id="user-create-submit" type="submit">Создать</button>
+        </footer>
+      </form>
+    </dialog>
 
     <div class="result-context-menu card border-0 shadow" id="result-context-menu" role="menu" hidden>
       <button type="button" id="search-result-button" role="menuitem" hidden>Выполнить поиск</button>
