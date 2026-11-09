@@ -58,7 +58,11 @@ async function withPage(check) {
         "/api/applicability/api-key": { configured: false, persistent: false, maskedKey: null },
         "/api/applicability/proxies": { persistent: false, activeRouteId: null, proxies: [], usage: { requestCount: 0 }, directUsage: {} },
         "/api/garage/vehicles": { vehicles: [] },
+        "/api/nomenclature/sources": { defaultSource: "production", sources: [
+          { id: "production", configured: false, online: false }, { id: "test", configured: false, online: false },
+        ] },
       };
+      if (url.pathname === "/api/nomenclature/lookups") return route.fulfill({ status: 503, json: { message: "Подключение выбранной базы 1С ещё не настроено." } });
       return route.fulfill({ json: responses[url.pathname] ?? { articles: [], brandCounts: [], hasMore: false } });
     });
     await page.goto(origin);
@@ -169,7 +173,7 @@ test("nomenclature reads real EAN-13 and QR images safely, copies, restores and 
     await page.getByText(/Код на фото не распознан/).waitFor();
     assert.equal(await page.locator("#nomenclature-result").isVisible(), false);
     assert.equal(await page.locator("#nomenclature-scan").isEnabled(), true);
-    assert.equal(apiRequests.some((path) => /nomenclature|barcode|integration/.test(path)), false);
+    assert.equal(apiRequests.some((path) => /integration/.test(path)), false);
     await page.reload();
     await page.waitForFunction(() => window.aggregatorAuthState?.ready);
     assert.equal(await page.locator("#nomenclature-function").isVisible(), true);

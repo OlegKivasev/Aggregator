@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=nomenclature-fullscreen-1" />
+    <link rel="stylesheet" href="/styles.css?v=nomenclature-card-1" />
     <link rel="stylesheet" href="/order-notifications.css" />
   </head>
   <body>
@@ -403,14 +403,32 @@
       <section id="nomenclature-function" class="nomenclature-function card border-0 shadow-sm" aria-labelledby="nomenclature-title" hidden>
         <header>
           <h2 id="nomenclature-title">Номенклатура</h2>
-          <p class="panel__meta">Отсканируйте штрихкод или QR-код и сверьте считанное значение с этикеткой.</p>
+          <p class="panel__meta">Отсканируйте код, чтобы открыть карточку товара из 1С.</p>
         </header>
+        <div class="nomenclature-source-row">
+          <label class="field" for="nomenclature-source"><span>База 1С</span><select id="nomenclature-source"><option value="production">Основная база</option><option value="test">Тестовая база</option></select></label>
+          <span class="panel__meta" id="nomenclature-source-status" role="status">Проверяем подключение…</span>
+          <button type="button" class="btn btn-light" id="nomenclature-source-refresh">Проверить связь</button>
+        </div>
         <div class="nomenclature-actions">
           <button type="button" class="btn btn-primary" id="nomenclature-scan">Сканировать камерой</button>
           <button type="button" class="btn btn-light" id="nomenclature-photo">Считать с фото</button>
           <input type="file" id="nomenclature-file" accept="image/*" aria-label="Фото штрихкода" hidden>
         </div>
         <p class="nomenclature-feedback" id="nomenclature-feedback" role="status" aria-live="polite">Нажмите «Сканировать камерой» и разрешите доступ к камере.</p>
+        <p class="nomenclature-feedback" id="nomenclature-lookup-feedback" role="status" aria-live="polite"></p>
+        <div class="nomenclature-choices" id="nomenclature-choices" hidden></div>
+        <article class="nomenclature-product" id="nomenclature-product" hidden aria-labelledby="nomenclature-product-name">
+          <span class="nomenclature-source-badge" id="nomenclature-product-source"></span>
+          <h3 id="nomenclature-product-name"></h3>
+          <p class="panel__meta" id="nomenclature-product-characteristic" hidden></p>
+          <dl class="nomenclature-prices">
+            <div><dt>Закупочная цена</dt><dd data-nomenclature-price="purchase"></dd></div>
+            <div><dt>Розничная цена</dt><dd data-nomenclature-price="retail"></dd></div>
+            <div><dt>Розница — безналичный расчёт</dt><dd data-nomenclature-price="retailCashless"></dd></div>
+          </dl>
+        </article>
+        <button type="button" class="btn btn-light" id="nomenclature-lookup-retry" hidden>Повторить поиск</button>
         <div class="nomenclature-result" id="nomenclature-result" hidden>
           <label for="nomenclature-code">Результат сканирования</label>
           <textarea id="nomenclature-code" rows="2" readonly spellcheck="false" aria-describedby="nomenclature-result-hint"></textarea>
@@ -502,6 +520,18 @@
           </div>
         </details>
 
+        <details class="suppliers-panel nomenclature-settings" id="nomenclature-settings" data-admin-only>
+          <summary class="suppliers-panel__summary">Номенклатура — подключение 1С</summary>
+          <div class="nomenclature-settings__content">
+            <p class="settings-drawer__hint">Каждая база подключается к агрегатору со своим ключом. IP-адрес базы указывать не требуется.</p>
+            <label class="field" for="nomenclature-default-source"><span>База по умолчанию</span><select id="nomenclature-default-source"><option value="production">Основная база</option><option value="test">Тестовая база</option></select></label>
+            <button type="button" class="btn btn-primary" id="nomenclature-settings-save">Сохранить выбор базы</button>
+            <section class="nomenclature-connection" data-nomenclature-connection="production"><h3>Основная база</h3><p data-connection-status></p><div class="nomenclature-actions"><button type="button" class="btn btn-light" data-connection-key>Создать ключ</button><button type="button" class="btn btn-light" data-connection-disconnect disabled>Отключить</button></div></section>
+            <section class="nomenclature-connection" data-nomenclature-connection="test"><h3>Тестовая база</h3><p data-connection-status></p><div class="nomenclature-actions"><button type="button" class="btn btn-light" data-connection-key>Создать ключ</button><button type="button" class="btn btn-light" data-connection-disconnect disabled>Отключить</button></div></section>
+            <div class="nomenclature-key" id="nomenclature-new-key" hidden><strong id="nomenclature-key-source"></strong><label class="field" for="nomenclature-key-value"><span>Новый ключ подключения</span><input id="nomenclature-key-value" type="text" readonly autocomplete="off" spellcheck="false"></label><p class="settings-drawer__hint">Скопируйте ключ в настройки этой базы 1С. Повторно показать его нельзя.</p><button type="button" class="btn btn-light" id="nomenclature-key-copy">Копировать ключ</button></div>
+            <p class="auth-feedback" id="nomenclature-settings-feedback" role="status"></p>
+          </div>
+        </details>
         <details class="vk-notifications-settings suppliers-panel" id="vk-notifications-settings" data-admin-only>
           <summary class="suppliers-panel__summary">Уведомления ВКонтакте</summary>
           <div class="vk-notifications-settings__content">
@@ -1242,7 +1272,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
 
     <script type="module" src="/auth-ui.js"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=nomenclature-region-4"></script>
+    <script type="module" src="/applicability.js?v=nomenclature-card-5"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>

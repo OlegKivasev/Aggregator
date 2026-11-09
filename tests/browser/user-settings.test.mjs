@@ -73,7 +73,7 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
         const bounds = elements.filter((element) => !element.hidden).map((element) => element.getBoundingClientRect());
         return bounds.slice(1).map((rect, index) => rect.top - bounds[index].bottom);
       });
-      assert.deepEqual(spacing, [14, 14, 14]);
+      assert.deepEqual(spacing, [14, 14, 14, 14]);
     };
     await assertSettingsSpacing();
     await page.locator("#users-settings > summary").click();

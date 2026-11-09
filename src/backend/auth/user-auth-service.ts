@@ -222,7 +222,7 @@ export class UserAuthService {
       serveJson(response, 401, { message: "Требуется авторизация." });
       return null;
     }
-    if (permission === "admin" && !user.isAdmin || permission !== null && permission !== "admin" && !user.permissions.includes(permission)) {
+    if (!user.isAdmin && (permission === "admin" || permission !== null && !user.permissions.includes(permission))) {
       serveJson(response, 403, { message: "Недостаточно прав для этого раздела." });
       return null;
     }

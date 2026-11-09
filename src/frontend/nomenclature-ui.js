@@ -1,4 +1,5 @@
 import { getVideoScanRegion } from "./nomenclature-scan-region.js";
+import { bootstrapNomenclatureLookup, bootstrapNomenclatureSettings } from "./nomenclature-lookup-ui.js";
 
 let decoderModule;
 
@@ -100,6 +101,8 @@ const cameraErrorMessage = (error) => {
 };
 
 export function bootstrapNomenclature() {
+  const lookup = bootstrapNomenclatureLookup();
+  bootstrapNomenclatureSettings();
   const section = document.querySelector("#nomenclature-function");
   const scanButton = document.querySelector("#nomenclature-scan");
   const photoButton = document.querySelector("#nomenclature-photo");
@@ -153,6 +156,7 @@ export function bootstrapNomenclature() {
   const current = (attempt) => attempt === generation && active && !document.hidden;
   const begin = () => {
     stop();
+    lookup.clear();
     code.value = "";
     resultPanel.hidden = true;
     setBusy(true);
@@ -164,6 +168,7 @@ export function bootstrapNomenclature() {
     resultPanel.hidden = false;
     stop();
     setFeedback("Код считан. Результат показан ниже.", "success");
+    void lookup.start(code.value);
   };
 
   const startCamera = async () => {
@@ -315,6 +320,8 @@ export function bootstrapNomenclature() {
   document.addEventListener("aggregator-auth-ready", (event) => {
     if (!event.detail?.isAdmin && !event.detail?.permissions?.includes("nomenclature")) {
       active = false;
+      lookup.setActive(null);
+      lookup.clear();
       cancel();
       code.value = "";
       resultPanel.hidden = true;
@@ -324,6 +331,7 @@ export function bootstrapNomenclature() {
   return {
     setActive(name) {
       active = name === "nomenclature" && !section.hidden;
+      lookup.setActive(active ? name : null);
       if (!active) cancel();
     },
   };

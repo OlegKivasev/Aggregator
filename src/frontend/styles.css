@@ -752,10 +752,35 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .nomenclature-result > label { font-weight: 800; }
 .nomenclature-result textarea { width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font-family: monospace; font-size: clamp(18px, 3vw, 28px); overflow-wrap: anywhere; resize: vertical; }
 .nomenclature-result > button { justify-self: start; }
+.nomenclature-source-row { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+.nomenclature-source-row .field { flex: 1; min-width: 160px; }
+.nomenclature-source-row .panel__meta { flex: 1; padding-bottom: 12px; }
+.nomenclature-source-row select, .nomenclature-settings select { min-height: 44px; width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font-size: 16px; }
+#nomenclature-lookup-feedback:empty { display: none; }
+#nomenclature-lookup-feedback[data-tone="error"] { color: #b42318; }
+#nomenclature-lookup-feedback[data-tone="success"] { color: #18794e; }
+.nomenclature-product { padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.nomenclature-product h3 { margin: 14px 0 8px; font-size: 21px; font-weight: 800; overflow-wrap: anywhere; }
+.nomenclature-source-badge { display: inline-block; padding: 5px 10px; border-radius: 8px; background: #edf8f0; color: #21663c; font-size: 13px; font-weight: 700; }
+.nomenclature-source-badge[data-test="true"] { background: #fff4cc; color: #765000; }
+.nomenclature-prices { margin: 18px 0 0; }
+.nomenclature-prices > div { display: flex; gap: 16px; justify-content: space-between; padding: 14px 0; border-top: 1px solid var(--line); }
+.nomenclature-prices dt { color: var(--muted); font-weight: 600; }
+.nomenclature-prices dd { flex-shrink: 0; margin: 0; color: var(--ink); font-size: 18px; font-weight: 800; }
+.nomenclature-choices { display: grid; gap: 10px; }
+.nomenclature-choices > button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.nomenclature-settings [hidden] { display: none !important; }
+.nomenclature-settings__content { display: grid; gap: 16px; padding: 16px 0; }
+.nomenclature-settings .btn-primary { background: var(--accent); border-color: var(--accent); }
+.nomenclature-connection, .nomenclature-key { display: grid; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.nomenclature-connection h3, .nomenclature-connection p { margin: 0; font-size: 14px; }
+.nomenclature-key input { width: 100%; min-width: 0; }
 @media (max-width: 800px) {
   .nomenclature-function { padding: 18px; }
   .nomenclature-actions > button { flex: 1 1 100%; }
   .nomenclature-result { padding: 14px; }
+  .nomenclature-prices > div { flex-wrap: wrap; gap: 6px; }
+  .nomenclature-source-row .panel__meta { padding-bottom: 0; }
 }
 
 .repairs-function[hidden] { display: none; }
