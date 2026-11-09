@@ -591,6 +591,9 @@ input {
 }
 
 .function-tabs { grid-column: 1; }
+.function-tabs[hidden] { display: none; }
+.function-layout--single { grid-template-columns: minmax(0, 1fr); }
+.function-layout--single > .function-content { grid-column: 1; }
 
 .auth-screen { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 24px; background: rgba(244, 247, 251, .96); }
 .auth-screen[hidden] { display: none; }
@@ -613,9 +616,24 @@ input {
 .users-settings__content legend { margin-bottom: 6px; font-size: 13px; font-weight: 700; }
 .users-list { display: grid; gap: 8px; margin-top: 18px; }
 .users-list h3 { margin: 0; font-size: 15px; }
-.users-list__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
-.users-list__row strong, .users-list__row span { display: block; }
+.users-list__row { min-width: 0; border: 1px solid var(--line); border-radius: 10px; }
+.users-list__summary { display: flex; align-items: center; gap: 10px; padding: 12px; cursor: pointer; list-style: none; }
+.users-list__summary::-webkit-details-marker { display: none; }
+.users-list__summary::before { width: 8px; height: 8px; flex: 0 0 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); content: ""; }
+.users-list__row[open] > .users-list__summary::before { transform: rotate(45deg); }
+.users-list__summary > div { min-width: 0; overflow-wrap: anywhere; }
+.users-list__summary strong, .users-list__summary span { display: block; }
+.users-list__summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
 .users-list__row .panel__meta { margin-top: 3px; }
+.users-list__row > .users-list__form { padding: 12px; border-top: 1px solid var(--line); }
+.users-list__form .field { min-width: 0; }
+.users-list__form input:not([type="checkbox"]) { width: 100%; min-width: 0; }
+.users-list__form .password-toggle { opacity: 1; pointer-events: auto; }
+.users-list__form .settings-drawer__hint, .users-list__form .auth-feedback { margin: 0; }
+.users-list__form legend { grid-column: 1 / -1; }
+.users-list__form .auth-feedback[data-state="success"] { color: #18794e; }
+.users-list__form .auth-actions .users-list__delete { display: grid; width: 40px; min-width: 40px; height: 40px; margin-left: auto; padding: 0; place-items: center; border-radius: 10px; }
+.users-list__delete img { width: 20px; height: 20px; object-fit: contain; opacity: .7; }
 .function-content {
   grid-column: 2;
   min-width: 0;

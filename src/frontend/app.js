@@ -162,7 +162,6 @@ const articleNotice = document.querySelector("#article-variant-notice");
 const articleNoticeText = document.querySelector("#article-variant-notice-text");
 const supplierNoticeSummary = document.querySelector("#supplier-notice-summary");
 const supplierNoticeList = document.querySelector("#supplier-notice-list");
-const passwordFields = [...document.querySelectorAll(".password-field")];
 const resultContextMenu = document.querySelector("#result-context-menu");
 const searchResultButton = document.querySelector("#search-result-button");
 const tabContextMenu = document.querySelector("#tab-context-menu");
@@ -584,6 +583,7 @@ const hidePassword = (passwordField) => {
   const toggle = passwordField.querySelector(".password-toggle");
   input.type = "password";
   toggle.setAttribute("aria-label", "Показать пароль");
+  toggle.setAttribute("aria-pressed", "false");
 };
 
 const updateSupplierSearchToggle = (supplier, authorized) => {
@@ -1686,21 +1686,19 @@ syncOfferFilterLayout();
 mobileOfferLayout.addEventListener("change", syncOfferFilterLayout);
 filtersToggle.addEventListener("click", () => setFiltersSidebarOpen(filtersSidebar.hidden));
 analogFiltersToggle.addEventListener("click", () => setAnalogFiltersSidebarOpen(analogFiltersSidebar.hidden));
-passwordFields.forEach((passwordField) => {
-  const input = passwordField.querySelector("input");
-  const toggle = passwordField.querySelector(".password-toggle");
-
-  toggle.addEventListener("click", () => {
-    const isHidden = input.type === "password";
-    input.type = isHidden ? "text" : "password";
-    toggle.setAttribute("aria-label", isHidden ? "Скрыть пароль" : "Показать пароль");
-  });
-
-  passwordField.addEventListener("focusout", (event) => {
-    if (!passwordField.contains(event.relatedTarget)) {
-      hidePassword(passwordField);
-    }
-  });
+document.addEventListener("click", (event) => {
+  const toggle = event.target.closest(".password-toggle");
+  if (!toggle) return;
+  const input = toggle.closest(".password-field")?.querySelector("input");
+  if (!input) return;
+  const isHidden = input.type === "password";
+  input.type = isHidden ? "text" : "password";
+  toggle.setAttribute("aria-label", isHidden ? "Скрыть пароль" : "Показать пароль");
+  toggle.setAttribute("aria-pressed", String(isHidden));
+});
+document.addEventListener("focusout", (event) => {
+  const passwordField = event.target.closest(".password-field");
+  if (passwordField && !passwordField.contains(event.relatedTarget)) hidePassword(passwordField);
 });
 document.addEventListener("click", (event) => {
   if (!resultContextMenu.hidden && !resultContextMenu.contains(event.target)) {

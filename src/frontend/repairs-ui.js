@@ -106,7 +106,8 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     count.hidden = false;
     feedback.textContent = "";
     delete feedback.dataset.tone;
-    tab.hidden = repairs.length === 0;
+    const singleForm = !authUser?.isAdmin && authUser?.permissions?.length === 1;
+    tab.hidden = repairs.length === 0 && !singleForm;
   };
 
   async function refresh({ background = false } = {}) {

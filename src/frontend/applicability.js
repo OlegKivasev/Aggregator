@@ -184,6 +184,11 @@ const createTab = (data = {}) => {
 const getActiveTab = () => tabs.find((tab) => tab.id === activeTabId);
 
 const setActiveFunction = (name) => {
+  const user = window.aggregatorAuthState?.user;
+  const permissionFor = { markup: "markup", applicability: "applicability", repairs: "repairs", "test-repairs": "testRepairs" };
+  if (user && !user.isAdmin && !user.permissions.includes(permissionFor[name])) {
+    name = Object.keys(permissionFor).find((key) => user.permissions.includes(permissionFor[key]));
+  }
   const isApplicability = name === "applicability";
   if (!isApplicability) oemSidebar?.hide();
   for (const [key, section, button] of [
@@ -2056,7 +2061,7 @@ const makesReady = loadMakes();
 const apiKeyReady = loadApiKeyState();
 try {
   const savedFunction = localStorage.getItem(activeFunctionStorageKey);
-  if (["applicability", "repairs", "test-repairs"].includes(savedFunction)) setActiveFunction(savedFunction);
+  setActiveFunction(["applicability", "repairs", "test-repairs"].includes(savedFunction) ? savedFunction : "markup");
 } catch {
   // The selected function is a convenience preference.
 }

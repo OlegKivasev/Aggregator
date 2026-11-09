@@ -38,6 +38,10 @@ const applyAccess = (user) => {
   const canApplicability = user?.isAdmin || user?.permissions?.includes("applicability");
   const canRepairs = user?.isAdmin || user?.permissions?.includes("repairs");
   const canTestRepairs = user?.isAdmin || user?.permissions?.includes("testRepairs");
+  const singleForm = !user?.isAdmin && user?.permissions?.length === 1;
+  const functionTabs = document.querySelector(".function-tabs");
+  if (functionTabs) functionTabs.hidden = singleForm;
+  document.querySelector(".function-layout")?.classList.toggle("function-layout--single", singleForm);
   const markupTab = document.querySelector("#markup-function-tab");
   const applicabilityTab = document.querySelector("#applicability-function-tab");
   const repairsTab = document.querySelector("#repairs-function-tab");
@@ -66,7 +70,7 @@ const applyAccess = (user) => {
   if (authToolbar) authToolbar.hidden = !isAuthenticated;
   document.dispatchEvent(new CustomEvent("aggregator-auth-ready", { detail: user }));
   const activeTab = document.querySelector(".function-tab.active");
-  if (!activeTab || activeTab.hidden) document.querySelector(".function-tab:not([hidden])")?.click();
+  (activeTab && !activeTab.hidden ? activeTab : document.querySelector(".function-tab:not([hidden])"))?.click();
 };
 
 const renderUsers = (users) => {
@@ -76,8 +80,10 @@ const renderUsers = (users) => {
   heading.textContent = "Учетные записи";
   usersList.append(heading);
   for (const user of users) {
-    const row = document.createElement("div");
+    const row = document.createElement("details");
     row.className = "users-list__row";
+    const summary = document.createElement("summary");
+    summary.className = "users-list__summary";
     const info = document.createElement("div");
     const fio = document.createElement("strong");
     fio.textContent = user.fio;
@@ -85,23 +91,107 @@ const renderUsers = (users) => {
     permissions.textContent = accessLabel(user);
     permissions.className = "panel__meta";
     info.append(fio, permissions);
-    row.append(info);
+    summary.append(info);
+    row.append(summary);
+    const form = document.createElement("form");
+    form.className = "auth-form users-list__form";
+    form.innerHTML = `
+      <label class="field"><span>ФИО</span><input name="fio" type="text" maxlength="256" autocomplete="off" required></label>
+      <label class="field"><span>Новый пароль</span><span class="password-field"><input name="password" type="password" autocomplete="new-password" minlength="3" maxlength="4096"><button class="password-toggle" type="button" aria-label="Показать пароль" aria-pressed="false"><span aria-hidden="true">&#128065;</span></button></span></label>
+      <p class="settings-drawer__hint">Оставьте пароль пустым, чтобы сохранить текущий.</p>
+      <fieldset class="supplier-options__list"><legend>Доступные формы</legend></fieldset>
+      <div class="auth-actions"><button class="btn btn-primary" type="submit">Сохранить</button></div>
+      <p class="auth-feedback" role="status" aria-live="polite"></p>`;
+    const fioInput = form.elements.namedItem("fio");
+    fioInput.value = user.fio;
+    const passwordInput = form.elements.namedItem("password");
+    passwordInput.id = `user-edit-password-${usersList.children.length}`;
+    const passwordToggle = form.querySelector(".password-toggle");
+    passwordToggle.setAttribute("aria-controls", passwordInput.id);
+    const hidePassword = () => {
+      passwordInput.type = "password";
+      passwordToggle.setAttribute("aria-label", "Показать пароль");
+      passwordToggle.setAttribute("aria-pressed", "false");
+    };
+    row.addEventListener("toggle", () => { if (!row.open) hidePassword(); });
+    const fieldset = form.querySelector("fieldset");
+    for (const source of permissionInputs) {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = source.value;
+      input.checked = user.isAdmin || user.permissions.includes(source.value);
+      input.disabled = user.isAdmin;
+      const text = document.createElement("span");
+      text.textContent = source.closest("label").textContent;
+      label.append(input, text);
+      fieldset.append(label);
+    }
+    const feedback = form.querySelector(".auth-feedback");
+    const saveButton = form.querySelector('[type="submit"]');
+    const actions = form.querySelector(".auth-actions");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      feedback.textContent = "";
+      delete feedback.dataset.state;
+      saveButton.disabled = true;
+      const deleteButton = actions.querySelector(".users-list__delete");
+      if (deleteButton) deleteButton.disabled = true;
+      try {
+        const response = await fetch("/api/users", {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: user.id, fio: fioInput.value, password: passwordInput.value,
+            permissions: [...fieldset.querySelectorAll("input:checked")].map((input) => input.value) }),
+        });
+        if (!response.ok) throw new Error(await messageFor(response, "Не удалось сохранить пользователя."));
+        const payload = await response.json();
+        Object.assign(user, payload.user);
+        fio.textContent = user.fio;
+        fioInput.value = user.fio;
+        permissions.textContent = accessLabel(user);
+        passwordInput.value = "";
+        hidePassword();
+        if (window.aggregatorAuthState?.user?.id === user.id) applyAccess(user);
+        feedback.textContent = "Изменения сохранены.";
+        feedback.dataset.state = "success";
+      } catch (error) {
+        feedback.textContent = error instanceof Error ? error.message : "Не удалось сохранить пользователя.";
+      } finally {
+        saveButton.disabled = false;
+        if (deleteButton) deleteButton.disabled = false;
+      }
+    });
     if (!user.isAdmin) {
       const deleteButton = document.createElement("button");
       deleteButton.type = "button";
-      deleteButton.className = "btn btn-light";
-      deleteButton.textContent = "Удалить";
+      deleteButton.className = "btn btn-light users-list__delete";
+      deleteButton.setAttribute("aria-label", "Удалить пользователя");
+      deleteButton.title = "Удалить пользователя";
+      const icon = document.createElement("img");
+      icon.src = "/recycle-bin.png";
+      icon.alt = "";
+      deleteButton.append(icon);
       deleteButton.addEventListener("click", async () => {
         if (!window.confirm(`Удалить пользователя «${user.fio}»?`)) return;
-        const response = await fetch("/api/users", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: user.id }) });
-        if (!response.ok) {
-          usersFeedback.textContent = await messageFor(response, "Не удалось удалить пользователя.");
-          return;
+        deleteButton.disabled = true;
+        saveButton.disabled = true;
+        feedback.textContent = "";
+        delete feedback.dataset.state;
+        try {
+          const response = await fetch("/api/users", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: user.id }) });
+          if (!response.ok) throw new Error(await messageFor(response, "Не удалось удалить пользователя."));
+          row.remove();
+          usersFeedback.textContent = "Пользователь удалён.";
+        } catch (error) {
+          feedback.textContent = error instanceof Error ? error.message : "Не удалось удалить пользователя.";
+        } finally {
+          deleteButton.disabled = false;
+          saveButton.disabled = false;
         }
-        await loadUsers();
       });
-      row.append(deleteButton);
+      actions.append(deleteButton);
     }
+    row.append(form);
     usersList.append(row);
   }
 };
