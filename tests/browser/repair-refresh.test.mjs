@@ -8,7 +8,7 @@ import { createAggregatorServer } from "../../src/backend/http/create-server.ts"
 
 const secret = "browser-refresh-test-only-repair-secret-32";
 const first = { documentId: "12345678-abcd-1234-abcd-123456789abc", number: "ТЕСТ-1", date: "2026-11-03T14:30:00",
-  vehicleName: "Toyota Camry | А123ВС163", status: "В работе", goodsReadiness: { totalPositions: 3, availablePositions: 1 } };
+  vehicleName: "Toyota Camry | А123ВС163", status: "В работе", goodsReadiness: { totalPositions: 3, availablePositions: 1 }, paymentStatus: "partially_paid", amountDue: 10_500 };
 const second = { ...first, documentId: "22345678-abcd-1234-abcd-123456789abc", vehicleName: "Ford Focus" };
 
 test("refresh reads only visible orders from 1C, animates, hides uncertain data through reload and recovers after a verified reply", async () => {
@@ -58,15 +58,18 @@ test("refresh reads only visible orders from 1C, animates, hides uncertain data 
     assert.equal(await page.locator("#repairs-refresh").isDisabled(), true);
     assert.equal(await page.locator("#repairs-search").isDisabled(), true);
     assert.equal(await page.locator("#repairs-rows .repairs-readiness").count(), 0);
+    assert.equal(await page.locator("#repairs-rows .repairs-payment-detail").count(), 0);
     assert.equal(await progress.evaluate((element) => getComputedStyle(element, "::before").animationName), "search-loading-spin");
     await page.emulateMedia({ reducedMotion: "reduce" });
     assert.equal(await progress.evaluate((element) => getComputedStyle(element, "::before").animationName), "none");
     await page.emulateMedia({ reducedMotion: "no-preference" });
     assert.equal(await page.locator("#repairs-function").evaluate((element) => element.scrollWidth <= element.clientWidth), true);
     if (process.env.REPAIRS_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.REPAIRS_SCREENSHOT_DIR, "repair-refresh-mobile.png"), fullPage: true });
-    const fresh = { ...first, goodsReadiness: { totalPositions: 4, availablePositions: 4 } };
+    const fresh = { ...first, goodsReadiness: { totalPositions: 4, availablePositions: 4 }, paymentStatus: "paid", amountDue: 0 };
     await complete(job, [fresh]);
     await page.locator("#repairs-rows").getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
+    assert.equal(await page.locator("#repairs-rows .repairs-payment").textContent(), "Оплачено");
+    assert.equal(await page.locator("#repairs-rows .repairs-payment-detail").count(), 0);
     assert.equal(await page.locator("#repairs-search").inputValue(), "Toyota");
     assert.equal(await page.locator("#repairs-refresh").isEnabled(), true);
     const stored = (await (await request("/api/repairs?testPlatform=false")).json()).repairs;

@@ -9,7 +9,7 @@ import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 
 const secret = "isolated-test-repair-refresh-secret-32-bytes";
 const first = { documentId: "12345678-abcd-1234-abcd-123456789abc", number: "ТЕСТ-1", date: "2026-11-03T14:30:00",
-  vehicleName: "Тестовая машина", status: "В работе", responsibleFio: "Первый сотрудник", goodsReadiness: { totalPositions: 3, availablePositions: 1 } };
+  vehicleName: "Тестовая машина", status: "В работе", responsibleFio: "Первый сотрудник", goodsReadiness: { totalPositions: 3, availablePositions: 1 }, paymentStatus: "partially_paid", amountDue: 10_500.01 };
 const second = { ...first, documentId: "22345678-abcd-1234-abcd-123456789abc", number: "ТЕСТ-2", vehicleName: "Вторая машина" };
 const json = (value, headers = {}) => ({ headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(value) });
 async function withServer(check, authenticated = false) {
@@ -55,7 +55,7 @@ test("repair refresh requires a live worker and updates only the requested order
     const job = await poll(); assert.deepEqual(job.documentIds, [first.documentId]);
     assert.equal(job.testPlatform, false);
     assert.equal((await create([second.documentId])).status, 429);
-    const fresh = { ...first, vehicleName: "Проверено 1С", goodsReadiness: { totalPositions: 4, availablePositions: 4 } };
+    const fresh = { ...first, vehicleName: "Проверено 1С", goodsReadiness: { totalPositions: 4, availablePositions: 4 }, paymentStatus: "paid", amountDue: 0 };
     assert.equal((await result(job, [fresh])).status, 200);
     const completed = (await (await get(job)).json()).refresh;
     assert.equal(completed.status, "completed"); assert.deepEqual(completed.repairs, [fresh]);
@@ -73,6 +73,8 @@ test("partial, extra, malformed and failed repair replies never update even one 
     for (const [repairs, removed, extra] of [
       [[updated], [], {}], [[updated, { ...second, goodsReadiness: { totalPositions: 1, availablePositions: 2 } }], [], {}],
       [[updated, { ...second, goodsReadiness: undefined }], [], {}], [[updated, second], [], { status: "error" }],
+      [[updated, { ...second, paymentStatus: "invalid" }], [], {}],
+      [[updated, { ...second, amountDue: undefined }], [], {}], [[updated, { ...second, amountDue: -1 }], [], {}],
       [[updated], [first.documentId], {}], [[updated, { ...second, documentId: "32345678-abcd-1234-abcd-123456789abc" }], [], {}],
       [[updated, { ...second, testPlatform: true }], [], {}], [[updated, second], [], { ignoredField: true }],
     ]) {

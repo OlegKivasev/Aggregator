@@ -59,6 +59,106 @@ const send = (baseUrl, payload, token = secret, options = {}) => fetch(`${baseUr
   body: JSON.stringify(payload), ...options,
 });
 
+test("repair payment status accepts only 1C contract values and leaves legacy cards unknown", () => {
+  assert.equal(parseRepairCard(card).paymentStatus, undefined);
+  for (const paymentStatus of ["paid", "payment_required"]) {
+    assert.deepEqual(parseRepairCard({ ...card, paymentStatus }), { ...card, paymentStatus });
+  }
+  for (const paymentStatus of [null, false, 0, {}, [], "", "PAID", " paid ", "Оплачено", "<script>"]) {
+    assert.throws(() => parseRepairCard({ ...card, paymentStatus }), /paymentStatus:/);
+  }
+  for (const amountDue of [0.01, 0.29, 10_500, 10_500.01, 9_999_999_999_999.99]) {
+    for (const paymentStatus of ["partially_paid", "payment_required"]) {
+      const detailed = { ...card, paymentStatus, amountDue };
+      assert.deepEqual(parseRepairCard(detailed), detailed);
+    }
+  }
+  assert.deepEqual(parseRepairCard({ ...card, paymentStatus: "paid", amountDue: 0 }), { ...card, paymentStatus: "paid", amountDue: 0 });
+  for (const amountDue of [null, "10500", -1, NaN, Infinity, 0, 0.001, 10_500.001, 1e20, {}, []]) {
+    assert.throws(() => parseRepairCard({ ...card, paymentStatus: "partially_paid", amountDue }), /amountDue:/);
+  }
+  for (const metadata of [{ paymentStatus: "partially_paid" }, { amountDue: 10 },
+    { paymentStatus: "paid", amountDue: 10 }, { paymentStatus: "payment_required", amountDue: 0 }]) {
+    assert.throws(() => parseRepairCard({ ...card, ...metadata }), /amountDue:/);
+  }
+});
+
+test("1C payment changes round-trip, persist, and remain independent for both repair platforms", async () => {
+  await withServer(secret, async ({ baseUrl, close }, { start }) => {
+    const production = { ...card, paymentStatus: "payment_required", amountDue: 20_500 };
+    const testCard = { ...card, testPlatform: true, paymentStatus: "paid", amountDue: 0 };
+    assert.deepEqual(await (await send(baseUrl, production)).json(), { repair: production });
+    assert.deepEqual(await (await send(baseUrl, testCard)).json(), { repair: testCard });
+    for (const metadata of [{ paymentStatus: "partially_paid" }, { paymentStatus: "partially_paid", amountDue: 0 },
+      { paymentStatus: "paid", amountDue: 1 }, { paymentStatus: "payment_required", amountDue: -1 }]) {
+      const response = await send(baseUrl, { ...card, ...metadata });
+      assert.equal(response.status, 400);
+      assert.match((await response.json()).message, /^amountDue:/);
+    }
+    for (const paymentStatus of [null, "invalid", 1]) {
+      const response = await send(baseUrl, { ...card, paymentStatus });
+      assert.equal(response.status, 400);
+      assert.match((await response.json()).message, /^paymentStatus:/);
+    }
+    await close();
+    const restarted = await start();
+    baseUrl = restarted.baseUrl;
+    const list = async () => (await (await fetch(`${baseUrl}/api/repairs`)).json()).repairs;
+    assert.deepEqual(await list(), [production, testCard]);
+    const partial = { ...production, paymentStatus: "partially_paid", amountDue: 10_500.29 };
+    assert.deepEqual(await (await send(baseUrl, partial)).json(), { repair: partial });
+    assert.deepEqual(await list(), [partial, testCard]);
+    const paid = { ...production, paymentStatus: "paid", amountDue: 0 };
+    await send(baseUrl, paid);
+    assert.deepEqual(await list(), [paid, testCard]);
+    // A complete older payload must clear the status rather than leave a stale "paid" label.
+    await send(baseUrl, card);
+    assert.deepEqual(await list(), [card, testCard]);
+    const testDebt = { ...testCard, paymentStatus: "partially_paid", amountDue: 0.29 };
+    await send(baseUrl, testDebt);
+    assert.deepEqual(await list(), [card, testDebt]);
+  });
+});
+
+test("two-status SQLite migration preserves both repair platforms, unknown debts, metadata and restart behavior", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "repair-payment-migration-"));
+  const path = join(directory, "test.sqlite");
+  const old = new DatabaseSync(path);
+  const stored = { ...card, responsibleFio: "Тестовый сотрудник", counterpartyName: "Тестовый автопарк",
+    goodsReadiness: { totalPositions: 5, availablePositions: 2 }, paymentStatus: "payment_required" };
+  try {
+    for (const table of ["repair_cards", "test_repair_cards"]) {
+      old.exec(`CREATE TABLE ${table} (document_id TEXT PRIMARY KEY NOT NULL, number TEXT NOT NULL,
+        date TEXT NOT NULL, vehicle_name TEXT NOT NULL, status TEXT NOT NULL, responsible_fio TEXT,
+        counterparty_name TEXT, goods_total_positions INTEGER, goods_available_positions INTEGER,
+        payment_status TEXT CHECK (payment_status IN ('paid', 'payment_required'))) STRICT`);
+      const insert = old.prepare(`INSERT INTO ${table} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      insert.run(card.documentId, card.number, card.date, card.vehicleName, card.status, stored.responsibleFio, stored.counterpartyName, 5, 2, stored.paymentStatus);
+    }
+    old.exec("CREATE TABLE unrelated_data (value TEXT); INSERT INTO unrelated_data VALUES ('keep')");
+  } finally { old.close(); }
+  let repository;
+  try {
+    repository = new SqliteRepairRepository(path);
+    assert.deepEqual(repository.list(), [stored, { ...stored, testPlatform: true }]);
+    const partial = { ...stored, paymentStatus: "partially_paid", amountDue: 10_500.29 };
+    repository.save(partial);
+    repository.close();
+    repository = new SqliteRepairRepository(path);
+    assert.deepEqual(repository.list(), [partial, { ...stored, testPlatform: true }]);
+    const testPartial = { ...partial, testPlatform: true, amountDue: 0.29 };
+    repository.save(testPartial);
+    const paid = { ...partial, paymentStatus: "paid", amountDue: 0 };
+    repository.save(paid);
+    assert.deepEqual(repository.list(), [paid, testPartial]);
+    const read = new DatabaseSync(path);
+    try {
+      assert.equal(read.prepare("SELECT amount_due_minor FROM test_repair_cards").get().amount_due_minor, 29);
+      assert.equal(read.prepare("SELECT value FROM unrelated_data").get().value, "keep");
+    } finally { read.close(); }
+  } finally { repository?.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test("repair validation canonicalizes UUID and rejects invalid complete cards and impossible dates", () => {
   assert.deepEqual(parseRepairCard({ ...card, documentId: card.documentId.toUpperCase(), number: " ТЕСТ-1 " }), card);
   assert.equal(parseRepairCard({ ...card, date: "2024-02-29T23:59:59" }).date, "2024-02-29T23:59:59");
@@ -463,7 +563,7 @@ test("repair metadata migration preserves existing production and test rows", as
   try {
     repository = new SqliteRepairRepository(path);
     assert.deepEqual(repository.list(), [card, { ...card, testPlatform: true }]);
-    const updated = { ...card, goodsReadiness: { totalPositions: 0, availablePositions: 0 } };
+    const updated = { ...card, goodsReadiness: { totalPositions: 0, availablePositions: 0 }, paymentStatus: "paid" };
     repository.save(updated);
     repository.close();
     repository = new SqliteRepairRepository(path);
