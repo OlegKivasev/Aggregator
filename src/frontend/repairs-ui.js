@@ -59,7 +59,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     const row = document.createElement("tr");
     row.className = "results-table__empty";
     const cell = document.createElement("td");
-    cell.colSpan = 2;
+    cell.colSpan = 3;
     cell.textContent = message;
     row.append(cell);
     rows.replaceChildren(row);
@@ -92,12 +92,23 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     return cell;
   };
 
+  const paymentCell = (status) => {
+    const cell = document.createElement("td");
+    const badge = document.createElement("span");
+    badge.className = "repairs-payment";
+    badge.dataset.status = status ?? "unknown";
+    badge.textContent = status === "payment_required" ? "Требуется оплата" : status === "paid" ? "Оплачено" : "Оплата ещё не проверена";
+    cell.append(badge);
+    return cell;
+  };
+
   const parseRepairs = (payload, fresh = false) => {
     if (!Array.isArray(payload?.repairs) || payload.repairs.some((card) => !card
       || ["documentId", "number", "date", "vehicleName", "status"].some((key) => typeof card[key] !== "string")
       || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(card.documentId)
       || (card.counterpartyName !== undefined && (typeof card.counterpartyName !== "string" || !card.counterpartyName.trim()))
       || !validReadiness(card.goodsReadiness) || fresh && !card.goodsReadiness
+      || (card.paymentStatus !== undefined && !["paid", "payment_required"].includes(card.paymentStatus))
       || (card.testPlatform !== undefined && typeof card.testPlatform !== "boolean")
       || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(card.date))) {
       throw new Error("Invalid repairs response");
@@ -139,7 +150,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
         counterparty.textContent = card.counterpartyName;
         vehicleCell.append(counterparty);
       }
-      row.append(vehicleCell, readinessCell(card.goodsReadiness));
+      row.append(vehicleCell, readinessCell(card.goodsReadiness), paymentCell(card.paymentStatus));
       fragment.append(row);
     }
     rows.replaceChildren(fragment);

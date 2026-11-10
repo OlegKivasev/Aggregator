@@ -3,6 +3,8 @@ export interface GoodsReadiness {
   availablePositions: number;
 }
 
+export type RepairPaymentStatus = "paid" | "payment_required";
+
 export interface RepairCard {
   documentId: string;
   number: string;
@@ -13,11 +15,12 @@ export interface RepairCard {
   testPlatform?: boolean;
   counterpartyName?: string;
   goodsReadiness?: GoodsReadiness;
+  paymentStatus?: RepairPaymentStatus;
 }
 
 export class RepairValidationError extends Error {}
 
-const fields = ["documentId", "number", "date", "vehicleName", "status", "responsibleFio", "testPlatform", "counterpartyName", "goodsReadiness"];
+const fields = ["documentId", "number", "date", "vehicleName", "status", "responsibleFio", "testPlatform", "counterpartyName", "goodsReadiness", "paymentStatus"];
 
 function cardText(payload: Record<string, unknown>, field: string, limit: number, allowEmpty = false): string {
   const value = payload[field];
@@ -68,10 +71,13 @@ export function parseRepairCard(value: unknown): RepairCard {
   }
   const payload = value as Record<string, unknown>;
   if (Object.keys(payload).some((key) => !fields.includes(key))) {
-    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status, responsibleFio, testPlatform, counterpartyName, goodsReadiness.");
+    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status, responsibleFio, testPlatform, counterpartyName, goodsReadiness, paymentStatus.");
   }
   if (payload.testPlatform !== undefined && typeof payload.testPlatform !== "boolean") {
     throw new RepairValidationError("testPlatform: требуется логическое значение true или false.");
+  }
+  if (payload.paymentStatus !== undefined && payload.paymentStatus !== "paid" && payload.paymentStatus !== "payment_required") {
+    throw new RepairValidationError("paymentStatus: требуется paid или payment_required.");
   }
   const counterpartyName = payload.counterpartyName === undefined ? undefined : cardText(payload, "counterpartyName", 500);
   const responsibleFio = payload.responsibleFio === undefined ? undefined : cardText(payload, "responsibleFio", 256);
@@ -91,5 +97,6 @@ export function parseRepairCard(value: unknown): RepairCard {
     ...(payload.testPlatform === true ? { testPlatform: true } : {}),
     ...(counterpartyName !== undefined ? { counterpartyName } : {}),
     ...(payload.goodsReadiness !== undefined ? { goodsReadiness: parseGoodsReadiness(payload.goodsReadiness) } : {}),
+    ...(payload.paymentStatus !== undefined ? { paymentStatus: payload.paymentStatus } : {}),
   };
 }
