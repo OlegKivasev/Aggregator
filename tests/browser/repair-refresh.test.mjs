@@ -68,7 +68,7 @@ test("refresh reads only visible orders from 1C, animates, hides uncertain data 
     const fresh = { ...first, goodsReadiness: { totalPositions: 4, availablePositions: 4 }, paymentStatus: "paid", amountDue: 0 };
     await complete(job, [fresh]);
     await page.locator("#repairs-rows").getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
-    assert.equal(await page.locator("#repairs-rows .repairs-payment").textContent(), "Оплачено");
+    assert.equal(await page.locator("#repairs-rows .repairs-payment").textContent(), "Оплачен");
     assert.equal(await page.locator("#repairs-rows .repairs-payment-detail").count(), 0);
     assert.equal(await page.locator("#repairs-search").inputValue(), "Toyota");
     assert.equal(await page.locator("#repairs-refresh").isEnabled(), true);
