@@ -37,6 +37,16 @@ export class OrderCancellationService {
     if (snapshots.length) this.repository.observe(supplier, snapshots);
   }
 
+  withCancellationDates(supplier: OrderHistorySupplier, history: OrderHistory): OrderHistory {
+    if (!Array.isArray(history?.orders)) return history;
+    const dates = this.repository.detectedDates(supplier,
+      history.orders.flatMap((order) => typeof order?.number === "string" ? [order.number] : []));
+    return { ...history, orders: history.orders.map((order) => {
+      const detectedAt = dates.get(order?.number);
+      return detectedAt ? { ...order, cancellationDetectedAt: detectedAt } : order;
+    }) };
+  }
+
   unread() { return this.repository.unread(); }
 
   acknowledge(payload: unknown) {

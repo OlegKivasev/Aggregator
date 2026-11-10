@@ -361,7 +361,7 @@ export function createAggregatorServer({
           if (!controller.signal.aborted) {
             const result = supplier === "armtek" ? cart.withArmtekReturnDays(history) : history;
             cancellations.observe(supplier, result);
-            serveJson(response, 200, result);
+            serveJson(response, 200, cancellations.withCancellationDates(supplier, result));
           }
         }
       } catch (error) {

@@ -27,6 +27,8 @@ export interface OrderHistoryOrder {
   /** Supplier document reference, separate from the stable order number. */
   documentNumber?: string;
   date: string | null;
+  /** When the aggregator last detected an increase in confirmed cancellations. */
+  cancellationDetectedAt?: string;
   items: OrderHistoryItem[];
 }
 

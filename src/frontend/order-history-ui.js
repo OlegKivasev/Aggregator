@@ -63,6 +63,8 @@ function validHistory(value) {
     && typeof value.limited === "boolean" && value.orders.every((order) => order && typeof order.number === "string"
       && (order.documentNumber === undefined || typeof order.documentNumber === "string" && order.documentNumber.length > 0 && order.documentNumber.length <= 100)
       && (order.date === null || typeof order.date === "string") && Array.isArray(order.items) && order.items.length > 0
+      && (order.cancellationDetectedAt === undefined || typeof order.cancellationDetectedAt === "string"
+        && Number.isFinite(Date.parse(order.cancellationDetectedAt)))
       && order.items.every((item) => item && typeof item.article === "string" && Number.isFinite(item.quantity)
         && acceptedFulfillments.has(item.fulfillment)
         && item.quantity > 0 && item.quantity <= Number.MAX_SAFE_INTEGER
@@ -318,7 +320,14 @@ export function bootstrapOrderHistory() {
       }
     }
     if (loading.length) fragment.append(element("p", "history-loading", `Загружаем заказы: ${loading.join(", ")}…`));
-    orders.sort((a, b) => (b.order.date ?? "").localeCompare(a.order.date ?? ""));
+    orders.sort((a, b) => {
+      if (values.status === "cancelled") {
+        const cancellationOrder = (Date.parse(b.order.cancellationDetectedAt ?? "") || 0)
+          - (Date.parse(a.order.cancellationDetectedAt ?? "") || 0);
+        if (cancellationOrder) return cancellationOrder;
+      }
+      return (b.order.date ?? "").localeCompare(a.order.date ?? "");
+    });
     for (const { order, name, supplier, limited } of orders) fragment.append(renderOrder(order, limited, name, supplier));
     if (!orders.length && !loading.length && !failures) {
       const empty = selected === "all" ? "В выбранной истории заказов нет."

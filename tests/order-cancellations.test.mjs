@@ -82,15 +82,47 @@ test("cancellation snapshots and seen revisions survive reopening and are shared
   try {
     first.observe("rossko", history());
     const initial = first.unread();
+    const dated = first.withCancellationDates("rossko", history());
     first.close(); first = store(path);
     assert.deepEqual(first.unread(), initial);
+    assert.deepEqual(first.withCancellationDates("rossko", history()), dated);
     second = store(path);
     second.acknowledge(acknowledgement(second.unread()));
     assert.equal(first.unread().total, 0);
     first.close(); first = store(path);
     first.observe("rossko", history());
     assert.equal(first.unread().total, 0);
+    assert.deepEqual(first.withCancellationDates("rossko", history()), dated);
   } finally { first.close(); second?.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("history retains last cancellation detection after acknowledgement and updates only increased quantities", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-01T12:00:00Z") });
+  const service = store();
+  try {
+    const payload = { orders: Array.from({ length: 125 }, (_, index) => ({
+      number: `ORDER-${index}`, date: "2026-10-16", items: [item({ quantity: 2 })],
+    })), limited: true };
+    service.observe("part-kom", payload);
+    const original = service.withCancellationDates("part-kom", payload);
+    assert.equal(new Set(original.orders.map((order) => order.cancellationDetectedAt)).size, 1, "one supplier response shares one detection time");
+    assert.equal(original.orders[124].cancellationDetectedAt, "2026-11-01T12:00:00.000Z", "dates cover orders beyond the unread page limit");
+    assert.equal(payload.orders[0].cancellationDetectedAt, undefined, "supplier data is not mutated");
+    assert.equal(original.limited, true);
+    while (service.unread().total) service.acknowledge(acknowledgement(service.unread()));
+    t.mock.timers.tick(60_000);
+    service.observe("part-kom", payload);
+    assert.deepEqual(service.withCancellationDates("part-kom", payload), original, "refresh and viewing do not make old cancellations fresh");
+    const changed = structuredClone(payload);
+    changed.orders[0].items[0].quantity = 3;
+    service.observe("part-kom", changed);
+    const latest = service.withCancellationDates("part-kom", changed);
+    assert.equal(latest.orders[0].cancellationDetectedAt, "2026-11-01T12:01:00.000Z");
+    assert.equal(latest.orders[1].cancellationDetectedAt, original.orders[1].cancellationDetectedAt);
+    assert.equal(service.unread().total, 1);
+    assert.deepEqual(service.withCancellationDates("rossko", payload), payload, "the same order number at another supplier has its own timeline");
+    assert.deepEqual(service.withCancellationDates("part-kom", { orders: [], limited: false }), { orders: [], limited: false });
+  } finally { service.close(); }
 });
 
 test("only the displayed page is acknowledged when the inbox contains more than 100 orders", () => {
@@ -141,11 +173,14 @@ async function withServer(check, loadHistory = async () => history()) {
 test("history reads record cancellations and inbox HTTP routes validate methods, bodies and acknowledgements", async () => {
   await withServer(async (origin) => {
     assert.equal((await (await fetch(`${origin}/api/order-cancellations`)).json()).total, 0);
-    assert.equal((await fetch(`${origin}/api/order-history/part-kom`)).status, 200);
+    const initialHistory = await fetch(`${origin}/api/order-history/part-kom`);
+    assert.equal(initialHistory.status, 200);
+    const dated = await initialHistory.json();
     const response = await fetch(`${origin}/api/order-cancellations`);
     assert.equal(response.headers.get("cache-control"), "no-store");
     const page = await response.json();
     assert.equal(page.total, 1);
+    assert.equal(dated.orders[0].cancellationDetectedAt, page.notices[0].detectedAt);
     assert.equal((await fetch(`${origin}/api/order-cancellations/seen`)).status, 405);
     assert.equal((await fetch(`${origin}/api/order-cancellations?all=1`)).status, 400);
     for (const [body, status] of [["broken", 400], ["{}", 400], ["x".repeat(17000), 413]]) {
@@ -156,7 +191,7 @@ test("history reads record cancellations and inbox HTTP routes validate methods,
     const seen = await fetch(`${origin}/api/order-cancellations/seen`, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(acknowledgement(page)) });
     assert.equal((await seen.json()).total, 0);
-    await fetch(`${origin}/api/order-history/part-kom`);
+    assert.deepEqual(await (await fetch(`${origin}/api/order-history/part-kom`)).json(), dated);
     assert.equal((await (await fetch(`${origin}/api/order-cancellations`)).json()).total, 0);
   });
 });

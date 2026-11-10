@@ -4368,6 +4368,57 @@ test("history indicator checks suppliers on returning to the page, throttles rep
   } });
 });
 
+test("cancelled history orders latest detected cancellations first and retains the order after viewing and reopening", async () => {
+  let oldOrderCancelled = false;
+  const line = (fulfillment, fields = {}) => ({ article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 2, price: 100,
+    status: null, fulfillment, expectedDate: null, guaranteedDate: null, warehouse: null, ...fields });
+  await withCartPage(async (page) => {
+    await page.locator("#history-toggle").click();
+    await page.waitForFunction(() => !document.querySelector(".history-loading")
+      && document.querySelector("#history-status-cancelled").title === "Новые отмены: 2");
+    const headings = () => page.locator(".history-card h3").allTextContents();
+    assert.deepEqual(await headings(), ["Заказ № NEWER", "Заказ № OLDER"]);
+    await page.locator("#history-status-cancelled").click();
+    await page.waitForFunction(() => !document.querySelector("#history-toggle").classList.contains("has-cancellations"));
+    assert.deepEqual(await headings(), ["Заказ № NEWER"]);
+    oldOrderCancelled = true;
+    await page.locator("#history-reload").click();
+    await page.waitForFunction(() => !document.querySelector(".history-loading")
+      && document.querySelector("#history-status-cancelled").title === "Новые отмены: 1");
+    const expected = ["Заказ № OLDER", "Заказ № NEWER"];
+    assert.deepEqual(await headings(), expected, "a newly cancelled older order goes above a previously cancelled newer order");
+    await page.locator("#history-status-cancelled").click();
+    await page.waitForFunction(() => !document.querySelector("#history-toggle").classList.contains("has-cancellations"));
+    assert.deepEqual(await headings(), expected, "acknowledgement must not change the cancellation order");
+    await page.locator("#history-search").fill("NEWER");
+    assert.deepEqual(await headings(), ["Заказ № NEWER"]);
+    await page.locator("#history-search").fill("");
+    assert.deepEqual(await headings(), expected);
+    await page.locator("#history-status-all").click();
+    assert.deepEqual(await headings(), ["Заказ № NEWER", "Заказ № OLDER"], "other statuses keep order-date sorting");
+    await page.locator("#history-status-cancelled").click();
+    await page.locator("#history-close").click();
+    await page.locator("#history-toggle").click();
+    await page.waitForFunction(() => !document.querySelector(".history-loading") && document.querySelectorAll(".history-card").length === 2);
+    assert.deepEqual(await headings(), expected);
+    await page.locator("#history-tab-all").click();
+    await page.waitForFunction(() => !document.querySelector(".history-loading") && document.querySelectorAll(".history-card").length === 3);
+    await page.locator("#history-status-cancelled").click();
+    assert.equal((await headings())[0], "Заказ № OLDER");
+    assert.equal(await page.locator(".history-card").first().locator(".history-card__identity > small").first().textContent(), "PartKOM",
+      "the combined tab uses each supplier's cancellation timestamp even with matching order numbers");
+    await page.locator("#history-reload").click();
+    await page.waitForFunction(() => !document.querySelector(".history-loading") && document.querySelectorAll(".history-card").length === 3);
+    assert.equal(await page.locator(".history-card").first().locator(".history-card__identity > small").first().textContent(), "PartKOM");
+  }, { fixedTime: "2026-11-10T12:00:00Z", reducedMotion: "reduce",
+    partKomOrderHistory: async () => ({ limited: false, orders: [
+      { number: "NEWER", date: "2026-11-08", items: [line("cancelled")] },
+      { number: "OLDER", date: "2026-11-01", items: [oldOrderCancelled ? line("partial", { cancelledQuantity: 1 }) : line("processing")] },
+    ] }), supplierOrderHistory: async ({ supplier }) => ({ limited: false, orders: supplier === "rossko"
+      ? [{ number: "OLDER", date: "2026-11-09", items: [line("cancelled")] }] : [] }),
+  });
+});
+
 test("history sorts every supplier newest first regardless of item status and aligns columns across different card contents", async () => {
   const order = (number, states, date = "2026-10-15 12:30:00", fields = {}) => ({ number, date,
     items: states.map((fulfillment) => ({ article: "A1", brand: "TEST", title: "Тестовая деталь", quantity: 2, price: 343,

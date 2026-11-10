@@ -25,6 +25,7 @@ export class SqliteOrderCancellationRepository {
   observe(supplier: OrderHistorySupplier, snapshots: CancellationSnapshot[]): void {
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      const detectedAt = new Date().toISOString();
       for (const incoming of snapshots) {
         const row = this.database.prepare("SELECT id, revision, payload FROM purchase_order_cancellation WHERE supplier = ? AND order_number = ?")
           .get(supplier, incoming.number);
@@ -42,10 +43,18 @@ export class SqliteOrderCancellationRepository {
           (id, supplier, order_number, revision, seen_revision, detected_at, payload) VALUES (?, ?, ?, 1, 0, ?, ?)
           ON CONFLICT (supplier, order_number) DO UPDATE SET
             revision = revision + 1, detected_at = excluded.detected_at, payload = excluded.payload`)
-          .run(row ? String(row.id) : randomUUID(), supplier, incoming.number, new Date().toISOString(), JSON.stringify(snapshot));
+          .run(row ? String(row.id) : randomUUID(), supplier, incoming.number, detectedAt, JSON.stringify(snapshot));
       }
       this.database.exec("COMMIT");
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+  }
+
+  detectedDates(supplier: OrderHistorySupplier, orderNumbers: string[]): Map<string, string> {
+    if (!orderNumbers.length) return new Map();
+    const placeholders = orderNumbers.map(() => "?").join(",");
+    const rows = this.database.prepare(`SELECT order_number, detected_at FROM purchase_order_cancellation
+      WHERE supplier = ? AND order_number IN (${placeholders})`).all(supplier, ...orderNumbers);
+    return new Map(rows.map((row) => [String(row.order_number), String(row.detected_at)]));
   }
 
   unread(): OrderCancellationPage {
