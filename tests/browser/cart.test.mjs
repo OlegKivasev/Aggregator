@@ -548,6 +548,34 @@ test("camera and context menus open Google Images directly for offers and analog
   }, { analogOffers, title: "Фильтр салона угольный Lada Vesta / X-Ray" });
 });
 
+test("best price highlights fastest delivery only among minimum prices in offers and analogs", async () => {
+  const early = offer("armtek", 4, { supplier: "armtek", keyzak: "BESTEARLY" },
+    { deliveryDate: "2028-03-11" }, "Быстрая минимальная");
+  const unknown = offer("armtek", 4, { supplier: "armtek", keyzak: "BESTUNKNOWN" }, {}, "Без срока");
+  const deliveries = { armtek: { deliveryDate: "2028-03-15" }, partkom: { deliveryDate: "2028-03-10" } };
+  await withCartPage(async (page) => {
+    const mainBest = page.locator("#results-body .is-best-price");
+    assert.equal(await mainBest.count(), 1);
+    assert.match(await mainBest.locator('[data-column="title"]').textContent(), /Быстрая минимальная/);
+    await page.locator('[data-sort-key="markupPrice"]').click();
+    assert.match(await mainBest.locator('[data-column="title"]').textContent(), /Быстрая минимальная/);
+    await page.locator("#table-search").fill("Обычное");
+    assert.equal(await mainBest.locator('[data-column="supplier"]').textContent(), "Armtek", "a faster but more expensive offer must not win");
+    await page.locator("#table-search").fill("");
+    await openOfferAnalogs(page, mainBest);
+    await page.waitForFunction(() => document.querySelectorAll("#analogs-results-body .analogs-result-row").length === 4);
+    const analogBest = page.locator("#analogs-results-body .is-best-price");
+    assert.equal(await analogBest.count(), 1);
+    assert.match(await analogBest.locator('[data-analog-column="title"]').textContent(), /Быстрая минимальная/);
+    await page.locator("#analogs-table-search").fill("Обычное");
+    assert.equal(await analogBest.locator('[data-analog-column="supplier"]').textContent(), "Armtek");
+  }, { deliveries, title: "Обычное предложение", extraOffers: [unknown, early], analogOffers: [
+    offer("armtek", 4, { supplier: "armtek", keyzak: "BESTLATE" }, deliveries.armtek, "Обычное предложение"),
+    offer("part-kom", 3, { supplier: "part-kom", makerId: "101", providerId: "202" }, deliveries.partkom, "Обычное предложение"),
+    unknown, early,
+  ], reducedMotion: "reduce" });
+});
+
 test("markup popup applies fixed, tiered and no markup consistently in offers, analogs and cart", async () => {
   await withCartPage(async (page, { origin, searchCalls }) => {
     const mainTrigger = page.locator('#results-table [data-markup-settings]');
@@ -2548,6 +2576,56 @@ test("custom cart tabs move goods, preserve supplier identity, reorder, persist 
   }, { reducedMotion: "reduce" });
 });
 
+test("cart dragging moves selected visible goods together, leaves unselected goods and rejects mixed supplier drops", async () => {
+  const extra = offer("armtek", 4, { supplier: "armtek", keyzak: "MULTIDRAG" }, {}, "Третий товар");
+  await withCartPage(async (page, { origin }) => {
+    await openCartForCustomTabs(page);
+    await page.locator("#cart-close").click();
+    await page.locator('#results-body [data-result-index="2"] .cart-offer-button').click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "3");
+    await page.locator("#cart-toggle").click();
+    await page.waitForFunction(() => document.querySelector("#cart-refresh-overlay").hidden);
+    for (let index = 0; index < 2; index++) {
+      await page.locator("#cart-new-tab").click();
+      await storedCartTabs(page);
+    }
+    const tabs = await storedCartTabs(page);
+    const target = (index) => page.locator(`#cart-tab-${tabs[index].id}`);
+    await page.locator("#cart-tab-all").click();
+    const itemIds = await page.locator("#cart-items tr[data-cart-item-id]").evaluateAll((rows) => rows.map((row) => row.dataset.cartItemId));
+    const row = (index) => page.locator(`#cart-items tr[data-cart-item-id="${itemIds[index]}"]`);
+    await row(0).locator(".cart-item-select").check();
+    await row(1).locator(".cart-item-select").check();
+    await row(0).locator(".cart-item-name").dragTo(target(0));
+    assert.deepEqual((await storedCartTabs(page)).map((tab) => tab.itemIds), [itemIds.slice(0, 2), []]);
+    await row(2).locator(".cart-item-name").dragTo(target(1));
+    assert.deepEqual((await storedCartTabs(page)).map((tab) => tab.itemIds), [itemIds.slice(0, 2), [itemIds[2]]], "dragging an unselected row moves only that row");
+    await target(0).click();
+    await page.locator("#cart-tab-exclude").check();
+    await storedCartTabs(page);
+    await page.locator("#cart-tab-all").click();
+    await page.locator("#cart-select-all").check();
+    await row(2).locator(".cart-item-name").dragTo(target(1));
+    assert.deepEqual((await storedCartTabs(page)).map((tab) => tab.itemIds), [itemIds.slice(0, 2), [itemIds[2]]], "hidden selected goods must stay in their tab");
+    await target(0).click();
+    await row(0).locator(".cart-item-name").dragTo(page.locator("#cart-tab-armtek"));
+    assert.deepEqual((await storedCartTabs(page)).map((tab) => tab.itemIds), [itemIds.slice(0, 2), [itemIds[2]]], "a mixed supplier group must not be moved partially");
+    assert.equal(await page.locator(".is-cart-dragging, .cart-tab.is-drop-target").count(), 0);
+    await row(1).locator(".cart-item-name").dragTo(target(1));
+    assert.deepEqual((await storedCartTabs(page)).map((tab) => tab.itemIds), [[], [itemIds[2], ...itemIds.slice(0, 2)]]);
+    await page.reload();
+    await page.locator("#cart-toggle").click();
+    await storedCartTabs(page);
+    await target(1).click();
+    await page.locator("#cart-select-all").check();
+    await row(0).locator(".cart-item-name").dragTo(page.locator("#cart-tab-all"));
+    assert.deepEqual((await storedCartTabs(page)).map((tab) => tab.itemIds), [[], []]);
+    const cart = await (await page.request.get(`${origin}/api/cart`)).json();
+    assert.deepEqual(cart.items.map((item) => [item.id, item.quantity, item.result.supplier]),
+      itemIds.map((id, index) => [id, 1, index === 1 ? "part-kom" : "armtek"]));
+  }, { extraOffers: [extra], reducedMotion: "reduce" });
+});
+
 test("hidden custom cart goods are excluded from All checkout and All clear, but remain orderable in their own tab", async () => {
   await withCartPage(async (page, { orderCalls, refreshCalls }) => {
     await openCartForCustomTabs(page);
@@ -2555,11 +2633,12 @@ test("hidden custom cart goods are excluded from All checkout and All clear, but
     const customId = await customCartTabs(page).getAttribute("data-cart-supplier");
     const custom = page.locator(`#cart-tab-${customId}`);
     await page.locator("#cart-tab-all").click();
-    await page.locator("#cart-select-all").check();
+    await page.locator("#cart-items .cart-item-select").first().check();
     await page.locator("#cart-items .cart-item-name").first().dragTo(custom);
     await custom.click();
     await page.locator("#cart-tab-exclude").check();
     await page.locator("#cart-tab-all").click();
+    await page.locator("#cart-select-all").check();
     assert.equal(await page.locator("#cart-items .cart-item-select:checked").count(), 1);
     assert.equal(await page.locator("#cart-total .cart-purchase-price").textContent(), "120,00 ₽");
     await page.clock.setFixedTime(new Date(Date.now() + 180_000));

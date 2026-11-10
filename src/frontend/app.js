@@ -3,6 +3,7 @@ import {
   compareDeliveryDates,
   compareDeliveryDatesThenPrice,
   escapeHtml,
+  findBestPriceResult,
   formatArticle,
   formatBrand,
   formatPrice,
@@ -1322,9 +1323,7 @@ const renderResults = () => {
   const { exactResults, filteredResults } = getMainTableResults(results);
   const sortedResults = [...filteredResults].sort((left, right) =>
     compareResults(left, right, sortState, markupSettings, mainDeliverySoon));
-  const bestPrice = filteredResults
-    .filter((result) => getMarkupPrice(result, markupSettings) !== null)
-    .reduce((best, result) => !best || getMarkupPrice(result, markupSettings) < getMarkupPrice(best, markupSettings) ? result : best, null);
+  const bestPrice = findBestPriceResult(filteredResults, getMarkupPrice);
   const isSearching = Boolean(getActiveTab()?.source);
   updateSortHeaders(sortButtons, sortState);
   syncMobileMainSort(sortState);
@@ -2316,9 +2315,7 @@ const renderAnalogRows = () => {
   const visibleResults = getVisibleAnalogResults(analogSearchResults);
   const filteredResults = getFilteredAnalogResults(visibleResults);
   const rows = [...filteredResults].sort((left, right) => compareResults(left, right, analogSortState, markupSettings, analogDeliverySoon));
-  const bestPrice = filteredResults
-    .filter((result) => getMarkupPrice(result) !== null)
-    .reduce((best, result) => !best || getMarkupPrice(result) < getMarkupPrice(best) ? result : best, null);
+  const bestPrice = findBestPriceResult(filteredResults, getMarkupPrice);
   const hasActiveAnalogFilters = mainFilterColumns.some((column) => hasActiveAnalogFilter(column));
   analogsCount.textContent = normalizedTerm || hasActiveAnalogFilters ? `${rows.length} из ${visibleResults.length}` : String(visibleResults.length);
   analogsCount.title = normalizedTerm || hasActiveAnalogFilters ? "Показано с учетом поиска и фильтров" : "Всего найдено";

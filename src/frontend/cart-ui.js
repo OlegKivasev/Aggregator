@@ -339,6 +339,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     toastTimeout = setTimeout(() => { toast.hidden = true; }, 4000);
   };
   const cartTabs = setupCartTabs({ modal, supplierNames, getCart: () => cart,
+    getSelectedIds: () => selectedIds,
     isLocked: () => busy || checking || Boolean(cart?.testing),
     onChange: () => { status.textContent = ""; render(); }, notify, api });
   const render = () => {

@@ -29,9 +29,14 @@ export const cartTabItems = (items, tabs, tabId) => {
   return items.filter((item) => !hidden.has(item.id));
 };
 
-export const moveCartItem = (tabs, itemId, targetId) => tabs.map((tab) => ({ ...tab,
-  itemIds: [...tab.itemIds.filter((id) => id !== itemId), ...(tab.id === targetId ? [itemId] : [])],
-}));
+export const moveCartItems = (tabs, itemIds, targetId) => {
+  const moved = new Set(itemIds);
+  return tabs.map((tab) => ({ ...tab,
+    itemIds: [...tab.itemIds.filter((id) => !moved.has(id)), ...(tab.id === targetId ? moved : [])],
+  }));
+};
+
+export const moveCartItem = (tabs, itemId, targetId) => moveCartItems(tabs, [itemId], targetId);
 
 export const reorderCartTab = (tabs, sourceId, targetId, after = false) => {
   const source = tabs.find((tab) => tab.id === sourceId);

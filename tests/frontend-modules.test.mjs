@@ -5,6 +5,7 @@ import {
   compareDeliveryDates,
   compareDeliveryDatesThenPrice,
   escapeHtml,
+  findBestPriceResult,
   formatArticle,
   formatBrand,
   formatPrice,
@@ -25,6 +26,21 @@ import { isArmtekReturnableVisible } from "../src/frontend/armtek-return-setting
 import { applySavedColumnWidths, applySavedColumnAlignments, fitOfferColumnWidths } from "../src/frontend/table-column-widths.js";
 import { formatDeliveryDate } from "../src/frontend/supplier-search-summary.js";
 import { formatCartLatestDeliveryDate } from "../src/frontend/cart-ui.js";
+
+test("best price uses the lowest displayed price, then fastest known delivery regardless of arrival order", () => {
+  const missing = { price: 100, deliveryDate: null };
+  const late = { price: 100, deliveryDate: "2028-03-15" };
+  const early = { price: 100, deliveryDate: "2028-03-11" };
+  const expensive = { price: 120, deliveryDate: "2028-03-10" };
+  for (const results of [[missing, late, expensive, early], [early, expensive, late, missing]]) {
+    assert.equal(findBestPriceResult(results), early);
+    assert.equal(findBestPriceResult(results, (result) => result === expensive ? 90 : result.price), expensive);
+  }
+  assert.equal(findBestPriceResult([late, early], () => 135), early);
+  assert.equal(findBestPriceResult([missing]), missing);
+  assert.equal(findBestPriceResult([]), null);
+  assert.equal(findBestPriceResult([null, undefined, 0, -1, NaN, Infinity].map((price) => ({ price }))), null);
+});
 
 test("cart completion date uses the latest upper bound and retains missing or approximate dates", () => {
   const item = (from, to = null, approximate = false) => ({ result: { deliveryDate: from, deliveryDateTo: to, deliveryDateApproximate: approximate } });

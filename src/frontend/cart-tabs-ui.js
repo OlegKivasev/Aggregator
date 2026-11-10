@@ -1,11 +1,11 @@
 import { escapeHtml } from "./result-formatting.js";
 import { setupTabCloseMenu } from "./tab-close-menu.js";
-import { cartTabItems, moveCartItem, normalizeCartTabs, reorderCartTab } from "./cart-tab-state.js";
+import { cartTabItems, moveCartItems, normalizeCartTabs, reorderCartTab } from "./cart-tab-state.js";
 
 const storageKey = "autoservice.cartTabs";
 const migratedKey = "autoservice.cartTabs.shared";
 
-export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChange, notify, api }) => {
+export const setupCartTabs = ({ modal, supplierNames, getCart, getSelectedIds, isLocked, onChange, notify, api }) => {
   const strip = modal.querySelector("#cart-tabs");
   const options = document.createElement("label");
   options.className = "cart-tab-options";
@@ -243,7 +243,7 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
   const clearDrag = () => {
     drag = null;
     clearPreview();
-    modal.querySelector(".is-cart-dragging")?.classList.remove("is-cart-dragging");
+    for (const node of modal.querySelectorAll(".is-cart-dragging")) node.classList.remove("is-cart-dragging");
   };
   modal.addEventListener("dragstart", (event) => {
     const tab = event.target.closest(".cart-tab");
@@ -252,6 +252,13 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
     if (row && event.target.closest("input, button, a")) return event.preventDefault();
     if (tab && !customTabs.some((item) => item.id === tab.dataset.cartSupplier)) return event.preventDefault();
     drag = tab ? { type: "tab", id: tab.dataset.cartSupplier } : { type: "item", id: row.dataset.cartItemId };
+    if (row) {
+      const selected = getSelectedIds();
+      drag.itemIds = selected.has(drag.id) ? getItems().filter((item) => selected.has(item.id)).map((item) => item.id) : [drag.id];
+      for (const itemRow of modal.querySelectorAll("#cart-items tr[data-cart-item-id]")) {
+        if (drag.itemIds.includes(itemRow.dataset.cartItemId)) itemRow.classList.add("is-cart-dragging");
+      }
+    }
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData(`application/x-autoservice-cart-${drag.type}`, drag.id);
     (tab ?? row).classList.add("is-cart-dragging");
@@ -263,8 +270,9 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
     const id = tab.dataset.cartSupplier;
     const custom = customTabs.some((item) => item.id === id);
     if (drag.type === "tab") return custom && id !== drag.id ? tab : null;
-    const item = getCart()?.items.find((item) => item.id === drag.id);
-    return item && (custom || id === "all" || id === item.result.supplier) ? tab : null;
+    const items = getCart()?.items.filter((item) => drag.itemIds.includes(item.id)) ?? [];
+    return items.length === drag.itemIds.length && items.length > 0
+      && (custom || id === "all" || items.every((item) => id === item.result.supplier)) ? tab : null;
   };
   strip.addEventListener("dragover", (event) => {
     clearPreview();
@@ -281,7 +289,7 @@ export const setupCartTabs = ({ modal, supplierNames, getCart, isLocked, onChang
     if (!tab) return clearDrag();
     event.preventDefault();
     const id = tab.dataset.cartSupplier;
-    if (drag.type === "item") customTabs = moveCartItem(customTabs, drag.id, id);
+    if (drag.type === "item") customTabs = moveCartItems(customTabs, drag.itemIds, id);
     else {
       const bounds = tab.getBoundingClientRect();
       customTabs = reorderCartTab(customTabs, drag.id, id, event.clientX > bounds.left + bounds.width / 2);

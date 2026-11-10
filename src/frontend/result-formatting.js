@@ -151,6 +151,20 @@ export const compareDeliveryDates = (left, right) => {
     || (effectiveLeftTo ?? leftFrom) - (effectiveRightTo ?? rightFrom);
 };
 
+export const findBestPriceResult = (results, getPrice = (result) => result.price) => {
+  let best = null;
+  let bestPrice = Infinity;
+  for (const result of results) {
+    const price = getPrice(result);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    if (price < bestPrice || price === bestPrice && compareDeliveryDates(result, best) < 0) {
+      best = result;
+      bestPrice = price;
+    }
+  }
+  return best;
+};
+
 export const compareDeliveryDatesThenPrice = (left, right) => {
   const deliveryComparison = compareDeliveryDates(left, right);
   const leftFrom = getDeliveryTimestamp(left.deliveryDate);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cartTabItems, moveCartItem, normalizeCartTabs, reorderCartTab } from "../src/frontend/cart-tab-state.js";
+import { cartTabItems, moveCartItem, moveCartItems, normalizeCartTabs, reorderCartTab } from "../src/frontend/cart-tab-state.js";
 
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const tab = (n, itemIds = [], excludeFromAll = false) => ({ id: `custom-${id(n)}`, name: `Вкладка ${n}`, itemIds, excludeFromAll });
@@ -31,6 +31,15 @@ test("moving a cart item replaces membership and returning to All removes it fro
   assert.deepEqual(tabs[0].itemIds, [id(1)], "the original state is not mutated");
   assert.deepEqual(cartTabItems(items, moved, "all"), items);
   assert.deepEqual(moveCartItem(moved, id(1), "all"), [tab(1, [], true), tab(2, [id(2)])]);
+});
+
+test("moving selected cart items updates all memberships together and deduplicates the target", () => {
+  const tabs = [tab(1, [id(1)], true), tab(2, [id(2), id(3)]), tab(3)];
+  const snapshot = structuredClone(tabs);
+  const moved = moveCartItems(tabs, [id(1), id(2), id(1)], tabs[1].id);
+  assert.deepEqual(moved, [tab(1, [], true), tab(2, [id(3), id(1), id(2)]), tab(3)]);
+  assert.deepEqual(moveCartItems(moved, [id(1), id(2)], "all"), [tab(1, [], true), tab(2, [id(3)]), tab(3)]);
+  assert.deepEqual(tabs, snapshot);
 });
 
 test("custom cart tabs reorder on either side while retaining names, hidden flags and goods", () => {
