@@ -92,13 +92,26 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     return cell;
   };
 
-  const paymentCell = (status) => {
+  const validPayment = ({ paymentStatus: status, amountDue: due }) => {
+    if (status !== undefined && !["paid", "payment_required", "partially_paid"].includes(status)) return false;
+    if (due === undefined) return status !== "partially_paid";
+    return status !== undefined && typeof due === "number" && Number.isFinite(due) && due >= 0
+      && (status === "paid" ? due === 0 : due > 0);
+  };
+  const amountFormat = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const paymentCell = ({ paymentStatus: status, amountDue: due }) => {
     const cell = document.createElement("td");
     const badge = document.createElement("span");
     badge.className = "repairs-payment";
     badge.dataset.status = status ?? "unknown";
-    badge.textContent = status === "payment_required" ? "Требуется оплата" : status === "paid" ? "Оплачено" : "Оплата ещё не проверена";
+    badge.textContent = status === "partially_paid" ? "Частично оплачен" : status === "payment_required" ? "Требуется оплата" : status === "paid" ? "Оплачено" : "Оплата ещё не проверена";
     cell.append(badge);
+    if (status === "payment_required" || status === "partially_paid") {
+      const detail = document.createElement("span");
+      detail.className = "repairs-payment-detail";
+      detail.textContent = due !== undefined ? `Осталось оплатить: ${amountFormat.format(due)}` : "Сумма долга ещё не получена из 1С";
+      cell.append(detail);
+    }
     return cell;
   };
 
@@ -108,7 +121,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(card.documentId)
       || (card.counterpartyName !== undefined && (typeof card.counterpartyName !== "string" || !card.counterpartyName.trim()))
       || !validReadiness(card.goodsReadiness) || fresh && !card.goodsReadiness
-      || (card.paymentStatus !== undefined && !["paid", "payment_required"].includes(card.paymentStatus))
+      || !validPayment(card)
       || (card.testPlatform !== undefined && typeof card.testPlatform !== "boolean")
       || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(card.date))) {
       throw new Error("Invalid repairs response");
@@ -150,7 +163,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
         counterparty.textContent = card.counterpartyName;
         vehicleCell.append(counterparty);
       }
-      row.append(vehicleCell, readinessCell(card.goodsReadiness), paymentCell(card.paymentStatus));
+      row.append(vehicleCell, readinessCell(card.goodsReadiness), paymentCell(card));
       fragment.append(row);
     }
     rows.replaceChildren(fragment);
