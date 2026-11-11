@@ -116,7 +116,7 @@
 .garage-offer-button[aria-disabled="true"] { color: #aab4c0; }
 .search-toolbar { display: flex; min-height: 48px; flex: 0 0 auto; align-items: flex-end; gap: 12px; padding: 10px 10px 6px 0; }
 .search-toolbar > .search-row { flex: 1 1 auto; min-width: 0; }
-.article-alphabet-notice { margin: -10px 0 0; color: #885b07; font-size: 12px; line-height: 1.5; }
+.article-alphabet-notice { margin: 0 0 -10px; color: #b42318; font-size: 12px; font-weight: 700; line-height: 1.5; }
 .article-variant-notice { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 14px; border: 1px solid #f5ce7b; border-radius: 10px; background: #fff8e7; color: #885b07; font-size: 12px; line-height: 1.5; }
 .article-variant-notice[hidden] { display: none; }
 .article-variant-notice > span { display: grid; place-items: center; flex: 0 0 20px; width: 20px; height: 20px; border-radius: 50%; background: #d99500; color: #fff; font-weight: 800; }
