@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { RepairRefreshService } from "../src/backend/repairs/repair-refresh-service.ts";
 import { UserAuthService } from "../src/backend/auth/user-auth-service.ts";
 import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 
@@ -185,6 +186,7 @@ test("repair refresh enforces permissions, document responsibility and request o
     const job = await poll();
     assert.equal((await get(job, two)).status, 404);
     assert.equal((await get(job, admin)).status, 404);
+    assert.equal((await request(`/api/repairs/refresh/${job.id}?testPlatform=false&waitSeconds=20`, { headers: { Cookie: two } })).status, 404);
     assert.equal((await request(`/api/repairs/refresh/${job.id}?testPlatform=false`, { method: "DELETE", headers: { Cookie: two } })).status, 404);
     await result(job, [{ ...first, responsibleFio: "Второй сотрудник" }]);
     const refreshed = (await (await get(job, one)).json()).refresh;
@@ -202,7 +204,77 @@ test("repair refresh validates request bounds and mode without exposing the inte
     assert.equal((await request("/api/repairs/refresh", { method: "POST", ...json({ documentIds: [first.documentId] }) })).status, 400);
     const bad = await request("/api/integration/1c/repairs/refresh/requests?testPlatform=false&waitSeconds=21", { headers: { Authorization: `Bearer ${secret}` } });
     assert.equal(bad.status, 400); assert.equal((await bad.text()).includes(secret), false);
+    for (const query of ["waitSeconds=21", "waitSeconds=-1", "waitSeconds=1&waitSeconds=2", "testPlatform=false", "unknown=1"]) {
+      assert.equal((await request(`/api/repairs/refresh/${first.documentId}?testPlatform=false&${query}`)).status, 400);
+    }
+    assert.equal((await request("/api/repairs?waitSeconds=1")).status, 400);
+    assert.equal((await request("/api/repairs/refresh?testPlatform=false&waitSeconds=1", { method: "POST", ...json({ documentIds: [first.documentId] }) })).status, 400);
   });
+});
+
+test("browser long polls wake on a confirmed result or cancellation", async () => {
+  await withServer(async ({ request, send, poll, create, result, get }) => {
+    await send(first); await poll(); await create([first.documentId]);
+    const job = await poll();
+    const controller = new AbortController();
+    let settled = false;
+    const waiting = request(`/api/repairs/refresh/${job.id}?testPlatform=false&waitSeconds=20`, { signal: controller.signal })
+      .then(async (response) => { settled = true; assert.equal(response.status, 200); return (await response.json()).refresh; });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      assert.equal(settled, false, "a pending request must be held on the server");
+      await result(job, [first]);
+      assert.equal((await waiting).status, "completed");
+      const started = performance.now();
+      assert.equal((await (await request(`/api/repairs/refresh/${job.id}?testPlatform=false&waitSeconds=20`)).json()).refresh.status, "completed");
+      assert.ok(performance.now() - started < 1000, "already completed results must not wait");
+      await create([first.documentId]); const cancelled = await poll();
+      const cancelledWait = request(`/api/repairs/refresh/${cancelled.id}?testPlatform=false&waitSeconds=20`, { signal: controller.signal });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await request(`/api/repairs/refresh/${cancelled.id}?testPlatform=false`, { method: "DELETE" });
+      assert.equal((await (await cancelledWait).json()).refresh.status, "cancelled");
+      assert.equal((await (await get(cancelled)).json()).refresh.status, "cancelled");
+    } finally { controller.abort(); }
+  });
+});
+
+test("batch verification markers roll back together if a storage write fails", async () => {
+  await withServer(async ({ request, send, poll, create, path }) => {
+    await send(first); await send(second); await poll();
+    const db = new DatabaseSync(path);
+    try {
+      db.exec(`CREATE TRIGGER fail_verification_marker BEFORE INSERT ON repair_refresh_unverified
+        WHEN NEW.document_id='${second.documentId}' BEGIN SELECT RAISE(ABORT, 'test storage failure'); END`);
+      assert.equal((await create([first.documentId, second.documentId])).status, 500);
+      assert.equal((await (await request("/api/repairs")).json()).unverified, undefined);
+      db.exec("DROP TRIGGER fail_verification_marker");
+      assert.equal((await create([first.documentId, second.documentId])).status, 202);
+      assert.equal((await (await request("/api/repairs")).json()).unverified.length, 2);
+    } finally { db.close(); }
+  });
+});
+
+test("browser waits release capacity on disconnect and shutdown without cancelling the refresh", async () => {
+  const db = new DatabaseSync(":memory:");
+  const refreshes = new RepairRefreshService(db, () => [first], () => "version", () => {});
+  const disconnect = new AbortController();
+  try {
+    refreshes.claim(false);
+    const job = refreshes.create({ documentIds: [first.documentId] }, false, "owner");
+    const wait = (signal) => refreshes.getWhenReady(job.id, false, "owner", undefined, signal, 20_000);
+    const waiting = Array.from({ length: 100 }, () => wait(disconnect.signal));
+    await assert.rejects(wait(disconnect.signal), { statusCode: 429 });
+    disconnect.abort();
+    assert.ok((await Promise.all(waiting)).every((result) => result.status === "pending"));
+    assert.equal(refreshes.get(job.id, false, "owner").status, "pending");
+    const afterDisconnect = wait(new AbortController().signal);
+    refreshes.cancel(job.id, false, "owner");
+    assert.equal((await afterDisconnect).status, "cancelled");
+    const next = refreshes.create({ documentIds: [first.documentId] }, false, "owner");
+    const stopping = refreshes.getWhenReady(next.id, false, "owner", undefined, new AbortController().signal, 20_000);
+    refreshes.close();
+    assert.equal((await stopping).status, "pending");
+  } finally { disconnect.abort(); refreshes.close(); db.close(); }
 });
 
 test("offline failures remain unverified across page reads and ordinary imports; only a complete refresh verifies them", async () => {

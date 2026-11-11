@@ -301,12 +301,8 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       if (!Number.isFinite(deadline)) throw new Error("Invalid refresh deadline");
       while (result.status === "pending") {
         if (Date.now() >= deadline) throw new Error("Refresh timeout");
-        await new Promise((resolve, reject) => {
-          const stop = () => { clearTimeout(timer); reject(new Error("Cancelled")); };
-          const timer = setTimeout(() => { controller.signal.removeEventListener("abort", stop); resolve(); }, 650);
-          if (controller.signal.aborted) stop(); else controller.signal.addEventListener("abort", stop, { once: true });
-        });
-        const response = await fetch(requestRoute, { cache: "no-store", signal: controller.signal });
+        // The server replies as soon as 1C commits the result, without a polling delay.
+        const response = await fetch(`${requestRoute}&waitSeconds=20`, { cache: "no-store", signal: controller.signal });
         if (!response.ok) throw new Error("Refresh poll failed");
         result = (await response.json()).refresh;
         if (!current()) return;

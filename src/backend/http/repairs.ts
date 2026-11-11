@@ -28,14 +28,20 @@ export async function serveRepairs(
   if (!integration && !refreshRoute && url.pathname !== "/api/repairs") return false;
   response.setHeader("Cache-Control", "no-store");
   let testPlatformFilter: boolean | undefined;
+  let resultWaitSeconds = 0;
   if (!integration) {
     const searchKeys = [...url.searchParams.keys()];
-    if (searchKeys.length > 1 || searchKeys.length === 1 && searchKeys[0] !== "testPlatform"
-      || searchKeys.length === 1 && !["true", "false"].includes(url.searchParams.get("testPlatform") ?? "")) {
+    const supportsWait = Boolean(refreshRoute?.[1]) && request.method === "GET";
+    if (searchKeys.some((key) => key !== "testPlatform" && !(supportsWait && key === "waitSeconds"))
+      || url.searchParams.getAll("testPlatform").length > 1
+      || url.searchParams.has("testPlatform") && !["true", "false"].includes(url.searchParams.get("testPlatform") ?? "")
+      || url.searchParams.getAll("waitSeconds").length > 1
+      || url.searchParams.has("waitSeconds") && !/^(?:\d|1\d|20)$/.test(url.searchParams.get("waitSeconds")!)) {
       serveJson(response, 400, { message: "Параметры URL не поддерживаются." });
       return true;
     }
-    if (searchKeys.length === 1) testPlatformFilter = url.searchParams.get("testPlatform") === "true";
+    if (url.searchParams.has("testPlatform")) testPlatformFilter = url.searchParams.get("testPlatform") === "true";
+    resultWaitSeconds = Number(url.searchParams.get("waitSeconds") ?? "0");
     if (refreshRoute && testPlatformFilter === undefined) { serveJson(response, 400, { message: "Укажите режим заказ-нарядов." }); return true; }
   }
   const method = deleteCard || clearTest || clearProduction ? "DELETE" : importCard || workerResults || refreshRoute && !refreshRoute[1] ? "POST" : "GET";
@@ -84,7 +90,7 @@ export async function serveRepairs(
         while (!abort.signal.aborted) {
           const job = repository.refreshes.claim(url.searchParams.get("testPlatform") === "true");
           if (job || Date.now() >= deadline) { serveJson(response, 200, { request: job }); break; }
-          await repository.refreshes.wait(abort.signal, deadline - Date.now());
+          await repository.refreshes.wait(abort.signal, Math.min(1000, deadline - Date.now()));
         }
       } finally { release(); response.removeListener("close", stop); }
     } else if (workerResults) {
@@ -100,7 +106,15 @@ export async function serveRepairs(
       } else if (request.method === "DELETE") {
         repository.refreshes.cancel(id, testPlatformFilter!, ownerId);
         serveJson(response, 200, { cancelled: true });
-      } else serveJson(response, 200, { refresh: repository.refreshes.get(id, testPlatformFilter!, ownerId, responsibleFio) });
+      } else {
+        const abort = new AbortController();
+        const stop = () => abort.abort();
+        response.once("close", stop);
+        try {
+          const refresh = await repository.refreshes.getWhenReady(id, testPlatformFilter!, ownerId, responsibleFio, abort.signal, resultWaitSeconds * 1000);
+          if (!response.destroyed) serveJson(response, 200, { refresh });
+        } finally { response.removeListener("close", stop); }
+      }
     } else if (deleteCard) {
       const identity = parseRepairRemoval(await readJsonBody(request));
       if (!response.destroyed) {

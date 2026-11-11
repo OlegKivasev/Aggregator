@@ -11,7 +11,7 @@ const first = { documentId: "12345678-abcd-1234-abcd-123456789abc", number: "Т�
   vehicleName: "Toyota Camry | А123ВС163", status: "В работе", goodsReadiness: { totalPositions: 3, availablePositions: 1 }, paymentStatus: "partially_paid", amountDue: 10_500 };
 const second = { ...first, documentId: "22345678-abcd-1234-abcd-123456789abc", vehicleName: "Ford Focus" };
 
-test("refresh reads only visible orders from 1C, animates, hides uncertain data through reload and recovers after a verified reply", async () => {
+test("refresh reads only visible orders from 1C, animates, hides uncertain data through reload and recovers after a verified reply", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "repair-refresh-browser-"));
   const previousPath = process.env.GARAGE_DB_PATH, previousSecret = process.env.ONEC_REPAIRS_INTEGRATION_SECRET;
   process.env.GARAGE_DB_PATH = join(directory, "test.sqlite"); process.env.ONEC_REPAIRS_INTEGRATION_SECRET = secret;
@@ -47,9 +47,16 @@ test("refresh reads only visible orders from 1C, animates, hides uncertain data 
     await page.goto(origin); await page.locator("#repairs-function-tab").click();
     await page.locator("#repairs-rows .repairs-readiness").first().waitFor();
     await page.locator("#repairs-search").fill("Toyota");
+    // A fresh result must render even while browser timers are stopped.
+    // This catches reintroducing a fixed delay before requesting the result.
+    await page.clock.install({ time: new Date("2026-11-11T12:00:00Z") });
+    await page.clock.pauseAt(new Date("2026-11-11T12:00:01Z"));
     const claimed = poll(20);
+    const awaitingResult = page.waitForRequest((request) => request.method() === "GET"
+      && /\/api\/repairs\/refresh\//.test(request.url()) && new URL(request.url()).searchParams.get("waitSeconds") === "20");
     await page.locator("#repairs-refresh").click();
     const job = await claimed;
+    await awaitingResult;
     assert.deepEqual(job.documentIds, [first.documentId]);
     assert.equal(job.testPlatform, false);
     const progress = page.locator("#repairs-feedback");
@@ -66,8 +73,11 @@ test("refresh reads only visible orders from 1C, animates, hides uncertain data 
     assert.equal(await page.locator("#repairs-function").evaluate((element) => element.scrollWidth <= element.clientWidth), true);
     if (process.env.REPAIRS_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.REPAIRS_SCREENSHOT_DIR, "repair-refresh-mobile.png"), fullPage: true });
     const fresh = { ...first, goodsReadiness: { totalPositions: 4, availablePositions: 4 }, paymentStatus: "paid", amountDue: 0 };
+    const deliveryStarted = performance.now();
     await complete(job, [fresh]);
     await page.locator("#repairs-rows").getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
+    t.diagnostic(`Local worker result to rendered cards: ${Math.round(performance.now() - deliveryStarted)} ms (browser timers paused)`);
+    await page.clock.resume();
     assert.equal(await page.locator("#repairs-rows .repairs-payment").textContent(), "Оплачен");
     assert.equal(await page.locator("#repairs-rows .repairs-payment-detail").count(), 0);
     assert.equal(await page.locator("#repairs-search").inputValue(), "Toyota");

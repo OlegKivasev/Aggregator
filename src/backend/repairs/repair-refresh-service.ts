@@ -22,6 +22,7 @@ interface Result { repairs: RepairCard[]; removedDocumentIds: string[] }
 export class RepairRefreshService {
   private readonly changes = new EventEmitter();
   private polls = 0;
+  private resultPolls = 0;
   private closed = false;
   private readonly db: DatabaseSync;
   private readonly list: () => RepairCard[];
@@ -31,6 +32,7 @@ export class RepairRefreshService {
   constructor(db: DatabaseSync, list: () => RepairCard[], version: (id: string, test: boolean) => string,
     apply: (result: Result, test: boolean) => void, now: () => number = Date.now) {
     this.db = db; this.list = list; this.version = version; this.apply = apply; this.now = now;
+    this.changes.setMaxListeners(104); // At most four 1C polls and 100 browser waits.
     db.exec(`CREATE TABLE IF NOT EXISTS repair_refresh_sources (test_platform INTEGER PRIMARY KEY, last_seen INTEGER) STRICT;
       CREATE TABLE IF NOT EXISTS repair_refresh_requests (
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, test_platform INTEGER NOT NULL,
@@ -59,7 +61,12 @@ export class RepairRefreshService {
     if (ids.some((id) => !allowed.has(id))) throw new RepairRefreshError(404);
     // Persist uncertainty so reloading the page cannot turn old counters into verified values.
     const invalidate = this.db.prepare("INSERT OR IGNORE INTO repair_refresh_unverified VALUES (?,?)");
-    for (const id of ids) invalidate.run(id, Number(test));
+    // One durable write for the selected batch, instead of a disk sync per order.
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const id of ids) invalidate.run(id, Number(test));
+      this.db.exec("COMMIT");
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
     const lastSeen = this.db.prepare("SELECT last_seen FROM repair_refresh_sources WHERE test_platform=?").get(Number(test))?.last_seen;
     if (typeof lastSeen !== "number" || this.now() - lastSeen >= 45_000) throw new RepairRefreshError(503);
     const count = Number(this.db.prepare("SELECT count(*) AS count FROM repair_refresh_requests WHERE status IN ('pending','leased') AND owner_id=?").get(owner)!.count);
@@ -99,6 +106,23 @@ export class RepairRefreshService {
   cancel(id: string, test: boolean, owner: string) {
     this.get(id, test, owner);
     this.db.prepare("UPDATE repair_refresh_requests SET status='cancelled' WHERE id=? AND status IN ('pending','leased')").run(id);
+    this.changes.emit("change");
+  }
+  async getWhenReady(id: string, test: boolean, owner: string, fio: string | undefined, signal: AbortSignal, duration: number) {
+    let result = this.get(id, test, owner, fio);
+    if (result.status !== "pending" || duration <= 0) return result;
+    if (this.resultPolls >= 100) throw new RepairRefreshError(429);
+    this.resultPolls += 1;
+    const deadline = Date.now() + duration;
+    try {
+      while (result.status === "pending" && !signal.aborted && !this.closed) {
+        const remaining = Math.min(deadline - Date.now(), Date.parse(result.expiresAt) - this.now());
+        if (remaining <= 0) break;
+        await this.wait(signal, remaining);
+        if (!this.closed) result = this.get(id, test, owner, fio);
+      }
+      return result;
+    } finally { this.resultPolls -= 1; }
   }
   claim(test: boolean) {
     this.clean();
@@ -180,7 +204,7 @@ export class RepairRefreshService {
     if (signal.aborted || this.closed) return;
     await new Promise<void>((resolve) => {
       const done = () => { clearTimeout(timer); signal.removeEventListener("abort", done); this.changes.removeListener("change", done); resolve(); };
-      const timer = setTimeout(done, Math.min(duration, 1000));
+      const timer = setTimeout(done, Math.max(0, duration));
       signal.addEventListener("abort", done, { once: true }); this.changes.once("change", done);
     });
   }
