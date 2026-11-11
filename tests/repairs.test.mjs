@@ -120,6 +120,39 @@ test("1C payment changes round-trip, persist, and remain independent for both re
   });
 });
 
+test("1C payment options validate, persist independently, and clear with older full cards", async () => {
+  const paymentOptions = { cardAmountDue: 10_500.29, cashAmountDue: 9_500.01, cashDiscountPercent: 4.88 };
+  const detailed = { ...card, paymentStatus: "partially_paid", amountDue: 9_500.01, paymentOptions };
+  assert.deepEqual(parseRepairCard(detailed), detailed);
+  for (const options of [null, [], {}, { ...paymentOptions, extra: 1 },
+    { ...paymentOptions, cardAmountDue: -1 }, { ...paymentOptions, cardAmountDue: "10500.29" },
+    { ...paymentOptions, cashAmountDue: -1 }, { ...paymentOptions, cashAmountDue: 0.001 },
+    { ...paymentOptions, cashDiscountPercent: 100.01 }, { ...paymentOptions, cashDiscountPercent: "5" },
+    { ...paymentOptions, cashAmountDue: null }, { ...paymentOptions, cashDiscountPercent: null }]) {
+    assert.throws(() => parseRepairCard({ ...detailed, paymentOptions: options }), /paymentOptions:/);
+  }
+  assert.throws(() => parseRepairCard({ ...card, paymentOptions }), /paymentOptions:/);
+  const repriced = { ...detailed, amountDue: 100, paymentOptions: { cardAmountDue: 100, cashAmountDue: 110, cashDiscountPercent: 0 } };
+  assert.deepEqual(parseRepairCard(repriced), repriced);
+  await withServer(secret, async ({ baseUrl, close }, { start }) => {
+    const testCard = { ...detailed, testPlatform: true, paymentStatus: "paid", amountDue: 0,
+      paymentOptions: { cardAmountDue: 0, cashAmountDue: 0, cashDiscountPercent: 5 } };
+    for (const value of [detailed, testCard]) assert.deepEqual(await (await send(baseUrl, value)).json(), { repair: value });
+    await close();
+    baseUrl = (await start()).baseUrl;
+    const list = async () => (await (await fetch(`${baseUrl}/api/repairs`)).json()).repairs;
+    assert.deepEqual(await list(), [detailed, testCard]);
+    const invalid = await send(baseUrl, { ...detailed, paymentOptions: { ...paymentOptions, cashAmountDue: -1 } });
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(await list(), [detailed, testCard]);
+    const legal = { ...detailed, paymentOptions: { cardAmountDue: 10_500.29, cashAmountDue: null, cashDiscountPercent: null } };
+    assert.deepEqual(await (await send(baseUrl, legal)).json(), { repair: legal });
+    assert.deepEqual(await list(), [legal, testCard]);
+    await send(baseUrl, card);
+    assert.deepEqual(await list(), [card, testCard]);
+  });
+});
+
 test("two-status SQLite migration preserves both repair platforms, unknown debts, metadata and restart behavior", async () => {
   const directory = await mkdtemp(join(tmpdir(), "repair-payment-migration-"));
   const path = join(directory, "test.sqlite");

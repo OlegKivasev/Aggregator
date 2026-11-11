@@ -69,7 +69,8 @@ test("refresh reads only visible orders from 1C, animates, hides uncertain data 
     await complete(job, [fresh]);
     await page.locator("#repairs-rows").getByText("В наличии 4 из 4 позиций", { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-rows .repairs-payment").textContent(), "Оплачен");
-    assert.equal(await page.locator("#repairs-rows .repairs-payment-detail").count(), 0);
+    assert.equal(await page.locator("#repairs-rows .repairs-payment-card").textContent(), "Картой: —");
+    assert.equal(await page.locator("#repairs-rows .repairs-payment-cash").textContent(), "Наличка: —");
     assert.equal(await page.locator("#repairs-search").inputValue(), "Toyota");
     assert.equal(await page.locator("#repairs-refresh").isEnabled(), true);
     const stored = (await (await request("/api/repairs?testPlatform=false")).json()).repairs;

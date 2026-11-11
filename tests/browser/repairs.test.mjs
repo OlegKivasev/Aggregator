@@ -126,7 +126,8 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.locator("#repairs-function-tab").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
     assert.equal(await page.locator("#repairs-rows tr").count(), 1);
-    assert.deepEqual(await page.locator("#repairs-rows td").allTextContents(), [card.vehicleName, "Наличие ещё не проверено", "Оплата ещё не проверена"]);
+    assert.deepEqual(await page.locator("#repairs-rows td").allTextContents(), [card.vehicleName, "Наличие ещё не проверено",
+      "Оплата ещё не проверенаОсталось оплатить:Картой: —Наличка: —Суммы по способам оплаты ещё не получены из 1С"]);
     assert.equal(await page.locator("#repairs-rows img").count(), 0);
     assert.equal(await page.evaluate(() => window.repairsXss), undefined);
     const updated = { ...card, vehicleName: "Тестовый контрагент с длинным наименованием для проверки переноса в списке заказ-нарядов", status: "В работе" };
@@ -163,16 +164,40 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
       assert.equal(await badge.getAttribute("data-status"), paymentStatus ?? "unknown");
       if (paymentStatus === "payment_required" || paymentStatus === "partially_paid") {
         assert.equal(await badge.evaluate((element) => getComputedStyle(element).color), "rgb(163, 47, 39)");
-        const detail = page.locator("#repairs-rows .repairs-payment-detail");
-        const expected = amountDue !== undefined ? `Осталось оплатить: ${amountDue.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Сумма долга ещё не получена из 1С";
-        await page.waitForFunction((expected) => document.querySelector("#repairs-rows .repairs-payment-detail")?.textContent === expected, expected);
-        assert.equal(await detail.textContent(), expected);
       } else {
-        assert.equal(await page.locator("#repairs-rows .repairs-payment-detail").count(), 0);
         if (paymentStatus === "paid") assert.equal(await badge.evaluate((element) => getComputedStyle(element).color), "rgb(33, 102, 60)");
       }
+      assert.equal(await page.locator("#repairs-rows .repairs-payment-card").textContent(), "Картой: —");
+      assert.equal(await page.locator("#repairs-rows .repairs-payment-cash").textContent(), "Наличка: —");
+      assert.equal(await page.locator("#repairs-rows .repairs-payment-note").textContent(), "Суммы по способам оплаты ещё не получены из 1С");
     }
-    const legal = { ...updated, goodsReadiness: { totalPositions: 5, availablePositions: 2 }, paymentStatus: "partially_paid", amountDue: 10_500, vehicleName: "Toyota Camry | А123ВС163", counterpartyName: 'ООО «Тестовый автопарк»' };
+    const formatAmount = (value) => value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    for (const paymentOptions of [
+      { cardAmountDue: 10_500.29, cashAmountDue: 9_500.01, cashDiscountPercent: 4.88 },
+      { cardAmountDue: 0.29, cashAmountDue: 0.01, cashDiscountPercent: 0 },
+      { cardAmountDue: 0, cashAmountDue: 0, cashDiscountPercent: 5 },
+      { cardAmountDue: 100, cashAmountDue: 110, cashDiscountPercent: 0 },
+      { cardAmountDue: 10_500.29, cashAmountDue: null, cashDiscountPercent: null },
+    ]) {
+      await send({ ...updated, paymentStatus: paymentOptions.cardAmountDue ? "partially_paid" : "paid",
+        amountDue: paymentOptions.cardAmountDue, paymentOptions });
+      await page.locator("#repairs-refresh").click();
+      const expectedCard = `Картой: ${formatAmount(paymentOptions.cardAmountDue)}`;
+      await page.locator("#repairs-rows .repairs-payment-card").getByText(expectedCard, { exact: true }).waitFor();
+      const discount = page.locator("#repairs-rows .repairs-payment-discount");
+      const expectedCash = paymentOptions.cashAmountDue === null ? "Наличка: Недоступно"
+        : `Наличка: ${formatAmount(paymentOptions.cashAmountDue)} (скидка ${paymentOptions.cashDiscountPercent.toLocaleString("ru-RU")}%)`;
+      assert.equal(await page.locator("#repairs-rows .repairs-payment-cash").textContent(), expectedCash);
+      assert.equal(await page.locator("#repairs-rows .repairs-payment-detail > span").textContent(), "Осталось оплатить:");
+      assert.equal(await page.locator("#repairs-rows .repairs-payment-note").count(), 0);
+      if (paymentOptions.cashDiscountPercent !== null) {
+        assert.equal(await discount.evaluate((element) => element.tagName), "STRONG");
+        assert.equal(await discount.evaluate((element) => getComputedStyle(element).fontWeight), "800");
+      } else assert.equal(await discount.count(), 0);
+    }
+    const legal = { ...updated, goodsReadiness: { totalPositions: 5, availablePositions: 2 }, paymentStatus: "partially_paid", amountDue: 10_500,
+      paymentOptions: { cardAmountDue: 10_500, cashAmountDue: 9_975, cashDiscountPercent: 5 },
+      vehicleName: "Toyota Camry | А123ВС163", counterpartyName: 'ООО «Тестовый автопарк»' };
     await send(legal);
     await page.locator("#repairs-refresh").click();
     await page.locator("#repairs-function .repairs-counterparty").waitFor();
@@ -266,7 +291,8 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#markup-function").isVisible(), true);
     assert.equal(await page.locator("#repairs-function").isVisible(), false);
     const testVehicle = "Тестовая машина в отдельной вкладке";
-    await send({ ...updated, testPlatform: true, vehicleName: testVehicle, goodsReadiness: { totalPositions: 5, availablePositions: 2 }, paymentStatus: "payment_required", amountDue: 20_500 });
+    await send({ ...updated, testPlatform: true, vehicleName: testVehicle, goodsReadiness: { totalPositions: 5, availablePositions: 2 }, paymentStatus: "payment_required", amountDue: 20_500,
+      paymentOptions: { cardAmountDue: 20_500, cashAmountDue: 19_475, cashDiscountPercent: 5 } });
     await pollRepairs();
     await page.locator("#repairs-function-tab").click();
     await page.locator("#repairs-count").getByText("1", { exact: true }).waitFor();
@@ -282,7 +308,8 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#test-repairs-rows .repairs-readiness").textContent(), "Есть товары к получению");
     assert.equal(await page.locator("#test-repairs-rows .repairs-readiness-detail").textContent(), "В наличии 2 из 5 позиций");
     assert.equal(await page.locator("#test-repairs-rows .repairs-payment").textContent(), "Не оплачен");
-    assert.equal((await page.locator("#test-repairs-rows .repairs-payment-detail").textContent()).replaceAll("\u00a0", " "), "Осталось оплатить: 20 500,00");
+    assert.equal(await page.locator("#test-repairs-rows .repairs-payment-card").textContent(), `Картой: ${formatAmount(20_500)}`);
+    assert.equal(await page.locator("#test-repairs-rows .repairs-payment-cash").textContent(), `Наличка: ${formatAmount(19_475)} (скидка 5%)`);
     await page.locator("#test-repairs-search").fill("нет такой машины");
     assert.equal(await page.locator("#test-repairs-count").textContent(), "0 из 1");
     assert.equal(await page.locator("#test-repairs-function").isVisible(), true);

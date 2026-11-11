@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import type { GoodsReadiness, RepairCard } from "./repair-card.ts";
+import { parseRepairPaymentOptions, type GoodsReadiness, type RepairCard } from "./repair-card.ts";
 import { RepairRefreshService } from "./repair-refresh-service.ts";
 
 export class SqliteRepairRepository {
@@ -59,6 +59,11 @@ export class SqliteRepairRepository {
           if (!columns.some((column) => column.name === "amount_due_minor")) {
             this.database.exec(`ALTER TABLE ${table} ADD COLUMN amount_due_minor INTEGER CHECK (amount_due_minor >= 0)`);
           }
+          for (const name of ["card_amount_due_minor", "cash_amount_due_minor", "cash_discount_hundredths"]) {
+            if (!columns.some((column) => column.name === name)) {
+              this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} INTEGER CHECK (${name} >= 0)`);
+            }
+          }
           for (const name of ["goods_total_positions", "goods_available_positions"]) {
             if (!columns.some((column) => column.name === name)) {
               this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} INTEGER`);
@@ -84,18 +89,20 @@ export class SqliteRepairRepository {
         throw error;
       }
       this.saveStatement = this.database.prepare(`
-        INSERT INTO repair_cards (document_id, number, date, vehicle_name, status, responsible_fio, counterparty_name, goods_total_positions, goods_available_positions, payment_status, amount_due_minor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO repair_cards (document_id, number, date, vehicle_name, status, responsible_fio, counterparty_name, goods_total_positions, goods_available_positions, payment_status, amount_due_minor, card_amount_due_minor, cash_amount_due_minor, cash_discount_hundredths) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
           number = excluded.number, date = excluded.date,
           vehicle_name = excluded.vehicle_name, status = excluded.status, responsible_fio = excluded.responsible_fio, counterparty_name = excluded.counterparty_name,
-          goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions, payment_status = excluded.payment_status, amount_due_minor = excluded.amount_due_minor
+          goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions, payment_status = excluded.payment_status, amount_due_minor = excluded.amount_due_minor,
+          card_amount_due_minor = excluded.card_amount_due_minor, cash_amount_due_minor = excluded.cash_amount_due_minor, cash_discount_hundredths = excluded.cash_discount_hundredths
       `);
       this.testSaveStatement = this.database.prepare(`
-        INSERT INTO test_repair_cards (document_id, number, date, vehicle_name, status, responsible_fio, counterparty_name, goods_total_positions, goods_available_positions, payment_status, amount_due_minor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO test_repair_cards (document_id, number, date, vehicle_name, status, responsible_fio, counterparty_name, goods_total_positions, goods_available_positions, payment_status, amount_due_minor, card_amount_due_minor, cash_amount_due_minor, cash_discount_hundredths) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
           number = excluded.number, date = excluded.date,
           vehicle_name = excluded.vehicle_name, status = excluded.status, responsible_fio = excluded.responsible_fio, counterparty_name = excluded.counterparty_name,
-          goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions, payment_status = excluded.payment_status, amount_due_minor = excluded.amount_due_minor
+          goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions, payment_status = excluded.payment_status, amount_due_minor = excluded.amount_due_minor,
+          card_amount_due_minor = excluded.card_amount_due_minor, cash_amount_due_minor = excluded.cash_amount_due_minor, cash_discount_hundredths = excluded.cash_discount_hundredths
       `);
       this.refreshes = new RepairRefreshService(this.database, () => this.list(true), (id, test) => {
         const table = test ? "test_repair_cards" : "repair_cards";
@@ -105,10 +112,10 @@ export class SqliteRepairRepository {
         for (const id of result.removedDocumentIds) this.remove(id, test);
       });
       this.listStatement = this.database.prepare(`
-        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, 0 AS testPlatform
+        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, 0 AS testPlatform
         FROM repair_cards WHERE status = 'В работе' OR ? = 1
         UNION ALL
-        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, 1 AS testPlatform
+        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, 1 AS testPlatform
         FROM test_repair_cards WHERE status = 'В работе' OR ? = 1
         ORDER BY date DESC, documentId ASC, testPlatform ASC
       `);
@@ -121,7 +128,10 @@ export class SqliteRepairRepository {
   save(card: RepairCard): void {
     const statement = card.testPlatform === true ? this.testSaveStatement : this.saveStatement;
     statement.run(card.documentId, card.number, card.date, card.vehicleName, card.status, card.responsibleFio ?? null, card.counterpartyName ?? null, card.goodsReadiness?.totalPositions ?? null, card.goodsReadiness?.availablePositions ?? null, card.paymentStatus ?? null,
-      card.amountDue !== undefined ? Math.round(card.amountDue * 100) : null);
+      card.amountDue !== undefined ? Math.round(card.amountDue * 100) : null,
+      card.paymentOptions !== undefined ? Math.round(card.paymentOptions.cardAmountDue * 100) : null,
+      card.paymentOptions?.cashAmountDue != null ? Math.round(card.paymentOptions.cashAmountDue * 100) : null,
+      card.paymentOptions?.cashDiscountPercent != null ? Math.round(card.paymentOptions.cashDiscountPercent * 100) : null);
   }
 
   list(includeInactive = false): RepairCard[] {
@@ -139,6 +149,15 @@ export class SqliteRepairRepository {
       if (due !== null && (typeof due !== "number" || !Number.isSafeInteger(due) || due < 0
         || paymentStatus === null || (paymentStatus === "paid" ? due !== 0 : due <= 0))) throw new Error("Invalid SQLite repair amount due");
       if (paymentStatus === "partially_paid" && due === null) throw new Error("Missing SQLite repair amount due");
+      const optionValues = [row.cardAmountDueMinor, row.cashAmountDueMinor, row.cashDiscountHundredths];
+      if (optionValues.some((value) => value !== null && (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0))
+        || row.cardAmountDueMinor === null && optionValues.some((value) => value !== null)
+        || row.cardAmountDueMinor !== null && (paymentStatus === null || due === null)) throw new Error("Invalid SQLite repair payment options");
+      const paymentOptions = typeof row.cardAmountDueMinor === "number" ? parseRepairPaymentOptions({
+        cardAmountDue: row.cardAmountDueMinor / 100,
+        cashAmountDue: typeof row.cashAmountDueMinor === "number" ? row.cashAmountDueMinor / 100 : null,
+        cashDiscountPercent: typeof row.cashDiscountHundredths === "number" ? row.cashDiscountHundredths / 100 : null,
+      }) : undefined;
       const total = row.goodsTotalPositions;
       const available = row.goodsAvailablePositions;
       let goodsReadiness: GoodsReadiness | undefined;
@@ -156,6 +175,7 @@ export class SqliteRepairRepository {
         ...(goodsReadiness !== undefined ? { goodsReadiness } : {}),
         ...(paymentStatus !== null ? { paymentStatus } : {}),
         ...(typeof due === "number" ? { amountDue: due / 100 } : {}),
+        ...(paymentOptions !== undefined ? { paymentOptions } : {}),
       };
     });
   }

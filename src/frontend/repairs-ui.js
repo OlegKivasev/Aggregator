@@ -99,19 +99,49 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       && (status === "paid" ? due === 0 : due > 0);
   };
   const amountFormat = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const paymentCell = ({ paymentStatus: status, amountDue: due }) => {
+  const percentFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
+  const validPaymentOptions = (options) => {
+    if (options === undefined) return true;
+    const amount = (value, max = 9_999_999_999_999.99) => typeof value === "number" && Number.isFinite(value)
+      && value >= 0 && value <= max && /^\d+(?:\.\d{1,2})?$/.test(String(value));
+    return options && typeof options === "object" && !Array.isArray(options)
+      && amount(options.cardAmountDue)
+      && (options.cashAmountDue === null && options.cashDiscountPercent === null
+        || amount(options.cashAmountDue) && amount(options.cashDiscountPercent, 100));
+  };
+  const paymentCell = ({ paymentStatus: status, paymentOptions: options }) => {
     const cell = document.createElement("td");
     const badge = document.createElement("span");
     badge.className = "repairs-payment";
     badge.dataset.status = status ?? "unknown";
     badge.textContent = status === "partially_paid" ? "Частично оплачен" : status === "payment_required" ? "Не оплачен" : status === "paid" ? "Оплачен" : "Оплата ещё не проверена";
     cell.append(badge);
-    if (status === "payment_required" || status === "partially_paid") {
-      const detail = document.createElement("span");
-      detail.className = "repairs-payment-detail";
-      detail.textContent = due !== undefined ? `Осталось оплатить: ${amountFormat.format(due)}` : "Сумма долга ещё не получена из 1С";
-      cell.append(detail);
+    const detail = document.createElement("div");
+    detail.className = "repairs-payment-detail";
+    const title = document.createElement("span");
+    title.textContent = "Осталось оплатить:";
+    const list = document.createElement("ul");
+    const card = document.createElement("li");
+    card.className = "repairs-payment-card";
+    card.textContent = `Картой: ${options ? amountFormat.format(options.cardAmountDue) : "—"}`;
+    const cash = document.createElement("li");
+    cash.className = "repairs-payment-cash";
+    cash.textContent = `Наличка: ${options ? options.cashAmountDue === null ? "Недоступно" : amountFormat.format(options.cashAmountDue) : "—"}`;
+    if (options?.cashDiscountPercent != null) {
+      const discount = document.createElement("strong");
+      discount.className = "repairs-payment-discount";
+      discount.textContent = `скидка ${percentFormat.format(options.cashDiscountPercent)}%`;
+      cash.append(" (", discount, ")");
     }
+    list.append(card, cash);
+    detail.append(title, list);
+    if (!options) {
+      const note = document.createElement("span");
+      note.className = "repairs-payment-note";
+      note.textContent = "Суммы по способам оплаты ещё не получены из 1С";
+      detail.append(note);
+    }
+    cell.append(detail);
     return cell;
   };
 
@@ -121,7 +151,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(card.documentId)
       || (card.counterpartyName !== undefined && (typeof card.counterpartyName !== "string" || !card.counterpartyName.trim()))
       || !validReadiness(card.goodsReadiness) || fresh && !card.goodsReadiness
-      || !validPayment(card)
+      || !validPayment(card) || !validPaymentOptions(card.paymentOptions)
       || (card.testPlatform !== undefined && typeof card.testPlatform !== "boolean")
       || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(card.date))) {
       throw new Error("Invalid repairs response");

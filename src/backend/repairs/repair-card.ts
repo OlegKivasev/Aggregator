@@ -5,6 +5,12 @@ export interface GoodsReadiness {
 
 export type RepairPaymentStatus = "paid" | "payment_required" | "partially_paid";
 
+export interface RepairPaymentOptions {
+  cardAmountDue: number;
+  cashAmountDue: number | null;
+  cashDiscountPercent: number | null;
+}
+
 export interface RepairCard {
   documentId: string;
   number: string;
@@ -17,11 +23,32 @@ export interface RepairCard {
   goodsReadiness?: GoodsReadiness;
   paymentStatus?: RepairPaymentStatus;
   amountDue?: number;
+  paymentOptions?: RepairPaymentOptions;
 }
 
 export class RepairValidationError extends Error {}
 
-const fields = ["documentId", "number", "date", "vehicleName", "status", "responsibleFio", "testPlatform", "counterpartyName", "goodsReadiness", "paymentStatus", "amountDue"];
+const fields = ["documentId", "number", "date", "vehicleName", "status", "responsibleFio", "testPlatform", "counterpartyName", "goodsReadiness", "paymentStatus", "amountDue", "paymentOptions"];
+
+function validAmount(value: unknown, maximum = 9_999_999_999_999.99): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= maximum
+    && /^\d+(?:\.\d{1,2})?$/.test(String(value)) && Number.isSafeInteger(Math.round(value * 100));
+}
+
+export function parseRepairPaymentOptions(value: unknown): RepairPaymentOptions {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RepairValidationError("paymentOptions: требуется объект расчёта карты и наличных из 1С.");
+  }
+  const payload = value as Record<string, unknown>;
+  const { cardAmountDue, cashAmountDue, cashDiscountPercent } = payload;
+  if (Object.keys(payload).length !== 3 || Object.keys(payload).some((key) => !["cardAmountDue", "cashAmountDue", "cashDiscountPercent"].includes(key))
+    || !validAmount(cardAmountDue)
+    || !(cashAmountDue === null && cashDiscountPercent === null
+      || validAmount(cashAmountDue) && validAmount(cashDiscountPercent, 100))) {
+    throw new RepairValidationError("paymentOptions: требуются остатки до копеек и скидка от 0 до 100%; для недоступных наличных оба значения null.");
+  }
+  return { cardAmountDue, cashAmountDue: cashAmountDue as number | null, cashDiscountPercent: cashDiscountPercent as number | null };
+}
 
 function cardText(payload: Record<string, unknown>, field: string, limit: number, allowEmpty = false): string {
   const value = payload[field];
@@ -72,7 +99,7 @@ export function parseRepairCard(value: unknown): RepairCard {
   }
   const payload = value as Record<string, unknown>;
   if (Object.keys(payload).some((key) => !fields.includes(key))) {
-    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status, responsibleFio, testPlatform, counterpartyName, goodsReadiness, paymentStatus, amountDue.");
+    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status, responsibleFio, testPlatform, counterpartyName, goodsReadiness, paymentStatus, amountDue, paymentOptions.");
   }
   if (payload.testPlatform !== undefined && typeof payload.testPlatform !== "boolean") {
     throw new RepairValidationError("testPlatform: требуется логическое значение true или false.");
@@ -89,6 +116,9 @@ export function parseRepairCard(value: unknown): RepairCard {
     }
   } else if (payload.paymentStatus === "partially_paid") {
     throw new RepairValidationError("amountDue: для частичной оплаты требуется положительный остаток долга.");
+  }
+  if (payload.paymentOptions !== undefined && (payload.paymentStatus === undefined || payload.amountDue === undefined)) {
+    throw new RepairValidationError("paymentOptions: требуются paymentStatus и amountDue текущего режима оплаты.");
   }
   const counterpartyName = payload.counterpartyName === undefined ? undefined : cardText(payload, "counterpartyName", 500);
   const responsibleFio = payload.responsibleFio === undefined ? undefined : cardText(payload, "responsibleFio", 256);
@@ -110,5 +140,6 @@ export function parseRepairCard(value: unknown): RepairCard {
     ...(payload.goodsReadiness !== undefined ? { goodsReadiness: parseGoodsReadiness(payload.goodsReadiness) } : {}),
     ...(payload.paymentStatus !== undefined ? { paymentStatus: payload.paymentStatus } : {}),
     ...(payload.amountDue !== undefined ? { amountDue: payload.amountDue as number } : {}),
+    ...(payload.paymentOptions !== undefined ? { paymentOptions: parseRepairPaymentOptions(payload.paymentOptions) } : {}),
   };
 }
