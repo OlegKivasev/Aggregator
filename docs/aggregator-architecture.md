@@ -116,7 +116,7 @@ aggregator.kovlab.com {
 | PartKOM | Официальный Web Services v4 API, Basic-аутентификация. Поддерживаются поиск и заказ. |
 | STParts | ABCP API; пакетный поиск артикула и бренда. |
 | Forum-Auto | REST API; поддерживаются поиск и заказ. |
-| Autopiter | SOAP API v2; в проекте заявлен поиск без оформления заказа. |
+| Autopiter | SOAP API v2; поиск, корзина агрегатора и оформление выбранных позиций через MakeOrderByItems. |
 | MotorDetal | API с токенами доступа и обновления. |
 | Mladov | Веб-интеграция с браузерным состоянием, хранимым на сервере. |
 

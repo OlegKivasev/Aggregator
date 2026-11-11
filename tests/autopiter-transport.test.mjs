@@ -42,12 +42,20 @@ test("Autopiter SOAP transport uses a fixed HTTPS origin, escapes credentials an
     await autopiterSoapRequest("GetPriceId", { ArticleId: "101", Currency: "РУБ", SearchCross: "1", MinSalesRating: "0", MinRealTimeInProc: "0" }, new AbortController().signal, "AuthCoocies=fixture");
     assert.equal(calls[2].options.headers.SOAPAction, '"http://www.autopiter.ru/GetPriceId"');
     assert.match(calls[2].body, /<ArticleId>101<\/ArticleId><Currency>РУБ<\/Currency><SearchCross>1<\/SearchCross>/);
+    await autopiterSoapRequest("MakeOrderByItems", { Items: { ItemAddCartModel: [
+      { DetailUid: 'fixture<&"', Comment: "", SalePrice: "125.5", Quantity: "2" },
+      { DetailUid: "second", Comment: "", SalePrice: "100", Quantity: "1" },
+    ] } }, new AbortController().signal, "AuthCoocies=fixture");
+    assert.equal(calls[3].options.headers.SOAPAction, '"http://www.autopiter.ru/MakeOrderByItems"');
+    assert.equal(calls[3].options.headers.Cookie, "AuthCoocies=fixture");
+    assert.match(calls[3].body, /<Items><ItemAddCartModel><DetailUid>fixture&lt;&amp;&quot;<\/DetailUid><Comment><\/Comment><SalePrice>125.5<\/SalePrice><Quantity>2<\/Quantity><\/ItemAddCartModel><ItemAddCartModel>/);
+    assert.equal((calls[3].body.match(/<ItemAddCartModel>/g) ?? []).length, 2);
     oversized = true;
     await assert.rejects(autopiterSoapRequest("FindCatalog", { Number: "A1" }, new AbortController().signal, "AuthCoocies=fixture"), SupplierIntegrationError);
     const aborted = new AbortController();
     aborted.abort(new Error("cancelled before request"));
     await assert.rejects(autopiterSoapRequest("FindCatalog", { Number: "A1" }, aborted.signal), /cancelled before request/);
-    assert.equal(calls.length, 4);
+    assert.equal(calls.length, 5);
   } finally {
     replacement.mock.restore(); syncBuiltinESMExports();
   }

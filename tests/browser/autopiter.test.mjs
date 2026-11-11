@@ -4,8 +4,9 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { resolve, sep } from "node:path";
 import { chromium } from "playwright";
+import { randomUUID } from "node:crypto";
 
-test("Autopiter connects, searches analogs from offers and discovered brands, filters returns and stays search-only", async () => {
+test("Autopiter connects, searches analogs from offers and discovered brands, filters returns and enables cart controls", async () => {
   const frontend = resolve("src/frontend");
   const server = createServer(async (request, response) => {
     const path = new URL(request.url, "http://127.0.0.1").pathname;
@@ -54,7 +55,7 @@ test("Autopiter connects, searches analogs from offers and discovered brands, fi
         searchQueries.push({ mode, article, brand: url.searchParams.get("brand"), suppliers: url.searchParams.getAll("supplier") });
         const results = mode === "brands" ? [{ type: "brand_candidates", supplier: "autopiter", brands: ["TEST"] }]
           : article === "A0" && mode !== "analogs" ? []
-          : [true, false].map((isReturnable) => ({ type: "result", result: { supplier: "autopiter", article: mode === "analogs" ? "B1" : article,
+          : [true, false].map((isReturnable) => ({ type: "result", offerId: randomUUID(), result: { supplier: "autopiter", article: mode === "analogs" ? "B1" : article,
             brand: mode === "analogs" ? "CROSS" : "TEST", ...(mode === "analogs" ? { isAnalog: true } : {}),
             title: mode === "analogs" ? isReturnable ? "Возвратный аналог" : "Невозвратный аналог" : isReturnable ? "Возвратный фильтр" : "Невозвратный фильтр",
             price: isReturnable ? 150 : 100, quantity: 5, warehouse: "Тестовый склад", deliveryDate: null,
@@ -88,13 +89,13 @@ test("Autopiter connects, searches analogs from offers and discovered brands, fi
     await page.locator("#submit-button").click();
     await page.getByText("Возвратный фильтр", { exact: true }).waitFor();
     assert.equal(await page.getByText("Невозвратный фильтр", { exact: true }).count(), 0);
-    assert.equal(await page.locator("#results-body .cart-offer-button:enabled").count(), 0);
+    assert.equal(await page.locator("#results-body .cart-offer-button:enabled").count(), 1);
     assert.deepEqual(searches, [["autopiter"]]);
     await page.locator("#results-body .results-table__row").click({ button: "right" });
     await page.locator("#show-analogs-button").click();
     await page.locator("#analogs-results-body").getByText("Возвратный аналог", { exact: true }).waitFor();
     assert.equal(await page.getByText("Невозвратный аналог", { exact: true }).count(), 0);
-    assert.equal(await page.locator("#analogs-results-body .cart-offer-button:enabled").count(), 0);
+    assert.equal(await page.locator("#analogs-results-body .cart-offer-button:enabled").count(), 1);
     assert.deepEqual(searchQueries.at(-1), { mode: "analogs", article: "A1", brand: "TEST", suppliers: ["autopiter"] });
     await page.locator("#analogs-modal button[data-close-analogs-modal]").click();
     await openSettings();
@@ -102,7 +103,7 @@ test("Autopiter connects, searches analogs from offers and discovered brands, fi
     await page.locator("#autopiter-non-returnable").check();
     await page.locator("#settings-close").click();
     assert.equal(await page.getByText("Невозвратный фильтр", { exact: true }).isVisible(), true);
-    assert.equal(await page.locator("#results-body .cart-offer-button:enabled").count(), 0);
+    assert.equal(await page.locator("#results-body .cart-offer-button:enabled").count(), 2);
     assert.equal(await page.evaluate(() => JSON.stringify(localStorage).includes("fixture-password")), false);
     await page.reload();
     await page.getByText("Невозвратный фильтр", { exact: true }).waitFor();

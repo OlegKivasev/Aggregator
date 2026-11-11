@@ -15,10 +15,11 @@ import type { SupplierCredentialRepository, StoredSupplierCredentials } from "..
 import { decodeRosskoApiCredentials } from "./supplier-session-service.ts";
 import { parseRosskoOrderSettings, RosskoOrderSettingsValidationError, type RosskoOrderSettings, type RosskoOrderSettingsState } from "../purchasing/rossko-order-settings.ts";
 import type { RosskoApiCredentials } from "../types.ts";
+import { AutopiterApiAdapter } from "../suppliers/autopiter/autopiter-api-adapter.ts";
 
 const validPhone = (value: unknown): value is string => typeof value === "string" && /^[+\d()\s-]{6,40}$/.test(value);
 const sameText = (left: string, right: string): boolean => left.trim().toLocaleUpperCase() === right.trim().toLocaleUpperCase();
-const supplierNames: Record<OrderSupplier, string> = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
+const supplierNames: Record<OrderSupplier, string> = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko", autopiter: "Автопитер" };
 
 export function allowedRosskoOrderChoices(options: RosskoOrderChoices): RosskoOrderChoices {
   const deliveries = options.deliveries.filter((item) => item.addressId !== null);
@@ -91,13 +92,15 @@ export class RealOrderApplicationService implements RealOrderGateway {
   private readonly sessions: SupplierSessionManager;
   private readonly search: (query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) => Promise<void>;
   private readonly credentialRepository: SupplierCredentialRepository | null;
+  private readonly autopiter: AutopiterApiAdapter;
 
   constructor(sessions: SupplierSessionManager,
     search: (query: SupplierSearchQuery, emit: (event: SearchStreamEvent) => void, signal: AbortSignal) => Promise<void>,
-    credentialRepository: SupplierCredentialRepository | null = null) {
+    credentialRepository: SupplierCredentialRepository | null = null, autopiter = new AutopiterApiAdapter()) {
     this.sessions = sessions;
     this.search = search;
     this.credentialRepository = credentialRepository;
+    this.autopiter = autopiter;
   }
 
   private rosskoCredentialsRecord(credentials: RosskoApiCredentials): StoredSupplierCredentials | null {
@@ -238,6 +241,7 @@ export class RealOrderApplicationService implements RealOrderGateway {
 
   async prepare(supplier: OrderSupplier, lines: PurchaseLine[], details: CheckoutDetails, signal: AbortSignal) {
     signal.throwIfAborted();
+    if (supplier === "autopiter") return this.autopiter.prepareOrder(lines, signal, this.sessions);
     if (supplier === "armtek") {
       const credentials = this.sessions.getArmtekCredentials();
       if (!credentials) throw new SupplierAuthError("Armtek credentials are missing");

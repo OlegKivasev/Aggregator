@@ -5,13 +5,13 @@ import { formatOrderStatus } from "./order-history-presentation.js";
 import { armtekReturnSource, formatArmtekReturnDays, hasOfferDeliveryWarning, hasSupplierWeekendDelivery } from "./order-notices.js";
 import { setupCartTabs } from "./cart-tabs-ui.js";
 
-const supplierNames = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
+const supplierNames = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko", autopiter: "Автопитер" };
 const maximumQuantity = (result) => Number.isFinite(result.quantity) ? Math.min(1_000_000, Math.floor(result.quantity)) : 0;
 const cartIcon = '<img src="/shopping-cart.png" alt="" aria-hidden="true">';
 const cartPriceFormat = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const receiptClasses = { "part-kom": "cart-partkom-receipt", "forum-auto": "cart-forum-receipt",
-  rossko: "cart-rossko-receipt", armtek: "cart-armtek-receipt" };
+  rossko: "cart-rossko-receipt", armtek: "cart-armtek-receipt", autopiter: "cart-autopiter-receipt" };
 
 const orderReceiptCard = (supplier, number, existingCard) => {
   if (existingCard) return existingCard;
@@ -171,9 +171,10 @@ export const formatCartLatestDeliveryDate = (items) => {
 export const renderCartOfferControls = (result) => {
   const maximum = maximumQuantity(result);
   const supported = Object.hasOwn(supplierNames, result.supplier);
-  const enabled = supported && maximum > 0 && typeof result.offerId === "string" && /^[0-9a-f-]{36}$/.test(result.offerId);
-  const title = !supported ? "Корзина доступна для PartKOM, Armtek, Forum Auto и Rossko" : maximum < 1
-    ? "Нет подтверждённого остатка" : !result.offerId ? "Повторите поиск для добавления в корзину" : "Добавить в корзину";
+  const enabled = supported && maximum > 0 && result.cartAvailable !== false && typeof result.offerId === "string" && /^[0-9a-f-]{36}$/.test(result.offerId);
+  const title = !supported ? "Корзина доступна для PartKOM, Armtek, Forum Auto, Rossko и Автопитера" : maximum < 1
+    ? "Нет подтверждённого остатка" : !result.offerId ? "Повторите поиск для добавления в корзину"
+      : result.cartAvailable === false ? "Предложение недоступно для заказа" : "Добавить в корзину";
   return `<td class="cart-add-cell"><div class="cart-offer-controls">
     <button type="button" class="mobile-offer-menu" aria-label="Действия с предложением" aria-haspopup="menu" aria-controls="result-context-menu">⋯</button>
     <input class="cart-quantity" type="number" min="1" max="${Math.max(1, maximum)}" step="1" value="1" inputmode="numeric"
@@ -754,8 +755,8 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
           } else if (group.supplier === "forum-auto") {
             appendReceipt(line.forumAutoOrder?.orderId,
               (card) => forumAutoReceiptNode(line.forumAutoOrder, line.orderIds, line.acceptedQuantity, card));
-          } else if (group.supplier === "rossko" || group.supplier === "armtek") {
-            const supplierOrders = group.supplier === "rossko" ? line.rosskoOrders : line.armtekOrders;
+          } else if (group.supplier === "rossko" || group.supplier === "armtek" || group.supplier === "autopiter") {
+            const supplierOrders = group.supplier === "rossko" ? line.rosskoOrders : group.supplier === "armtek" ? line.armtekOrders : line.autopiterOrders;
             if (Array.isArray(supplierOrders)) for (const receipt of supplierOrders) appendReceipt(receipt?.orderId,
               (card) => supplierOrderReceiptNode(group.supplier, receipt, line.orderIds, line.acceptedQuantity, selectedItem, card));
           }

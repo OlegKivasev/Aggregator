@@ -2449,7 +2449,7 @@ const startAnalogSearchForQuery = ({ article, brands, sourceResult, returnFocus 
           return;
         }
         analogSearchResultKeys.add(resultKey);
-        analogSearchResults.push({ ...payload.result, offerId: typeof payload.offerId === "string" ? payload.offerId : "" });
+        analogSearchResults.push({ ...payload.result, offerId: typeof payload.offerId === "string" ? payload.offerId : "", cartAvailable: payload.cartAvailable !== false });
         scheduleAnalogRowsRender();
         return;
       }
@@ -3051,7 +3051,7 @@ const startSearch = (article, enabledSuppliers) => {
     }
 
     if (payload.type === "result") {
-      tab.results.push({ ...payload.result, offerId: typeof payload.offerId === "string" ? payload.offerId : "" });
+      tab.results.push({ ...payload.result, offerId: typeof payload.offerId === "string" ? payload.offerId : "", cartAvailable: payload.cartAvailable !== false });
       if (tab.id === activeTabId) {
         results = tab.results;
       }

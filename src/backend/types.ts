@@ -111,6 +111,7 @@ export interface SearchResultEvent {
   type: "result";
   result: NormalizedSearchResult;
   offerId?: string;
+  cartAvailable?: boolean;
 }
 
 export interface SearchBrandCandidatesEvent {

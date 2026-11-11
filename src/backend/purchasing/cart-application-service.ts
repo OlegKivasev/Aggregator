@@ -74,7 +74,7 @@ function validateQuantity(value: unknown, maximum: number): number {
 }
 
 function normalizeCartSupplier(value: unknown): "all" | PurchaseReference["supplier"] {
-  if (value !== "all" && value !== "armtek" && value !== "part-kom" && value !== "forum-auto" && value !== "rossko") {
+  if (value !== "all" && value !== "armtek" && value !== "part-kom" && value !== "forum-auto" && value !== "rossko" && value !== "autopiter") {
     throw new CartError("Выберите вкладку корзины.");
   }
   return value;
@@ -111,6 +111,9 @@ function validLine(line: PurchaseLine): boolean {
         && /^[1-9]\d{0,19}$/.test(line.reference.makerId) && /^[1-9]\d{0,19}$/.test(line.reference.providerId)
       || line.reference.supplier === "forum-auto" && nullableIdentifier(line.reference.warehouse) && line.reference.warehouse === line.result.warehouse
         && (line.reference.gid === undefined || typeof line.reference.gid === "string" && line.reference.gid.length > 0 && line.reference.gid.length <= 2000)
+      || line.reference.supplier === "autopiter" && typeof line.reference.detailUid === "string"
+        && line.reference.detailUid.length > 0 && line.reference.detailUid.length <= 2000 && !/[\x00-\x1f\x7f]/.test(line.reference.detailUid)
+        && typeof line.reference.sellerId === "string" && /^\d{1,10}$/.test(line.reference.sellerId) && Number(line.reference.sellerId) <= 2147483647
       || line.reference.supplier === "rossko" && nullableIdentifier(line.reference.partGuid) && nullableIdentifier(line.reference.stockId))
     && Number.isSafeInteger(line.quantity) && line.quantity >= 1 && line.quantity <= stock(line.result));
 }

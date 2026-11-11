@@ -17,6 +17,7 @@ test("garage cart controls exclude unconfirmed stock, unsupported suppliers, pas
   const now = Date.parse("2026-10-18T10:00:00Z");
   const item = { supplier: "armtek", availabilityStatus: "available", supplierQuantity: 4, requiredQuantity: 2, deliveryDate: null };
   assert.equal(garageCartWarning(item, now), null);
+  assert.equal(garageCartWarning({ ...item, supplier: "autopiter" }, now), null);
   assert.equal(garageCartWarning({ ...item, availabilityStatus: "insufficient" }, now), null, "lowering the required quantity can restore the cart button before the next refresh");
   for (const change of [{ availabilityStatus: "not_found" }, { availabilityStatus: "supplier_error" }, { supplierQuantity: null },
     { availabilityStatus: "unknown" }, { requiredQuantity: .5 }, { supplierQuantity: 1 }, { supplier: "stparts" }, { deliveryDate: "2026-10-05" }]) {

@@ -27,7 +27,7 @@ const emptyResponse = (method) => response(method, "", {
 });
 const fields = (data) => Object.entries(data).map(([key, value]) => `<${key}>${value ?? ""}</${key}>`).join("");
 const catalog = (data = {}) => `<SearchCatalogModel>${fields({ ArticleId: "101", CatalogName: "TEST", Number: "A-1", ...data })}</SearchCatalogModel>`;
-const offer = (data = {}) => `<PriceSearchModel>${fields({ Number: "A-1", CatalogName: "TEST", Name: "Тестовый фильтр &amp; комплект", SalePrice: "125.50", NumberOfAvailable: "7", Region: "Тестовый склад", DeliveryDate: "2026-11-10T00:00:00+03:00", TypeRefusal: "1", CurrencyName: "RUB", ...data })}</PriceSearchModel>`;
+const offer = (data = {}) => `<PriceSearchModel>${fields({ DetailUid: "fixture-detail", SellerId: "10", Number: "A-1", CatalogName: "TEST", Name: "Тестовый фильтр &amp; комплект", SalePrice: "125.50", NumberOfAvailable: "7", Region: "Тестовый склад", DeliveryDate: "2026-11-10T00:00:00+03:00", TypeRefusal: "1", CurrencyName: "RUB", ...data })}</PriceSearchModel>`;
 function manager() { const value = new SupplierSessionManager(); value.setAutopiterCredentials(credentials, cookie); value.markAuthorized("autopiter"); return value; }
 async function searchOffers(content) {
   const adapter = new AutopiterApiAdapter(async (method) => method === "FindCatalog" ? response(method, catalog()) : response(method, content));
@@ -194,7 +194,7 @@ test("Autopiter shares its one recovery attempt across catalog and price request
   assert.equal(results.length, 1);
 });
 
-test("Autopiter prices every exact catalog once, filters other articles and replacements and does not enable orders", async () => {
+test("Autopiter prices every exact catalog once, filters other articles and replacements and retains private ordering references", async () => {
   const calls = [];
   const adapter = new AutopiterApiAdapter(async (method, params, _signal, receivedCookie) => {
     calls.push({ method, params, receivedCookie });
@@ -210,7 +210,8 @@ test("Autopiter prices every exact catalog once, filters other articles and repl
   assert.equal(results.length, 2);
   assert.deepEqual(results[0], { supplier: "autopiter", article: "A-1", brand: "TEST", title: "Тестовый фильтр & комплект", price: 125.5,
     quantity: 7, warehouse: "Тестовый склад", deliveryDate: "2026-11-10T00:00:00.000Z", deliveryDateApproximate: false, isReturnable: true, link: "https://autopiter.ru/" });
-  assert.equal(getPurchaseReference(results[0]), null);
+  assert.deepEqual(getPurchaseReference(results[0]), { supplier: "autopiter", detailUid: "fixture-detail", sellerId: "10" });
+  assert.equal(JSON.stringify(results[0]).includes("detailUid"), false);
   assert.equal(typeof adapter.searchAnalogs, "function");
 });
 
@@ -234,7 +235,7 @@ test("Autopiter analogs use selected-brand catalogs and preserve distinct offers
   assert.deepEqual(calls.slice(1).map((call) => call.parameters.ArticleId), ["101", "103"]);
   assert.ok(calls.slice(1).every((call) => call.parameters.SearchCross === "1" && call.parameters.Currency === "РУБ"));
   assert.equal(results.length, 7);
-  assert.ok(results.every((result) => result.isAnalog === true && getPurchaseReference(result) === null));
+  assert.ok(results.every((result) => result.isAnalog === true && getPurchaseReference(result)?.supplier === "autopiter"));
   assert.equal(results.filter((result) => result.brand === "OTHER" && result.article === "A1").length, 1);
   assert.ok(results.some((result) => result.price === 200));
   assert.ok(results.some((result) => result.warehouse === "Другой склад"));
@@ -302,7 +303,8 @@ test("Autopiter brand and analog HTTP streams include real adapter results in th
   const requests = [];
   const adapter = new AutopiterApiAdapter(async (method, parameters) => {
     requests.push({ method, parameters });
-    return response(method, method === "FindCatalog" ? catalog() : offer({ Number: "B1", CatalogName: "CROSS" }));
+    return response(method, method === "FindCatalog" ? catalog() : offer({ Number: "B1", CatalogName: "CROSS" })
+      + offer({ Number: "B2", CatalogName: "CROSS", DetailUid: "" }));
   });
   const service = new SearchApplicationService([adapter], manager(), () => assert.fail("unexpected disconnection"));
   const server = createAggregatorServer({ application: { streamSearch: service.streamSearch.bind(service) }, publicDir: resolve("src/frontend") });
@@ -322,6 +324,8 @@ test("Autopiter brand and analog HTTP streams include real adapter results in th
         assert.equal(offer.result.article, "B1");
         assert.equal(offer.result.isAnalog, true);
         assert.equal(typeof offer.offerId, "string");
+        assert.equal(offer.cartAvailable, true);
+        assert.equal(events.find((event) => event.type === "result" && event.result.article === "B2").cartAvailable, false);
       }
     }
     assert.deepEqual(requests.map((request) => request.method), ["FindCatalog", "FindCatalog", "GetPriceId"]);

@@ -847,8 +847,8 @@ export function createAggregatorServer({
         await application.streamSearch(query, (event) => {
           if (event.type === "result") {
             const offerId = garage.registerSearchOffer(event.result);
-            cart.registerOffer(offerId, event.result);
-            writeSseEvent(response, { ...event, offerId });
+            const cartAvailable = cart.registerOffer(offerId, event.result);
+            writeSseEvent(response, { ...event, offerId, cartAvailable });
             return;
           }
           writeSseEvent(response, event);

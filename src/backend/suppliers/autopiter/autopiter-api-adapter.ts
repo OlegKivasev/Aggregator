@@ -5,9 +5,12 @@ import { SupplierAuthError, SupplierIntegrationError } from "../errors.ts";
 import { siteHttpRequest, type SiteHttpResponse } from "../site-http.ts";
 import { parseSupplierXml, type XmlElement } from "../soap-xml.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
+import { attachPurchaseReference, type PurchaseLine } from "../../purchasing/purchase-offer.ts";
+import { autopiterOrderFields, parseAutopiterOrderResult } from "./autopiter-order.ts";
 
-type AutopiterMethod = "Authorization" | "IsAuthorization" | "FindCatalog" | "GetPriceId";
-type SoapFields = Record<string, string>;
+type AutopiterMethod = "Authorization" | "IsAuthorization" | "FindCatalog" | "GetPriceId" | "MakeOrderByItems";
+export interface AutopiterSoapFields { [key: string]: string | AutopiterSoapFields | AutopiterSoapFields[] }
+type SoapFields = AutopiterSoapFields;
 export type AutopiterRequester = (method: AutopiterMethod, fields: SoapFields, signal: AbortSignal, cookie?: string) => Promise<SiteHttpResponse>;
 
 interface AutopiterSessionRecovery {
@@ -26,13 +29,15 @@ const text = (element: XmlElement, name: string): string => children(element, na
 const articleKey = (value: string): string => value.replace(/[^\p{L}\p{N}]/gu, "").toUpperCase();
 const brandKey = (value: string): string => articleKey(value.normalize("NFKC"));
 const escapeXml = (value: string): string => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+const serializeFields = (fields: SoapFields): string => Object.entries(fields).map(([key, value]) =>
+  (Array.isArray(value) ? value : [value]).map((item) => `<${key}>${typeof item === "string" ? escapeXml(item) : serializeFields(item)}</${key}>`).join("")).join("");
 
 export const autopiterSoapRequest: AutopiterRequester = (method, fields, signal, cookie) => siteHttpRequest(endpoint, {
   method: "POST", signal, cookie,
   timeoutMs: autopiterConfig.requestTimeoutMs,
   maxResponseBytes: supplierMaxResponseBytes,
   headers: { "Content-Type": "text/xml; charset=utf-8", SOAPAction: `"${namespace}${method}"` },
-  body: `<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><${method} xmlns="${namespace}">${Object.entries(fields).map(([key, value]) => `<${key}>${escapeXml(value)}</${key}>`).join("")}</${method}></soap:Body></soap:Envelope>`,
+  body: `<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><${method} xmlns="${namespace}">${serializeFields(fields)}</${method}></soap:Body></soap:Envelope>`,
 });
 
 function methodResponse(response: SiteHttpResponse, method: AutopiterMethod): XmlElement {
@@ -56,8 +61,10 @@ function methodResponse(response: SiteHttpResponse, method: AutopiterMethod): Xm
 }
 
 function resultElement(response: SiteHttpResponse, method: AutopiterMethod): XmlElement {
-  const result = children(methodResponse(response, method), `${method}Result`)[0];
-  if (!result) throw new SupplierIntegrationError("Autopiter did not return a method result");
+  const wrapper = methodResponse(response, method);
+  const result = children(wrapper, `${method}Result`)[0];
+  const nilResult = new RegExp(`<(?:(?:[\\w.-]+):)?${method}(?:Response|Result)\\b[^>]*\\s(?:[\\w.-]+:)?nil\\s*=\\s*["'](?:true|1)["']`).test(response.body);
+  if (!result || nilResult || wrapper.children.length !== 1 || wrapper.text.trim()) throw new SupplierIntegrationError("Autopiter did not return a method result");
   return result;
 }
 
@@ -170,7 +177,7 @@ function normalizeOffer(offer: XmlElement, requestedArticle: string, analogBrand
     throw new SupplierIntegrationError("Autopiter returned an invalid offer");
   }
   const date = deliveryDate(text(offer, "DeliveryDate"));
-  return {
+  const result: NormalizedSearchResult = {
     supplier: "autopiter", brand, article, title, price,
     quantity: quantity && quantity > 0 ? quantity : null,
     warehouse: text(offer, "Region") || null,
@@ -179,6 +186,13 @@ function normalizeOffer(offer: XmlElement, requestedArticle: string, analogBrand
     link: "https://autopiter.ru/",
     ...(analogBrand !== undefined ? { isAnalog: true } : {}),
   };
+  const detailUid = text(offer, "DetailUid");
+  const sellerId = text(offer, "SellerId");
+  if (detailUid && detailUid.length <= 2000 && !/[\x00-\x1f\x7f]/.test(detailUid)
+    && /^\d{1,10}$/.test(sellerId) && Number(sellerId) <= 2147483647) {
+    attachPurchaseReference(result, { supplier: "autopiter", detailUid, sellerId });
+  }
+  return result;
 }
 
 export class AutopiterApiAdapter implements SupplierAdapter {
@@ -253,6 +267,45 @@ export class AutopiterApiAdapter implements SupplierAdapter {
     await this.requestWithSession("IsAuthorization", {}, context, manager, (response) => {
       if (!booleanResult(response, "IsAuthorization")) throw new SupplierAuthError("Autopiter authorization is required");
     });
+  }
+
+  async prepareOrder(lines: PurchaseLine[], signal: AbortSignal, manager: SupplierSessionManager) {
+    const fields = autopiterOrderFields(lines);
+    const operation = manager.beginOperation(this.id, signal);
+    let generation: number;
+    try {
+      try { await this.validateSession({ signal: operation.signal, timeoutMs: this.timeoutMs }, manager); }
+      catch (error) {
+        operation.signal.throwIfAborted();
+        if (!(error instanceof SupplierAuthError)) throw error;
+        const credentials = manager.getAutopiterCredentials();
+        if (!credentials) throw error;
+        const previous = manager.getAutopiterCookie();
+        const verified = await verifyAutopiterCredentials(credentials, operation.signal, this.request);
+        operation.signal.throwIfAborted();
+        // Verification already called IsAuthorization; another identical check adds no information.
+        manager.updateAutopiterCookie(previous, verified);
+      }
+      operation.signal.throwIfAborted();
+      generation = operation.generation;
+    } finally { operation.dispose(); }
+    const credentials = manager.getAutopiterCredentials();
+    let submitted = false;
+    return async (_attemptId: string, orderSignal: AbortSignal) => {
+      const submission = manager.beginOperation(this.id, orderSignal);
+      try {
+        submission.signal.throwIfAborted();
+        const current = manager.getAutopiterCredentials();
+        if (submission.generation !== generation || current?.login !== credentials?.login || current?.password !== credentials?.password) {
+          throw new SupplierAuthError("Autopiter session changed before order submission");
+        }
+        if (submitted) throw new SupplierIntegrationError("Autopiter order has already been submitted");
+        submitted = true;
+        // Never recover/retry a mutation: a lost reply may already represent a placed order.
+        return await this.requestWithSession("MakeOrderByItems", fields, { signal: submission.signal, timeoutMs: this.timeoutMs }, manager,
+          (response) => parseAutopiterOrderResult(resultElement(response, "MakeOrderByItems"), response.body, lines));
+      } finally { submission.dispose(); }
+    };
   }
 
   async search(query: SearchQuery, context: SupplierSearchContext, onResult: (result: NormalizedSearchResult) => void, manager: SupplierSessionManager): Promise<void> {

@@ -737,7 +737,7 @@ test("HTTP server delegates Автопитер authorization without exposing cr
   assert.deepEqual(await response.json(), { session: session("autopiter", true) });
 });
 
-test("HTTP server transports mixed supplier SSE events without changing them", async () => {
+test("HTTP server transports mixed supplier SSE events with private offer handles and cart availability", async () => {
   const expectedEvents = [
     { type: "search_started", article: "ABC-123", suppliers: ["rossko", "armtek"] },
     { type: "supplier_status", supplier: "rossko", status: "searching" },
@@ -776,7 +776,9 @@ test("HTTP server transports mixed supplier SSE events without changing them", a
   const events = parseSseEvents(await response.text());
   const result = events.find((event) => event.type === "result");
   assert.match(result.offerId, /^[0-9a-f-]{36}$/i);
+  assert.equal(result.cartAvailable, false);
   delete result.offerId;
+  delete result.cartAvailable;
   assert.deepEqual(events, expectedEvents);
 });
 

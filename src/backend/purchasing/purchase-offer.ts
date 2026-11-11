@@ -5,6 +5,7 @@ export type PurchaseReference =
   | { supplier: "part-kom"; makerId: string; providerId: string }
   | { supplier: "armtek"; keyzak: string; returnDays?: number }
   | { supplier: "forum-auto"; warehouse: string | null; gid?: string }
+  | { supplier: "autopiter"; detailUid: string; sellerId: string }
   | { supplier: "rossko"; partGuid: string | null; stockId: string | null };
 
 export interface PurchaseLine {
@@ -53,6 +54,7 @@ export function samePurchaseOffer(
   const next = fresh.reference;
   if (old.supplier === "armtek" && next.supplier === "armtek") return old.keyzak === next.keyzak;
   if (old.supplier === "part-kom" && next.supplier === "part-kom") return old.makerId === next.makerId && old.providerId === next.providerId;
+  if (old.supplier === "autopiter" && next.supplier === "autopiter") return old.detailUid === next.detailUid && old.sellerId === next.sellerId;
   if (old.supplier === "forum-auto" && next.supplier === "forum-auto") {
     return old.gid ? old.gid === next.gid : old.warehouse === next.warehouse;
   }

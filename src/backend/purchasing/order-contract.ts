@@ -11,6 +11,14 @@ export interface ConfirmedOrderLine {
   forumAutoOrder?: ForumAutoOrderReceipt;
   rosskoOrders?: RosskoOrderReceipt[];
   armtekOrders?: ArmtekOrderReceipt[];
+  autopiterOrders?: AutopiterOrderReceipt[];
+}
+
+export interface AutopiterOrderReceipt {
+  orderId: string;
+  quantity: number;
+  price: number;
+  deliveryAt?: string;
 }
 
 export interface RosskoOrderReceipt {

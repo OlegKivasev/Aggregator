@@ -20,7 +20,7 @@ import { listForumAutoOrderHistory, parseForumAutoApiResponse, parseForumAutoOrd
 
 // The browser uses a real local cart server; supplier searches and checks are fictional fixtures.
 const supplierOrigins = { armtek: "https://etp.armtek.ru/", "part-kom": "https://www.part-kom.ru/",
-  "forum-auto": "https://itrade.forum-auto.ru/", rossko: "https://samara.rossko.ru/" };
+  "forum-auto": "https://itrade.forum-auto.ru/", rossko: "https://samara.rossko.ru/", autopiter: "https://autopiter.ru/" };
 const offer = (supplier, quantity, reference, delivery = {}, title = "Тестовый фильтр <img src=x onerror=window.cartXss=1>") => attachPurchaseReference({ supplier, brand: "TEST", article: "A1", title,
   quantity, price: supplier === "armtek" ? 100 : 120, warehouse: "Тестовый склад", deliveryDate: null, deliveryDateApproximate: false,
   link: supplierOrigins[supplier], ...delivery }, reference);
@@ -38,6 +38,7 @@ async function withCartPage(check, options = {}) {
   const searchCalls = [];
   try {
     const suppliers = options.allSuppliers ? ["armtek", "part-kom", "forum-auto", "rossko"] : ["armtek", "part-kom"];
+    if (options.autopiter) suppliers.push("autopiter");
     const sessions = suppliers.map((supplier) => ({ supplier, authorized: supplier === "rossko" ? options.rosskoAuthorized ?? true : true, lastCheckedAt: null, lastAuthorizedAt: null }));
     const application = {
       getRosskoOrderSettings: options.rosskoSettings?.get,
@@ -79,6 +80,10 @@ async function withCartPage(check, options = {}) {
           emit({ type: "supplier_status", supplier: "rossko", status: "completed" });
         }
         for (const result of options.extraOffers ?? []) emit({ type: "result", result });
+        if (options.autopiter) {
+          emit({ type: "result", result: offer("autopiter", 7, { supplier: "autopiter", detailUid: "fixture-detail", sellerId: "10" }, { isReturnable: true }) });
+          emit({ type: "supplier_status", supplier: "autopiter", status: "completed" });
+        }
         emit({ type: "supplier_status", supplier: "armtek", status: "completed" });
         emit({ type: "supplier_status", supplier: "part-kom", status: "completed" });
         emit({ type: "search_completed", article: query.article });
@@ -1214,6 +1219,49 @@ test("table header settings preview live, cancel safely and persist shared main 
     assert.equal(await analogs.locator('[data-width-column="title"]').inputValue(), "550");
     assert.equal(await analogs.locator('[data-alignment-column="brand"]').inputValue(), "right");
   }, { preserveSearchState: true });
+});
+
+test("Autopiter disables cart actions when the server has no ordering reference while keeping garage actions", async () => {
+  await withCartPage(async (page) => {
+    const row = page.locator("#results-body tr").filter({ hasText: "Нет данных для заказа" });
+    assert.equal(await row.locator(".cart-offer-button").isDisabled(), true);
+    assert.equal(await row.locator(".cart-offer-button").getAttribute("title"), "Предложение недоступно для заказа");
+    assert.equal(await row.locator(".garage-offer-button").getAttribute("aria-disabled"), "false");
+  }, { autopiter: true, extraOffers: [{ supplier: "autopiter", article: "B2", brand: "TEST", title: "Нет данных для заказа",
+    price: 120, quantity: 7, warehouse: "Тестовый склад", deliveryDate: null, deliveryDateApproximate: false,
+    isReturnable: true, link: "https://autopiter.ru/" }] });
+});
+
+test("Autopiter adds goods, restores its supplier tab and orders selected goods with an invoice receipt", async () => {
+  await withCartPage(async (page, { orderCalls, refreshCalls }) => {
+    const autopiterRow = page.locator("#results-body tr").filter({ has: page.locator('[data-column="supplier"]', { hasText: "Автопитер" }) });
+    await autopiterRow.locator(".cart-quantity").fill("2");
+    await autopiterRow.locator(".cart-offer-button").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
+    await page.locator("#results-body tr").filter({ has: page.locator('[data-column="supplier"]', { hasText: "Armtek" }) }).locator(".cart-offer-button").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "3");
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "3");
+    await page.locator("#cart-toggle").click();
+    await page.locator('#cart-tabs [data-cart-supplier="autopiter"]').click();
+    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 1);
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
+    await page.waitForFunction(() => document.querySelector("#cart-order-confirm").classList.contains("is-success"));
+    assert.equal(orderCalls.length, 1);
+    assert.equal(orderCalls[0][0].reference.supplier, "autopiter");
+    assert.equal(orderCalls[0][0].quantity, 2);
+    assert.equal(refreshCalls.length, 1, "checkout reuses the fresh opening check");
+    const receipt = page.locator(".cart-autopiter-receipt");
+    assert.match(await receipt.textContent(), /Автопитер · заказ № 10001/);
+    assert.match(await receipt.textContent(), /Заказано2 шт\./);
+    assert.match(await receipt.textContent(), /Цена120/);
+    assert.equal(await page.locator("#cart-badge").textContent(), "1");
+  }, { autopiter: true, confirmOrders: (lines) => ({ rejected: [], confirmed: lines.map((line) => ({
+    id: line.id, acceptedQuantity: line.quantity, orderIds: ["10001"], autopiterOrders: [{
+      orderId: "10001", quantity: line.quantity, price: line.result.price, deliveryAt: "2026-11-14T00:00:00+03:00",
+    }],
+  })) }) });
 });
 
 test("cart adds bounded quantities, persists, orders and removes confirmed items", async () => {
