@@ -172,22 +172,27 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
       assert.equal(await page.locator("#repairs-rows .repairs-payment-note").textContent(), "Суммы по способам оплаты ещё не получены из 1С");
     }
     const formatAmount = (value) => value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    for (const paymentOptions of [
-      { cardAmountDue: 10_500.29, cashAmountDue: 9_500.01, cashDiscountPercent: 4.88 },
-      { cardAmountDue: 0.29, cashAmountDue: 0.01, cashDiscountPercent: 0 },
-      { cardAmountDue: 0, cashAmountDue: 0, cashDiscountPercent: 5 },
-      { cardAmountDue: 100, cashAmountDue: 110, cashDiscountPercent: 0 },
-      { cardAmountDue: 10_500.29, cashAmountDue: null, cashDiscountPercent: null },
+    for (const [paymentOptions, expectedDiscount] of [
+      [{ cardAmountDue: 10_500.29, cashAmountDue: 9_500.01, cashDiscountPercent: 4.88 }, "скидка 5%/1 000руб"],
+      [{ cardAmountDue: 0.29, cashAmountDue: 0.01, cashDiscountPercent: 0 }, "скидка 0%/0руб"],
+      [{ cardAmountDue: 0, cashAmountDue: 0, cashDiscountPercent: 5 }, "скидка 5%/0руб"],
+      [{ cardAmountDue: 100, cashAmountDue: 110, cashDiscountPercent: 0 }, "скидка 0%/0руб"],
+      [{ cardAmountDue: 500, cashAmountDue: 299.51, cashDiscountPercent: 4.49 }, "скидка 4%/200руб"],
+      [{ cardAmountDue: 500, cashAmountDue: 299.50, cashDiscountPercent: 4.50 }, "скидка 5%/201руб"],
+      [{ cardAmountDue: 200.79, cashAmountDue: 0.29, cashDiscountPercent: 4.51 }, "скидка 5%/201руб"],
+      [{ cardAmountDue: 500, cashAmountDue: 299.99, cashDiscountPercent: 5.50 }, "скидка 6%/200руб"],
+      [{ cardAmountDue: 10_500.29, cashAmountDue: null, cashDiscountPercent: null }, null],
     ]) {
       await send({ ...updated, paymentStatus: paymentOptions.cardAmountDue ? "partially_paid" : "paid",
         amountDue: paymentOptions.cardAmountDue, paymentOptions });
       await page.locator("#repairs-refresh").click();
+      await waitForRepairIdle();
       const expectedCard = `Картой: ${formatAmount(paymentOptions.cardAmountDue)}`;
       await page.locator("#repairs-rows .repairs-payment-card").getByText(expectedCard, { exact: true }).waitFor();
       const discount = page.locator("#repairs-rows .repairs-payment-discount");
       const expectedCash = paymentOptions.cashAmountDue === null ? "Наличка: Недоступно"
-        : `Наличка: ${formatAmount(paymentOptions.cashAmountDue)} (скидка ${paymentOptions.cashDiscountPercent.toLocaleString("ru-RU")}%)`;
-      assert.equal(await page.locator("#repairs-rows .repairs-payment-cash").textContent(), expectedCash);
+        : `Наличка: ${formatAmount(paymentOptions.cashAmountDue)} (${expectedDiscount})`;
+      assert.equal((await page.locator("#repairs-rows .repairs-payment-cash").textContent()).replaceAll("\u00a0", " "), expectedCash.replaceAll("\u00a0", " "));
       assert.equal(await page.locator("#repairs-rows .repairs-payment-detail > span").textContent(), "Осталось оплатить:");
       assert.equal(await page.locator("#repairs-rows .repairs-payment-note").count(), 0);
       if (paymentOptions.cashDiscountPercent !== null) {
@@ -309,7 +314,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#test-repairs-rows .repairs-readiness-detail").textContent(), "В наличии 2 из 5 позиций");
     assert.equal(await page.locator("#test-repairs-rows .repairs-payment").textContent(), "Не оплачен");
     assert.equal(await page.locator("#test-repairs-rows .repairs-payment-card").textContent(), `Картой: ${formatAmount(20_500)}`);
-    assert.equal(await page.locator("#test-repairs-rows .repairs-payment-cash").textContent(), `Наличка: ${formatAmount(19_475)} (скидка 5%)`);
+    assert.equal((await page.locator("#test-repairs-rows .repairs-payment-cash").textContent()).replaceAll("\u00a0", " "), "Наличка: 19 475,00 (скидка 5%/1 025руб)");
     await page.locator("#test-repairs-search").fill("нет такой машины");
     assert.equal(await page.locator("#test-repairs-count").textContent(), "0 из 1");
     assert.equal(await page.locator("#test-repairs-function").isVisible(), true);

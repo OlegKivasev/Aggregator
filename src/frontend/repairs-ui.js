@@ -99,7 +99,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       && (status === "paid" ? due === 0 : due > 0);
   };
   const amountFormat = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const percentFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
+  const integerFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
   const validPaymentOptions = (options) => {
     if (options === undefined) return true;
     const amount = (value, max = 9_999_999_999_999.99) => typeof value === "number" && Number.isFinite(value)
@@ -130,7 +130,9 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     if (options?.cashDiscountPercent != null) {
       const discount = document.createElement("strong");
       discount.className = "repairs-payment-discount";
-      discount.textContent = `скидка ${percentFormat.format(options.cashDiscountPercent)}%`;
+      const discountMinor = Math.max(0, Math.round(options.cardAmountDue * 100) - Math.round(options.cashAmountDue * 100));
+      const discountRubles = Math.floor((discountMinor + 50) / 100);
+      discount.textContent = `скидка ${integerFormat.format(options.cashDiscountPercent)}%/${integerFormat.format(discountRubles)}руб`;
       cash.append(" (", discount, ")");
     }
     list.append(card, cash);
