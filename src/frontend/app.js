@@ -45,6 +45,10 @@ import {
 
 const form = document.querySelector("#search-form");
 const articleInput = document.querySelector("#article-input");
+const articleAlphabetNotice = document.querySelector("#article-alphabet-notice");
+const updateArticleAlphabetNotice = () => {
+  articleAlphabetNotice.hidden = !/\p{Script=Cyrillic}/u.test(articleInput.value);
+};
 const submitButton = document.querySelector("#submit-button");
 const globalStatus = document.querySelector("#global-status");
 const resultsBody = document.querySelector("#results-body");
@@ -1236,6 +1240,7 @@ const activateTab = (tabId) => {
   results = tab.results;
   markupSettings = tab.markupSettings;
   articleInput.value = tab.article;
+  updateArticleAlphabetNotice();
   globalStatus.textContent = tab.status;
   supplierEnabledInputs.forEach((input) => {
     input.checked = isSupplierVisible(input.value) && tab.enabledSuppliers.includes(input.value);
@@ -2083,7 +2088,10 @@ newTabButton.addEventListener("click", () => {
   articleInput.focus();
 });
 
-articleInput.addEventListener("input", saveSearchState);
+articleInput.addEventListener("input", () => {
+  updateArticleAlphabetNotice();
+  saveSearchState();
+});
 supplierEnabledInputs.forEach((input) => input.addEventListener("change", saveSearchState));
 supplierVisibilityInputs.forEach((input) => {
   input.addEventListener("change", () => {
@@ -3127,7 +3135,10 @@ cancelSearchButton.addEventListener("click", () => {
   saveSearchState();
 });
 
-const searchHistory = setupSearchHistory({ input: articleInput, form, kind: "pricing", onSelect: saveSearchState });
+const searchHistory = setupSearchHistory({ input: articleInput, form, kind: "pricing", onSelect: () => {
+  updateArticleAlphabetNotice();
+  saveSearchState();
+} });
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -3177,6 +3188,7 @@ if (restoredTab) {
   });
 }
 supplierSearchSelectionsRestored = true;
+updateArticleAlphabetNotice();
 tableSearchInput.addEventListener("input", () => {
   tableSearchTerm = tableSearchInput.value;
   renderResults();

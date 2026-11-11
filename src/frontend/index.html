@@ -141,6 +141,7 @@
                   type="text"
                   placeholder="Введите артикул"
                   autocomplete="off"
+                  aria-describedby="article-alphabet-notice"
                   required
                 />
                 <button type="submit" id="submit-button" class="btn btn-primary">
@@ -161,6 +162,7 @@
             </button>
           </div>
 
+          <p class="article-alphabet-notice" id="article-alphabet-notice" role="status" aria-live="polite" hidden>В артикуле есть русские буквы. Проверьте раскладку: некоторые поставщики принимают только латиницу.</p>
           <div class="article-variant-notice" id="article-variant-notice" role="status" aria-live="polite" hidden><span aria-hidden="true">!</span><p id="article-variant-notice-text"></p></div>
           <div class="results-panel card border-0 shadow-sm overflow-hidden" id="results-panel" aria-busy="false">
             <div class="results-panel__header card-header bg-white border-0">
