@@ -809,6 +809,8 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .repairs-payment-detail { display: block; margin-top: 8px; color: var(--ink); font-size: 12px; font-weight: 400; line-height: 1.5; }
 .repairs-payment-detail ul { margin: 4px 0 0; padding-left: 18px; }
 .repairs-payment-detail li + li { margin-top: 3px; }
+.repairs-payment-card { color: #a32f27; }
+.repairs-payment-cash { color: #21663c; }
 .repairs-payment-discount { font-weight: 800; }
 .repairs-payment-note { display: block; margin-top: 6px; color: var(--muted); }
 .repairs-readiness[data-tone="ready"] { border-color: #a6d9b8; background: #edf8f0; color: #21663c; }

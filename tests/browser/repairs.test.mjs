@@ -218,6 +218,9 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.ok(plateBox.y >= vehicleBox.y + vehicleBox.height);
     assert.ok(counterpartyBox.y >= plateBox.y + plateBox.height);
     const assertVehicleStyles = async (mobile) => {
+      assert.equal(await page.locator("#repairs-rows .repairs-payment-card").evaluate((element) => getComputedStyle(element).color), "rgb(163, 47, 39)");
+      assert.equal(await page.locator("#repairs-rows .repairs-payment-cash").evaluate((element) => getComputedStyle(element).color), "rgb(33, 102, 60)");
+      assert.equal(await page.locator("#repairs-rows .repairs-payment-detail > span").evaluate((element) => getComputedStyle(element).color), "rgb(23, 32, 42)");
       assert.equal(await page.locator("#repairs-function .repairs-vehicle-name").evaluate((element) => getComputedStyle(element).fontSize), mobile ? "18px" : "12px");
       assert.equal(await page.locator("#repairs-function .repairs-vehicle-plate").evaluate((element) => getComputedStyle(element).fontSize), mobile ? "17px" : "12px");
       for (const id of ["repairs-refresh", "test-repairs-refresh"]) {

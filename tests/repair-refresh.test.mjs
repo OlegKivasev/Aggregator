@@ -104,6 +104,47 @@ test("confirmed removals are atomic and concurrent card changes reject the entir
   });
 });
 
+test("an administrator can confirm all 23 orders delivered concurrently by 1C while an employee sees only their own", async () => {
+  await withServer(async ({ request, send, poll, create, result, get }) => {
+    const login = async (fio, password) => (await request("/api/auth/login", { method: "POST", ...json({ fio, password }) })).headers.get("set-cookie").split(";", 1)[0];
+    const admin = await login("Администратор", "test-admin-password");
+    assert.equal((await request("/api/users", { method: "POST", ...json({ fio: "Первый сотрудник", permissions: ["repairs"], password: "test-user-password" }, { Cookie: admin }) })).status, 201);
+    const employee = await login("Первый сотрудник", "test-user-password");
+    const cards = [first, ...Array.from({ length: 22 }, (_, index) => ({ ...second,
+      documentId: `${(index + 1).toString(16).padStart(8, "0")}-abcd-1234-abcd-123456789abc`,
+      responsibleFio: "Второй сотрудник" }))];
+    for (const card of cards) await send(card);
+    await send({ ...first, testPlatform: true }); await poll();
+    assert.equal((await create(cards.map((card) => card.documentId), false, admin)).status, 202);
+    const job = await poll();
+    assert.equal(job.documentIds.length, 23);
+    const fresh = cards.map((card) => ({ ...card, goodsReadiness: { totalPositions: 6, availablePositions: 6 }, amountDue: 9_500.01 }));
+    // The scheduled sender already delivered exactly the values read by the manual worker.
+    for (const card of fresh) await send(card);
+    assert.equal((await result(job, fresh)).status, 200);
+    const completed = (await (await get(job, admin)).json()).refresh;
+    assert.equal(completed.status, "completed");
+    assert.deepEqual(completed.repairs, fresh);
+    assert.equal((await (await request("/api/repairs", { headers: { Cookie: admin } })).json()).unverified, undefined);
+    assert.deepEqual((await (await request("/api/repairs?testPlatform=true", { headers: { Cookie: admin } })).json()).repairs, [{ ...first, testPlatform: true }]);
+    assert.deepEqual((await (await request("/api/repairs?testPlatform=false", { headers: { Cookie: employee } })).json()).repairs, [fresh[0]]);
+    assert.equal((await create([first.documentId], false, employee)).status, 202);
+    const employeeJob = await poll();
+    assert.deepEqual(employeeJob.documentIds, [first.documentId]);
+    await result(employeeJob, [fresh[0]]);
+    assert.equal((await (await get(employeeJob, employee)).json()).refresh.status, "completed");
+    const closedId = cards[1].documentId;
+    await create([closedId], false, admin);
+    const closingJob = await poll();
+    assert.equal((await request("/api/integration/1c/repairs", { method: "DELETE",
+      ...json({ documentId: closedId, testPlatform: false }, { Authorization: `Bearer ${secret}` }) })).status, 200);
+    await result(closingJob, [], [closedId]);
+    const closed = (await (await get(closingJob, admin)).json()).refresh;
+    assert.equal(closed.status, "completed");
+    assert.deepEqual(closed.removedDocumentIds, [closedId]);
+  }, true);
+});
+
 test("repair leases, cancellation, expiry and worker authorization reject late or unrelated results", async () => {
   await withServer(async ({ request, send, poll, create, result, get, path }) => {
     await send(first); await poll();

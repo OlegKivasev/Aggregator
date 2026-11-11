@@ -142,7 +142,15 @@ export class RepairRefreshService {
         const covered = [...repairs.map((card) => card.documentId), ...removedDocumentIds];
         if (new Set(covered).size !== ids.length || covered.some((id) => !ids.includes(id))) throw new Error("Unexpected cards");
         const versions = JSON.parse(job.versions_json) as string[];
-        if (ids.some((id, index) => this.version(id, data.testPlatform as boolean) !== versions[index])) throw new Error("Concurrent update");
+        const changedIds = ids.filter((id, index) => this.version(id, data.testPlatform as boolean) !== versions[index]);
+        if (changedIds.length) {
+          const current = new Map(this.list().filter((card) => (card.testPlatform === true) === data.testPlatform)
+            .map((card) => [card.documentId, JSON.stringify(parseRepairCard(card))]));
+          const incoming = new Map(repairs.map((card) => [card.documentId, JSON.stringify(card)]));
+          // The independent scheduled sender may have delivered this exact 1C snapshot
+          // first. Confirm matching values/removals, but never overwrite a different update.
+          if (changedIds.some((id) => current.get(id) !== incoming.get(id))) throw new Error("Concurrent update");
+        }
         result = { repairs, removedDocumentIds };
       } catch { /* A partial or malformed result invalidates the whole requested batch. */ }
       if (result) {
