@@ -67,6 +67,27 @@ test("repair refresh requires a live worker and updates only the requested order
   });
 });
 
+test("a fully paid refresh may omit hidden payment options and clears their previous values", async () => {
+  await withServer(async ({ request, send, poll, create, result, get }) => {
+    const unpaid = { ...first, paymentOptions: { cardAmountDue: 10500.01, cashAmountDue: 10000, cashDiscountPercent: 4.76 } };
+    assert.equal((await send(unpaid)).status, 200);
+    await poll();
+    assert.equal((await create([first.documentId])).status, 202);
+    const job = await poll();
+    const paid = { ...first, paymentStatus: "paid", amountDue: 0 };
+    assert.equal((await result(job, [paid])).status, 200);
+    const confirmed = (await (await get(job)).json()).refresh;
+    assert.equal(confirmed.status, "completed");
+    assert.deepEqual(confirmed.repairs, [paid]);
+    assert.deepEqual((await (await request("/api/repairs")).json()).repairs, [paid]);
+    // A subsequent debt must accept freshly calculated options again.
+    await create([first.documentId]);
+    const next = await poll();
+    assert.equal((await result(next, [unpaid])).status, 200);
+    assert.deepEqual((await (await request("/api/repairs")).json()).repairs, [unpaid]);
+  });
+});
+
 test("partial, extra, malformed and failed repair replies never update even one cached card", async () => {
   await withServer(async ({ request, send, poll, create, result, get }) => {
     await send(first); await send(second); await poll();
