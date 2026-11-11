@@ -54,8 +54,10 @@ test("refresh reads only visible orders from 1C, animates, hides uncertain data 
     const claimed = poll(20);
     const awaitingResult = page.waitForRequest((request) => request.method() === "GET"
       && /\/api\/repairs\/refresh\//.test(request.url()) && new URL(request.url()).searchParams.get("waitSeconds") === "20");
+    const clickStarted = performance.now();
     await page.locator("#repairs-refresh").click();
     const job = await claimed;
+    t.diagnostic(`Local click to waiting 1C worker receiving the job: ${Math.round(performance.now() - clickStarted)} ms`);
     await awaitingResult;
     assert.deepEqual(job.documentIds, [first.documentId]);
     assert.equal(job.testPlatform, false);
