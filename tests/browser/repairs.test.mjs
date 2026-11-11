@@ -167,6 +167,10 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
       } else {
         if (paymentStatus === "paid") assert.equal(await badge.evaluate((element) => getComputedStyle(element).color), "rgb(33, 102, 60)");
       }
+      if (paymentStatus === "paid") {
+        assert.equal(await page.locator("#repairs-rows .repairs-payment-detail").count(), 0);
+        continue;
+      }
       assert.equal(await page.locator("#repairs-rows .repairs-payment-card").textContent(), "Картой: —");
       assert.equal(await page.locator("#repairs-rows .repairs-payment-cash").textContent(), "Наличка: —");
       assert.equal(await page.locator("#repairs-rows .repairs-payment-note").textContent(), "Суммы по способам оплаты ещё не получены из 1С");
@@ -187,6 +191,11 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
         amountDue: paymentOptions.cardAmountDue, paymentOptions });
       await page.locator("#repairs-refresh").click();
       await waitForRepairIdle();
+      if (paymentOptions.cardAmountDue === 0) {
+        assert.equal(await page.locator("#repairs-rows .repairs-payment").textContent(), "Оплачен");
+        assert.equal(await page.locator("#repairs-rows .repairs-payment-detail").count(), 0);
+        continue;
+      }
       const expectedCard = `Картой: ${formatAmount(paymentOptions.cardAmountDue)}`;
       await page.locator("#repairs-rows .repairs-payment-card").getByText(expectedCard, { exact: true }).waitFor();
       const discount = page.locator("#repairs-rows .repairs-payment-discount");

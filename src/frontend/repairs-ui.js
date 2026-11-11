@@ -116,6 +116,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     badge.dataset.status = status ?? "unknown";
     badge.textContent = status === "partially_paid" ? "Частично оплачен" : status === "payment_required" ? "Не оплачен" : status === "paid" ? "Оплачен" : "Оплата ещё не проверена";
     cell.append(badge);
+    if (status === "paid") return cell;
     const detail = document.createElement("div");
     detail.className = "repairs-payment-detail";
     const title = document.createElement("span");
