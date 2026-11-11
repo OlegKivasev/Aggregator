@@ -277,6 +277,25 @@ test("browser waits release capacity on disconnect and shutdown without cancelli
   } finally { disconnect.abort(); refreshes.close(); db.close(); }
 });
 
+test("refresh timing separates waiting for 1C from reading and sending the result without mixing client clocks", () => {
+  const db = new DatabaseSync(":memory:");
+  let now = 1_000_000;
+  const refreshes = new RepairRefreshService(db, () => [first], () => "version", () => {}, () => now);
+  try {
+    refreshes.claim(false);
+    refreshes.create({ documentIds: [first.documentId] }, false, "owner");
+    now += 2300;
+    const job = refreshes.claim(false);
+    now += 5100;
+    const result = refreshes.complete({ requestId: job.id, leaseId: job.leaseId, testPlatform: false,
+      status: "success", repairs: [first], removedDocumentIds: [] });
+    assert.equal(result.status, "completed");
+    assert.equal(result.timing.queueMs, 2300);
+    assert.equal(result.timing.workerMs, 5100);
+    assert.ok(Number.isInteger(result.timing.applyMs) && result.timing.applyMs >= 0);
+  } finally { refreshes.close(); db.close(); }
+});
+
 test("offline failures remain unverified across page reads and ordinary imports; only a complete refresh verifies them", async () => {
   await withServer(async ({ request, send, poll, create, result, get }) => {
     await send(first);

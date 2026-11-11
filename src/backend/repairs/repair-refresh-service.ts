@@ -137,6 +137,8 @@ export class RepairRefreshService {
       expiresAt: new Date(row.expires_at).toISOString() } : null;
   }
   complete(value: unknown) {
+    const receivedAt = this.now();
+    const applyStarted = performance.now();
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new RepairRefreshError(400);
     const data = value as Record<string, unknown>;
     if (!validId(data.requestId) || !validId(data.leaseId) || typeof data.testPlatform !== "boolean") throw new RepairRefreshError(400);
@@ -187,7 +189,11 @@ export class RepairRefreshService {
         .run(result ? "completed" : "error", result ? JSON.stringify(result) : null, JSON.stringify(versions), job.id);
       this.db.exec("COMMIT");
       this.changes.emit("change");
-      return { accepted: true, requestId: job.id, status: result ? "completed" : "error" };
+      return { accepted: true, requestId: job.id, status: result ? "completed" : "error", timing: {
+        queueMs: Math.max(0, job.lease_until! - 45_000 - (job.expires_at - 60_000)),
+        workerMs: Math.max(0, receivedAt - (job.lease_until! - 45_000)),
+        applyMs: Math.round(performance.now() - applyStarted),
+      } };
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
   }
   beginPoll() {
