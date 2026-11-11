@@ -158,6 +158,7 @@ export class RealOrderApplicationService implements RealOrderGateway {
     signal.throwIfAborted();
     const bounded = createBoundedAbortSignal(signal, 35_000, "Supplier order history timed out");
     try {
+      if (query.supplier === "autopiter") return await this.autopiter.orderHistory(query.from, query.to, bounded.signal, this.sessions);
       if (query.supplier === "armtek") {
         const credentials = this.sessions.getArmtekCredentials();
         if (!credentials) throw new SupplierAuthError("Armtek API credentials are missing");

@@ -1,6 +1,6 @@
 import type { OrderHistoryItem, OrderHistoryOrder } from "./order-history-contract.ts";
 
-export type OrderHistorySupplier = "part-kom" | "armtek" | "forum-auto" | "rossko";
+export type OrderHistorySupplier = "part-kom" | "armtek" | "forum-auto" | "rossko" | "autopiter";
 
 export interface CancellationGroup {
   quantity: number;

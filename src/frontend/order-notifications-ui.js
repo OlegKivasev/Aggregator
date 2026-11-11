@@ -1,4 +1,4 @@
-const supplierNames = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
+const supplierNames = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko", autopiter: "Автопитер" };
 const labels = { new: "Новый заказ", cancelled: "Отменено", received: "Получено", missing: "Проверьте заказ" };
 const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
 const date = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Samara" });

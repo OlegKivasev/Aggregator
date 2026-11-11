@@ -1,7 +1,7 @@
 import type { OrderHistory } from "../purchasing/order-history-contract.ts";
 import type { OrderHistorySupplier } from "../purchasing/order-cancellation-contract.ts";
 
-export const supplierNames: Record<OrderHistorySupplier, string> = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
+export const supplierNames: Record<OrderHistorySupplier, string> = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko", autopiter: "Автопитер" };
 export const notificationSuppliers = Object.keys(supplierNames) as OrderHistorySupplier[];
 export type EventKind = "new" | "cancelled" | "received" | "missing";
 export interface MonitoredItem { article: string; brand: string | null; title: string | null; quantity: number; cancelled: number; received: number; price: number | null }

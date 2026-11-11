@@ -52,7 +52,7 @@ async function withSettings(check, options = {}) {
       return new Response(JSON.stringify({ response: value }), { headers: { "Content-Type": "application/json" } });
     });
     let currentHistory = fixtureHistory(); const loads = [];
-    service = new OrderNotificationService(settings, repository, client, { available: (supplier) => !!options.monitor && supplier === "armtek",
+    service = new OrderNotificationService(settings, repository, client, { available: (supplier) => !!options.monitor && supplier === (options.supplier ?? "armtek"),
       load: async (supplier) => {
         if (!options.monitor) throw new Error("Supplier API must not be called by this test");
         loads.push(supplier); await options.checkGate?.(); return [currentHistory];
@@ -305,11 +305,14 @@ test("VK UI explains the nightly pause and Forum Auto review alerts and shows 07
   }, { now: Date.parse("2026-10-17T23:05:00+04:00") });
 });
 
-test("VK UI manually checks and sends changes without shifting the next automatic check", async () => {
+for (const [supplier, name] of [["armtek", "Armtek"], ["autopiter", "Автопитер"]]) {
+test(`VK UI manually checks ${name} and sends changes without shifting the next automatic check`, async () => {
   let release; const waiting = new Promise((resolve) => { release = resolve; }); let block = false;
   await withSettings(async (page, { service, sends, loads, setHistory }) => {
     await page.locator("#vk-notifications-token").fill(fixtureToken); await page.getByRole("button", { name: "Сохранить ключ", exact: true }).click();
     await page.waitForFunction(() => !document.querySelector("#vk-notifications-enabled").disabled);
+    assert.equal(await page.locator("#vk-notifications-suppliers li").count(), 5);
+    assert.equal(await page.locator("#vk-notifications-suppliers strong", { hasText: "Автопитер" }).count(), 1);
     await page.locator("#vk-notifications-enabled").check();
     await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Отправка в ВК включена"));
     await service.runOnce(); const next = service.state().nextCheckAt;
@@ -319,13 +322,14 @@ test("VK UI manually checks and sends changes without shifting the next automati
     assert.equal(await page.locator("#vk-notifications-refresh").isDisabled(), true);
     release();
     await page.waitForFunction(() => document.querySelector("#vk-notifications-status").textContent.includes("Ручная проверка завершена"));
-    assert.equal(loads.length, 2); assert.equal(sends.length, 2); assert.match(sends[1].get("message"), /ОТМЕНЕНО · Armtek/);
+    assert.deepEqual(loads, [supplier, supplier]); assert.equal(sends.length, 2); assert.ok(sends[1].get("message").includes(`ОТМЕНЕНО · ${name}`));
     assert.equal(service.state().nextCheckAt, next);
     await page.getByRole("button", { name: "Проверить сейчас", exact: true }).click();
     await page.waitForFunction(() => !document.querySelector("#vk-notifications-refresh").disabled);
     assert.equal(loads.length, 3); assert.equal(sends.length, 2);
-  }, { monitor: true, checkGate: () => block ? waiting : undefined });
+  }, { monitor: true, supplier, checkGate: () => block ? waiting : undefined });
 });
+}
 
 test("VK UI saves editable quiet hours, disables the pause, preserves them on reload and manually sends at night", async () => {
   await withSettings(async (page, { service, sends, settings, setHistory }) => {

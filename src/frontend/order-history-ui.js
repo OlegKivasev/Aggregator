@@ -3,7 +3,7 @@ import { armtekReturnSource, formatArmtekReturnDays, hasSupplierWeekendDelivery 
 import { historyItemRows } from "./order-history-presentation.js";
 
 const suppliers = [
-  ["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"],
+  ["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"], ["autopiter", "Автопитер"],
 ];
 const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
 const fulfillmentLabels = new Map([
@@ -229,7 +229,7 @@ export function bootstrapOrderHistory() {
     return { from: dateValue(start), to: dateValue(end) };
   };
   const defaultFilters = (supplier) => {
-    return { ...(supplier === "armtek" ? defaultPeriod() : { from: "", to: "" }), status: "", query: "" };
+    return { ...(supplier === "armtek" || supplier === "autopiter" ? defaultPeriod() : { from: "", to: "" }), status: "", query: "" };
   };
   const defaults = new Map(views.map(([supplier]) => [supplier, defaultFilters(supplier)]));
   const filters = new Map([...defaults].map(([supplier, values]) => [supplier, { ...values }]));
@@ -281,7 +281,7 @@ export function bootstrapOrderHistory() {
     from.value = values.from;
     to.value = values.to;
     search.value = values.query;
-    from.required = to.required = selected === "armtek";
+    from.required = to.required = selected === "armtek" || selected === "autopiter";
     updateControls();
   };
 
@@ -371,7 +371,7 @@ export function bootstrapOrderHistory() {
     sharedHistoryRequests.clear();
     void readCancellations(signal);
     const loads = suppliers.map(([supplier, name]) => {
-      const params = new URLSearchParams(supplier === "armtek" ? defaultPeriod() : {});
+      const params = new URLSearchParams(supplier === "armtek" || supplier === "autopiter" ? defaultPeriod() : {});
       const promise = fetchHistory(supplier, params, signal);
       sharedHistoryRequests.set(`${supplier}?${params}`, promise);
       return promise.then(() => null, () => name);
@@ -388,13 +388,13 @@ export function bootstrapOrderHistory() {
   const requestSource = async (supplier, force = false) => {
     const params = new URLSearchParams();
     let queryError = null;
-    if (supplier === "armtek") {
+    if (supplier === "armtek" || supplier === "autopiter") {
       const values = filters.get(selected);
       const period = defaultPeriod(values.to ? new Date(`${values.to}T12:00:00`) : new Date());
       const start = values.from || period.from;
       const end = values.to || period.to;
       if (start > end || Date.parse(end) - Date.parse(start) > 92 * 86400000) {
-        queryError = "Выберите корректный период Armtek: не более 93 дней.";
+        queryError = `Выберите корректный период ${suppliers.find(([id]) => id === supplier)[1]}: не более 93 дней.`;
       }
       params.set("from", start);
       params.set("to", end);
@@ -434,6 +434,7 @@ export function bootstrapOrderHistory() {
     updateControls();
     if (!filterError() && !histories.size) { load(); return; }
     if (!filterError() && histories.has("armtek")) void requestSource("armtek");
+    if (!filterError() && histories.has("autopiter")) void requestSource("autopiter");
     render();
   };
   for (const [id, name] of views) {

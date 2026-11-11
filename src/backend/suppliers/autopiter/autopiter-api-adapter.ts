@@ -7,8 +7,12 @@ import { parseSupplierXml, type XmlElement } from "../soap-xml.ts";
 import type { SupplierAdapter } from "../supplier-adapter.ts";
 import { attachPurchaseReference, type PurchaseLine } from "../../purchasing/purchase-offer.ts";
 import { autopiterOrderFields, parseAutopiterOrderResult } from "./autopiter-order.ts";
+import { parseAutopiterInvoiceItems, parseAutopiterInvoices } from "./autopiter-history.ts";
+import { finishOrderHistory, historyDate } from "../../purchasing/order-history-values.ts";
+import type { OrderHistory, OrderHistoryOrder } from "../../purchasing/order-history-contract.ts";
 
-type AutopiterMethod = "Authorization" | "IsAuthorization" | "FindCatalog" | "GetPriceId" | "MakeOrderByItems";
+type AutopiterMethod = "Authorization" | "IsAuthorization" | "FindCatalog" | "GetPriceId" | "MakeOrderByItems"
+  | "GetInvoiceOrderByDateTime" | "GetFullInvoiceOrder";
 export interface AutopiterSoapFields { [key: string]: string | AutopiterSoapFields | AutopiterSoapFields[] }
 type SoapFields = AutopiterSoapFields;
 export type AutopiterRequester = (method: AutopiterMethod, fields: SoapFields, signal: AbortSignal, cookie?: string) => Promise<SiteHttpResponse>;
@@ -123,11 +127,11 @@ export async function verifyAutopiterCredentials(credentials: AutopiterCredentia
   return verifiedCookie;
 }
 
-function listResult(response: SiteHttpResponse, method: "FindCatalog" | "GetPriceId", itemName: string): XmlElement[] {
+function listResult(response: SiteHttpResponse, method: "FindCatalog" | "GetPriceId" | "GetInvoiceOrderByDateTime" | "GetFullInvoiceOrder", itemName: string): XmlElement[] {
   const wrapper = methodResponse(response, method);
   const nilResult = new RegExp(`<(?:(?:[\\w.-]+):)?${method}(?:Response|Result)\\b[^>]*\\s(?:[\\w.-]+:)?nil\\s*=\\s*["'](?:true|1)["']`).test(response.body);
   if (nilResult || wrapper.text.trim()) throw new SupplierIntegrationError("Autopiter returned an invalid result list");
-  // Both list results have minOccurs=0 in the supplier's WSDL: an empty method response is valid.
+  // List results have minOccurs=0 in the supplier's WSDL: an empty method response is valid.
   if (wrapper.children.length === 0) return [];
   const result = children(wrapper, `${method}Result`)[0];
   if (!result || wrapper.children.length !== 1 || result.text.trim() || result.children.some((item) => localName(item) !== itemName)) {
@@ -267,6 +271,43 @@ export class AutopiterApiAdapter implements SupplierAdapter {
     await this.requestWithSession("IsAuthorization", {}, context, manager, (response) => {
       if (!booleanResult(response, "IsAuthorization")) throw new SupplierAuthError("Autopiter authorization is required");
     });
+  }
+
+  async orderHistory(from: string, to: string, signal: AbortSignal, manager: SupplierSessionManager): Promise<OrderHistory> {
+    signal.throwIfAborted();
+    if (historyDate(from) !== from || historyDate(to) !== to || from > to || Date.parse(to) - Date.parse(from) > 92 * 86_400_000) {
+      throw new SupplierIntegrationError("Autopiter history period is invalid");
+    }
+    const operation = manager.beginOperation(this.id, signal);
+    const controller = new AbortController();
+    const context = { signal: AbortSignal.any([operation.signal, controller.signal]), timeoutMs: this.timeoutMs };
+    const recovery: AutopiterSessionRecovery = {};
+    try {
+      const invoices = await this.requestWithSession("GetInvoiceOrderByDateTime", {
+        DateStart: `${from}T00:00:00`, DateFinish: `${to}T23:59:59.9999999`,
+      }, context, manager, (response) => parseAutopiterInvoices(listResult(response, "GetInvoiceOrderByDateTime", "InvoiceModel")), recovery);
+      const orders: OrderHistoryOrder[] = [];
+      let count = 0;
+      let limited = invoices.length > 500;
+      const selected = invoices.slice(0, 500);
+      for (let offset = 0; offset < selected.length; offset += 4) {
+        context.signal.throwIfAborted();
+        // The API only accepts one invoice number. Bound independent reads and cancel the entire window on failure.
+        const pending = selected.slice(offset, offset + 4).map((invoice) => this.requestWithSession("GetFullInvoiceOrder", {
+          OrderNumber: invoice.number,
+        }, context, manager, (response) => parseAutopiterInvoiceItems(invoice, listResult(response, "GetFullInvoiceOrder", "OrderInformationItemModel")), recovery)
+          .catch((error: unknown) => { controller.abort(error); throw error; }));
+        const results = await Promise.allSettled(pending);
+        const failure = results.find((result) => result.status === "rejected");
+        if (failure?.status === "rejected") throw failure.reason;
+        for (const result of results) if (result.status === "fulfilled" && result.value.items.length) {
+          orders.push(result.value); count += result.value.items.length;
+        }
+        if (count >= 500) { limited ||= offset + 4 < selected.length; break; }
+      }
+      context.signal.throwIfAborted();
+      return finishOrderHistory(orders, limited);
+    } finally { controller.abort(); operation.dispose(); }
   }
 
   async prepareOrder(lines: PurchaseLine[], signal: AbortSignal, manager: SupplierSessionManager) {

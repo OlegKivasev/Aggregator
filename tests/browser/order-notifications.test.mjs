@@ -23,7 +23,7 @@ async function withFeed(check) {
   let browser; let server; let service;
   try {
     const repository = new SqliteNotificationRepository(join(directory, "orders.sqlite"));
-    const suppliers = ["armtek", "part-kom", "forum-auto", "rossko"];
+    const suppliers = ["armtek", "part-kom", "forum-auto", "rossko", "autopiter"];
     repository.observeFeed(suppliers.map((supplier) => ({ supplier, histories: [history()] })), now);
     repository.observeFeed([
       { supplier: "armtek", histories: [history([{ ...item(), fulfillment: "partial", cancelledQuantity: 2, deliveredQuantity: 3 }])] },
@@ -34,9 +34,9 @@ async function withFeed(check) {
       new VkClient(async () => { throw new Error("VK must never be called by the website feed"); }), {
         available: () => false, load: async () => { throw new Error("Reading the feed must not query suppliers"); }, observe: () => {},
       }, () => now + 600_000);
-    const addOrder = (number, cancelled = false) => {
-      repository.observeFeed([{ supplier: "rossko", histories: [history([item(2)], number)] }], now + 1_200_000);
-      if (cancelled) repository.observeFeed([{ supplier: "rossko", histories: [history([{ ...item(2), fulfillment: "cancelled" }], number)] }], now + 1_800_000);
+    const addOrder = (number, cancelled = false, supplier = "rossko") => {
+      repository.observeFeed([{ supplier, histories: [history([item(2)], number)] }], now + 1_200_000);
+      if (cancelled) repository.observeFeed([{ supplier, histories: [history([{ ...item(2), fulfillment: "cancelled" }], number)] }], now + 1_800_000);
     };
     let mode = "ok"; let onRead = null;
     const source = await readFile("src/frontend/index.html", "utf8");
@@ -76,6 +76,23 @@ async function withFeed(check) {
     await service?.close(); await rm(directory, { recursive: true, force: true });
   }
 }
+
+test("Autopiter notifications appear in the shared feed and can be marked as read", async () => {
+  await withFeed(async (page, { addOrder }) => {
+    addOrder("AUTOPITER-NEW", true, "autopiter");
+    await page.clock.runFor(30_001);
+    await page.waitForFunction(() => document.querySelector("#order-notifications-count").textContent === "6");
+    await page.locator("#order-notifications-trigger").click();
+    const cards = page.locator(".order-notification-card").filter({ hasText: "Автопитер" });
+    await cards.first().waitFor();
+    assert.equal(await cards.count(), 2);
+    assert.match(await cards.allTextContents().then((values) => values.join(" ")), /AUTOPITER-NEW/);
+    assert.equal(await cards.locator(".order-notification-products li").count(), 2);
+    assert.equal(await page.locator(".order-notification-card--cancelled").filter({ hasText: "Автопитер" }).count(), 1);
+    await page.locator("#order-notifications-read").click();
+    await page.waitForFunction(() => document.querySelector("#order-notifications-count").hidden);
+  });
+});
 
 test("bell shows safe colored order cards, multiple products and fits mobile with automatic visible reads", async () => {
   await withFeed(async (page) => {

@@ -320,30 +320,30 @@ export function createAggregatorServer({
       return;
     }
 
-    const historyMatch = /^\/api\/order-history\/(part-kom|armtek|forum-auto|rossko)$/.exec(url.pathname);
+    const historyMatch = /^\/api\/order-history\/(part-kom|armtek|forum-auto|rossko|autopiter)$/.exec(url.pathname);
     if (historyMatch) {
       const supplier = historyMatch[1] as OrderHistorySupplier;
-      const name = ({ "part-kom": "PartKOM", armtek: "Armtek", "forum-auto": "Forum Auto", rossko: "Rossko" } as Record<string, string>)[supplier];
+      const name = ({ "part-kom": "PartKOM", armtek: "Armtek", "forum-auto": "Forum Auto", rossko: "Rossko", autopiter: "Автопитер" } as Record<string, string>)[supplier];
       response.setHeader("Cache-Control", "no-store");
       if (request.method !== "GET") {
         serveJson(response, 405, { message: "Method not allowed" });
         return;
       }
       const archive = url.searchParams.get("archive");
-      const allowed = supplier === "part-kom" ? ["archive"] : supplier === "armtek" ? ["from", "to"] : [];
+      const allowed = supplier === "part-kom" ? ["archive"] : supplier === "armtek" || supplier === "autopiter" ? ["from", "to"] : [];
       if ([...url.searchParams.keys()].some((key) => !allowed.includes(key) || url.searchParams.getAll(key).length > 1)
         || archive !== null && archive !== "0" && archive !== "1") {
         serveJson(response, 400, { message: "Неверный фильтр истории заказов." });
         return;
       }
       let query: SupplierOrderHistoryQuery | null = null;
-      if (supplier === "armtek") {
+      if (supplier === "armtek" || supplier === "autopiter") {
         const from = url.searchParams.get("from");
         const to = url.searchParams.get("to");
         if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)
           || historyDate(from) !== from || historyDate(to) !== to || from > to
           || Date.parse(to) - Date.parse(from) > 92 * 86_400_000) {
-          serveJson(response, 400, { message: "Выберите корректный период Armtek: не более 93 дней." });
+          serveJson(response, 400, { message: `Выберите корректный период ${name}: не более 93 дней.` });
           return;
         }
         query = { supplier, from, to };

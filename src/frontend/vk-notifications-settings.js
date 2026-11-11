@@ -22,7 +22,7 @@ const pairCommand = document.querySelector("#vk-notifications-pair-command");
 const pairCopy = document.querySelector("#vk-notifications-pair-copy");
 const pairCancel = document.querySelector("#vk-notifications-pair-cancel");
 const pairStatus = document.querySelector("#vk-notifications-pair-status");
-const names = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko" };
+const names = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko", autopiter: "Автопитер" };
 let state = null;
 let busy = false;
 let checkingNow = false;
@@ -47,7 +47,7 @@ const validate = (value) => {
     || !Array.isArray(value.chats) || value.chats.length > 1000
     || value.chats.some((item) => !item || !Number.isSafeInteger(item.id) || item.id <= 2_000_000_000 || typeof item.title !== "string" || item.title.length > 200)
     || value.peerId !== null && !value.chats.some((item) => item.id === value.peerId)
-    || !Array.isArray(value.suppliers) || value.suppliers.length > 4
+    || !Array.isArray(value.suppliers) || value.suppliers.length > Object.keys(names).length
     || value.suppliers.some((item) => !item || !Object.hasOwn(names, item.supplier) || !validDate(item.lastSuccessAt) || typeof item.limited !== "boolean"
       || item.error !== null && (typeof item.error !== "string" || item.error.length > 500))) throw new Error("Не удалось проверить настройки уведомлений ВК.");
   return value;
