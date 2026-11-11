@@ -86,6 +86,13 @@ Dependencies flow from HTTP transport through application services to supplier a
 
 The frontend uses native browser modules without a bundler. `src/frontend/app.js` owns DOM state and event wiring, while `result-formatting.js`, `search-stream.js`, and `supplier-search-summary.js` isolate result safety, SSE transport, and summary formatting respectively.
 
+## Оптимизация скорости
+
+[Каталог методов оптимизации](docs/optimization/README.md) содержит разбор
+ускорения обновления заказов, замеры и порядок проверки скорости при любых
+новых функциях и исправлениях, включая сторону 1С. Обязательные инструкции
+для агента закреплены в [AGENTS.md](AGENTS.md).
+
 ## Номенклатура: сканирование и карточка из 1С
 
 В разделе «Номенклатура» кнопка «Сканировать камерой» открывает заднюю камеру
