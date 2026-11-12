@@ -476,6 +476,85 @@ test("refreshing the whole cart authorizes a supplier tab without another refres
   }, undefined, gateway);
 });
 
+test("partial tab refreshes retain verification of other fresh lines across price revisions", async () => {
+  const checks = [];
+  const gateway = {
+    refresh: async (lines) => { checks.push(lines.map((line) => line.id)); return lines.map((line) => ({ ...line, result: { ...line.result, price: 125 } })); },
+    choices: async () => ({}),
+    prepare: async (_supplier, lines) => async () => ({ confirmed: lines.map((line) => ({ id: line.id,
+      acceptedQuantity: line.quantity, orderIds: ["fixture-subset"] })), rejected: [] }),
+  };
+  await withCart(async (cart) => {
+    for (const supplier of ["armtek", "part-kom", "forum-auto"]) {
+      const id = randomUUID(); cart.registerOffer(id, result(supplier));
+      cart.mutate("add", { offerId: id, quantity: 1, revision: cart.view().revision });
+    }
+    const [first, second, hidden] = cart.view().items;
+    const signal = new AbortController().signal;
+    const opened = await cart.refreshForOrder(3, "all", signal, [first.id]);
+    const switched = await cart.refreshForOrder(opened.revision, "all", signal, [second.id]);
+    assert.equal(switched.revision, 5);
+    await assert.rejects(cart.order(5, "all", [hidden.id], {}, signal), /Сначала обновите/);
+    const ordered = await cart.order(5, "all", [first.id, second.id], {}, signal);
+    assert.deepEqual(ordered.cart.items.map((item) => item.id), [hidden.id]);
+    assert.deepEqual(checks, [[first.id], [second.id]]);
+  }, undefined, gateway);
+});
+
+test("refreshing another tab does not extend older verification or authorize a failed line", async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  let failed = false;
+  const gateway = {
+    refresh: async (lines) => lines.map((line) => ({ ...line, ...(failed
+      ? { refreshIssue: { reason: "check_failed", message: "Fixture unavailable" } } : {}) })),
+    choices: async () => ({}),
+    prepare: async (_supplier, lines) => async () => ({ confirmed: lines.map((line) => ({ id: line.id,
+      acceptedQuantity: line.quantity, orderIds: ["fixture-expiry"] })), rejected: [] }),
+  };
+  await withCart(async (cart) => {
+    for (const supplier of ["armtek", "part-kom", "forum-auto"]) {
+      const id = randomUUID(); cart.registerOffer(id, result(supplier));
+      cart.mutate("add", { offerId: id, quantity: 1, revision: cart.view().revision });
+    }
+    const [first, second, third] = cart.view().items;
+    const signal = new AbortController().signal;
+    await cart.refreshForOrder(3, "all", signal, [first.id]);
+    now += 100_000;
+    await cart.refreshForOrder(3, "all", signal, [second.id]);
+    failed = true;
+    await cart.refreshForOrder(3, "all", signal, [third.id]);
+    await assert.rejects(cart.order(3, "all", [third.id], {}, signal), /недоступные позиции/);
+    now += 20_001;
+    await assert.rejects(cart.order(3, "all", [first.id, second.id], {}, signal), /Сначала обновите/);
+    const ordered = await cart.order(3, "all", [second.id], {}, signal);
+    assert.deepEqual(ordered.cart.items.map((item) => item.id), [first.id, third.id]);
+  }, undefined, gateway);
+});
+
+test("an unchanged partial refresh rejects a concurrent persistent cart revision", async () => {
+  const gate = Promise.withResolvers();
+  const gateway = { refresh: async (lines) => { await gate.promise; return lines; }, choices: async () => ({}),
+    prepare: async () => { throw new Error("must not submit"); } };
+  await withCart(async (cart, _reopen, path) => {
+    const id = randomUUID(); cart.registerOffer(id, result());
+    cart.mutate("add", { offerId: id, quantity: 1, revision: 0 });
+    const item = cart.view().items[0];
+    const signal = new AbortController().signal;
+    const pending = cart.refreshForOrder(1, "all", signal, [item.id]);
+    const rejected = assert.rejects(pending, /Корзина изменилась/);
+    const other = new SqliteCartRepository(path);
+    try {
+      const state = other.load();
+      state.lines[0].quantity = 2;
+      assert.equal(other.save({ ...state, revision: 2 }, 1), true);
+    } finally { other.close(); gate.resolve(); }
+    await rejected;
+    assert.equal(cart.view().items[0].quantity, 2);
+    await assert.rejects(cart.order(2, "all", [item.id], {}, signal), /Сначала обновите/);
+  }, undefined, gateway);
+});
+
 test("real checkout sends only selected lines and leaves other cart goods untouched", async () => {
   const prepared = [];
   const choicesFor = [];

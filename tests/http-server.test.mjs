@@ -15,6 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { attachPurchaseReference } from "../src/backend/purchasing/purchase-offer.ts";
 import { testPurchaseOrder } from "../src/backend/application/test-order-application-service.ts";
+import { SqliteCartRepository } from "../src/backend/purchasing/sqlite-cart-repository.ts";
 
 const publicDir = join(process.cwd(), "src", "frontend");
 const openServers = new Set();
@@ -129,6 +130,47 @@ test("supplier history HTTP aborts upstream work when the client disconnects", a
   request.destroy();
   await aborted;
   assert.equal(receivedSignal.aborted, true);
+});
+
+test("cart refresh accepts 500 selected UUIDs within a bounded body without increasing other body limits", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "aggregator-cart-refresh-http-"));
+  const previousPath = process.env.GARAGE_DB_PATH;
+  process.env.GARAGE_DB_PATH = join(directory, "cart.sqlite");
+  let server;
+  let checks = 0;
+  try {
+    const lines = Array.from({ length: 500 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, quantity: 1,
+      reference: { supplier: "armtek", keyzak: "TEST01" }, result: { supplier: "armtek", article: `CART${index}`,
+        brand: "TEST", title: "Fixture part", price: 100, quantity: 5, warehouse: "Fixture",
+        deliveryDate: null, deliveryDateApproximate: false, link: "https://etp.armtek.ru/" },
+    }));
+    const repository = new SqliteCartRepository(process.env.GARAGE_DB_PATH);
+    try { assert.equal(repository.save({ revision: 1, lines }, 0), true); }
+    finally { repository.close(); }
+    const application = createApplication({ realCartOrder: {
+      refresh: async (selected) => { checks++; assert.equal(selected.length, 500); return selected; },
+      choices: async () => ({}), prepare: async () => { throw new Error("must not order"); },
+    } });
+    const running = await listen(application);
+    server = running.server;
+    const send = (path, body) => fetch(`${running.baseUrl}${path}`, { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const payload = { revision: 1, supplier: "all", itemIds: lines.map((line) => line.id) };
+    assert.ok(Buffer.byteLength(JSON.stringify(payload)) > 16 * 1024);
+    const refreshed = await send("/api/cart/refresh", payload);
+    assert.equal(refreshed.status, 200);
+    assert.equal((await refreshed.json()).items.length, 500);
+    assert.equal(checks, 1);
+    assert.equal((await send("/api/cart/refresh", { ...payload, itemIds: [...payload.itemIds, lines[0].id] })).status, 400);
+    assert.equal((await send("/api/cart/refresh", { text: "x".repeat(33_000) })).status, 413);
+    assert.equal((await send("/api/cart/items", { text: "x".repeat(17_000) })).status, 413);
+    assert.equal(checks, 1);
+  } finally {
+    if (server?.listening) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); openServers.delete(server); }
+    if (previousPath === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previousPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("cart HTTP validates server offers and quantities, hides routing and cannot enable real orders", async () => {

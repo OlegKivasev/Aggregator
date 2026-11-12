@@ -2722,6 +2722,28 @@ test("hidden custom cart goods are excluded from All checkout and All clear, but
   }, { reducedMotion: "reduce" });
 });
 
+test("opening All with every good hidden makes no offer refresh until the custom tab opens", async () => {
+  await withCartPage(async (page, { origin, refreshCalls }) => {
+    await openCartForCustomTabs(page);
+    await page.locator("#cart-close").click();
+    const cart = await (await page.request.get(`${origin}/api/cart`)).json();
+    const tabs = await (await page.request.get(`${origin}/api/cart/tabs`)).json();
+    const customId = "custom-00000000-0000-4000-8000-000000000012";
+    const saved = await page.request.put(`${origin}/api/cart/tabs`, { data: { revision: tabs.revision,
+      tabs: [{ id: customId, name: "Скрытые товары", excludeFromAll: true, itemIds: cart.items.map((item) => item.id) }] } });
+    assert.equal(saved.status(), 200);
+    refreshCalls.length = 0;
+    await page.locator("#cart-toggle").click();
+    await page.locator("#cart-refresh-overlay").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 0);
+    assert.equal(refreshCalls.length, 0);
+    await page.locator(`#cart-tab-${customId}`).click();
+    await page.locator("#cart-refresh-overlay").waitFor({ state: "hidden" });
+    assert.equal(refreshCalls.length, 1);
+    assert.equal(refreshCalls[0].length, 2);
+  }, { reducedMotion: "reduce" });
+});
+
 test("mixed-supplier custom cart checkout and custom clear affect only the active tab", async () => {
   const extra = offer("armtek", 3, { supplier: "armtek", keyzak: "EXTRA01" });
   extra.article = "A2";
@@ -3145,7 +3167,9 @@ test("opening the cart refreshes its offers and a supplier tab can order without
   }, { refreshedPrice: 125 });
 });
 
-test("opening 11 goods uses the bounded real refresh service and reports server timing", async () => {
+for (const hiddenTab of [false, true]) {
+test(hiddenTab ? "opening All checks four visible goods and defers seven hidden goods until their tab opens"
+  : "opening 11 goods uses the bounded real refresh service and reports server timing", async () => {
   const references = {
     armtek: { supplier: "armtek", keyzak: "TEST01" },
     "part-kom": { supplier: "part-kom", makerId: "101", providerId: "202" },
@@ -3157,21 +3181,35 @@ test("opening 11 goods uses the bounded real refresh service and reports server 
   let calls = 0;
   let active = 0;
   let peak = 0;
+  const hiddenIds = new Set();
+  const hiddenGate = Promise.withResolvers();
+  const customId = "custom-00000000-0000-4000-8000-000000000011";
   const service = new RealOrderApplicationService(new SupplierSessionManager(), async (query, emit, signal) => {
     calls++;
     peak = Math.max(peak, ++active);
     try {
+      const item = items.find((item) => item.reference.supplier === query.suppliers[0] && item.result.article === query.article);
+      if (hiddenIds.has(item.id)) await hiddenGate.promise;
       await new Promise((resolve) => setTimeout(resolve, 10));
       signal.throwIfAborted();
-      const item = items.find((item) => item.reference.supplier === query.suppliers[0] && item.result.article === query.article);
       emit({ type: "result", result: attachPurchaseReference({ ...item.result, price: 125 }, item.reference) });
       emit({ type: "supplier_status", supplier: query.suppliers[0], status: "completed" });
     } finally { active--; }
   });
-  await withCartPage(async (page, { refreshCalls, orderCalls }) => {
+  try { await withCartPage(async (page, { refreshCalls, orderCalls, origin }) => {
     for (let index = 0; index < 11; index++) {
       await page.locator("#results-body .cart-offer-button").nth(index).click();
       await page.waitForFunction((count) => document.querySelector("#cart-badge").textContent === String(count), index + 1);
+    }
+    if (hiddenTab) {
+      const cart = await (await page.request.get(`${origin}/api/cart`)).json();
+      const visible = new Set(["armtek", "part-kom"].flatMap((supplier) => cart.items
+        .filter((item) => item.result.supplier === supplier).slice(0, 2).map((item) => item.id)));
+      for (const item of cart.items) if (!visible.has(item.id)) hiddenIds.add(item.id);
+      const tabs = await (await page.request.get(`${origin}/api/cart/tabs`)).json();
+      const saved = await page.request.put(`${origin}/api/cart/tabs`, { data: { revision: tabs.revision,
+        tabs: [{ id: customId, name: "Вкладка 1", excludeFromAll: true, itemIds: [...hiddenIds] }] } });
+      assert.equal(saved.status(), 200);
     }
     const refreshed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/cart/refresh");
     await page.locator("#cart-toggle").click();
@@ -3179,23 +3217,39 @@ test("opening 11 goods uses the bounded real refresh service and reports server 
     assert.equal(response.status(), 200);
     assert.match(response.headers()["server-timing"], /^cart-refresh;dur=\d+\.\d$/);
     await page.locator("#cart-refresh-overlay").waitFor({ state: "hidden" });
-    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 11);
+    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), hiddenTab ? 4 : 11);
     assert.ok((await page.locator("#cart-items .cart-purchase-price").allTextContents()).every((price) => price === "125,00"));
     assert.equal(refreshCalls.length, 1);
-    assert.equal(calls, 11);
+    assert.equal(calls, hiddenTab ? 4 : 11);
+    assert.equal(refreshCalls[0].length, hiddenTab ? 4 : 11);
     assert.equal(peak, 4);
     assert.equal(active, 0);
+    if (hiddenTab) {
+      assert.ok(refreshCalls[0].every((item) => !hiddenIds.has(item.id)));
+      await page.locator(`#cart-tab-${customId}`).click();
+      await page.locator("#cart-refresh-overlay").waitFor({ state: "visible" });
+      assert.equal(refreshCalls.length, 2);
+      assert.deepEqual(new Set(refreshCalls[1].map((item) => item.id)), hiddenIds);
+      hiddenGate.resolve();
+      await page.locator("#cart-refresh-overlay").waitFor({ state: "hidden" });
+      assert.equal(await page.locator("#cart-tab-exclude").isChecked(), true);
+      assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 7);
+      assert.ok((await page.locator("#cart-items .cart-purchase-price").allTextContents()).every((price) => price === "125,00"));
+      await page.locator("#cart-tab-all").click();
+      assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 4);
+    }
     await page.locator("#cart-tab-armtek").click();
     await openCheckout(page);
     assert.equal(await page.locator(".cart-order-table tbody tr").count(), 6);
-    assert.equal(refreshCalls.length, 1);
+    assert.equal(refreshCalls.length, hiddenTab ? 2 : 1);
     assert.equal(calls, 11);
     assert.equal(orderCalls.length, 0);
   }, { autopiter: true, extraOffers, reducedMotion: "reduce", refresh: async (lines, signal) => {
     items = lines;
     return service.refresh(lines, signal);
-  } });
+  } }); } finally { hiddenGate.resolve(); }
 });
+}
 
 test("opening the cart shows a centered blocking refresh state until supplier offers finish refreshing", async () => {
   let release;

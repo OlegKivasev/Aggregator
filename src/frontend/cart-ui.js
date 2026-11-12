@@ -320,8 +320,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   let toastTimeout;
   let returnFocus = toggle;
   let refreshedRevision = null;
-  let refreshedItemIds = new Set();
-  let refreshedUntil = 0;
+  let refreshedUntilById = new Map();
   const selectedIds = new Set();
 
   const setCartRefreshing = (refreshing) => {
@@ -342,7 +341,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   const cartTabs = setupCartTabs({ modal, supplierNames, getCart: () => cart,
     getSelectedIds: () => selectedIds,
     isLocked: () => busy || checking || Boolean(cart?.testing),
-    onChange: () => { status.textContent = ""; render(); }, notify, api });
+    onChange: () => { status.textContent = ""; render(); void refreshActiveTab(); }, notify, api });
   const render = () => {
     if (!cart) return;
     const focusedControl = document.activeElement.closest?.("#cart-items input, #cart-items button");
@@ -404,6 +403,35 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     await cartTabs.load();
     render();
   };
+  const isFresh = (id) => refreshedRevision === cart.revision && (refreshedUntilById.get(id) ?? 0) > Date.now();
+  const refreshOffers = async (supplier, itemIds) => {
+    const previous = refreshedRevision === cart.revision ? refreshedUntilById : new Map();
+    const requested = new Set(itemIds);
+    refreshedRevision = null;
+    cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier, itemIds }) }));
+    const now = Date.now();
+    const present = new Set(cart.items.map((item) => item.id));
+    refreshedUntilById = new Map([...previous].filter(([id, expires]) => present.has(id) && !requested.has(id) && expires > now));
+    for (const item of cart.items) if (requested.has(item.id) && !cart.pendingIds.includes(item.id)) {
+      refreshedUntilById.set(item.id, now + 110_000);
+    }
+    refreshedRevision = cart.revision;
+  };
+  const visibleRefreshIds = () => {
+    const pending = new Set(cart.pendingIds);
+    return cartTabs.getItems().filter((item) => !pending.has(item.id) && !isFresh(item.id)).map((item) => item.id);
+  };
+  const refreshActiveTab = async () => {
+    if (!modal.open || !cart || busy || checking || cart.testing || cartTabs.isPending()) return;
+    const itemIds = visibleRefreshIds();
+    if (!itemIds.length) return;
+    busy = true;
+    setCartRefreshing(true);
+    render();
+    try { await refreshOffers(cartTabs.getSupplier(), itemIds); }
+    catch (error) { status.textContent = error.message; }
+    finally { busy = false; setCartRefreshing(false); render(); }
+  };
   const flyToCart = (source) => {
     if (matchMedia("(prefers-reduced-motion: reduce)").matches || !source.isConnected || !source.getClientRects().length) return;
     const from = source.getBoundingClientRect();
@@ -433,7 +461,8 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       cart = validateCart(await api(path, { method, body: JSON.stringify({ revision: cart.revision, ...fields }) }));
       if (path.startsWith("/api/cart/items/") && (method === "DELETE" || method === "PATCH") && refreshedRevision === previousRevision) {
         refreshedRevision = cart.revision;
-        refreshedItemIds = new Set(cart.items.filter((item) => !item.unavailable && refreshedItemIds.has(item.id)).map((item) => item.id));
+        const available = new Set(cart.items.filter((item) => !item.unavailable).map((item) => item.id));
+        refreshedUntilById = new Map([...refreshedUntilById].filter(([id]) => available.has(id)));
       }
       status.textContent = "";
       if (source?.matches(".cart-offer-button")) { flyToCart(source); notify("Товар добавлен в корзину."); }
@@ -457,13 +486,11 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     render();
     status.textContent = "";
     try {
+      refreshedRevision = null;
+      refreshedUntilById.clear();
       await refresh();
-      if (cart.items.length) {
-        cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier: "all" }) }));
-        refreshedRevision = cart.revision;
-        refreshedItemIds = new Set(cart.items.filter((item) => !item.unavailable && !cart.pendingIds.includes(item.id)).map((item) => item.id));
-        refreshedUntil = Date.now() + 110_000;
-      }
+      const itemIds = visibleRefreshIds();
+      if (itemIds.length) await refreshOffers(cartTabs.getSupplier(), itemIds);
       status.textContent = "";
     } catch (error) { refreshedRevision = null; status.textContent = error.message; }
     finally { busy = false; setCartRefreshing(false); render(); }
@@ -623,16 +650,11 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       const itemIds = cartTabs.getItems()
         .filter((item) => selectedIds.has(item.id) && !cart.pendingIds.includes(item.id) && !item.unavailable).map((item) => item.id);
       if (!itemIds.length) throw new Error("Выберите товары для заказа.");
-      if (refreshedRevision !== cart.revision || refreshedUntil <= Date.now()
-        || itemIds.some((id) => !refreshedItemIds.has(id))) {
-        refreshedRevision = null;
+      const staleIds = itemIds.filter((id) => !isFresh(id));
+      if (staleIds.length) {
         setCartRefreshing(true);
-        try {
-          cart = validateCart(await api("/api/cart/refresh", { method: "POST", body: JSON.stringify({ revision: cart.revision, supplier, itemIds }) }));
-        } finally { setCartRefreshing(false); }
-        refreshedRevision = cart.revision;
-        refreshedItemIds = new Set(cart.items.filter((item) => itemIds.includes(item.id) && !item.unavailable).map((item) => item.id));
-        refreshedUntil = Date.now() + 110_000;
+        try { await refreshOffers(supplier, staleIds); }
+        finally { setCartRefreshing(false); }
         const unavailable = cart.items.find((item) => itemIds.includes(item.id) && item.unavailable);
         if (unavailable) throw new Error(unavailable.unavailable.message);
       }

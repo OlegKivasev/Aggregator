@@ -124,7 +124,7 @@ export class CartApplicationService {
   private readonly realOrder: RealOrderGateway | null;
   private readonly offers = new Map<string, { line: PurchaseLine; expires: number }>();
   private testing = false;
-  private refreshed: { revision: number; lineIds: string[]; expires: number } | null = null;
+  private refreshed: { revision: number; expiresById: Map<string, number> } | null = null;
   private readonly refreshIssues = new Map<string, CartRefreshIssue>();
   private readonly controller = new AbortController();
 
@@ -251,7 +251,7 @@ export class CartApplicationService {
     if (!this.repository.save({ ...cart, revision: cart.revision + 1 }, cart.revision)) throw new CartError("Корзина изменилась. Повторите действие.", 409);
     const ids = new Set(cart.lines.map((line) => line.id));
     this.refreshed = this.refreshed?.revision === cart.revision ? { ...this.refreshed, revision: cart.revision + 1,
-      lineIds: this.refreshed.lineIds.filter((id) => ids.has(id) && !invalidated.has(id)) } : null;
+      expiresById: new Map([...this.refreshed.expiresById].filter(([id]) => ids.has(id) && !invalidated.has(id))) } : null;
     for (const id of this.refreshIssues.keys()) if (!ids.has(id)) this.refreshIssues.delete(id);
     return this.view();
   }
@@ -308,6 +308,7 @@ export class CartApplicationService {
     const lines = candidates.filter((line) => !pending.has(line.id));
     if (!lines.length) return this.view();
     this.testing = true;
+    const previous = this.refreshed?.revision === cart.revision ? this.refreshed.expiresById : new Map<string, number>();
     this.refreshed = null;
     try {
       const combinedSignal = AbortSignal.any([signal, this.controller.signal]);
@@ -329,12 +330,16 @@ export class CartApplicationService {
         if (!this.repository.save(next, cart.revision)) throw new CartError("Корзина изменилась. Проверьте её заново.", 409);
       }
       const current = this.load();
+      if (current.revision !== cart.revision + (changed ? 1 : 0)) throw new CartError("Корзина изменилась. Проверьте её заново.", 409);
       for (const line of checked) {
         if (line.refreshIssue) this.refreshIssues.set(line.id, line.refreshIssue);
         else this.refreshIssues.delete(line.id);
       }
-      this.refreshed = { revision: current.revision,
-        lineIds: checked.filter((line) => !line.refreshIssue).map((line) => line.id), expires: Date.now() + 2 * 60_000 };
+      const now = Date.now();
+      const requested = new Set(lines.map((line) => line.id));
+      const expiresById = new Map([...previous].filter(([id, expires]) => !requested.has(id) && expires > now));
+      for (const line of checked) if (!line.refreshIssue) expiresById.set(line.id, now + 2 * 60_000);
+      this.refreshed = { revision: current.revision, expiresById };
       this.testing = false;
       return this.view();
     } finally { this.testing = false; }
@@ -383,7 +388,7 @@ export class CartApplicationService {
     if (lines.some((line) => this.refreshIssues.has(line.id))) throw new CartError("Уберите недоступные позиции из выбранных товаров.", 409);
     const refreshed = this.refreshed;
     if (!refreshed || refreshed.revision !== cart.revision
-      || lines.some((line) => !refreshed.lineIds.includes(line.id)) || refreshed.expires <= Date.now()) {
+      || lines.some((line) => (refreshed.expiresById.get(line.id) ?? 0) <= Date.now())) {
       throw new CartError("Сначала обновите предложения и проверьте заказ заново.", 409);
     }
     if (!details || typeof details !== "object" || Array.isArray(details)) throw new CartError("Неверные параметры заказа.");

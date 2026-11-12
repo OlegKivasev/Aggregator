@@ -410,7 +410,7 @@ export function createAggregatorServer({
             || url.pathname === "/api/cart/uncertain/resolve"
             || url.pathname === "/api/cart/order-options") && request.method === "POST") {
           const payload = await readJsonBody(request, url.pathname === "/api/cart/items/batch" ? 64 * 1024
-            : url.pathname === "/api/cart/items" && request.method === "DELETE" ? 32 * 1024 : undefined);
+            : url.pathname === "/api/cart/refresh" || url.pathname === "/api/cart/items" && request.method === "DELETE" ? 32 * 1024 : undefined);
           if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new CartError("Неверные параметры корзины.");
           const fields = payload as Record<string, unknown>;
           if (url.pathname === "/api/cart/order-options") {
