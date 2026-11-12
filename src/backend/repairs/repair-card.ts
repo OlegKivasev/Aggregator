@@ -20,6 +20,8 @@ export interface RepairCard {
   responsibleFio?: string;
   testPlatform?: boolean;
   counterpartyName?: string;
+  contactName?: string;
+  contactPhone?: string;
   goodsReadiness?: GoodsReadiness;
   paymentStatus?: RepairPaymentStatus;
   amountDue?: number;
@@ -28,7 +30,7 @@ export interface RepairCard {
 
 export class RepairValidationError extends Error {}
 
-const fields = ["documentId", "number", "date", "vehicleName", "status", "responsibleFio", "testPlatform", "counterpartyName", "goodsReadiness", "paymentStatus", "amountDue", "paymentOptions"];
+const fields = ["documentId", "number", "date", "vehicleName", "status", "responsibleFio", "testPlatform", "counterpartyName", "contactName", "contactPhone", "goodsReadiness", "paymentStatus", "amountDue", "paymentOptions"];
 
 function validAmount(value: unknown, maximum = 9_999_999_999_999.99): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= maximum
@@ -99,7 +101,7 @@ export function parseRepairCard(value: unknown): RepairCard {
   }
   const payload = value as Record<string, unknown>;
   if (Object.keys(payload).some((key) => !fields.includes(key))) {
-    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status, responsibleFio, testPlatform, counterpartyName, goodsReadiness, paymentStatus, amountDue, paymentOptions.");
+    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status, responsibleFio, testPlatform, counterpartyName, contactName, contactPhone, goodsReadiness, paymentStatus, amountDue, paymentOptions.");
   }
   if (payload.testPlatform !== undefined && typeof payload.testPlatform !== "boolean") {
     throw new RepairValidationError("testPlatform: требуется логическое значение true или false.");
@@ -121,6 +123,8 @@ export function parseRepairCard(value: unknown): RepairCard {
     throw new RepairValidationError("paymentOptions: требуются paymentStatus и amountDue текущего режима оплаты.");
   }
   const counterpartyName = payload.counterpartyName === undefined ? undefined : cardText(payload, "counterpartyName", 500);
+  const contactName = payload.contactName === undefined ? undefined : cardText(payload, "contactName", 500);
+  const contactPhone = payload.contactPhone === undefined ? undefined : cardText(payload, "contactPhone", 200);
   const responsibleFio = payload.responsibleFio === undefined ? undefined : cardText(payload, "responsibleFio", 256);
   const documentId = parseDocumentId(payload);
   const date = cardText(payload, "date", 19);
@@ -137,6 +141,8 @@ export function parseRepairCard(value: unknown): RepairCard {
     ...(responsibleFio !== undefined ? { responsibleFio } : {}),
     ...(payload.testPlatform === true ? { testPlatform: true } : {}),
     ...(counterpartyName !== undefined ? { counterpartyName } : {}),
+    ...(contactName !== undefined ? { contactName } : {}),
+    ...(contactPhone !== undefined ? { contactPhone } : {}),
     ...(payload.goodsReadiness !== undefined ? { goodsReadiness: parseGoodsReadiness(payload.goodsReadiness) } : {}),
     ...(payload.paymentStatus !== undefined ? { paymentStatus: payload.paymentStatus } : {}),
     ...(payload.amountDue !== undefined ? { amountDue: payload.amountDue as number } : {}),

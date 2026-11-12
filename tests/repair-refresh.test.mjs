@@ -10,7 +10,7 @@ import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 
 const secret = "isolated-test-repair-refresh-secret-32-bytes";
 const first = { documentId: "12345678-abcd-1234-abcd-123456789abc", number: "ТЕСТ-1", date: "2026-11-03T14:30:00",
-  vehicleName: "Тестовая машина", status: "В работе", responsibleFio: "Первый сотрудник", goodsReadiness: { totalPositions: 3, availablePositions: 1 }, paymentStatus: "partially_paid", amountDue: 10_500.01 };
+  vehicleName: "Тестовая машина", status: "В работе", responsibleFio: "Первый сотрудник", contactName: "Тестовый клиент", contactPhone: "+7 (900) 123-45-67", goodsReadiness: { totalPositions: 3, availablePositions: 1 }, paymentStatus: "partially_paid", amountDue: 10_500.01 };
 const second = { ...first, documentId: "22345678-abcd-1234-abcd-123456789abc", number: "ТЕСТ-2", vehicleName: "Вторая машина" };
 const json = (value, headers = {}) => ({ headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(value) });
 async function withServer(check, authenticated = false) {

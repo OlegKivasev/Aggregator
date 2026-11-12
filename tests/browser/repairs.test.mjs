@@ -211,7 +211,8 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     }
     const legal = { ...updated, goodsReadiness: { totalPositions: 5, availablePositions: 2 }, paymentStatus: "partially_paid", amountDue: 10_500,
       paymentOptions: { cardAmountDue: 10_500, cashAmountDue: 9_975, cashDiscountPercent: 5 },
-      vehicleName: "Toyota Camry | А123ВС163", counterpartyName: 'ООО «Тестовый автопарк»' };
+      vehicleName: "Toyota Camry | А123ВС163", counterpartyName: 'ООО «Тестовый автопарк»',
+      contactName: "Анна Тестовая", contactPhone: "+7 (900) 123-45-67" };
     await send(legal);
     await page.locator("#repairs-refresh").click();
     await page.locator("#repairs-function .repairs-counterparty").waitFor();
@@ -219,6 +220,8 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#repairs-function .repairs-vehicle-name").textContent(), "Toyota Camry");
     assert.equal(await page.locator("#repairs-function .repairs-vehicle-plate").textContent(), "А123ВС163");
     assert.equal(await page.locator("#repairs-function .repairs-counterparty").textContent(), legal.counterpartyName);
+    assert.equal(await page.locator("#repairs-rows .repairs-contact-name").textContent(), legal.contactName);
+    assert.equal(await page.locator("#repairs-rows .repairs-contact-phone").textContent(), legal.contactPhone);
     assert.equal(await page.locator("#repairs-rows img").count(), 0);
     assert.equal(await page.evaluate(() => window.repairsXss), undefined);
     const vehicleBox = await page.locator("#repairs-function .repairs-vehicle-name").boundingBox();
@@ -279,12 +282,25 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     assert.equal(await page.locator("#repairs-function .repairs-table").evaluate((element) => element.scrollWidth <= element.clientWidth), true);
     if (process.env.REPAIRS_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.REPAIRS_SCREENSHOT_DIR, "repairs-mobile.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 900 });
+    const { contactName, contactPhone, ...withoutContacts } = legal;
+    for (const contact of [{ contactName }, { contactPhone }, {}]) {
+      await send({ ...withoutContacts, ...contact });
+      await page.locator("#repairs-refresh").click();
+      await page.waitForFunction(() => !document.querySelector("#repairs-refresh").disabled);
+      for (const [field, selector] of [["contactName", ".repairs-contact-name"], ["contactPhone", ".repairs-contact-phone"]]) {
+        const element = page.locator(`#repairs-rows ${selector}`);
+        assert.equal(await element.count(), contact[field] ? 1 : 0);
+        if (contact[field]) assert.equal(await element.textContent(), contact[field]);
+      }
+    }
     const unsafeCounterparty = '<img src=x onerror="window.repairsXss=1">';
-    await send({ ...legal, counterpartyName: unsafeCounterparty });
+    await send({ ...legal, counterpartyName: unsafeCounterparty, contactName: unsafeCounterparty, contactPhone: unsafeCounterparty });
     await page.locator("#repairs-refresh").click();
-    await page.getByText(unsafeCounterparty, { exact: true }).waitFor();
+    await page.locator("#repairs-rows .repairs-counterparty").filter({ hasText: unsafeCounterparty }).waitFor();
     assert.equal(await page.locator("#repairs-rows img").count(), 0);
     assert.equal(await page.evaluate(() => window.repairsXss), undefined);
+    assert.equal(await page.locator("#repairs-rows .repairs-contact-name").textContent(), unsafeCounterparty);
+    assert.equal(await page.locator("#repairs-rows .repairs-contact-phone").textContent(), unsafeCounterparty);
     await send({ ...legal, vehicleName: "" });
     await page.locator("#repairs-refresh").click();
     await page.getByText("Договор не указан", { exact: true }).waitFor();
@@ -293,6 +309,7 @@ test("repairs browser list loads real API data, renders safely, refreshes, resto
     await page.locator("#repairs-refresh").click();
     await page.waitForFunction(() => !document.querySelector("#repairs-refresh").disabled);
     assert.equal(await page.locator("#repairs-function .repairs-counterparty").count(), 0);
+    assert.equal(await page.locator("#repairs-rows .repairs-contact").count(), 0);
     failList = true;
     await page.locator("#repairs-refresh").click();
     await page.getByText(/Произошёл сбой обновления.*Обратитесь в магазин/).waitFor();

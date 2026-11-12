@@ -800,6 +800,7 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .repairs-function .results-panel__controls > .btn-primary { min-height: 40px; padding: 8px 16px; color: #fff; border-color: var(--accent); background: var(--accent); }
 .repairs-function .results-panel__controls > .btn-primary:hover:enabled, .repairs-function .results-panel__controls > .btn-primary:focus-visible { border-color: var(--accent-dark); background: var(--accent-dark); }
 .repairs-counterparty { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.repairs-contact { display: block; margin-top: 4px; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .repairs-name-column { width: 46%; }
 .repairs-readiness-column { width: 30%; }
 .repairs-payment-column { width: 24%; }

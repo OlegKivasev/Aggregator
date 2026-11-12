@@ -153,6 +153,9 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       || ["documentId", "number", "date", "vehicleName", "status"].some((key) => typeof card[key] !== "string")
       || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(card.documentId)
       || (card.counterpartyName !== undefined && (typeof card.counterpartyName !== "string" || !card.counterpartyName.trim()))
+      || ["contactName", "contactPhone"].some((field) => card[field] !== undefined
+        && (typeof card[field] !== "string" || !card[field].trim() || card[field].length > (field === "contactName" ? 500 : 200)
+          || /[\u0000-\u001f\u007f-\u009f]/u.test(card[field])))
       || !validReadiness(card.goodsReadiness) || fresh && !card.goodsReadiness
       || !validPayment(card) || !validPaymentOptions(card.paymentOptions)
       || (card.testPlatform !== undefined && typeof card.testPlatform !== "boolean")
@@ -195,6 +198,13 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
         counterparty.className = "repairs-counterparty panel__meta";
         counterparty.textContent = card.counterpartyName;
         vehicleCell.append(counterparty);
+      }
+      for (const [field, className] of [["contactName", "repairs-contact-name"], ["contactPhone", "repairs-contact-phone"]]) {
+        if (!card[field]) continue;
+        const contact = document.createElement("span");
+        contact.className = `${className} repairs-contact`;
+        contact.textContent = card[field];
+        vehicleCell.append(contact);
       }
       row.append(vehicleCell, readinessCell(card.goodsReadiness), paymentCell(card));
       fragment.append(row);

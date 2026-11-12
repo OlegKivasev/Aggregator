@@ -352,6 +352,41 @@ test("integration status verifies the server secret without requiring or creatin
 });
 
 
+test("repair contacts are optional independent fields with bounded safe text", () => {
+  assert.deepEqual(parseRepairCard(card), card);
+  for (const contact of [{ contactName: "Анна" }, { contactPhone: "+7 (900) 123-45-67" },
+    { contactName: "Анна", contactPhone: "+7 (900) 123-45-67" }]) {
+    assert.deepEqual(parseRepairCard({ ...card, ...contact }), { ...card, ...contact });
+    for (const [key, value] of Object.entries(contact)) {
+      assert.equal(parseRepairCard({ ...card, [key]: ` ${value} ` })[key], value);
+    }
+  }
+  for (const [field, limit] of [["contactName", 500], ["contactPhone", 200]]) {
+    for (const value of [null, false, 42, {}, [], "", " ", "line\nline", "x".repeat(limit + 1)]) {
+      assert.throws(() => parseRepairCard({ ...card, [field]: value }), RepairValidationError);
+    }
+  }
+});
+
+test("repair contacts survive both stores and restart, and disappear when 1C removes them", async () => {
+  await withServer(secret, async ({ baseUrl, close }, { start }) => {
+    const contacts = { contactName: "Анна Тестовая", contactPhone: "89277261454" };
+    for (const testPlatform of [false, true]) {
+      const value = { ...card, ...contacts, ...(testPlatform ? { testPlatform } : {}) };
+      assert.equal((await send(baseUrl, value)).status, 200);
+    }
+    await close();
+    const restarted = await start();
+    assert.deepEqual((await (await fetch(`${restarted.baseUrl}/api/repairs`)).json()).repairs,
+      [{ ...card, ...contacts }, { ...card, ...contacts, testPlatform: true }]);
+    for (const value of [card, { ...card, testPlatform: true }]) {
+      assert.equal((await send(restarted.baseUrl, value)).status, 200);
+    }
+    assert.deepEqual((await (await fetch(`${restarted.baseUrl}/api/repairs`)).json()).repairs,
+      [card, { ...card, testPlatform: true }]);
+  });
+});
+
 test("legal repair cards validate counterparty and retain an honest empty contract", () => {
   const legal = { ...card, vehicleName: "Договор — тестовый автомобиль", counterpartyName: 'ООО «Тестовый автопарк»' };
   assert.deepEqual(parseRepairCard({ ...legal, counterpartyName: ` ${legal.counterpartyName} ` }), legal);
