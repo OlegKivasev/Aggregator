@@ -179,10 +179,39 @@ export class RealOrderApplicationService implements RealOrderGateway {
   }
 
   async refresh(lines: PurchaseLine[], signal: AbortSignal): Promise<RefreshedPurchaseLine[]> {
+    signal.throwIfAborted();
     const found = new Map<string, { offers: Array<{ result: PurchaseLine["result"]; reference: PurchaseReference }>; issue?: CartRefreshIssue }>();
+    const groupsBySupplier = new Map<OrderSupplier, { supplier: OrderSupplier; jobs: Array<{ key: string; line: PurchaseLine }>; next: number; active: number }>();
+    const keys = new Set<string>();
     for (const line of lines) {
       const key = JSON.stringify([line.reference.supplier, line.result.article]);
-      if (found.has(key)) continue;
+      if (keys.has(key)) continue;
+      keys.add(key);
+      const supplier = line.reference.supplier;
+      let group = groupsBySupplier.get(supplier);
+      if (!group) {
+        group = { supplier, jobs: [], next: 0, active: 0 };
+        groupsBySupplier.set(supplier, group);
+      }
+      group.jobs.push({ key, line });
+    }
+    const groups = [...groupsBySupplier.values()];
+    let cursor = 0;
+    const takeNext = () => {
+      for (let checked = 0; checked < groups.length; checked++) {
+        const group = groups[cursor];
+        cursor = (cursor + 1) % groups.length;
+        // Autopiter already sends up to four price requests inside one search.
+        const limit = group.supplier === "autopiter" ? 1 : 2;
+        if (group.next >= group.jobs.length || group.active >= limit) continue;
+        group.active++;
+        return { group, ...group.jobs[group.next++] };
+      }
+      return null;
+    };
+    const controller = new AbortController();
+    const refreshSignal = AbortSignal.any([signal, controller.signal]);
+    const lookup = async (key: string, line: PurchaseLine) => {
       const offers: Array<{ result: PurchaseLine["result"]; reference: PurchaseReference }> = [];
       let status: string | null = null;
       const failed = (message: string): void => { found.set(key, { offers: [], issue: { reason: "check_failed", message } }); };
@@ -192,20 +221,39 @@ export class RealOrderApplicationService implements RealOrderGateway {
             const reference = getPurchaseReference(event.result);
             if (reference) offers.push({ result: event.result, reference });
           } else if (event.type === "supplier_status" && event.supplier === line.reference.supplier) status = event.status;
-        }, signal);
-        signal.throwIfAborted();
+        }, refreshSignal);
+        refreshSignal.throwIfAborted();
         if (status === "completed") found.set(key, { offers });
         else if (status === "auth_error") failed(`Не удалось проверить товар: требуется авторизация ${supplierNames[line.reference.supplier]}.`);
         else if (status === "timeout") failed("Не удалось проверить товар: поставщик не ответил вовремя.");
         else failed("Не удалось проверить товар у поставщика.");
       } catch (error) {
-        signal.throwIfAborted();
+        refreshSignal.throwIfAborted();
         if (error instanceof SupplierAuthError) failed(`Не удалось проверить товар: требуется авторизация ${supplierNames[line.reference.supplier]}.`);
         else if (error instanceof SupplierTimeoutError) failed("Не удалось проверить товар: поставщик не ответил вовремя.");
         else if (error instanceof SupplierIntegrationError) failed("Не удалось проверить товар у поставщика.");
         else throw error;
       }
+    };
+    // A shared bounded pool keeps independent suppliers moving even if one is slow.
+    const workers = Array.from({ length: Math.min(4, keys.size) }, async () => {
+      while (true) {
+        refreshSignal.throwIfAborted();
+        const job = takeNext();
+        if (!job) return;
+        try { await lookup(job.key, job.line); }
+        catch (error) { controller.abort(error); throw error; }
+        finally { job.group.active--; }
+      }
+    });
+    try { await Promise.all(workers); }
+    catch (error) {
+      controller.abort(error);
+      await Promise.allSettled(workers);
+      signal.throwIfAborted();
+      throw error;
     }
+    refreshSignal.throwIfAborted();
     return lines.map((line) => {
       const lookup = found.get(JSON.stringify([line.reference.supplier, line.result.article]));
       if (!lookup) throw new Error("Cart offer refresh result is missing");

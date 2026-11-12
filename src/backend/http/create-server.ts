@@ -417,8 +417,12 @@ export function createAggregatorServer({
             const choices = await cart.orderChoices(fields.revision, fields.supplier, controller.signal, fields.itemIds);
             if (!controller.signal.aborted) serveJson(response, 200, choices);
           } else if (url.pathname === "/api/cart/refresh") {
+            const started = performance.now();
             const result = await cart.refreshForOrder(fields.revision, fields.supplier, controller.signal, fields.itemIds);
-            if (!controller.signal.aborted) serveJson(response, 200, result);
+            if (!controller.signal.aborted) {
+              response.setHeader("Server-Timing", `cart-refresh;dur=${(performance.now() - started).toFixed(1)}`);
+              serveJson(response, 200, result);
+            }
           } else if (url.pathname === "/api/cart/uncertain/resolve") {
             serveJson(response, 200, cart.resolveUncertainLine(fields.id, fields.revision, fields.confirmedAbsent, fields.confirmedPlaced));
           } else if (url.pathname === "/api/cart/order") {

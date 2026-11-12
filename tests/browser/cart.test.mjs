@@ -3145,6 +3145,58 @@ test("opening the cart refreshes its offers and a supplier tab can order without
   }, { refreshedPrice: 125 });
 });
 
+test("opening 11 goods uses the bounded real refresh service and reports server timing", async () => {
+  const references = {
+    armtek: { supplier: "armtek", keyzak: "TEST01" },
+    "part-kom": { supplier: "part-kom", makerId: "101", providerId: "202" },
+    autopiter: { supplier: "autopiter", detailUid: "fixture-detail", sellerId: "10" },
+  };
+  const extraOffers = ["armtek", "armtek", "armtek", "armtek", "armtek", "part-kom", "part-kom", "autopiter"]
+    .map((supplier, index) => offer(supplier, 10, references[supplier], { article: `CART${index}`, isReturnable: true }));
+  let items = [];
+  let calls = 0;
+  let active = 0;
+  let peak = 0;
+  const service = new RealOrderApplicationService(new SupplierSessionManager(), async (query, emit, signal) => {
+    calls++;
+    peak = Math.max(peak, ++active);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      signal.throwIfAborted();
+      const item = items.find((item) => item.reference.supplier === query.suppliers[0] && item.result.article === query.article);
+      emit({ type: "result", result: attachPurchaseReference({ ...item.result, price: 125 }, item.reference) });
+      emit({ type: "supplier_status", supplier: query.suppliers[0], status: "completed" });
+    } finally { active--; }
+  });
+  await withCartPage(async (page, { refreshCalls, orderCalls }) => {
+    for (let index = 0; index < 11; index++) {
+      await page.locator("#results-body .cart-offer-button").nth(index).click();
+      await page.waitForFunction((count) => document.querySelector("#cart-badge").textContent === String(count), index + 1);
+    }
+    const refreshed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/cart/refresh");
+    await page.locator("#cart-toggle").click();
+    const response = await refreshed;
+    assert.equal(response.status(), 200);
+    assert.match(response.headers()["server-timing"], /^cart-refresh;dur=\d+\.\d$/);
+    await page.locator("#cart-refresh-overlay").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 11);
+    assert.ok((await page.locator("#cart-items .cart-purchase-price").allTextContents()).every((price) => price === "125,00"));
+    assert.equal(refreshCalls.length, 1);
+    assert.equal(calls, 11);
+    assert.equal(peak, 4);
+    assert.equal(active, 0);
+    await page.locator("#cart-tab-armtek").click();
+    await openCheckout(page);
+    assert.equal(await page.locator(".cart-order-table tbody tr").count(), 6);
+    assert.equal(refreshCalls.length, 1);
+    assert.equal(calls, 11);
+    assert.equal(orderCalls.length, 0);
+  }, { autopiter: true, extraOffers, reducedMotion: "reduce", refresh: async (lines, signal) => {
+    items = lines;
+    return service.refresh(lines, signal);
+  } });
+});
+
 test("opening the cart shows a centered blocking refresh state until supplier offers finish refreshing", async () => {
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
