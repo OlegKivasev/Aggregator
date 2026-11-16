@@ -364,12 +364,11 @@ test("frontend opens on-demand analog search for a selected result", async () =>
   assert.match(app, /brands: \[result\.brand\]/);
   assert.match(app, /formatBrand\(result\.brand\)/);
   assert.match(app, /formatArticle\(result\.article\)/);
-  assert.match(app, /const analogSupplierIds = \["rossko", "armtek", "part-kom", "stparts", "forum-auto", "autopiter"\]/);
-  assert.match(app, /analogSupplierIds\.filter\(isSupplierVisible\)/);
+  assert.match(app, /analogSearchSuppliers = \[\];/);
   assert.doesNotMatch(html, /id="analogs-search-status"/);
   assert.doesNotMatch(app, /setAnalogSearchStatus|updateAnalogSearchProgress/);
   assert.match(app, /searchResultButton\.addEventListener\("click"/);
-  assert.match(app, /const tab = createSearchTab\(\{ article, enabledSuppliers: getEnabledSuppliers\(\) \}\);/);
+  assert.match(app, /const tab = createSearchTab\(\{ article \}\);/);
   assert.match(app, /form\.requestSubmit\(\);/);
   assert.match(app, /Показать всё/);
   assert.match(app, /analogSearchCompleted \? Number\.POSITIVE_INFINITY/);
@@ -407,32 +406,26 @@ test("frontend shows purchase price below the retail price and discovers brands 
   assert.match(app, /const getMainTableResults = \(items\) =>/);
   assert.match(app, /openArticleAnalogsModal\(tab, submitButton\)/);
   assert.match(app, /if \(!brands\.length\) \{\s+closeArticleAnalogsModal\(\);\s+return;/);
-  assert.match(app, /analogSupplierIds\.filter\(\(supplier\) => tab\?\.enabledSuppliers\.includes\(supplier\)/);
+  assert.doesNotMatch(app, /searchParams\.append\("supplier"/);
 });
 
-test("frontend can hide a supplier from searches, results, and authorization settings", async () => {
+test("frontend has no local supplier switches and keeps authorization settings", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
 
-  assert.match(html, /class="supplier-visibility-input" type="checkbox" value="armtek"/);
+  assert.doesNotMatch(html, /supplier-visibility-input|supplier-enabled-input|filters-suppliers/);
   assert.match(html, /class="auth-card" data-supplier="armtek"/);
-  assert.match(app, /const supplierVisibilityStorageKey = "autoservice\.supplierVisibility"/);
-  assert.match(app, /const updateSupplierVisibility = \(supplier\)/);
-  assert.match(app, /result\.isAnalog !== true\)[\s\S]*?isSupplierVisible\(result\.supplier\)/);
-  assert.match(app, /analogSearchSuppliers = analogSearchSuppliers\.filter\(isSupplierVisible\);/);
+  assert.doesNotMatch(app, /supplierVisibility|isSupplierVisible|supplierEnabledInputs/);
 });
 
-test("frontend preserves selected search suppliers when sessions load after restart", async () => {
+test("frontend records the actual server selection instead of restoring search switches", async () => {
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
 
-  assert.match(app, /let supplierSearchSelectionsRestored = false;/);
-  assert.match(app, /if \(supplierSearchSelectionsRestored\) \{\s+syncActiveTab\(\);\s+saveSearchState\(\);\s+\}/);
-  assert.match(app, /supplierSearchSelectionsRestored = true;/);
-  assert.doesNotMatch(app, /updateRosskoSessionCard\(rosskoSession, true\)/);
-  assert.doesNotMatch(app, /updateArmtekSessionCard\(armtekSession, true\)/);
+  assert.match(app, /tab\.enabledSuppliers = payload\.suppliers;/);
+  assert.doesNotMatch(app, /supplierSearchSelectionsRestored|getEnabledSuppliers/);
 });
 
-test("main-search filters use a compact trigger, supplier disclosure, and direct filter buttons", async () => {
+test("main-search filters use a compact trigger and direct result filter buttons", async () => {
   const html = await readFile(new URL("../src/frontend/index.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/frontend/app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/frontend/styles.css", import.meta.url), "utf8");
@@ -443,8 +436,7 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.doesNotMatch(html, /id="filters-sidebar" hidden/);
   assert.doesNotMatch(html, /<h2>Фильтры<\/h2>/);
   assert.doesNotMatch(html, /id="filters-close"/);
-  assert.match(html, /id="filters-suppliers"/);
-  assert.match(html, /class="supplier-enabled-input" type="checkbox" value="rossko" checked/);
+  assert.doesNotMatch(html, /id="filters-suppliers"|supplier-enabled-input/);
   assert.match(html, /<details class="filters-sidebar__section filters-sidebar__disclosure" data-filter-section="warehouse" hidden>/);
   assert.match(html, /<details class="filters-sidebar__section filters-sidebar__disclosure" data-filter-section="markupPrice" hidden>/);
   assert.match(html, /<details class="filters-sidebar__section filters-sidebar__disclosure" data-filter-section="deliveryDate" hidden>/);
@@ -471,14 +463,12 @@ test("main-search filters use a compact trigger, supplier disclosure, and direct
   assert.match(styles, /\.filters-sidebar\s*\{[^}]*--filters-sidebar-width: 200px;[^}]*min-width: 180px;/s);
   assert.match(styles, /\.filters-sidebar\s*\{[^}]*height: 100%;[^}]*overflow-y: auto;/s);
   assert.match(styles, /@media \(max-width: 575\.98px\)\s*\{\s*\.workspace/);
-  assert.match(styles, /\.filters-suppliers\s*\{[^}]*margin-top: 0;/s);
   assert.match(styles, /\.filters-sidebar__disclosure summary\s*\{[^}]*cursor: pointer;/s);
   assert.match(styles, /\.filters-sidebar__resize\s*\{[^}]*cursor: col-resize;/s);
   assert.match(styles, /\.filters-sidebar__resize::before\s*\{[^}]*height: 72px;/s);
   assert.match(app, /const filtersCloseThresholdRatio = 0\.02;/);
   assert.match(app, /const getFiltersCloseWidth = \(sidebar\) =>/);
   assert.match(app, /filtersResize\.releasePointerCapture\(event\.pointerId\);\s+setFiltersSidebarOpen\(false\);/s);
-  assert.match(styles, /\.supplier-search-toggle \.supplier-enabled-input\s*\{[^}]*clip-path: inset\(50%\);/s);
 });
 
 test("garage uses a centered car icon and mirrors the filter resize control", async () => {
@@ -871,7 +861,7 @@ test("search reports supplier authorization failures without waiting for session
   const submitHandler = app.slice(app.indexOf('form.addEventListener("submit"'));
 
   assert.doesNotMatch(submitHandler, /checkSupplierSessions|showSupplierSessionCheckProgress/);
-  assert.match(submitHandler, /startSearch\(article, enabledSuppliers\);/);
+  assert.match(submitHandler, /startSearch\(article\);/);
   assert.match(app, /payload\.status === "auth_error"[\s\S]*?showSearchToast\(/);
   assert.match(app, /Поиск по остальным поставщикам продолжается/);
   assert.doesNotMatch(app, /supplier-check/);

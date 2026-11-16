@@ -28,7 +28,11 @@ export class SearchApplicationService {
     emit: (event: SearchStreamEvent) => void,
     signal: AbortSignal,
   ): Promise<void> {
-    const selectedAdapters = selectSupplierAdapters(this.adapters, query.suppliers);
+    // An omitted selection means all currently connected suppliers. Explicit selections
+    // remain available to internal callers, such as refreshing a cart supplier.
+    const selectedAdapters = query.suppliers === undefined
+      ? this.adapters.filter((adapter) => this.sessionManager.getSession(adapter.id).authorized)
+      : selectSupplierAdapters(this.adapters, query.suppliers);
     const currentAdapters = "mode" in query && query.mode === "analogs"
       ? selectedAdapters.filter((adapter) => adapter.searchAnalogs)
       : "mode" in query && query.mode === "brands"

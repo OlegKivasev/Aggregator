@@ -84,19 +84,6 @@
         <div class="filters-control">
           <button type="button" class="filters-toggle" id="filters-toggle" aria-controls="filters-sidebar" aria-expanded="true" aria-label="Скрыть фильтры" title="Скрыть фильтры">⋮</button>
           <aside class="filters-sidebar card border-0 shadow-sm" id="filters-sidebar">
-            <details class="filters-suppliers" id="filters-suppliers">
-            <summary>Поставщики</summary>
-            <div class="filters-sidebar__suppliers">
-              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="rossko" checked /><span>Rossko</span></label>
-              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="armtek" checked /><span>Armtek</span></label>
-              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="part-kom" checked /><span>PartKOM</span></label>
-              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="stparts" checked /><span>STParts</span></label>
-              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="forum-auto" checked /><span>Forum-Auto</span></label>
-              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="autopiter" checked /><span>Автопитер</span></label>
-              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="motordetal" checked /><span>MotorDetal</span></label>
-              <label class="supplier-search-toggle" hidden><input class="supplier-enabled-input" type="checkbox" value="mladov" checked /><span>Механик Ладов</span></label>
-            </div>
-            </details>
             <section class="filters-sidebar__section" data-filter-section="supplier" hidden>
             <h3>Поставщик</h3>
             <div class="filters-sidebar__values" data-filter-values="supplier" aria-live="polite"></div>
@@ -605,21 +592,7 @@
         <details class="suppliers-panel" data-admin-only>
           <summary class="suppliers-panel__summary">Поставщики</summary>
 
-          <details class="supplier-visibility-settings">
-            <summary class="supplier-visibility-settings__summary">Показывать поставщиков в приложении</summary>
-            <p>Отключенный поставщик не участвует в новом поиске и поиске аналогов, а его предложения и карточка авторизации скрываются.</p>
-            <div class="supplier-options__list" aria-label="Отображаемые поставщики">
-              <label><input class="supplier-visibility-input" type="checkbox" value="rossko" checked><span>Rossko</span></label>
-              <label><input class="supplier-visibility-input" type="checkbox" value="armtek" checked><span>Armtek</span></label>
-              <label><input class="supplier-visibility-input" type="checkbox" value="part-kom" checked><span>PartKOM</span></label>
-              <label><input class="supplier-visibility-input" type="checkbox" value="stparts" checked><span>STParts</span></label>
-              <label><input class="supplier-visibility-input" type="checkbox" value="forum-auto" checked><span>Forum-Auto</span></label>
-              <label><input class="supplier-visibility-input" type="checkbox" value="autopiter" checked><span>Автопитер</span></label>
-              <label><input class="supplier-visibility-input" type="checkbox" value="motordetal" checked><span>MotorDetal</span></label>
-              <label><input class="supplier-visibility-input" type="checkbox" value="mladov" checked><span>Механик Ладов</span></label>
-            </div>
-          </details>
-
+          <p>Поиск автоматически использует всех подключённых поставщиков для всех сотрудников.</p>
           <article class="auth-card" data-supplier="mladov">
             <div class="auth-card__header">
               <div><h3>Механик Ладов</h3></div>

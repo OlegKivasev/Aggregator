@@ -90,13 +90,13 @@ test("Autopiter connects, searches analogs from offers and discovered brands, fi
     await page.getByText("Возвратный фильтр", { exact: true }).waitFor();
     assert.equal(await page.getByText("Невозвратный фильтр", { exact: true }).count(), 0);
     assert.equal(await page.locator("#results-body .cart-offer-button:enabled").count(), 1);
-    assert.deepEqual(searches, [["autopiter"]]);
+    assert.deepEqual(searches, [[]]);
     await page.locator("#results-body .results-table__row").click({ button: "right" });
     await page.locator("#show-analogs-button").click();
     await page.locator("#analogs-results-body").getByText("Возвратный аналог", { exact: true }).waitFor();
     assert.equal(await page.getByText("Невозвратный аналог", { exact: true }).count(), 0);
     assert.equal(await page.locator("#analogs-results-body .cart-offer-button:enabled").count(), 1);
-    assert.deepEqual(searchQueries.at(-1), { mode: "analogs", article: "A1", brand: "TEST", suppliers: ["autopiter"] });
+    assert.deepEqual(searchQueries.at(-1), { mode: "analogs", article: "A1", brand: "TEST", suppliers: [] });
     await page.locator("#analogs-modal button[data-close-analogs-modal]").click();
     await openSettings();
     await page.locator('[data-supplier="autopiter"] summary').click();
@@ -110,10 +110,10 @@ test("Autopiter connects, searches analogs from offers and discovered brands, fi
     await page.locator("#article-input").fill("A0");
     await page.locator("#submit-button").click();
     await page.locator('#article-analogs-modal-brands input[value="TEST"]').check();
-    assert.deepEqual(searchQueries.at(-1), { mode: "brands", article: "A0", brand: null, suppliers: ["autopiter"] });
+    assert.deepEqual(searchQueries.at(-1), { mode: "brands", article: "A0", brand: null, suppliers: [] });
     await page.locator("#article-analogs-modal-continue").click();
     await page.locator("#analogs-results-body").getByText("Невозвратный аналог", { exact: true }).waitFor();
-    assert.deepEqual(searchQueries.at(-1), { mode: "analogs", article: "A0", brand: "TEST", suppliers: ["autopiter"] });
+    assert.deepEqual(searchQueries.at(-1), { mode: "analogs", article: "A0", brand: "TEST", suppliers: [] });
     await page.locator("#analogs-modal button[data-close-analogs-modal]").click();
     await openSettings();
     await page.locator('[data-supplier="autopiter"] summary').click();

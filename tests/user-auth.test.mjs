@@ -8,7 +8,7 @@ import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 
 const integrationSecret = "user-auth-test-integration-secret-32-bytes";
 
-async function withServer(check) {
+async function withServer(check, application = { streamSearch: async () => {}, listSupplierSessions: () => [] }) {
   const directory = await mkdtemp(join(tmpdir(), "aggregator-user-auth-"));
   const previousPath = process.env.GARAGE_DB_PATH;
   const previousSecret = process.env.ONEC_REPAIRS_INTEGRATION_SECRET;
@@ -16,7 +16,7 @@ async function withServer(check) {
   process.env.ONEC_REPAIRS_INTEGRATION_SECRET = integrationSecret;
   const auth = new UserAuthService(process.env.GARAGE_DB_PATH, "Администратор", "admin-password-123");
   const server = createAggregatorServer({
-    application: { streamSearch: async () => {}, listSupplierSessions: () => [] },
+    application,
     publicDir: resolve("src/frontend"), auth,
   });
   await new Promise((resolvePromise, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolvePromise); });
@@ -102,6 +102,38 @@ test("serves the login page before authentication while protecting API routes", 
     const protectedResponse = await fetch(`${baseUrl}/api/repairs`);
     assert.equal(protectedResponse.status, 401);
   });
+});
+
+test("pricing employees can read shared supplier status while only admins manage connections", async () => {
+  const sessions = [{ supplier: "autopiter", authorized: true, lastCheckedAt: null, lastAuthorizedAt: null }];
+  let reads = 0;
+  await withServer(async (baseUrl) => {
+    assert.equal((await fetch(`${baseUrl}/api/suppliers/sessions`)).status, 401);
+    const adminCookie = await login(baseUrl, "Администратор", "admin-password-123");
+    for (const [fio, permissions] of [["Проценщик", ["markup"]], ["Механик", ["repairs"]]]) {
+      assert.equal((await fetch(`${baseUrl}/api/users`, {
+        method: "POST", headers: { Cookie: adminCookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ fio, password: "employee-test-password", permissions }),
+      })).status, 201);
+    }
+    const employeeCookie = await login(baseUrl, "Проценщик", "employee-test-password");
+    for (const Cookie of [adminCookie, employeeCookie]) {
+      const response = await fetch(`${baseUrl}/api/suppliers/sessions`, { headers: { Cookie } });
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { sessions });
+    }
+    const restrictedCookie = await login(baseUrl, "Механик", "employee-test-password");
+    assert.equal((await fetch(`${baseUrl}/api/suppliers/sessions`, { headers: { Cookie: restrictedCookie } })).status, 403);
+    for (const supplier of ["rossko", "armtek", "part-kom", "stparts", "forum-auto", "autopiter", "motordetal", "mladov"]) {
+      for (const action of ["authorize", "logout"]) {
+        const response = await fetch(`${baseUrl}/api/suppliers/${supplier}/${action}`, {
+          method: "POST", headers: { Cookie: employeeCookie, "Content-Type": "application/json" }, body: "{}",
+        });
+        assert.equal(response.status, 403);
+      }
+    }
+    assert.equal(reads, 2);
+  }, { streamSearch: async () => {}, listSupplierSessions: () => { reads++; return sessions; } });
 });
 
 test("only admins can persist a complete user order; invalid or stale orders leave it intact", async () => {
