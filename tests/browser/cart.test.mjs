@@ -2334,7 +2334,8 @@ test("mobile order history shows full item details and retains supplier, status 
     assert.equal(await page.locator(".history-card table").first().evaluate((node) => getComputedStyle(node).display), "table");
     await page.locator("#history-close").click();
     assert.equal(await page.locator("#history-toggle").evaluate((node) => node === document.activeElement), true);
-  }, { allSuppliers: true, viewport: { width: 390, height: 844 }, partKomOrderHistory: async () => history, supplierOrderHistory: async () => history });
+  }, { allSuppliers: true, autopiter: true, fixedTime: "2026-10-17T12:00:00Z", viewport: { width: 390, height: 844 },
+    partKomOrderHistory: async () => history, supplierOrderHistory: async () => history });
 });
 
 test("cart honors reduced motion, constrains focus and fits mobile viewport", async () => {
@@ -2995,10 +2996,23 @@ test("cart clear confirmation rejects a cart changed after the user reviewed it"
         body: JSON.stringify({ revision: cart.revision, quantity: 2 }) });
       if (!response.ok) throw new Error("Fixture update failed");
     });
+    const calls = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (path.startsWith("/api/cart")) calls.push(`${request.method()} ${path}`);
+    });
+    const rejection = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/cart/items"
+      && response.request().method() === "DELETE");
     await page.locator("#cart-clear-accept").click();
+    assert.equal((await rejection).status(), 409);
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
     assert.match(await page.locator("#cart-status").textContent(), /Корзина изменилась/);
     assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 1);
+    assert.deepEqual(calls, ["DELETE /api/cart/items", "GET /api/cart", "GET /api/cart/tabs"]);
+    await page.locator("#cart-items .cart-quantity").fill("3");
+    await page.locator("#cart-title").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "3");
+    assert.equal(await page.locator("#cart-status").textContent(), "");
   }, { reducedMotion: "reduce" });
 });
 
@@ -4219,17 +4233,17 @@ test("cancelled status replaces cancellation review and acknowledges alerts acro
     status: "Отмена", fulfillment: "cancelled", expectedDate: null, guaranteedDate: null, warehouse: null }] }] });
   await withCartPage(async (page, { origin }) => {
     await page.locator("#history-toggle").click();
-    await page.waitForFunction(() => document.querySelector("#history-status-cancelled")?.title === "Новые отмены: 4");
+    await page.waitForFunction(() => document.querySelector("#history-status-cancelled")?.title === "Новые отмены: 5");
     assert.equal(await page.locator("#history-cancellation-notice, #history-cancellation-view, #history-cancellation-done").count(), 0);
     assert.equal(await page.locator("#history-title").innerText(), "История заказов");
     const cancelled = page.locator("#history-status-cancelled");
     assert.equal(await cancelled.evaluate((node) => getComputedStyle(node).color), "rgb(161, 46, 53)");
     await page.locator("#history-status-active").click();
     await page.locator("#history-close").click();
-    assert.equal((await (await page.request.get(`${origin}/api/order-cancellations`)).json()).total, 4);
+    assert.equal((await (await page.request.get(`${origin}/api/order-cancellations`)).json()).total, 5);
     await page.locator("#history-toggle").click();
     await page.locator("#history-tab-all").click();
-    await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 4);
+    await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 5);
     assert.equal(await page.locator(".history-card img").count(), 0);
     assert.equal(await page.evaluate(() => window.noticeXss), undefined);
     if (process.env.TEST_CAPTURE_DIR) await page.locator("#history-modal").screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "cancelled-status-desktop.png") });
@@ -4256,7 +4270,7 @@ test("cancelled status replaces cancellation review and acknowledges alerts acro
     await page.locator("#history-reload").click();
     await page.waitForFunction(() => document.querySelector("#history-status-cancelled").title === "Новые отмены: 1");
     assert.equal(await page.locator("#history-toggle.has-cancellations").count(), 1);
-  }, { allSuppliers: true, fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => partKomHistory(),
+  }, { allSuppliers: true, autopiter: true, fixedTime: "2026-10-17T12:00:00Z", partKomOrderHistory: async () => partKomHistory(),
     supplierOrderHistory: async () => supplierHistory() });
 });
 

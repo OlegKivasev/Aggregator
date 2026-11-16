@@ -413,7 +413,7 @@ body:has(.garage-add-modal:not([hidden])) { overflow: hidden; }
   :is(#cart-modal, #history-modal, #cart-order-confirm) .analogs-modal__header { flex: 0 0 auto; padding: 12px; gap: 8px; }
   :is(#cart-modal, #history-modal, #cart-order-confirm) .analogs-modal__header h2 { min-width: 0; font-size: 20px; overflow-wrap: anywhere; }
   :is(#cart-modal, #history-modal, #cart-order-confirm) .cart-tabs { flex: 0 0 auto; padding-inline: 12px; }
-  #cart-modal .cart-tabs { flex-wrap: wrap; max-height: none; overflow: visible; }
+  #cart-modal .cart-tabs { flex-wrap: wrap; max-height: 144px; overflow-y: auto; overscroll-behavior: contain; }
   :is(#cart-modal, #history-modal, #cart-order-confirm) .cart-content { flex: 0 0 auto; min-width: 0; min-height: 0; padding: 12px; overflow: visible; }
   :is(#cart-modal, #history-modal, #cart-order-confirm) .cart-footer { min-width: 0; padding: 12px; gap: 12px; }
   #cart-modal .cart-footer__summary { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }

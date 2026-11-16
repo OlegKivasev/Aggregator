@@ -440,8 +440,9 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       return true;
     } catch (error) {
       notify(error.message, true);
-      status.textContent = error.message;
       try { await refresh(); } catch { /* The original actionable error remains visible. */ }
+      // Loading shared tabs redraws the cart and clears the previous status.
+      status.textContent = error.message;
       return false;
     } finally { busy = false; if (source) source.disabled = false; render(); }
   };

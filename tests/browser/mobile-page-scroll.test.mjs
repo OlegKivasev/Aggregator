@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 
 // Long fictional lists exercise the real renderers without contacting suppliers.
 const repairs = [false, true].flatMap((testPlatform) => Array.from({ length: 36 }, (_, index) => ({
-  documentId: `mobile-${testPlatform}-${index}`, number: `ЗН-${index}`, date: "2026-11-09T10:00:00",
+  documentId: `12345678-abcd-1234-${testPlatform ? "bbbb" : "aaaa"}-${String(index).padStart(12, "0")}`, number: `ЗН-${index}`, date: "2026-11-09T10:00:00",
   vehicleName: `Toyota Land Cruiser ${index} | А123ВС163`, status: "В работе", testPlatform,
   counterpartyName: `Организация ${index} с длинным названием ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`,
   goodsReadiness: { totalPositions: 12, availablePositions: index % 13 },
