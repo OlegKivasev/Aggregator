@@ -9,6 +9,8 @@ export function bootstrapNomenclatureStock() {
   const sentinel = document.querySelector("#nomenclature-stock-sentinel");
   const progress = document.querySelector("#nomenclature-stock-progress");
   const loading = document.querySelector("#nomenclature-stock-loading");
+  const moreLoading = document.querySelector("#nomenclature-stock-more-loading");
+  const retry = document.querySelector("#nomenclature-stock-retry");
   const statistics = document.querySelector("#nomenclature-stock-statistics");
   const availabilityEnabled = document.querySelector("#nomenclature-availability-enabled");
   const availability = document.querySelector("#nomenclature-availability");
@@ -31,6 +33,7 @@ export function bootstrapNomenclatureStock() {
   let busy = false;
   let blocked = false;
   let nextCursor = null;
+  let bufferedPage;
   let total = 0;
   let sortField = "id";
   let sortDirection = "asc";
@@ -38,7 +41,7 @@ export function bootstrapNomenclatureStock() {
   const identities = new Set();
   const cursors = new Set();
   const normalize = (value) => [...new Set(value.normalize("NFC").trim().toLocaleLowerCase("ru-RU").split(/\s+/).filter(Boolean))].sort().join(" ");
-  const stop = () => { generation += 1; clearTimeout(timer); timer = undefined; controller?.abort(); controller = undefined; busy = false; loading.hidden = true; table.removeAttribute("aria-busy"); };
+  const stop = () => { generation += 1; clearTimeout(timer); timer = undefined; controller?.abort(); controller = undefined; bufferedPage = undefined; busy = false; loading.hidden = true; moreLoading.hidden = true; retry.hidden = true; table.removeAttribute("aria-busy"); };
   const selectedPrice = () => priceEnabled.checked ? priceType.value : "";
   const selectedAvailability = () => availabilityEnabled.checked ? availability.value : "all";
   const syncSortHeaders = () => {
@@ -48,14 +51,21 @@ export function bootstrapNomenclatureStock() {
       item.closest("th").setAttribute("aria-sort", selected ? (sortDirection === "asc" ? "ascending" : "descending") : "none");
     }
   };
-  const nearEnd = () => sentinel.getBoundingClientRect().top < window.innerHeight + 400;
+  const preloadDistance = 2000;
+  const nearEnd = () => sentinel.getBoundingClientRect().top < window.innerHeight + preloadDistance;
   const load = async (first = false) => {
     if (!active || document.hidden || busy || blocked || (!first && !nextCursor)) return;
+    // Keep one completed page ahead without downloading the entire catalogue.
+    if (bufferedPage && !nearEnd()) return;
+    const prepared = bufferedPage;
+    bufferedPage = undefined;
     const attempt = generation;
     const abort = new AbortController();
     controller = abort; busy = true;
-    progress.textContent = ""; status.textContent = ""; loading.hidden = false; table.setAttribute("aria-busy", "true");
-    const cursor = nextCursor;
+    progress.textContent = ""; retry.hidden = true;
+    if (first) status.textContent = "";
+    loading.hidden = !first; moreLoading.hidden = first; table.setAttribute("aria-busy", "true");
+    const cursor = prepared?.cursor ?? nextCursor;
     try {
       const parameters = new URLSearchParams();
       parameters.set("details", "1"); parameters.set("availability", selectedAvailability());
@@ -63,22 +73,25 @@ export function bootstrapNomenclatureStock() {
       if (cursor) parameters.set("after", cursor);
       if (query) parameters.set("q", query);
       if (sortField !== "id") { parameters.set("sort", sortField); parameters.set("direction", sortDirection); }
-      const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(35_000)]);
-      const response = await fetch(`/api/nomenclature/stock${parameters.size ? `?${parameters}` : ""}`, {
-        cache: "no-store", signal,
-      });
-      let value;
-      try { value = await response.json(); }
-      catch {
-        if (signal.aborted) throw signal.reason;
-        throw new Error(response.ok ? "Сервер вернул пустой или неполный ответ. Обновите список."
-          : `Сервер не смог загрузить остатки (HTTP ${response.status}). Обновите список.`);
+      let value = prepared?.value;
+      if (!prepared) {
+        const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(35_000)]);
+        const response = await fetch(`/api/nomenclature/stock${parameters.size ? `?${parameters}` : ""}`, {
+          cache: "no-store", signal,
+        });
+        try { value = await response.json(); }
+        catch (error) {
+          if (signal.aborted) throw signal.reason;
+          if (error instanceof TypeError) throw error;
+          throw new Error(response.ok ? "Сервер вернул пустой или неполный ответ. Обновите список."
+            : `Сервер не смог загрузить остатки (HTTP ${response.status}). Обновите список.`);
+        }
+        if (!response.ok) throw new Error(typeof value?.message === "string" ? value.message : "Не удалось загрузить остатки из 1С.");
       }
-      if (!response.ok) throw new Error(typeof value?.message === "string" ? value.message : "Не удалось загрузить остатки из 1С.");
       if (!value || !Array.isArray(value.products) || value.products.length > 100 || typeof value.hasMore !== "boolean"
         || !Number.isFinite(Date.parse(value.receivedAt)) || (value.hasMore ? value.products.length !== 100
           || typeof value.nextCursor !== "string" || value.nextCursor.length > 8192
-          || !value.nextCursor || cursors.has(value.nextCursor) : value.nextCursor !== null)
+          || !value.nextCursor || value.nextCursor === cursor || cursors.has(value.nextCursor) : value.nextCursor !== null)
         || value.products.some((item) => !item || typeof item.id !== "string" || identities.has(item.id)
           || typeof item.name !== "string" || typeof item.article !== "string"
           || typeof item.quantity !== "number" || !Number.isFinite(item.quantity)
@@ -91,6 +104,7 @@ export function bootstrapNomenclatureStock() {
         throw new Error("Получен некорректный список остатков. Обновите список.");
       }
       if (attempt !== generation || !active) return;
+      if (!first && !nearEnd()) { bufferedPage = { value, cursor }; return; }
       if (first) {
         totalCount = value.totalCount;
         const previous = priceType.value;
@@ -115,14 +129,17 @@ export function bootstrapNomenclatureStock() {
     } catch (error) {
       if (attempt !== generation || !active) return;
       blocked = true;
-      status.textContent = error?.name === "TimeoutError" ? "1С не ответила вовремя. Обновите список."
-        : error instanceof Error ? error.message : "Не удалось загрузить остатки из 1С.";
-      status.dataset.tone = "error";
-      progress.textContent = "";
+      const message = error?.name === "TimeoutError" ? "1С не ответила вовремя. Повторите загрузку."
+        : error instanceof TypeError ? "Соединение с агрегатором прервано. Повторите загрузку."
+          : error instanceof Error ? error.message : "Не удалось загрузить остатки из 1С.";
+      const feedback = first ? status : progress;
+      feedback.textContent = message;
+      feedback.dataset.tone = "error";
+      retry.hidden = first;
     } finally {
       if (attempt === generation && active) {
-        controller = undefined; busy = false; loading.hidden = true; table.removeAttribute("aria-busy");
-        if (nextCursor && !blocked && nearEnd()) void load();
+        controller = undefined; busy = false; loading.hidden = true; moreLoading.hidden = true; table.removeAttribute("aria-busy");
+        if (nextCursor && !blocked) void load();
       }
     }
   };
@@ -151,6 +168,7 @@ export function bootstrapNomenclatureStock() {
   input.addEventListener("compositionend", search);
   form.addEventListener("submit", (event) => { event.preventDefault(); query = normalize(input.value); restart(); });
   refresh.addEventListener("click", () => { query = normalize(input.value); restart(); });
+  retry.addEventListener("click", () => { if (!active || busy) return; blocked = false; void load(); });
   const filterChanged = () => {
     availability.disabled = !availabilityEnabled.checked;
     priceType.disabled = !priceEnabled.checked;
@@ -174,7 +192,7 @@ export function bootstrapNomenclatureStock() {
   });
   new IntersectionObserver((entries) => {
     if (entries.some((entry) => entry.isIntersecting)) void load();
-  }, { rootMargin: "400px 0px" }).observe(sentinel);
+  }, { rootMargin: `${preloadDistance}px 0px` }).observe(sentinel);
   document.addEventListener("visibilitychange", () => { if (document.hidden) stop(); else if (active) { query = normalize(input.value); restart(); } });
   window.addEventListener("pagehide", stop);
   return {

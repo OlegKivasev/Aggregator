@@ -68,7 +68,13 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
       article: index === 1 ? "" : `0000${index}`, quantity: index === 0 ? 1.125 : index + 1 }));
     assert.equal((await complete(job, products, true)).status, 200);
     await page.waitForFunction(() => document.querySelectorAll("#nomenclature-stock-rows tr").length === 100);
-    assert.equal(reads.length, 1, "one browser request waits for the entire page without polling");
+    const second = await poll(20);
+    assert.deepEqual(second.after, { id: products.at(-1).id, value: null });
+    assert.equal(reads.length, 2, "one initial read and one background page ahead, without browser polling");
+    assert.equal(await page.locator("#nomenclature-stock-loading").isVisible(), false, "continuation never shows the initial spinner above the rows");
+    assert.equal(await page.locator("#nomenclature-stock-more-loading").isVisible(), true);
+    assert.equal(await page.locator("#nomenclature-stock-more-loading").textContent(), "Продолжается поиск…");
+    assert.equal(await page.locator("#nomenclature-stock-more-loading").evaluate((element) => element.getBoundingClientRect().top >= document.querySelector("#nomenclature-stock-table").getBoundingClientRect().bottom), true);
     assert.equal(await page.locator("#nomenclature-stock-rows tr").first().locator("td").first().textContent(), products[0].name);
     assert.equal(await page.locator("#nomenclature-stock-rows img").count(), 0);
     assert.equal(await page.locator("#nomenclature-stock-rows tr").first().locator("td").nth(1).textContent(), "00000");
@@ -101,13 +107,19 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
       })), { width: await page.locator(".nomenclature-stock").evaluate((element) => element.clientWidth), overflow: false, children: [] });
     }
     await page.locator("#nomenclature-stock-sentinel").scrollIntoViewIfNeeded();
-    const second = await poll(20);
-    assert.deepEqual(second.after, { id: products.at(-1).id, value: null });
-    await page.locator("#nomenclature-stock-sentinel").scrollIntoViewIfNeeded();
-    assert.equal(await poll(), null, "scrolling during a load cannot create a parallel batch");
-    assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), 100, "scrolling keeps previous batches");
+    assert.equal(await page.locator("#nomenclature-stock-loading").isVisible(), false);
+    await page.locator("#nomenclature-stock-more-loading").waitFor();
+    assert.equal(await poll(), null, "repeated scrolling during a slow background read cannot create another page request");
+    if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-bottom-loading.png"), fullPage: false });
+    await page.evaluate(() => window.scrollTo(0, 0));
     assert.equal((await complete(second, [{ ...products[2], id: randomUUID(), name: "Последний товар" }])).status, 200);
-    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+    await page.locator("#nomenclature-stock-more-loading").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), 100, "a completed background page stays buffered until the user approaches the end");
+    assert.equal(await poll(), null, "a buffered page stops further requests while the user stays at the top");
+    const beforeScroll = reads.length;
+    await page.locator("#nomenclature-stock-sentinel").scrollIntoViewIfNeeded();
+    await page.locator("#nomenclature-stock-rows").getByText("Последний товар", { exact: true }).waitFor();
+    assert.equal(reads.length, beforeScroll, "scrolling consumes the prepared page without waiting for another HTTP response");
     assert.equal(reads.length, 2);
     assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), 101);
 
@@ -120,20 +132,32 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     const filtered = products.map((product, index) => ({ ...product, id: randomUUID(), name: `Фильтр ${index + 1}` }));
     assert.equal((await complete(search, filtered, true)).status, 200);
     await page.waitForFunction(() => document.querySelectorAll("#nomenclature-stock-rows tr").length === 100);
+    const obsoletePrefetch = await poll(20);
     await input.fill("фильтрx"); await input.fill("ФИЛЬТР");
     const reverted = await poll(20);
     assert.equal(reverted.query, "фильтр", "returning to the current query cancels the pending different query");
+    assert.equal((await complete(obsoletePrefetch, [{ ...filtered[0], id: randomUUID() }])).status, 409, "changing search cancels the old background page");
     assert.equal((await complete(reverted, filtered, true)).status, 200);
     await page.waitForFunction(() => document.querySelectorAll("#nomenclature-stock-rows tr").length === 100);
     await page.locator("#nomenclature-stock-sentinel").scrollIntoViewIfNeeded();
     const failed = await poll(20);
     assert.equal(failed.query, "фильтр"); assert.deepEqual(failed.after, { id: filtered.at(-1).id, value: null });
     assert.equal((await complete(failed, [], false, "error")).status, 200);
-    await page.waitForFunction(() => document.querySelector("#nomenclature-stock-status").dataset.tone === "error");
+    await page.waitForFunction(() => document.querySelector("#nomenclature-stock-progress").dataset.tone === "error");
+    assert.equal(await page.locator("#nomenclature-stock-status").textContent(), "", "continuation errors stay below the table");
+    assert.equal(await page.locator("#nomenclature-stock-loading").isVisible(), false);
+    assert.equal(await page.locator("#nomenclature-stock-more-loading").isVisible(), false);
     assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), 100);
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.locator("#nomenclature-stock-sentinel").scrollIntoViewIfNeeded();
     assert.equal(await poll(), null, "an error cannot cause automatic retry loops");
+    await page.locator("#nomenclature-stock-retry").click();
+    const retriedPage = await poll(20);
+    assert.deepEqual(retriedPage.after, failed.after, "retry resumes the failed page instead of restarting the catalogue");
+    assert.equal(retriedPage.query, failed.query);
+    assert.equal((await complete(retriedPage, [{ ...filtered[0], id: randomUUID(), name: "После повтора" }])).status, 200);
+    await page.locator("#nomenclature-stock-rows").getByText("После повтора", { exact: true }).waitFor();
+    assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), 101, "retry preserves the loaded rows");
     await page.locator("#nomenclature-stock-refresh").click();
     const retried = await poll(20);
     assert.equal(retried.after, null); assert.equal(retried.query, failed.query);
@@ -199,7 +223,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.equal(reopened.after, null);
     assert.equal((await complete(reopened, [{ ...products[0], name: "Свежий товар" }])).status, 200);
     await page.locator("#nomenclature-stock-rows").getByText("Свежий товар", { exact: true }).waitFor();
-    assert.equal(reads.length, 15);
+    const beforeLargeList = reads.length;
 
     await page.locator("#nomenclature-stock-refresh").click();
     let firstId;
@@ -212,17 +236,17 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
       if (!batch) firstId = values[0].id;
       lastId = values.at(-1).id;
       assert.equal((await complete(pending, values, batch < 11)).status, 200);
-      await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+      await page.locator(`[data-product-id="${lastId}"]`).waitFor({ state: "attached" });
       if (!batch) await page.locator(`[data-product-id="${firstId}"]`).click();
       assert.match(await page.locator("#nomenclature-stock-statistics").textContent(), /Всего строк: 1.200; Выделено: 1/);
       assert.ok(await page.locator("#nomenclature-stock-rows tr").count() <= 300);
       if (batch < 11) await page.locator("#nomenclature-stock-sentinel").scrollIntoViewIfNeeded();
     }
-    assert.equal(reads.length, 27, "1200 items require 12 additional requests without eager loading");
+    assert.equal(reads.length, beforeLargeList + 12, "1200 items still require exactly 12 page requests including prefetch");
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.locator(`[data-product-id="${firstId}"]`).waitFor();
     assert.equal(await page.locator(`[data-product-id="${firstId}"]`).getAttribute("aria-selected"), "true", "selection survives row removal and reconstruction");
-    assert.equal(reads.length, 27, "scrolling back uses loaded data");
+    assert.equal(reads.length, beforeLargeList + 12, "scrolling back uses loaded data");
     assert.ok(await page.locator("#nomenclature-stock-rows tr").count() <= 300);
     await page.setViewportSize({ width: 320, height: 844 });
     await page.locator(`[data-product-id="${firstId}"]`).waitFor();
@@ -345,6 +369,50 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await page.locator("#nomenclature-stock-refresh").click();
     const recovered = await poll(20);
     assert.equal((await complete(recovered, prices)).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), prices.length);
+    assert.equal(await page.locator("#nomenclature-stock-status").textContent(), "");
+
+    let failConnection = true;
+    const networkProducts = products.map((item) => ({ ...item, id: randomUUID(), price: null }));
+    await page.route((url) => url.pathname === "/api/nomenclature/stock" && url.searchParams.get("q") === "сеть", (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("after");
+      if (!cursor) return route.fulfill({ json: { products: networkProducts, hasMore: true, nextCursor: "network-page-2", receivedAt: new Date().toISOString(), totalCount: 101, priceTypes } });
+      assert.equal(cursor, "network-page-2");
+      if (failConnection) { failConnection = false; return route.abort("failed"); }
+      return route.fulfill({ json: { products: [{ ...networkProducts[0], id: randomUUID(), name: "После восстановления сети" }], hasMore: false, nextCursor: null, receivedAt: new Date().toISOString() } });
+    });
+    await input.fill("сеть"); await input.press("Enter");
+    await page.locator("#nomenclature-stock-progress").getByText("Соединение с агрегатором прервано. Повторите загрузку.", { exact: true }).waitFor();
+    assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), 100);
+    assert.equal(await page.locator("#nomenclature-stock-status").textContent(), "");
+    assert.equal(await page.locator("#nomenclature-stock-more-loading").isVisible(), false);
+    const beforeNetworkRetry = reads.length;
+    await page.locator("#nomenclature-stock-retry").click();
+    await page.locator("#nomenclature-stock-more-loading").waitFor({ state: "hidden" });
+    await page.locator("#nomenclature-stock-sentinel").scrollIntoViewIfNeeded();
+    await page.locator("#nomenclature-stock-rows").getByText("После восстановления сети", { exact: true }).waitFor();
+    assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), 101);
+    assert.equal(reads.length, beforeNetworkRetry + 1, "network recovery retries only the missing page, retaining the original rows");
+    await input.fill(""); await input.press("Enter");
+    const afterNetwork = await poll(20);
+    assert.equal((await complete(afterNetwork, prices)).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+
+    const stateDatabase = new DatabaseSync(process.env.GARAGE_DB_PATH);
+    try { stateDatabase.prepare("UPDATE nomenclature_sources SET last_seen=?").run(Date.now() - 90_001); }
+    finally { stateDatabase.close(); }
+    const beforeOffline = reads.length;
+    await page.locator("#nomenclature-stock-refresh").click();
+    await page.locator("#nomenclature-stock-status").getByText("Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.", { exact: true }).waitFor();
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#nomenclature-stock-table").getAttribute("aria-busy"), null);
+    await page.evaluate(() => window.dispatchEvent(new Event("scroll")));
+    assert.equal(reads.length, beforeOffline + 1, "an offline source stops the spinner after one HTTP request without automatic retries");
+    await poll(0, 5);
+    await page.locator("#nomenclature-stock-refresh").click();
+    const reconnected = await poll(20);
+    assert.equal((await complete(reconnected, prices)).status, 200);
     await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), prices.length);
     assert.equal(await page.locator("#nomenclature-stock-status").textContent(), "");

@@ -447,7 +447,9 @@
             </table>
           </div>
           <div class="nomenclature-stock-sentinel" id="nomenclature-stock-sentinel">
+            <div class="search-loading nomenclature-loading" id="nomenclature-stock-more-loading" role="status" aria-live="polite" hidden><div class="search-loading__content"><span class="search-loading__spinner" aria-hidden="true"></span><div><strong>Продолжается поиск…</strong></div></div></div>
             <p class="nomenclature-feedback" id="nomenclature-stock-progress" role="status" aria-live="polite"></p>
+            <button type="button" class="btn btn-light" id="nomenclature-stock-retry" hidden>Повторить загрузку</button>
           </div>
         </section>
       </section>
@@ -1274,7 +1276,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
 
     <script type="module" src="/auth-ui.js"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=nomenclature-stock-filters-1"></script>
+    <script type="module" src="/applicability.js?v=nomenclature-stock-prefetch-1"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>
