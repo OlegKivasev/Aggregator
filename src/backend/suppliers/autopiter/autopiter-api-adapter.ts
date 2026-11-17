@@ -157,7 +157,8 @@ function parseCatalogs(response: SiteHttpResponse, requestedArticle: string): Ca
     if (!article || !brand || !/^[1-9]\d{0,18}$/.test(id)) throw new SupplierIntegrationError("Autopiter returned an invalid catalog");
     if (articleKey(article) === articleKey(requestedArticle) && !matches.has(id)) matches.set(id, { id, brand });
   }
-  if (matches.size > 64) throw new SupplierIntegrationError("Autopiter returned too many catalogs");
+  // FindCatalog allows an unbounded list; common short articles can exceed 64 catalogs.
+  // Response bytes, the search deadline and the price-request window bound the work instead.
   return [...matches.values()];
 }
 

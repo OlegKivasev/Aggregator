@@ -215,6 +215,63 @@ test("Autopiter prices every exact catalog once, filters other articles and repl
   assert.equal(typeof adapter.searchAnalogs, "function");
 });
 
+test("Autopiter searches 1214 across more than 64 catalogs without truncation or unbounded requests", async (t) => {
+  for (const count of [26, 64, 65, 77, 256]) {
+    const ids = Array.from({ length: count }, (_, index) => String(101 + index));
+    const calls = [];
+    let active = 0;
+    let peak = 0;
+    const adapter = new AutopiterApiAdapter(async (method, parameters, requestSignal) => {
+      requestSignal.throwIfAborted();
+      calls.push({ method, parameters });
+      if (method === "FindCatalog") {
+        assert.equal(parameters.Number, "1214");
+        return response(method, ids.map((ArticleId) => catalog({ ArticleId, Number: "1214", CatalogName: `BRAND ${ArticleId}` })).join("")
+          + catalog({ ArticleId: ids[0], Number: "12-14" }) + catalog({ ArticleId: "9999", Number: "12140" }));
+      }
+      assert.equal(method, "GetPriceId");
+      assert.equal(parameters.SearchCross, "0");
+      active++; peak = Math.max(peak, active);
+      try {
+        await new Promise((resolve) => setImmediate(resolve));
+        requestSignal.throwIfAborted();
+        return response(method, offer({ Number: "1214", CatalogName: `BRAND ${parameters.ArticleId}`, DetailUid: `fixture-${parameters.ArticleId}` }));
+      } finally { active--; }
+    });
+    const events = [];
+    await runSupplierSearch({ adapter, sessionManager: manager(), query: { article: "1214" }, signal: signal(), emit: (event) => events.push(event) });
+    assert.equal(events.at(-1).status, "completed", `${count} catalogs must complete`);
+    assert.equal(calls.length, count + 1);
+    assert.deepEqual(calls.slice(1).map((call) => call.parameters.ArticleId), ids);
+    assert.equal(peak, 4);
+    assert.equal(active, 0);
+    assert.deepEqual(events.filter((event) => event.type === "result").map((event) => event.result.brand), ids.map((id) => `BRAND ${id}`));
+    t.diagnostic(`${count} catalogs: ${calls.length} SOAP calls, peak price requests ${peak}`);
+  }
+});
+
+test("Autopiter discovers all 77 brands and prices only the selected brand beyond catalog 64", async () => {
+  const ids = Array.from({ length: 77 }, (_, index) => String(101 + index));
+  const calls = [];
+  const adapter = new AutopiterApiAdapter(async (method, parameters) => {
+    calls.push({ method, parameters });
+    return method === "FindCatalog"
+      ? response(method, ids.map((ArticleId) => catalog({ ArticleId, Number: "1214", CatalogName: `BRAND ${ArticleId}` })).join(""))
+      : response(method, offer({ Number: "CROSS-1214", CatalogName: "CROSS" }));
+  });
+  let brands;
+  await adapter.searchBrands({ mode: "brands", article: "1214" }, context(), (values) => { brands = values; }, manager());
+  assert.deepEqual(brands, ids.map((id) => `BRAND ${id}`));
+  assert.deepEqual(calls.map((call) => call.method), ["FindCatalog"]);
+  const results = [];
+  await adapter.searchAnalogs({ mode: "analogs", article: "1214", brand: `BRAND ${ids.at(-1)}` }, context(), (value) => results.push(value), manager());
+  assert.deepEqual(calls.map((call) => call.method), ["FindCatalog", "FindCatalog", "GetPriceId"]);
+  assert.equal(calls.at(-1).parameters.ArticleId, ids.at(-1));
+  assert.equal(calls.at(-1).parameters.SearchCross, "1");
+  assert.equal(results.length, 1);
+  assert.equal(results[0].isAnalog, true);
+});
+
 test("Autopiter analogs use selected-brand catalogs and preserve distinct offers without originals or duplicates", async () => {
   const calls = [];
   const cross = { Number: "B-1", CatalogName: "CROSS", DetailUid: "cross-1", SellerId: "10" };
@@ -428,7 +485,7 @@ test("Autopiter cancels all prefetched prices and never starts queued catalogs a
     let cancelled = 0;
     const adapter = new AutopiterApiAdapter(async (method, _fields, requestSignal) => {
       requestSignal.throwIfAborted();
-      if (method === "FindCatalog") return response(method, Array.from({ length: 8 }, (_, index) => catalog({ ArticleId: String(101 + index) })).join(""));
+      if (method === "FindCatalog") return response(method, Array.from({ length: 77 }, (_, index) => catalog({ ArticleId: String(101 + index) })).join(""));
       active++; requests++;
       if (active === 4) started.resolve();
       try {
@@ -456,7 +513,7 @@ test("Autopiter reports a failed catalog and closes outstanding price requests",
   let active = 0;
   let cancelled = 0;
   const adapter = new AutopiterApiAdapter(async (method, parameters, requestSignal) => {
-    if (method === "FindCatalog") return response(method, Array.from({ length: 8 }, (_, index) => catalog({ ArticleId: String(101 + index) })).join(""));
+    if (method === "FindCatalog") return response(method, Array.from({ length: 77 }, (_, index) => catalog({ ArticleId: String(101 + index) })).join(""));
     requests++;
     if (parameters.ArticleId === "101") throw failure;
     active++;
