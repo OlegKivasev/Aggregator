@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=nomenclature-stock-sort-1" />
+    <link rel="stylesheet" href="/styles.css?v=nomenclature-stock-filters-1" />
     <link rel="stylesheet" href="/order-notifications.css" />
   </head>
   <body>
@@ -392,15 +392,23 @@
       <section id="nomenclature-function" class="nomenclature-function card border-0 shadow-sm" aria-labelledby="nomenclature-title" hidden>
         <header>
           <h2 id="nomenclature-title">Номенклатура</h2>
-          <p class="panel__meta">Товары в наличии и поиск карточки по штрихкоду.</p>
         </header>
-        <div class="nomenclature-source-row">
-          <span class="panel__meta" id="nomenclature-source-status" role="status">Проверяем подключение…</span>
+        <div class="nomenclature-toolbar">
+          <button type="button" class="nomenclature-tool" id="nomenclature-scan" aria-label="Сканировать камерой" title="Сканировать камерой"><span class="nomenclature-scanner-icon" aria-hidden="true"></span></button>
+          <button type="button" class="nomenclature-tool" id="nomenclature-stock-refresh" aria-label="Обновить список" title="Обновить список"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 11.5-1L20 9M4 15l2.5 3A7 7 0 0 0 18 17"/></svg></button>
+          <form class="nomenclature-stock-search" id="nomenclature-stock-search" role="search">
+            <label class="visually-hidden" for="nomenclature-stock-query">Поиск по наименованию или артикулу</label>
+            <input id="nomenclature-stock-query" type="search" maxlength="100" placeholder="Название или артикул товара" autocomplete="off" enterkeyhint="search" aria-controls="nomenclature-stock-rows">
+          </form>
         </div>
-        <div class="nomenclature-actions">
-          <button type="button" class="btn btn-primary" id="nomenclature-scan">Сканировать камерой</button>
-        </div>
-        <p class="nomenclature-feedback" id="nomenclature-feedback" role="status" aria-live="polite">Нажмите «Сканировать камерой» и разрешите доступ к камере.</p>
+        <details class="nomenclature-filters" open>
+          <summary>Фильтры <span id="nomenclature-filter-summary">В наличии</span></summary>
+          <div class="nomenclature-filter-controls">
+            <label class="nomenclature-filter"><input id="nomenclature-availability-enabled" type="checkbox" checked><span>Остатки</span><select id="nomenclature-availability" aria-label="Отбор по остаткам"><option value="all">Все</option><option value="available" selected>В наличии</option><option value="absent">Отсутствуют</option></select></label>
+            <label class="nomenclature-filter"><input id="nomenclature-price-enabled" type="checkbox"><span>Цены</span><select id="nomenclature-price-type" aria-label="Вид цены" disabled><option value="">Вид цены</option></select></label>
+          </div>
+        </details>
+        <p class="nomenclature-feedback" id="nomenclature-feedback" role="status" aria-live="polite"></p>
         <div class="nomenclature-result" id="nomenclature-result" hidden>
           <label for="nomenclature-code">Штрихкод</label>
           <textarea id="nomenclature-code" rows="1" readonly spellcheck="false"></textarea>
@@ -419,23 +427,17 @@
         </article>
         <button type="button" class="btn btn-light" id="nomenclature-lookup-retry" hidden>Повторить поиск</button>
         <section class="nomenclature-stock" aria-labelledby="nomenclature-stock-title">
-          <div class="nomenclature-stock-heading">
-            <h3 id="nomenclature-stock-title">Товары в наличии</h3>
-            <button type="button" class="btn btn-light" id="nomenclature-stock-refresh">Обновить список</button>
-          </div>
-          <form class="nomenclature-stock-search" id="nomenclature-stock-search" role="search">
-            <label class="field" for="nomenclature-stock-query"><span>Поиск по наименованию или артикулу</span>
-              <input id="nomenclature-stock-query" type="search" maxlength="100" placeholder="Название или артикул товара" autocomplete="off" enterkeyhint="search">
-            </label>
-          </form>
-          <p class="panel__meta">Фактический остаток по всем складам, включая резервы, в единицах хранения 1С.</p>
+          <h3 id="nomenclature-stock-title" class="visually-hidden">Номенклатура</h3>
+          <p class="nomenclature-stock-statistics" id="nomenclature-stock-statistics" role="status" aria-live="polite">Всего строк: —; Выделено: 0</p>
           <p class="nomenclature-feedback" id="nomenclature-stock-status" role="status" aria-live="polite"></p>
+          <div class="search-loading nomenclature-loading" id="nomenclature-stock-loading" role="status" aria-live="polite" hidden><div class="search-loading__content"><span class="search-loading__spinner" aria-hidden="true"></span><div><strong>Выполняется поиск</strong></div></div></div>
           <div class="nomenclature-stock-table" id="nomenclature-stock-table" hidden>
-            <table aria-label="Товары с положительным остатком">
+            <table aria-label="Номенклатура" aria-multiselectable="true">
               <thead><tr>
                 <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="name"><span>Наименование</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
                 <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="article"><span>Артикул</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="quantity"><span>Остаток</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="quantity" aria-label="Сортировать по остатку"><span class="nomenclature-quantity-label">Остаток</span><span class="nomenclature-quantity-short" aria-hidden="true">Ост.</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                <th scope="col" id="nomenclature-stock-price-heading" hidden>Цена</th>
               </tr></thead>
               <tbody aria-hidden="true"><tr><td class="nomenclature-stock-spacer" id="nomenclature-stock-before" colspan="3"></td></tr></tbody>
               <tbody id="nomenclature-stock-rows"></tbody>
@@ -1271,7 +1273,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
 
     <script type="module" src="/auth-ui.js"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=nomenclature-stock-sort-1"></script>
+    <script type="module" src="/applicability.js?v=nomenclature-stock-filters-1"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>

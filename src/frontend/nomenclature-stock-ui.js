@@ -1,4 +1,4 @@
-import { createStockTable } from "./nomenclature-stock-table.js?v=stock-search-1";
+import { createStockTable } from "./nomenclature-stock-table.js?v=stock-filters-1";
 
 export function bootstrapNomenclatureStock() {
   const status = document.querySelector("#nomenclature-stock-status");
@@ -9,8 +9,19 @@ export function bootstrapNomenclatureStock() {
   const sentinel = document.querySelector("#nomenclature-stock-sentinel");
   const progress = document.querySelector("#nomenclature-stock-progress");
   const retry = document.querySelector("#nomenclature-stock-retry");
+  const loading = document.querySelector("#nomenclature-stock-loading");
+  const statistics = document.querySelector("#nomenclature-stock-statistics");
+  const availabilityEnabled = document.querySelector("#nomenclature-availability-enabled");
+  const availability = document.querySelector("#nomenclature-availability");
+  const priceEnabled = document.querySelector("#nomenclature-price-enabled");
+  const priceType = document.querySelector("#nomenclature-price-type");
+  const priceHeading = document.querySelector("#nomenclature-stock-price-heading");
+  let totalCount;
+  priceEnabled.disabled = true;
+  let selectionCount = 0;
+  const paintStatistics = () => { statistics.textContent = `Всего строк: ${totalCount === undefined ? "—" : totalCount.toLocaleString("ru-RU")}; Выделено: ${selectionCount.toLocaleString("ru-RU")}`; };
   const renderer = createStockTable(document.querySelector("#nomenclature-stock-rows"),
-    document.querySelector("#nomenclature-stock-before"), document.querySelector("#nomenclature-stock-after"));
+    document.querySelector("#nomenclature-stock-before"), document.querySelector("#nomenclature-stock-after"), (count) => { selectionCount = count; paintStatistics(); });
   let active = false;
   let controller;
   let generation = 0;
@@ -26,19 +37,21 @@ export function bootstrapNomenclatureStock() {
   const identities = new Set();
   const cursors = new Set();
   const normalize = (value) => [...new Set(value.normalize("NFC").trim().toLocaleLowerCase("ru-RU").split(/\s+/).filter(Boolean))].sort().join(" ");
-  const stop = () => { generation += 1; clearTimeout(timer); timer = undefined; controller?.abort(); controller = undefined; busy = false; };
+  const stop = () => { generation += 1; clearTimeout(timer); timer = undefined; controller?.abort(); controller = undefined; busy = false; loading.hidden = true; table.removeAttribute("aria-busy"); };
+  const selectedPrice = () => priceEnabled.checked ? priceType.value : "";
+  const selectedAvailability = () => availabilityEnabled.checked ? availability.value : "all";
   const nearEnd = () => sentinel.getBoundingClientRect().top < window.innerHeight + 400;
   const load = async (first = false) => {
     if (!active || document.hidden || busy || blocked || (!first && !nextCursor)) return;
     const attempt = generation;
     const abort = new AbortController();
     controller = abort; busy = true; retry.hidden = true;
-    progress.textContent = "Загружаем товары…";
-    progress.dataset.tone = "loading";
-    if (first) { status.textContent = "Загружаем товары в наличии…"; status.dataset.tone = "loading"; }
+    progress.textContent = ""; status.textContent = ""; loading.hidden = false; table.setAttribute("aria-busy", "true");
     const cursor = nextCursor;
     try {
       const parameters = new URLSearchParams();
+      parameters.set("details", "1"); parameters.set("availability", selectedAvailability());
+      if (selectedPrice()) parameters.set("priceType", selectedPrice());
       if (cursor) parameters.set("after", cursor);
       if (query) parameters.set("q", query);
       if (sortField !== "id") { parameters.set("sort", sortField); parameters.set("direction", sortDirection); }
@@ -57,14 +70,29 @@ export function bootstrapNomenclatureStock() {
       if (!value || !Array.isArray(value.products) || value.products.length > 100 || typeof value.hasMore !== "boolean"
         || !Number.isFinite(Date.parse(value.receivedAt)) || (value.hasMore ? value.products.length !== 100
           || typeof value.nextCursor !== "string" || value.nextCursor.length > 8192
-          || (sortField === "id" && value.nextCursor !== value.products.at(-1)?.id) || cursors.has(value.nextCursor) : value.nextCursor !== null)
+          || !value.nextCursor || cursors.has(value.nextCursor) : value.nextCursor !== null)
         || value.products.some((item) => !item || typeof item.id !== "string" || identities.has(item.id)
           || typeof item.name !== "string" || typeof item.article !== "string"
-          || typeof item.quantity !== "number" || !Number.isFinite(item.quantity) || item.quantity <= 0)
+          || typeof item.quantity !== "number" || !Number.isFinite(item.quantity)
+          || selectedAvailability() === "available" && item.quantity <= 0 || selectedAvailability() === "absent" && item.quantity > 0
+          || selectedPrice() && (item.price === undefined || item.price !== null && (typeof item.price.amount !== "number" || !Number.isFinite(item.price.amount)
+            || item.price.amount < 0 || typeof item.price.currency !== "string" || !/^[A-Z]{3}$/.test(item.price.currency))))
+        || first && (!Number.isSafeInteger(value.totalCount) || value.totalCount < value.products.length || !Array.isArray(value.priceTypes)
+          || value.priceTypes.some((item) => !item || typeof item.id !== "string" || typeof item.name !== "string"))
         || new Set(value.products.map((item) => item.id)).size !== value.products.length) {
         throw new Error("Получен некорректный список остатков. Повторите загрузку.");
       }
       if (attempt !== generation || !active) return;
+      if (first) {
+        totalCount = value.totalCount;
+        const previous = priceType.value;
+        const options = value.priceTypes.map((item) => { const option = document.createElement("option"); option.value = item.id; option.textContent = item.name; return option; });
+        priceType.replaceChildren(...options);
+        if (value.priceTypes.some((item) => item.id === previous)) priceType.value = previous;
+        priceEnabled.disabled = options.length === 0;
+        priceType.disabled = !priceEnabled.checked || !options.length;
+        paintStatistics();
+      }
       for (const item of value.products) identities.add(item.id);
       if (cursor) cursors.add(cursor);
       total += value.products.length;
@@ -72,40 +100,43 @@ export function bootstrapNomenclatureStock() {
       table.hidden = false;
       table.querySelector("table").setAttribute("aria-rowcount", value.hasMore ? "-1" : String(total + 1));
       renderer.append(value.products);
-      status.textContent = total ? `Загружено товаров: ${total}. Получено из 1С в ${new Date(value.receivedAt).toLocaleTimeString("ru-RU")}`
-        : query ? "По вашему запросу товаров в наличии не найдено." : "Товаров с положительным остатком нет.";
+      status.textContent = total ? "" : "Товары не найдены.";
       status.dataset.tone = "notice";
-      progress.textContent = nextCursor ? "Прокрутите вниз, чтобы загрузить ещё" : total ? "Все товары загружены" : "";
+      progress.textContent = "";
       progress.dataset.tone = "notice";
     } catch (error) {
       if (attempt !== generation || !active) return;
       blocked = true;
-      progress.textContent = error?.name === "TimeoutError" ? "1С не ответила вовремя. Повторите загрузку."
+      status.textContent = error?.name === "TimeoutError" ? "1С не ответила вовремя. Повторите загрузку."
         : error instanceof Error ? error.message : "Не удалось загрузить остатки из 1С.";
-      progress.dataset.tone = "error";
-      status.textContent = total ? `Загружено товаров: ${total}. Следующие товары пока не получены.` : progress.textContent;
       status.dataset.tone = "error";
-      if (!total) progress.textContent = "";
+      progress.textContent = "";
       retry.hidden = false;
     } finally {
       if (attempt === generation && active) {
-        controller = undefined; busy = false;
+        controller = undefined; busy = false; loading.hidden = true; table.removeAttribute("aria-busy");
         if (nextCursor && !blocked && nearEnd()) void load();
       }
     }
   };
   const restart = () => {
-    stop(); renderer.reset(); identities.clear(); cursors.clear();
+    stop(); totalCount = undefined; renderer.reset(!!selectedPrice()); identities.clear(); cursors.clear();
     total = 0; nextCursor = null; blocked = false; table.hidden = !active; retry.hidden = true;
     progress.textContent = "";
+    priceHeading.hidden = !selectedPrice();
+    priceHeading.textContent = selectedPrice() ? priceType.selectedOptions[0]?.textContent ?? "Цена" : "Цена";
+    priceHeading.title = priceHeading.textContent;
+    document.querySelector("#nomenclature-stock-title").textContent = selectedAvailability() === "available" ? "Товары в наличии" : "Номенклатура";
+    table.querySelector("table").classList.toggle("has-price", !!selectedPrice());
+    for (const spacer of table.querySelectorAll(".nomenclature-stock-spacer")) spacer.colSpan = selectedPrice() ? 4 : 3;
     if (active) void load(true);
   };
   const search = () => {
     const nextQuery = normalize(input.value);
     if (nextQuery === query && !timer) return;
-    stop(); renderer.reset(); identities.clear(); cursors.clear(); total = 0; nextCursor = null;
+    stop(); totalCount = undefined; renderer.reset(!!selectedPrice()); identities.clear(); cursors.clear(); total = 0; nextCursor = null;
     table.hidden = false; retry.hidden = true; blocked = true;
-    status.textContent = "Ожидаем окончания ввода…"; status.dataset.tone = "notice"; progress.textContent = "";
+    status.textContent = ""; progress.textContent = "";
     timer = setTimeout(() => { query = nextQuery; restart(); }, nextQuery ? 300 : 0);
   };
   input.addEventListener("input", (event) => { if (!event.isComposing) search(); });
@@ -113,6 +144,17 @@ export function bootstrapNomenclatureStock() {
   form.addEventListener("submit", (event) => { event.preventDefault(); query = normalize(input.value); restart(); });
   refresh.addEventListener("click", () => { query = normalize(input.value); restart(); });
   retry.addEventListener("click", () => { blocked = false; void load(total === 0); });
+  const filterChanged = () => {
+    availability.disabled = !availabilityEnabled.checked;
+    priceType.disabled = !priceEnabled.checked;
+    if (priceEnabled.checked && !priceType.value) { priceEnabled.checked = false; priceType.disabled = true; return; }
+    document.querySelector("#nomenclature-filter-summary").textContent = [
+      selectedAvailability() === "available" ? "В наличии" : selectedAvailability() === "absent" ? "Отсутствуют" : "Все товары",
+      selectedPrice() ? priceType.selectedOptions[0].textContent : "",
+    ].filter(Boolean).join(" · ");
+    query = normalize(input.value); restart();
+  };
+  for (const control of [availabilityEnabled, availability, priceEnabled, priceType]) control.addEventListener("change", filterChanged);
   for (const button of sortButtons) button.addEventListener("click", () => {
     const field = button.dataset.nomenclatureSort;
     sortDirection = field === sortField && sortDirection === "asc" ? "desc" : "asc";

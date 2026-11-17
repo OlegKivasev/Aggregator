@@ -4,10 +4,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { NomenclatureError } from "./contract.ts";
 import { stockPageSize, type StockPage, type StockResult } from "./stock-contract.ts";
 import { defaultStockSort, decodeStockCursor, encodeStockCursor, validateStockSortValue, type StockSort, type StockSortField } from "./stock-sort.ts";
+import { stockOptionsKey, type StockOptions } from "./stock-options.ts";
 
 interface Row {
   id: string; cursor: string; query: string; status: string; expires_at: number; lease_id: string | null; result_json: string | null;
   sort_field: StockSortField; sort_direction: "asc" | "desc";
+  options: string;
 }
 const ttl = 30_000;
 
@@ -39,9 +41,11 @@ export class StockRequests {
       }
       if (!columns.has("sort_field")) database.exec("ALTER TABLE nomenclature_stock_requests ADD COLUMN sort_field TEXT NOT NULL DEFAULT 'id'");
       if (!columns.has("sort_direction")) database.exec("ALTER TABLE nomenclature_stock_requests ADD COLUMN sort_direction TEXT NOT NULL DEFAULT 'asc'");
+      if (!columns.has("options")) database.exec("ALTER TABLE nomenclature_stock_requests ADD COLUMN options TEXT NOT NULL DEFAULT ''");
       database.exec(`DROP INDEX IF EXISTS nomenclature_stock_active_idx;
         DROP INDEX IF EXISTS nomenclature_stock_search_active_idx;
-        CREATE UNIQUE INDEX IF NOT EXISTS nomenclature_stock_sort_active_idx ON nomenclature_stock_requests(cursor,query,sort_field,sort_direction)
+        DROP INDEX IF EXISTS nomenclature_stock_sort_active_idx;
+        CREATE UNIQUE INDEX IF NOT EXISTS nomenclature_stock_options_active_idx ON nomenclature_stock_requests(cursor,query,sort_field,sort_direction,options)
           WHERE status IN ('pending','leased'); COMMIT`);
     } catch (error) { database.exec("ROLLBACK"); throw error; }
   }
@@ -55,19 +59,20 @@ export class StockRequests {
   notify(): void { this.changes.emit("change"); }
   close(): void { this.closed = true; this.notify(); }
 
-  async load(cursor: string | null, signal: AbortSignal, notifyWorker: () => void, query = "", sort: StockSort = defaultStockSort): Promise<StockPage> {
+  async load(cursor: string | null, signal: AbortSignal, notifyWorker: () => void, query = "", sort: StockSort = defaultStockSort, options?: StockOptions): Promise<StockPage> {
     if (signal.aborted) throw signal.reason;
     if (this.closed) throw new NomenclatureError(503, "stopping", "Соединение закрывается.");
     if (this.count >= 100) throw new NomenclatureError(429, "stock_busy", "Слишком много запросов остатков. Повторите позже.");
-    decodeStockCursor(cursor, query, sort);
+    const key = stockOptionsKey(options);
+    decodeStockCursor(cursor, query, sort, key);
     this.cleanup();
-    let row = this.database.prepare("SELECT * FROM nomenclature_stock_requests WHERE cursor=? AND query=? AND sort_field=? AND sort_direction=? AND status IN ('pending','leased')").get(cursor ?? "", query, sort.field, sort.direction) as unknown as Row | undefined;
+    let row = this.database.prepare("SELECT * FROM nomenclature_stock_requests WHERE cursor=? AND query=? AND sort_field=? AND sort_direction=? AND options=? AND status IN ('pending','leased')").get(cursor ?? "", query, sort.field, sort.direction, key) as unknown as Row | undefined;
     if (!row) {
       const active = this.database.prepare("SELECT COUNT(*) AS count FROM nomenclature_stock_requests WHERE status IN ('pending','leased')").get()!.count;
       if (Number(active) >= 20) throw new NomenclatureError(429, "stock_busy", "Очередь остатков занята. Повторите позже.");
       const id = randomUUID();
-      this.database.prepare("INSERT INTO nomenclature_stock_requests (id,cursor,status,created_at,expires_at,query,sort_field,sort_direction) VALUES (?,?,'pending',?,?,?,?,?)")
-        .run(id, cursor ?? "", this.now(), this.now() + ttl, query, sort.field, sort.direction);
+      this.database.prepare("INSERT INTO nomenclature_stock_requests (id,cursor,status,created_at,expires_at,query,sort_field,sort_direction,options) VALUES (?,?,'pending',?,?,?,?,?,?)")
+        .run(id, cursor ?? "", this.now(), this.now() + ttl, query, sort.field, sort.direction, key);
       row = this.database.prepare("SELECT * FROM nomenclature_stock_requests WHERE id=?").get(id) as unknown as Row;
       notifyWorker();
     }
@@ -108,7 +113,7 @@ export class StockRequests {
       }
     }
   }
-  claim(supportsSearch = false, supportsTerms = false, supportsSorting = false) {
+  claim(supportsSearch = false, supportsTerms = false, supportsSorting = false, supportsOptions = false) {
     this.cleanup();
     const now = this.now();
     const row = this.database.prepare(`UPDATE nomenclature_stock_requests SET status='leased',lease_id=?,lease_until=? WHERE id=(
@@ -116,21 +121,34 @@ export class StockRequests {
       AND (query='' OR ?=1)
       AND (query NOT LIKE '% %' OR ?=1)
       AND (sort_field='id' OR ?=1)
-      ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now, Number(supportsSearch), Number(supportsTerms), Number(supportsSorting)) as unknown as Row | undefined;
+      AND (options='' OR ?=1)
+      ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now, Number(supportsSearch), Number(supportsTerms), Number(supportsSorting), Number(supportsOptions)) as unknown as Row | undefined;
     return row ? { kind: "stock" as const, id: row.id, leaseId: row.lease_id!,
-      after: supportsSorting ? decodeStockCursor(row.cursor || null, row.query, { field: row.sort_field, direction: row.sort_direction }) : row.cursor || null,
+      after: supportsSorting ? decodeStockCursor(row.cursor || null, row.query, { field: row.sort_field, direction: row.sort_direction }, row.options) : row.cursor || null,
       ...(supportsSearch ? { query: row.query } : {}),
       ...(supportsSorting ? { sortField: row.sort_field, sortDirection: row.sort_direction } : {}),
+      ...(supportsOptions ? { options: row.options ? JSON.parse(row.options) as StockOptions : null } : {}),
       limit: stockPageSize, expiresAt: new Date(row.expires_at).toISOString() } : null;
   }
   complete(data: StockResult): void {
     const row = this.database.prepare("SELECT * FROM nomenclature_stock_requests WHERE id=?").get(data.requestId) as unknown as Row | undefined;
     if (!row || row.lease_id !== data.leaseId) throw new NomenclatureError(409, "lease_mismatch", "Аренда запроса остатков изменилась.");
     const sort: StockSort = { field: row.sort_field, direction: row.sort_direction };
-    const after = decodeStockCursor(row.cursor || null, row.query, sort);
-    const lastValue = row.sort_field === "id" ? null : data.hasMore ? validateStockSortValue(data.lastSortValue, row.sort_field) : null;
+    const after = decodeStockCursor(row.cursor || null, row.query, sort, row.options);
+    const options = row.options ? JSON.parse(row.options) as StockOptions : undefined;
+    if (data.status === "completed" && (data.products.some((item) =>
+      ((options?.availability ?? "available") === "available" && item.quantity <= 0)
+      || (options?.availability === "absent" && item.quantity > 0)
+      || (options?.priceType ? item.price === undefined : item.price !== undefined))
+      || options && !after && (data.totalCount === undefined || data.priceTypes === undefined
+        || (data.hasMore ? data.totalCount <= data.products.length : data.totalCount !== data.products.length))
+      || options && after && (data.totalCount !== undefined || data.priceTypes !== undefined))) {
+      throw new NomenclatureError(400, "invalid_stock", "Ответ не соответствует отбору номенклатуры.");
+    }
+    const lastValue = row.sort_field === "id" ? null : data.hasMore ? validateStockSortValue(data.lastSortValue, row.sort_field, !!options) : null;
     const page: StockPage = { products: data.products, hasMore: data.hasMore,
-      nextCursor: data.hasMore ? encodeStockCursor({ id: data.products.at(-1)!.id, value: lastValue }, row.query, sort) : null, receivedAt: new Date(this.now()).toISOString() };
+      nextCursor: data.hasMore ? encodeStockCursor({ id: data.products.at(-1)!.id, value: lastValue }, row.query, sort, row.options) : null, receivedAt: new Date(this.now()).toISOString(),
+      ...(data.totalCount === undefined ? {} : { totalCount: data.totalCount }), ...(data.priceTypes === undefined ? {} : { priceTypes: data.priceTypes }) };
     // Keep the timestamp of an accepted result when an identical delivery is retried.
     if (row?.result_json) page.receivedAt = (JSON.parse(row.result_json) as StockPage).receivedAt;
     const result = JSON.stringify(page);

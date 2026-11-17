@@ -13,7 +13,6 @@ const priceText = (price) => price === null ? "—" : new Intl.NumberFormat("ru-
 }).format(price.amount);
 
 export function bootstrapNomenclatureLookup() {
-  const sourceStatus = document.querySelector("#nomenclature-source-status");
   const lookupStatus = document.querySelector("#nomenclature-lookup-feedback");
   const retry = document.querySelector("#nomenclature-lookup-retry");
   const choices = document.querySelector("#nomenclature-choices");
@@ -29,17 +28,12 @@ export function bootstrapNomenclatureLookup() {
   let sourcesPromise;
 
   const feedback = (text, tone = "notice") => { lookupStatus.textContent = text; lookupStatus.dataset.tone = tone; };
-  const paintSource = () => {
-    sourceStatus.textContent = connectionText(state);
-    sourceStatus.dataset.tone = state?.online ? "success" : "notice";
-  };
   const loadSources = () => {
     sourcesPromise = (async () => {
       const response = await fetch("/api/nomenclature/connection", { cache: "no-store", signal: AbortSignal.timeout(10_000) });
       if (!response.ok) throw new Error(await message(response, "Не удалось проверить подключение к 1С."));
       state = readState(await response.json());
-      paintSource();
-    })().catch(() => { state = undefined; sourceStatus.textContent = "Не удалось проверить подключение"; });
+    })().catch(() => { state = undefined; });
     return sourcesPromise;
   };
   const clear = () => {

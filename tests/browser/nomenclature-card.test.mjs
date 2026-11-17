@@ -68,7 +68,7 @@ async function withPage(check) {
       await page.goto(origin);
       await page.waitForFunction(() => window.aggregatorAuthState?.ready);
       await page.locator("#nomenclature-function-tab").click();
-      await page.waitForFunction(() => !document.querySelector("#nomenclature-source-status").textContent.includes("Проверяем"));
+      await page.locator("#nomenclature-scan").waitFor();
     };
     await check({ page, request, key, poll, complete, open });
     assert.deepEqual(errors, []);

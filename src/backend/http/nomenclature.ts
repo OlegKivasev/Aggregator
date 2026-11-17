@@ -3,6 +3,7 @@ import type { AuthenticatedUser } from "../auth/user-auth-service.ts";
 import { NomenclatureError, objectFields, parseBarcode, parseLookupResult, parseUuid } from "../nomenclature/contract.ts";
 import { parseStockResult, parseStockQuery } from "../nomenclature/stock-contract.ts";
 import { decodeStockCursor, parseStockSort } from "../nomenclature/stock-sort.ts";
+import { parseStockOptions, stockOptionsKey } from "../nomenclature/stock-options.ts";
 import type { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
 import { serveJson } from "./responses.ts";
@@ -38,14 +39,14 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
       } else if (match[1] === "results" || match[1] === "stock-results") {
         onlyMethod("POST");
         if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
-        const result = match[1] === "stock-results" ? parseStockResult(await jsonBody(256 * 1024)) : parseLookupResult(await jsonBody(64 * 1024));
+        const result = match[1] === "stock-results" ? parseStockResult(await jsonBody(256 * 1024), true) : parseLookupResult(await jsonBody(64 * 1024));
         if ("hasMore" in result) service.completeStock(token, result); else service.complete(token, result);
         serveJson(response, 200, { accepted: true, requestId: result.requestId });
       } else {
         onlyMethod("GET");
         const wait = url.searchParams.get("waitSeconds") ?? "20";
         if ([...url.searchParams.keys()].some((key) => !["waitSeconds", "stock"].includes(key)) || url.searchParams.getAll("waitSeconds").length > 1
-          || url.searchParams.getAll("stock").length > 1 || url.searchParams.has("stock") && !["1", "2", "3", "4"].includes(url.searchParams.get("stock")!)
+          || url.searchParams.getAll("stock").length > 1 || url.searchParams.has("stock") && !["1", "2", "3", "4", "5"].includes(url.searchParams.get("stock")!)
           || !/^(?:\d|1\d|20)$/.test(wait)) throw new NomenclatureError(400, "wait", "Ожидание должно быть от 0 до 20 секунд.");
         const release = service.beginPoll();
         const controller = new AbortController();
@@ -55,7 +56,7 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
           const deadline = Date.now() + Number(wait) * 1000;
           while (!controller.signal.aborted) {
             const version = Number(url.searchParams.get("stock") ?? "0");
-            const job = service.claim(token, version >= 1, version >= 2, version >= 3, version >= 4);
+            const job = service.claim(token, version >= 1, version >= 2, version >= 3, version >= 4, version >= 5);
             if (job || Date.now() >= deadline) { serveJson(response, 200, { request: job }); break; }
             await service.wait(controller.signal, deadline - Date.now());
           }
@@ -66,19 +67,24 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
 
     if (url.pathname === "/api/nomenclature/stock") {
       onlyMethod("GET");
-      const allowed = ["after", "q", "sort", "direction"];
+      const allowed = ["after", "q", "sort", "direction", "details", "availability", "priceType"];
       if ([...url.searchParams.keys()].some((key) => !allowed.includes(key)) || allowed.some((key) => url.searchParams.getAll(key).length > 1)) {
         throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
       }
       const query = parseStockQuery(url.searchParams.get("q") ?? "");
       const sort = parseStockSort(url.searchParams.get("sort"), url.searchParams.get("direction"));
+      if (url.searchParams.has("details") && url.searchParams.get("details") !== "1"
+        || !url.searchParams.has("details") && (url.searchParams.has("availability") || url.searchParams.has("priceType"))) {
+        throw new NomenclatureError(400, "invalid_stock_filter", "Некорректный отбор номенклатуры.");
+      }
+      const options = url.searchParams.has("details") ? parseStockOptions(url.searchParams.get("availability"), url.searchParams.get("priceType")) : undefined;
       const cursor = url.searchParams.get("after");
-      decodeStockCursor(cursor, query, sort);
+      decodeStockCursor(cursor, query, sort, stockOptionsKey(options));
       const controller = new AbortController();
       const abort = () => controller.abort();
       response.once("close", abort);
       try {
-        const page = await service.loadStock(cursor, controller.signal, query, sort);
+        const page = await service.loadStock(cursor, controller.signal, query, sort, options);
         if (!response.destroyed) serveJson(response, 200, page);
       } finally { response.removeListener("close", abort); }
       return true;
