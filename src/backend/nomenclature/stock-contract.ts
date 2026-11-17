@@ -14,7 +14,7 @@ export function parseStockQuery(value: unknown): string {
   }
   const query = value.normalize("NFC").trim().replace(/\s+/g, " ").toLocaleLowerCase("ru-RU");
   if (query.length > 100) throw new NomenclatureError(400, "invalid_stock_query", "Поиск после нормализации должен содержать не более 100 символов.");
-  return query;
+  return [...new Set(query.split(" ").filter(Boolean))].sort().join(" ");
 }
 
 export function parseStockResult(value: unknown): StockResult {

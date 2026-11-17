@@ -100,13 +100,14 @@ export class StockRequests {
       }
     }
   }
-  claim(supportsSearch = false) {
+  claim(supportsSearch = false, supportsTerms = false) {
     this.cleanup();
     const now = this.now();
     const row = this.database.prepare(`UPDATE nomenclature_stock_requests SET status='leased',lease_id=?,lease_until=? WHERE id=(
       SELECT id FROM nomenclature_stock_requests WHERE expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
       AND (query='' OR ?=1)
-      ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now, Number(supportsSearch)) as unknown as Row | undefined;
+      AND (query NOT LIKE '% %' OR ?=1)
+      ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now, Number(supportsSearch), Number(supportsTerms)) as unknown as Row | undefined;
     return row ? { kind: "stock" as const, id: row.id, leaseId: row.lease_id!, after: row.cursor || null,
       ...(supportsSearch ? { query: row.query } : {}),
       limit: stockPageSize, expiresAt: new Date(row.expires_at).toISOString() } : null;

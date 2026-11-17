@@ -40,8 +40,9 @@ test("stock validates bounded complete pages, positive quantities and unmodified
 });
 
 test("search normalizes bounded text and shares only identical search/cursor combinations", async () => {
-  assert.equal(parseStockQuery("  ФИЛЬТР   00001  "), "фильтр 00001");
+  assert.equal(parseStockQuery("  ФИЛЬТР   00001  "), "00001 фильтр");
   assert.equal(parseStockQuery("%_[~]"), "%_[~]");
+  assert.equal(parseStockQuery(" тор  КОЛ кол "), "кол тор");
   for (const value of [null, 1, "x".repeat(101), "İ".repeat(100), "a\nb", "a\u0000b"]) assert.throws(() => parseStockQuery(value));
   await fixture(async ({ service, token }) => {
     const signal = new AbortController().signal;
@@ -60,6 +61,21 @@ test("search normalizes bounded text and shares only identical search/cursor com
     assert.equal((await first).products[0].name, "фильтр");
     assert.equal((await shared).products[0].name, "фильтр");
     assert.equal((await other).products[0].name, "00001");
+  });
+});
+
+test("fragment search is shared in either order and requires a worker that supports all fragments", async () => {
+  await fixture(async ({ service, token }) => {
+    const signal = new AbortController().signal;
+    const a = service.loadStock(null, signal, parseStockQuery("кол тор"));
+    const b = service.loadStock(null, signal, parseStockQuery("ТОР кол кол"));
+    assert.equal(service.claim(token, true, true), null, "a phrase-only worker cannot consume multi-fragment search");
+    const job = service.claim(token, true, true, true);
+    assert.equal(job.query, "кол тор");
+    assert.equal(service.claim(token, true, true, true), null);
+    const matching = ["Тормозные колодки", "Колодки тормозные"].map((name) => ({ ...product, id: randomUUID(), name }));
+    service.completeStock(token, result(job, matching));
+    assert.deepEqual((await a).products, matching); assert.deepEqual((await b).products, matching);
   });
 });
 
@@ -88,12 +104,12 @@ test("the initial stock schema migrates without losing results or mixing searche
 });
 
 test("1, 10 and 100 concurrent readers share one job per search/page, with fresh later reads", async () => {
-  for (const query of ["", "фильтр"]) for (const count of [1, 10, 100]) await fixture(async ({ service, token, path }) => {
+  for (const query of ["", "фильтр", "кол тор"]) for (const count of [1, 10, 100]) await fixture(async ({ service, token, path }) => {
     const abort = new AbortController();
     const reads = Array.from({ length: count }, () => service.loadStock(null, abort.signal, query));
     if (count === 100) await assert.rejects(service.loadStock(null, abort.signal, query), (error) => error.statusCode === 429);
     assert.equal(service.claim(token), null, "old extensions cannot take stock jobs");
-    const job = service.claim(token, true, true);
+    const job = service.claim(token, true, true, true);
     assert.equal(job.kind, "stock"); assert.equal(job.limit, 100); assert.equal(job.after, null);
     assert.equal(service.claim(token, true), null);
     const products = Array.from({ length: 100 }, () => ({ ...product, id: randomUUID() }));
@@ -117,12 +133,12 @@ test("1, 10 and 100 concurrent readers share one job per search/page, with fresh
     service.completeStock(token, result(job, products, true));
     assert.throws(() => service.completeStock(token, result(job)), (error) => error.statusCode === 409);
     const next = service.loadStock(pages[0].nextCursor, abort.signal, query);
-    const nextJob = service.claim(token, true, true);
+    const nextJob = service.claim(token, true, true, true);
     assert.equal(nextJob.after, products.at(-1).id);
     service.completeStock(token, result(nextJob, []));
     assert.deepEqual((await next).products, []);
     const fresh = service.loadStock(null, abort.signal, query);
-    const freshJob = service.claim(token, true, true);
+    const freshJob = service.claim(token, true, true, true);
     assert.notEqual(freshJob.id, job.id);
     service.completeStock(token, result(freshJob));
     assert.equal((await fresh).products.length, 1);
@@ -238,15 +254,15 @@ test("HTTP delivers stock in one waiting browser request and keeps old worker pr
     assert.deepEqual((await response.json()).products, [product]);
     const searchResponse = request("/api/nomenclature/stock?q=" + encodeURIComponent("  ФИЛЬТР %_[~] "));
     let searchJob;
-    for (let index = 0; index < 100 && !searchJob; index += 1) searchJob = await poll("&stock=2");
-    assert.equal(searchJob.query, "фильтр %_[~]");
+    for (let index = 0; index < 100 && !searchJob; index += 1) searchJob = await poll("&stock=3");
+    assert.equal(searchJob.query, "%_[~] фильтр");
     assert.equal((await request("/api/integration/1c/nomenclature/stock-results", { method: "POST", ...json(result(searchJob), headers) })).status, 200);
     assert.equal((await searchResponse).status, 200);
     for (const query of ["?after=wrong", "?after=", `?after=${product.id}&after=${product.id}`, "?limit=10000", "?q=a&q=b", "?q=" + "a".repeat(101), "?q=a%0Ab"]) {
       assert.equal((await request("/api/nomenclature/stock" + query)).status, 400);
     }
     assert.equal((await request("/api/nomenclature/stock", { method: "POST", ...json({}) })).status, 405);
-    assert.equal((await request("/api/integration/1c/nomenclature/requests?stock=3", { headers })).status, 400);
+    assert.equal((await request("/api/integration/1c/nomenclature/requests?stock=4", { headers })).status, 400);
   } finally {
     server.closeAllConnections(); await new Promise((done) => server.close(done));
     if (previous === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previous;

@@ -44,7 +44,7 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         onlyMethod("GET");
         const wait = url.searchParams.get("waitSeconds") ?? "20";
         if ([...url.searchParams.keys()].some((key) => !["waitSeconds", "stock"].includes(key)) || url.searchParams.getAll("waitSeconds").length > 1
-          || url.searchParams.getAll("stock").length > 1 || url.searchParams.has("stock") && !["1", "2"].includes(url.searchParams.get("stock")!)
+          || url.searchParams.getAll("stock").length > 1 || url.searchParams.has("stock") && !["1", "2", "3"].includes(url.searchParams.get("stock")!)
           || !/^(?:\d|1\d|20)$/.test(wait)) throw new NomenclatureError(400, "wait", "Ожидание должно быть от 0 до 20 секунд.");
         const release = service.beginPoll();
         const controller = new AbortController();
@@ -53,7 +53,7 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         try {
           const deadline = Date.now() + Number(wait) * 1000;
           while (!controller.signal.aborted) {
-            const job = service.claim(token, url.searchParams.has("stock"), url.searchParams.get("stock") === "2");
+            const job = service.claim(token, url.searchParams.has("stock"), ["2", "3"].includes(url.searchParams.get("stock")!), url.searchParams.get("stock") === "3");
             if (job || Date.now() >= deadline) { serveJson(response, 200, { request: job }); break; }
             await service.wait(controller.signal, deadline - Date.now());
           }

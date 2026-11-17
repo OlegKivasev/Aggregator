@@ -173,7 +173,7 @@ export class NomenclatureService {
     this.database.prepare("UPDATE nomenclature_lookups SET status='cancelled' WHERE id=? AND status IN ('pending','leased')").run(id);
   }
 
-  claim(token: string | undefined, includeStock = false, supportsStockSearch = false) {
+  claim(token: string | undefined, includeStock = false, supportsStockSearch = false, supportsStockTerms = false) {
     this.heartbeat(token);
     this.cleanup();
     const now = this.now();
@@ -186,14 +186,15 @@ export class NomenclatureService {
         SELECT 'stock' AS kind, id, created_at FROM nomenclature_stock_requests
           WHERE expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
           AND (query='' OR ?=1)
-        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now, Number(supportsStockSearch));
-      if (oldest?.kind === "stock") return this.stock.claim(supportsStockSearch);
+          AND (query NOT LIKE '% %' OR ?=1)
+        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now, Number(supportsStockSearch), Number(supportsStockTerms));
+      if (oldest?.kind === "stock") return this.stock.claim(supportsStockSearch, supportsStockTerms);
     }
     const row = this.database.prepare(`UPDATE nomenclature_lookups SET status='leased', lease_id=?, lease_until=? WHERE id=(
       SELECT id FROM nomenclature_lookups WHERE source_id=? AND expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
       ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, source, now, now) as unknown as LookupRow | undefined;
     return row ? { id: row.id, leaseId: row.lease_id!, barcode: row.barcode, expiresAt: new Date(row.expires_at).toISOString() }
-      : includeStock ? this.stock.claim(supportsStockSearch) : null;
+      : includeStock ? this.stock.claim(supportsStockSearch, supportsStockTerms) : null;
   }
 
   complete(token: string | undefined, data: LookupResult & { requestId: string; leaseId: string }): void {

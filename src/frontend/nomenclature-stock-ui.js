@@ -22,7 +22,7 @@ export function bootstrapNomenclatureStock() {
   let total = 0;
   const identities = new Set();
   const cursors = new Set();
-  const normalize = (value) => value.normalize("NFC").trim().replace(/\s+/g, " ").toLocaleLowerCase("ru-RU");
+  const normalize = (value) => [...new Set(value.normalize("NFC").trim().toLocaleLowerCase("ru-RU").split(/\s+/).filter(Boolean))].sort().join(" ");
   const stop = () => { generation += 1; clearTimeout(timer); timer = undefined; controller?.abort(); controller = undefined; busy = false; };
   const nearEnd = () => sentinel.getBoundingClientRect().top < window.innerHeight + 400;
   const load = async (first = false) => {
@@ -38,10 +38,17 @@ export function bootstrapNomenclatureStock() {
       const parameters = new URLSearchParams();
       if (cursor) parameters.set("after", cursor);
       if (query) parameters.set("q", query);
+      const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(35_000)]);
       const response = await fetch(`/api/nomenclature/stock${parameters.size ? `?${parameters}` : ""}`, {
-        cache: "no-store", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(35_000)]),
+        cache: "no-store", signal,
       });
-      const value = await response.json();
+      let value;
+      try { value = await response.json(); }
+      catch {
+        if (signal.aborted) throw signal.reason;
+        throw new Error(response.ok ? "Сервер вернул пустой или неполный ответ. Повторите загрузку."
+          : `Сервер не смог загрузить остатки (HTTP ${response.status}). Повторите загрузку.`);
+      }
       if (!response.ok) throw new Error(typeof value?.message === "string" ? value.message : "Не удалось загрузить остатки из 1С.");
       if (!value || !Array.isArray(value.products) || value.products.length > 100 || typeof value.hasMore !== "boolean"
         || !Number.isFinite(Date.parse(value.receivedAt)) || (value.hasMore ? value.products.length !== 100
@@ -73,6 +80,7 @@ export function bootstrapNomenclatureStock() {
       progress.dataset.tone = "error";
       status.textContent = total ? `Загружено товаров: ${total}. Следующие товары пока не получены.` : progress.textContent;
       status.dataset.tone = "error";
+      if (!total) progress.textContent = "";
       retry.hidden = false;
     } finally {
       if (attempt === generation && active) {
