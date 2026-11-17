@@ -61,6 +61,17 @@ assert.equal((prices.match(/Запрос\.Выполнить\(/g) ?? []).length,
 assert.match(prices, /СрезПоследних\(&ДатаЦен, ВидЦен = &ВидЦен[\s\S]*?Номенклатура В \(&Ссылки\)[\s\S]*?ГДЕ Цены\.Актуальность/);
 assert.ok(prices.indexOf("Запрос.Выполнить()") < prices.indexOf("Пока Выборка.Следующий()"), "no query per product");
 assert.match(stock, /ПрочитатьJSON\(Чтение, Ложь\)/);
+// Regression for the compiler error reported in 1C: no global Абс function.
+// Execute only the two numeric guards from the real BSL source, not the module.
+assert.doesNotMatch(source, /(?<![\p{L}\p{N}_])(?:Абс|Abs)\s*\(/iu);
+const numericGuard = stock.match(/Если ТипЗнч\(ЗначениеПосле\) <> Тип\("Число"\) Тогда ВызватьИсключение "Некорректный остаток курсора\."; КонецЕсли;\s*Если ЗначениеПосле < -\d+ Или ЗначениеПосле > \d+ Тогда ВызватьИсключение "Некорректный остаток курсора\."; КонецЕсли;/)?.[0];
+assert.ok(numericGuard, "A separate type check must precede the two signed range comparisons");
+const numericCode = numericGuard.replaceAll('ТипЗнч(ЗначениеПосле) <> Тип("Число")', 'typeof ЗначениеПосле !== "number"')
+  .replaceAll("Если ", "if (").replaceAll(" Тогда ", ") { ").replaceAll("ВызватьИсключение ", "throw new Error(")
+  .replaceAll('"; КонецЕсли;', '"); }').replaceAll(" Или ", " || ");
+const validateQuantity = new Function("ЗначениеПосле", numericCode);
+for (const quantity of [-1e15, -999999999999999.875, -1.125, -1, 0, 1, 1.125, 999999999999999.875, 1e15]) assert.doesNotThrow(() => validateQuantity(quantity));
+for (const quantity of [-1e15 - 0.125, 1e15 + 0.125, -1e16, 1e16, "0", null, undefined, false, {}, []]) assert.throws(() => validateQuantity(quantity), /Некорректный остаток курсора/);
 assert.match(stock, /ЗаписатьJSON\(Запись, ПоследнееЗначение\)/);
 for (const column of ["Наименование", "Артикул", "Количество"]) assert.ok(stock.includes(`ПоследнееЗначение = Выборка.${column}`));
 const worker = modules.get("АС_АгрегаторСервер");
@@ -68,4 +79,4 @@ assert.equal((worker.match(/stock=5/g) ?? []).length, 3);
 assert.doesNotMatch(worker, /stock=[34]/);
 assert.match(worker, /ТоварыВНаличии\(Задание\.after, Диагностика, Задание\.query, Задание\.sortField, Задание\.sortDirection, Задание\.options\)/);
 assert.match(worker, /Результат\.lastSortValue = Страница\.lastSortValue/);
-console.log("Static 1C sort check: both modules have balanced blocks, BOM/CRLF and matching SHA1; one aggregation source, initial count in the same temporary-table package, subsequent bounded query, one optional batched price read, quantity range after sum, reference tie key, exact decimal cursor. Platform not run.");
+console.log("Static 1C sort check: both modules have balanced blocks, BOM/CRLF and matching SHA1; one aggregation source, initial count in the same temporary-table package, subsequent bounded query, one optional batched price read, quantity range after sum, reference tie key, exact decimal cursor. Numeric guard model: 9 valid / 10 invalid cases; no unsupported Abs call. Platform not run.");
