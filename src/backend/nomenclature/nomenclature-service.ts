@@ -4,6 +4,8 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { NomenclatureError, type LookupResult } from "./contract.ts";
+import { StockRequests } from "./stock-requests.ts";
+import type { StockResult } from "./stock-contract.ts";
 
 interface SourceRow { id: string; token_hash: string | null; last_seen: number | null }
 interface LookupRow {
@@ -21,6 +23,7 @@ export class NomenclatureService {
   private pollCount = 0;
   private closed = false;
   private readonly now: () => number;
+  private readonly stock: StockRequests;
 
   constructor(path: string, now: () => number = Date.now) {
     this.now = now;
@@ -42,6 +45,7 @@ export class NomenclatureService {
         CREATE INDEX IF NOT EXISTS nomenclature_owner_idx ON nomenclature_lookups(owner_id, status);
       `);
       this.migrateConnection();
+      this.stock = new StockRequests(this.database, this.now);
     } catch (error) { this.database.close(); throw error; }
   }
 
@@ -66,7 +70,9 @@ export class NomenclatureService {
   }
 
   close(): void {
+    if (this.closed) return;
     this.closed = true;
+    this.stock.close();
     this.changes.emit(source);
     this.database.close();
   }
@@ -92,9 +98,24 @@ export class NomenclatureService {
       this.database.prepare("UPDATE nomenclature_sources SET token_hash=?, last_seen=NULL WHERE id=?").run(tokenHash, source);
       this.database.prepare("UPDATE nomenclature_lookups SET status='error', result_json=? WHERE source_id=? AND status IN ('pending','leased')")
         .run(JSON.stringify({ status: "error", products: [] }), source);
+      this.stock.invalidate();
       this.database.exec("COMMIT");
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
     this.changes.emit(source);
+    this.stock.notify();
+  }
+
+  loadStock(cursor: string | null, signal: AbortSignal) {
+    if (this.closed) throw new NomenclatureError(503, "stopping", "Соединение закрывается.");
+    const connection = this.state();
+    if (!connection.configured) throw new NomenclatureError(503, "source_unconfigured", "Подключение номенклатуры ещё не настроено.");
+    if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.");
+    return this.stock.load(cursor, signal, () => this.changes.emit(source));
+  }
+
+  completeStock(token: string | undefined, result: StockResult): void {
+    this.heartbeat(token);
+    this.stock.complete(result);
   }
 
   authenticate(token: string | undefined): void {
@@ -152,14 +173,26 @@ export class NomenclatureService {
     this.database.prepare("UPDATE nomenclature_lookups SET status='cancelled' WHERE id=? AND status IN ('pending','leased')").run(id);
   }
 
-  claim(token: string | undefined) {
+  claim(token: string | undefined, includeStock = false) {
     this.heartbeat(token);
     this.cleanup();
     const now = this.now();
+    if (includeStock) {
+      // Preserve FIFO across scans and stock pages; neither stream can starve the other.
+      const oldest = this.database.prepare(`SELECT kind FROM (
+        SELECT 'lookup' AS kind, id, created_at FROM nomenclature_lookups
+          WHERE source_id=? AND expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
+        UNION ALL
+        SELECT 'stock' AS kind, id, created_at FROM nomenclature_stock_requests
+          WHERE expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
+        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now);
+      if (oldest?.kind === "stock") return this.stock.claim();
+    }
     const row = this.database.prepare(`UPDATE nomenclature_lookups SET status='leased', lease_id=?, lease_until=? WHERE id=(
       SELECT id FROM nomenclature_lookups WHERE source_id=? AND expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
       ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, source, now, now) as unknown as LookupRow | undefined;
-    return row ? { id: row.id, leaseId: row.lease_id!, barcode: row.barcode, expiresAt: new Date(row.expires_at).toISOString() } : null;
+    return row ? { id: row.id, leaseId: row.lease_id!, barcode: row.barcode, expiresAt: new Date(row.expires_at).toISOString() }
+      : includeStock ? this.stock.claim() : null;
   }
 
   complete(token: string | undefined, data: LookupResult & { requestId: string; leaseId: string }): void {

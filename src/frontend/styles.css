@@ -767,6 +767,18 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 #nomenclature-lookup-feedback[data-tone="success"] { color: #18794e; }
 .nomenclature-product { padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
 .nomenclature-product h3 { margin: 0 0 8px; color: var(--ink); font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+.nomenclature-stock { border-block: 1px solid var(--line); padding-block: 16px; }
+.nomenclature-stock-heading, .nomenclature-stock-pages { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.nomenclature-stock-heading h3 { margin: 0; font-size: 18px; font-weight: 800; }
+.nomenclature-stock > .panel__meta { margin-top: 8px; }
+.nomenclature-stock table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
+.nomenclature-stock th, .nomenclature-stock td { padding: 10px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; vertical-align: top; }
+.nomenclature-stock th { color: var(--muted); font-weight: 600; white-space: normal; text-transform: none; }
+.nomenclature-stock td { white-space: normal; }
+.nomenclature-stock th:first-child { width: 52%; }
+.nomenclature-stock th:nth-child(2) { width: 28%; }
+.nomenclature-stock th:last-child, .nomenclature-stock td:last-child { width: 20%; text-align: right; font-variant-numeric: tabular-nums; }
+.nomenclature-stock-pages { margin-top: 12px; }
 .nomenclature-prices { margin: 18px 0 0; }
 .nomenclature-prices > div { display: flex; gap: 16px; justify-content: space-between; padding: 14px 0; border-top: 1px solid var(--line); }
 .nomenclature-prices dt { color: var(--muted); font-weight: 600; }

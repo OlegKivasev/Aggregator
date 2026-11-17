@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=repair-payment-colors-1" />
+    <link rel="stylesheet" href="/styles.css?v=nomenclature-stock-1" />
     <link rel="stylesheet" href="/order-notifications.css" />
   </head>
   <body>
@@ -392,7 +392,7 @@
       <section id="nomenclature-function" class="nomenclature-function card border-0 shadow-sm" aria-labelledby="nomenclature-title" hidden>
         <header>
           <h2 id="nomenclature-title">Номенклатура</h2>
-          <p class="panel__meta">Отсканируйте код, чтобы открыть карточку товара из 1С.</p>
+          <p class="panel__meta">Товары в наличии и поиск карточки по штрихкоду.</p>
         </header>
         <div class="nomenclature-source-row">
           <span class="panel__meta" id="nomenclature-source-status" role="status">Проверяем подключение…</span>
@@ -418,6 +418,25 @@
           </dl>
         </article>
         <button type="button" class="btn btn-light" id="nomenclature-lookup-retry" hidden>Повторить поиск</button>
+        <section class="nomenclature-stock" aria-labelledby="nomenclature-stock-title">
+          <div class="nomenclature-stock-heading">
+            <h3 id="nomenclature-stock-title">Товары в наличии</h3>
+            <button type="button" class="btn btn-light" id="nomenclature-stock-refresh">Обновить список</button>
+          </div>
+          <p class="panel__meta">Фактический остаток по всем складам, включая резервы, в единицах хранения 1С.</p>
+          <p class="nomenclature-feedback" id="nomenclature-stock-status" role="status" aria-live="polite"></p>
+          <div class="nomenclature-stock-table" id="nomenclature-stock-table" hidden>
+            <table aria-label="Товары с положительным остатком">
+              <thead><tr><th scope="col">Наименование</th><th scope="col">Артикул</th><th scope="col">Остаток</th></tr></thead>
+              <tbody id="nomenclature-stock-rows"></tbody>
+            </table>
+          </div>
+          <nav class="nomenclature-stock-pages" aria-label="Страницы товаров в наличии">
+            <button type="button" class="btn btn-light" id="nomenclature-stock-previous" disabled>Назад</button>
+            <span class="panel__meta" id="nomenclature-stock-page"></span>
+            <button type="button" class="btn btn-light" id="nomenclature-stock-next" disabled>Далее</button>
+          </nav>
+        </section>
       </section>
       <section id="repairs-function" class="repairs-function results-panel card border-0 shadow-sm overflow-hidden" aria-labelledby="repairs-title" hidden>
         <header class="results-panel__header card-header bg-white border-0">
@@ -1242,7 +1261,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
 
     <script type="module" src="/auth-ui.js"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=repair-live-refresh-1"></script>
+    <script type="module" src="/applicability.js?v=nomenclature-stock-1"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>

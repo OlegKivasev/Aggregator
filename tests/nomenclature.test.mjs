@@ -194,6 +194,7 @@ test("lookup state persists, ownership is enforced, leases are reclaimed and lat
 test("nomenclature routes enforce form access, administrator settings and request ownership", async () => {
   await withServer(async ({ request, path }) => {
     assert.equal((await request("/api/nomenclature/connection")).status, 401);
+    assert.equal((await request("/api/nomenclature/stock")).status, 401);
     const adminLogin = await request("/api/auth/login", { method: "POST", ...json({ fio: "Администратор", password: "test-admin-password" }) });
     const adminCookie = adminLogin.headers.get("set-cookie").split(";", 1)[0];
     // Simulates an administrator created before the new nomenclature permission existed.
@@ -210,6 +211,8 @@ test("nomenclature routes enforce form access, administrator settings and reques
     const second = await login("Номенклатура два");
     const denied = await login("Без доступа");
     assert.equal((await request("/api/nomenclature/connection", { headers: { Cookie: denied } })).status, 403);
+    assert.equal((await request("/api/nomenclature/stock", { headers: { Cookie: denied } })).status, 403);
+    assert.equal((await request("/api/nomenclature/stock", { headers: { Cookie: first } })).status, 503);
     assert.equal((await request("/api/nomenclature/settings", { headers: { Cookie: first } })).status, 403);
     assert.equal((await request("/api/nomenclature/connection", { method: "POST", ...json({}, { Cookie: first }) })).status, 403);
     assert.equal((await request("/api/nomenclature/connection", { method: "DELETE", headers: { Cookie: first } })).status, 403);
