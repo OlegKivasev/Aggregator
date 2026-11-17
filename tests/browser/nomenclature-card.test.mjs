@@ -11,6 +11,10 @@ import { createAggregatorServer } from "../../src/backend/http/create-server.ts"
 // Fictional products and keys are confined to a fresh temporary test database.
 const product = { id: "12345678-abcd-1234-abcd-123456789abc", name: '<img src=x onerror="window.productXss=1"> Тестовый товар',
   characteristicId: null, characteristicName: null,
+  statistics: { stockWithOrders: 7.125, unit: "шт", monthlySales: [
+    { month: "2026-02", quantity: 3.125 }, { month: "2026-01", quantity: 0 },
+    { month: "2025-12", quantity: -2 }, { month: "2025-11", quantity: 15 },
+  ] },
   prices: { purchase: { amount: 6500, currency: "RUB" }, retail: { amount: 8800, currency: "RUB" }, retailCashless: { amount: 9750, currency: "RUB" } } };
 const barcode = "2000043626425";
 const body = (value, headers = {}) => ({ headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(value) });
@@ -81,8 +85,10 @@ async function withPage(check) {
   }
 }
 
-test("a real scan uses the single connection and shows a compact barcode above the product with three prices", async () => {
+test("a real scan shows stock with orders and four months before prices without extra lookups", async () => {
   await withPage(async ({ page, request, key, poll, complete, open }) => {
+    let lookupRequests = 0;
+    page.on("request", (request) => { if (request.method() === "POST" && new URL(request.url()).pathname === "/api/nomenclature/lookups") lookupRequests += 1; });
     const token = await key();
     await poll(token);
     await open();
@@ -115,14 +121,25 @@ test("a real scan uses the single connection and shows a compact barcode above t
     assert.equal(await page.evaluate(() => window.productXss), undefined);
     const amounts = await page.locator("[data-nomenclature-price]").allTextContents();
     assert.deepEqual(amounts.map((value) => value.replace(/\s/g, "")), ["6500,00₽", "8800,00₽", "9750,00₽"]);
+    assert.equal(await page.locator("#nomenclature-stock-with-orders").textContent(), "7,125 шт");
+    assert.deepEqual((await page.locator("#nomenclature-monthly-sales dt").allTextContents()).map((value) => value.trim()), ["Февраль 2026", "Январь 2026", "Декабрь 2025", "Ноябрь 2025"]);
+    assert.deepEqual(await page.locator("#nomenclature-monthly-sales dd").allTextContents(), ["3,125 шт", "0 шт", "-2 шт", "15 шт"]);
+    assert.equal(await page.locator("#nomenclature-stock-with-orders").evaluate((element) => element.getBoundingClientRect().top < document.querySelector("#nomenclature-monthly-sales").getBoundingClientRect().top), true);
+    assert.equal(await page.locator("#nomenclature-monthly-sales").evaluate((element) => element.getBoundingClientRect().bottom <= document.querySelector("[data-nomenclature-price]").getBoundingClientRect().top), true);
+    assert.equal(lookupRequests, 1, "statistics arrive in the original barcode response");
     assert.equal(await page.locator("#nomenclature-function").evaluate((element) => element.scrollWidth <= element.clientWidth), true);
     if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-product-mobile.png"), fullPage: true });
+    for (const width of [320, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.equal(await page.locator("#nomenclature-product").evaluate((element) => element.scrollWidth <= element.clientWidth), true);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
 
     const next = poll(token, 20);
     await scanSvg(page, scanFile("second-code"), "second-code");
     const variants = [
       { ...product, characteristicId: "11111111-abcd-1234-abcd-123456789abc", characteristicName: "Синий" },
-      { ...product, characteristicId: "22222222-abcd-1234-abcd-123456789abc", characteristicName: "Красный", prices: { purchase: { amount: 0, currency: "RUB" }, retail: null, retailCashless: null } },
+      { ...product, statistics: null, characteristicId: "22222222-abcd-1234-abcd-123456789abc", characteristicName: "Красный", prices: { purchase: { amount: 0, currency: "RUB" }, retail: null, retailCashless: null } },
     ];
     assert.equal(await complete(token, await next, variants), 200);
     await page.locator("#nomenclature-choices").waitFor();
@@ -131,6 +148,9 @@ test("a real scan uses the single connection and shows a compact barcode above t
     await page.locator("#nomenclature-choices button").filter({ hasText: "Красный" }).click();
     assert.equal(await page.locator("#nomenclature-product-characteristic").textContent(), "Красный");
     assert.deepEqual((await page.locator("[data-nomenclature-price]").allTextContents()).map((value) => value.replace(/\s/g, "")), ["0,00₽", "—", "—"]);
+    assert.equal(await page.locator("#nomenclature-stock-with-orders").textContent(), "Нет данных");
+    assert.equal(await page.locator("#nomenclature-monthly-sales > div").count(), 0, "another product cannot retain the previous history");
+    assert.equal(await page.locator("#nomenclature-sales-status").isVisible(), true);
 
     const missing = poll(token, 20);
     await scanSvg(page, scanFile("missing-code"), "missing-code");

@@ -1,10 +1,16 @@
 export interface ProductPrice { amount: number; currency: string }
+export interface ProductStatistics {
+  stockWithOrders: number | null;
+  unit: string | null;
+  monthlySales: { month: string; quantity: number }[] | null;
+}
 export interface NomenclatureProduct {
   id: string;
   name: string;
   characteristicId: string | null;
   characteristicName: string | null;
   prices: { purchase: ProductPrice | null; retail: ProductPrice | null; retailCashless: ProductPrice | null };
+  statistics?: ProductStatistics | null;
 }
 export interface LookupResult { status: "found" | "not_found" | "error"; products: NomenclatureProduct[] }
 export class NomenclatureError extends Error {
@@ -45,6 +51,28 @@ function price(value: unknown): ProductPrice | null {
   }
   return { amount: data.amount, currency: data.currency };
 }
+function statistics(value: unknown): ProductStatistics | null {
+  // Older extensions and already saved lookup results contain prices only.
+  if (value === undefined || value === null) return null;
+  const data = objectFields(value, ["stockWithOrders", "unit", "monthlySales"]);
+  const quantity = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1e12;
+  if (data.stockWithOrders !== null && (!quantity(data.stockWithOrders) || data.stockWithOrders < 0)
+    || data.monthlySales !== null && (!Array.isArray(data.monthlySales) || data.monthlySales.length !== 4)) {
+    throw new NomenclatureError(400, "invalid_statistics", "Некорректные остатки или история продаж.");
+  }
+  let previousMonth: number | undefined;
+  const monthlySales = data.monthlySales === null ? null : (data.monthlySales as unknown[]).map((value) => {
+    const row = objectFields(value, ["month", "quantity"]);
+    const match = typeof row.month === "string" && /^([1-9]\d{3})-(0[1-9]|1[0-2])$/.exec(row.month);
+    const month = match ? Number(match[1]) * 12 + Number(match[2]) : NaN;
+    if (!match || !quantity(row.quantity) || previousMonth !== undefined && month !== previousMonth - 1) {
+      throw new NomenclatureError(400, "invalid_statistics", "Некорректный месяц или количество продаж.");
+    }
+    previousMonth = month;
+    return { month: row.month as string, quantity: row.quantity };
+  });
+  return { stockWithOrders: data.stockWithOrders as number | null, unit: data.unit === null ? null : text(data.unit, 100), monthlySales };
+}
 export function parseLookupResult(value: unknown): LookupResult & { requestId: string; leaseId: string } {
   const data = objectFields(value, ["requestId", "leaseId", "status", "products"]);
   if (typeof data.status !== "string" || !["found", "not_found", "error"].includes(data.status) || !Array.isArray(data.products) || data.products.length > 20
@@ -53,7 +81,7 @@ export function parseLookupResult(value: unknown): LookupResult & { requestId: s
   }
   const identities = new Set<string>();
   const products = data.products.map((value): NomenclatureProduct => {
-    const item = objectFields(value, ["id", "name", "characteristicId", "characteristicName", "prices"]);
+    const item = objectFields(value, ["id", "name", "characteristicId", "characteristicName", "prices", "statistics"]);
     const prices = objectFields(item.prices, ["purchase", "retail", "retailCashless"]);
     const id = parseUuid(item.id);
     const characteristicId = item.characteristicId === null ? null : parseUuid(item.characteristicId);
@@ -65,7 +93,8 @@ export function parseLookupResult(value: unknown): LookupResult & { requestId: s
     identities.add(identity);
     return { id, name: text(item.name), characteristicId,
       characteristicName: item.characteristicName === null ? null : text(item.characteristicName, 256),
-      prices: { purchase: price(prices.purchase), retail: price(prices.retail), retailCashless: price(prices.retailCashless) } };
+      prices: { purchase: price(prices.purchase), retail: price(prices.retail), retailCashless: price(prices.retailCashless) },
+      ...(item.statistics === undefined ? {} : { statistics: statistics(item.statistics) }) };
   });
   return { requestId: parseUuid(data.requestId), leaseId: parseUuid(data.leaseId), status: data.status as LookupResult["status"], products };
 }

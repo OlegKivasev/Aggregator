@@ -252,3 +252,37 @@ test("nomenclature validates payloads, matching characteristics and zero or miss
     assert.equal((await request("/api/integration/1c/nomenclature/status")).status, 401);
   });
 });
+
+test("barcode statistics preserve zeros, returns and year boundaries and reject incomplete histories", async () => {
+  const id = "12345678-abcd-1234-abcd-123456789abc";
+  const statistics = { stockWithOrders: 0, unit: "шт", monthlySales: [
+    { month: "2026-02", quantity: 1.125 }, { month: "2026-01", quantity: 0 },
+    { month: "2025-12", quantity: -2 }, { month: "2025-11", quantity: 10 },
+  ] };
+  const result = (value) => ({ requestId: id, leaseId: id, status: "found", products: [{ ...product, statistics: value }] });
+  assert.deepEqual(parseLookupResult(result(statistics)).products[0].statistics, statistics);
+  const unavailable = { stockWithOrders: null, unit: null, monthlySales: null };
+  assert.deepEqual(parseLookupResult(result(unavailable)).products[0].statistics, unavailable);
+  assert.equal(parseLookupResult(result(null)).products[0].statistics, null);
+  assert.equal(parseLookupResult({ ...result(null), products: [product] }).products[0].statistics, undefined);
+  for (const patch of [
+    { stockWithOrders: -1 }, { stockWithOrders: "5" }, { stockWithOrders: Infinity }, { unit: "\n" }, { unit: undefined },
+    { monthlySales: [] }, { monthlySales: statistics.monthlySales.slice(1) },
+    { monthlySales: statistics.monthlySales.map((row) => ({ ...row, quantity: NaN })) },
+    { monthlySales: statistics.monthlySales.map((row) => ({ ...row, month: "2026-02" })) },
+    { monthlySales: [...statistics.monthlySales].reverse() },
+    { monthlySales: [{ month: "2026-13", quantity: 1 }, ...statistics.monthlySales.slice(1)] },
+    { monthlySales: [{ month: "2026-02", quantity: 1, extra: 1 }, ...statistics.monthlySales.slice(1)] },
+  ]) assert.throws(() => parseLookupResult(result({ ...statistics, ...patch })));
+  await withServer(async ({ request }) => {
+    const token = await key(request);
+    await poll(request, token);
+    const lookup = (await (await request("/api/nomenclature/lookups", { method: "POST", ...json({ barcode: "stats" }) })).json()).lookup;
+    const job = (await (await poll(request, token)).json()).request;
+    const invalid = completion(job, [{ ...product, statistics: { ...statistics, stockWithOrders: -1 } }]);
+    assert.equal((await sendResult(request, token, invalid)).status, 400);
+    assert.equal((await (await request(`/api/nomenclature/lookups/${lookup.id}`)).json()).lookup.status, "pending");
+    assert.equal((await sendResult(request, token, completion(job, [{ ...product, statistics }]))).status, 200);
+    assert.deepEqual((await (await request(`/api/nomenclature/lookups/${lookup.id}`)).json()).lookup.products[0].statistics, statistics);
+  });
+});

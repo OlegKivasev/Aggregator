@@ -432,6 +432,15 @@
         <article class="nomenclature-product" id="nomenclature-product" hidden aria-labelledby="nomenclature-product-name">
           <h3 id="nomenclature-product-name"></h3>
           <p class="panel__meta" id="nomenclature-product-characteristic" hidden></p>
+          <dl class="nomenclature-prices nomenclature-inventory">
+            <div><dt>Остаток с учётом заказов</dt><dd id="nomenclature-stock-with-orders"></dd></div>
+          </dl>
+          <section class="nomenclature-sales" aria-labelledby="nomenclature-sales-title">
+            <h4 id="nomenclature-sales-title">Реализовано:</h4>
+            <p class="panel__meta" id="nomenclature-statistics-scope">Всего по номенклатуре, по всем складам и характеристикам.</p>
+            <p class="panel__meta" id="nomenclature-sales-status" hidden></p>
+            <dl id="nomenclature-monthly-sales"></dl>
+          </section>
           <dl class="nomenclature-prices">
             <div><dt>Закупочная цена</dt><dd data-nomenclature-price="purchase"></dd></div>
             <div><dt>Розничная цена</dt><dd data-nomenclature-price="retail"></dd></div>

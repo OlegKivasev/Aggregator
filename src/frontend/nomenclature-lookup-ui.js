@@ -11,6 +11,8 @@ const connectionText = (source) => !source?.configured ? "Подключение
 const priceText = (price) => price === null ? "—" : new Intl.NumberFormat("ru-RU", {
   style: "currency", currency: price.currency, minimumFractionDigits: 2, maximumFractionDigits: 2,
 }).format(price.amount);
+const quantityFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
+const monthFormat = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric", timeZone: "UTC" });
 
 export function bootstrapNomenclatureLookup() {
   const lookupStatus = document.querySelector("#nomenclature-lookup-feedback");
@@ -52,6 +54,25 @@ export function bootstrapNomenclatureLookup() {
     title.textContent = product.name;
     characteristic.textContent = product.characteristicName ?? "";
     characteristic.hidden = !product.characteristicName;
+    const statistics = product.statistics;
+    const suffix = statistics?.unit ? ` ${statistics.unit}` : "";
+    document.querySelector("#nomenclature-stock-with-orders").textContent = statistics?.stockWithOrders == null
+      ? "Нет данных" : quantityFormat.format(statistics.stockWithOrders) + suffix;
+    const sales = document.querySelector("#nomenclature-monthly-sales");
+    const status = document.querySelector("#nomenclature-sales-status");
+    sales.replaceChildren();
+    status.hidden = statistics?.monthlySales != null;
+    status.textContent = statistics == null ? "История продаж ещё не получена из 1С." : "История продаж недоступна.";
+    for (const row of statistics?.monthlySales ?? []) {
+      const line = document.createElement("div");
+      const month = document.createElement("dt");
+      const quantity = document.createElement("dd");
+      const name = monthFormat.format(new Date(`${row.month}-01T00:00:00Z`)).replace(/\s*г\.$/, "");
+      month.textContent = name[0].toUpperCase() + name.slice(1);
+      quantity.textContent = quantityFormat.format(row.quantity) + suffix;
+      line.append(month, quantity);
+      sales.append(line);
+    }
     for (const key of ["purchase", "retail", "retailCashless"]) {
       document.querySelector(`[data-nomenclature-price="${key}"]`).textContent = priceText(product.prices[key]);
     }
@@ -64,7 +85,7 @@ export function bootstrapNomenclatureLookup() {
     if (!lookup || typeof lookup.id !== "string" || !/^[a-f0-9-]{36}$/i.test(lookup.id) || (id && lookup.id !== id) || lookup.barcode !== barcode
       || !["pending", "found", "not_found", "error", "expired", "cancelled"].includes(lookup.status) || !Array.isArray(lookup.products)
       || lookup.products.length > 20 || !Number.isFinite(Date.parse(lookup.expiresAt))
-      || lookup.products.some((product) => !product || typeof product.name !== "string" || !product.prices
+      || lookup.products.some((product) => !product || typeof product.name !== "string" || !product.prices || !validStatistics(product.statistics)
         || !["purchase", "retail", "retailCashless"].every((key) => product.prices[key] === null
           || typeof product.prices[key]?.amount === "number" && Number.isFinite(product.prices[key].amount) && product.prices[key].amount >= 0
             && typeof product.prices[key].currency === "string" && /^[A-Z]{3}$/.test(product.prices[key].currency)))) {
@@ -135,6 +156,19 @@ export function bootstrapNomenclatureLookup() {
     clear() { lastBarcode = ""; clear(); },
     setActive(name) { active = name === "nomenclature"; if (active) void loadSources(); else clear(); },
   };
+}
+
+function validStatistics(statistics) {
+  if (statistics == null) return true;
+  const quantity = (value) => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1e12;
+  return (statistics.unit === null || typeof statistics.unit === "string" && statistics.unit.length <= 100)
+    && (statistics.stockWithOrders === null || quantity(statistics.stockWithOrders) && statistics.stockWithOrders >= 0)
+    && (statistics.monthlySales === null || Array.isArray(statistics.monthlySales) && statistics.monthlySales.length === 4
+      && statistics.monthlySales.every((row, index, rows) => {
+        if (!row || !/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(row.month) || !quantity(row.quantity)) return false;
+        const serial = (value) => Number(value.slice(0, 4)) * 12 + Number(value.slice(5));
+        return index === 0 || serial(rows[index - 1].month) - serial(row.month) === 1;
+      }));
 }
 
 export function bootstrapNomenclatureSettings() {

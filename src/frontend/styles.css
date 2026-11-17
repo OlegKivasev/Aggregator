@@ -844,6 +844,13 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .nomenclature-prices > div { display: flex; gap: 16px; justify-content: space-between; padding: 14px 0; border-top: 1px solid var(--line); }
 .nomenclature-prices dt { color: var(--muted); font-weight: 600; }
 .nomenclature-prices dd { flex-shrink: 0; margin: 0; color: var(--ink); font-size: 18px; font-weight: 800; }
+.nomenclature-inventory dd { color: #198754; }
+.nomenclature-sales { margin-top: 18px; }
+.nomenclature-sales h4 { margin: 0 0 6px; font-size: 16px; font-weight: 800; }
+.nomenclature-sales dl { margin: 8px 0 0; font-variant-numeric: tabular-nums; }
+.nomenclature-sales dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; }
+.nomenclature-sales dt { font-weight: 500; }
+.nomenclature-sales dd { margin: 0; font-weight: 800; }
 .nomenclature-choices { display: grid; gap: 10px; }
 .nomenclature-choices > button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .nomenclature-settings [hidden] { display: none !important; }
