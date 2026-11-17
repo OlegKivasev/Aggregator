@@ -12,8 +12,8 @@ const ttl = Number(readFileSync(new URL("../src/backend/nomenclature/stock-reque
 assert.equal(windowSeconds, 45, "preserve the file database worker window");
 assert.equal(reserve, ttl, "reserve a full request lifetime for reading and delivery");
 assert.match(worker, /ТекущаяУниверсальнаяДата\(\) >= ЗавершитьДо - ЗапасНаОбработку/);
-assert.match(worker, /"requests\?waitSeconds=20&stock=6", Неопределено, ЗавершитьДо, ЗапасНаОбработку\)/);
-assert.match(source, /Функция ЗапросНоменклатуры\(Настройки, Метод, Ресурс, Тело, НеПозднее, ЗапасНаОбработку = 0\)/);
+assert.match(worker, /"requests\?waitSeconds=20&stock=6", Неопределено, ЗавершитьДо, ЗапасНаОбработку, ДиагностикаОбмена\)/);
+assert.match(source, /Функция ЗапросНоменклатуры\(Настройки, Метод, Ресурс, Тело, НеПозднее, ЗапасНаОбработку = 0, ДиагностикаОбмена = Неопределено\)/);
 const expression = source.match(/Формат\((Макс\(0, Мин\(20, Таймаут - 2, Осталось - ЗапасНаОбработку\)\)), "ЧГ=0"\)/)?.[1];
 assert.ok(expression, "poll duration must subtract processing reserve from the remaining window");
 const wait = new Function("Таймаут", "Осталось", "ЗапасНаОбработку", `return ${expression.replaceAll("Макс", "Math.max").replaceAll("Мин", "Math.min")}`);
@@ -49,7 +49,7 @@ assert.match(launch, /Не Настройки\.ПоискНоменклатур�
 assert.doesNotMatch(launch, /Настройки\.Включен|HTTPСоединение|ЗапросНоменклатуры\(|ТоварыВНаличии\(/);
 assert.match(launch, /Регламентное\.Использование[\s\S]*?Регламентное\.ИмяПользователя = ПользователиИнформационнойБазы\.ТекущийПользователь\(\)\.Имя/);
 assert.match(launch, /СостояниеФоновогоЗадания\.Активно/);
-assert.match(launch, /СостояниеФоновогоЗадания\.ЗавершеноАварийно[\s\S]*?Задание\.Конец \+ 30/);
+assert.match(launch, /Отбор\.Состояние = СостояниеФоновогоЗадания\.ЗавершеноАварийно[\s\S]*?Задание\.Конец \+ 30/);
 assert.match(launch, /ФоновыеЗадания\.Выполнить\("АС_АгрегаторСервер\.ОбработатьЗапросыНоменклатуры", Новый Массив,\s*"АС_НоменклатураАгрегатора"/);
 assert.match(source, /НастроитьЗаданиеАгрегатора\("АС_ПоискНоменклатурыАгрегатора", "АС_НоменклатураАгрегатора"/);
 
