@@ -93,7 +93,7 @@ test("the initial stock schema migrates without losing results or mixing searche
     const inspection = new DatabaseSync(path);
     assert.equal(inspection.prepare("SELECT query FROM nomenclature_stock_requests WHERE id='old'").get().query, "");
     assert.equal(inspection.prepare("SELECT result_json FROM nomenclature_stock_requests WHERE id='old'").get().result_json, '{"old":true}');
-    assert.deepEqual(inspection.prepare("PRAGMA index_info(nomenclature_stock_search_active_idx)").all().map((row) => row.name), ["cursor", "query"]);
+    assert.deepEqual(inspection.prepare("PRAGMA index_info(nomenclature_stock_sort_active_idx)").all().map((row) => row.name), ["cursor", "query", "sort_field", "sort_direction"]);
     inspection.close();
     const token = service.rotateKey(); service.heartbeat(token);
     const a = service.loadStock(null, new AbortController().signal, "a");
@@ -258,11 +258,28 @@ test("HTTP delivers stock in one waiting browser request and keeps old worker pr
     assert.equal(searchJob.query, "%_[~] фильтр");
     assert.equal((await request("/api/integration/1c/nomenclature/stock-results", { method: "POST", ...json(result(searchJob), headers) })).status, 200);
     assert.equal((await searchResponse).status, 200);
-    for (const query of ["?after=wrong", "?after=", `?after=${product.id}&after=${product.id}`, "?limit=10000", "?q=a&q=b", "?q=" + "a".repeat(101), "?q=a%0Ab"]) {
+    const sortedResponse = request("/api/nomenclature/stock?q=" + encodeURIComponent("кол тор") + "&sort=quantity&direction=desc");
+    let sortedJob;
+    for (let index = 0; index < 100 && !sortedJob; index += 1) sortedJob = await poll("&stock=4");
+    assert.equal(sortedJob.sortField, "quantity"); assert.equal(sortedJob.sortDirection, "desc"); assert.equal(sortedJob.after, null);
+    const sortedProducts = Array.from({ length: 100 }, () => ({ ...product, id: randomUUID() }));
+    const sortedResult = { ...result(sortedJob, sortedProducts, true), lastSortValue: "1.125" };
+    assert.equal((await request("/api/integration/1c/nomenclature/stock-results", { method: "POST", ...json(sortedResult, headers) })).status, 200);
+    const sortedPage = await (await sortedResponse).json();
+    const nextResponse = request("/api/nomenclature/stock?q=" + encodeURIComponent("ТОР кол") + "&sort=quantity&direction=desc&after=" + sortedPage.nextCursor);
+    let nextJob;
+    for (let index = 0; index < 100 && !nextJob; index += 1) nextJob = await poll("&stock=4");
+    assert.deepEqual(nextJob.after, { id: sortedProducts.at(-1).id, value: "1.125" });
+    assert.equal(await poll("&stock=3"), null);
+    assert.equal((await request("/api/integration/1c/nomenclature/stock-results", { method: "POST", ...json(result(nextJob, []), headers) })).status, 200);
+    assert.equal((await nextResponse).status, 200);
+    for (const query of ["?after=wrong", "?after=", `?after=${product.id}&after=${product.id}`, "?limit=10000", "?q=a&q=b", "?q=" + "a".repeat(101), "?q=a%0Ab",
+      "?sort=unknown", "?sort=name&sort=quantity", "?sort=quantity&direction=desc&direction=asc", "?direction=desc", "?sort=quantity&direction=unknown",
+      `?sort=quantity&direction=asc&after=${sortedPage.nextCursor}`, `?sort=quantity&direction=desc&after=${sortedPage.nextCursor}`]) {
       assert.equal((await request("/api/nomenclature/stock" + query)).status, 400);
     }
     assert.equal((await request("/api/nomenclature/stock", { method: "POST", ...json({}) })).status, 405);
-    assert.equal((await request("/api/integration/1c/nomenclature/requests?stock=4", { headers })).status, 400);
+    assert.equal((await request("/api/integration/1c/nomenclature/requests?stock=5", { headers })).status, 400);
   } finally {
     server.closeAllConnections(); await new Promise((done) => server.close(done));
     if (previous === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previous;

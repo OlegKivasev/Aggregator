@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=nomenclature-stock-parts-1" />
+    <link rel="stylesheet" href="/styles.css?v=nomenclature-stock-sort-1" />
     <link rel="stylesheet" href="/order-notifications.css" />
   </head>
   <body>
@@ -432,7 +432,11 @@
           <p class="nomenclature-feedback" id="nomenclature-stock-status" role="status" aria-live="polite"></p>
           <div class="nomenclature-stock-table" id="nomenclature-stock-table" hidden>
             <table aria-label="Товары с положительным остатком">
-              <thead><tr><th scope="col">Наименование</th><th scope="col">Артикул</th><th scope="col">Остаток</th></tr></thead>
+              <thead><tr>
+                <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="name"><span>Наименование</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="article"><span>Артикул</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="quantity"><span>Остаток</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
+              </tr></thead>
               <tbody aria-hidden="true"><tr><td class="nomenclature-stock-spacer" id="nomenclature-stock-before" colspan="3"></td></tr></tbody>
               <tbody id="nomenclature-stock-rows"></tbody>
               <tbody aria-hidden="true"><tr><td class="nomenclature-stock-spacer" id="nomenclature-stock-after" colspan="3"></td></tr></tbody>
@@ -1267,7 +1271,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
 
     <script type="module" src="/auth-ui.js"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=nomenclature-stock-parts-1"></script>
+    <script type="module" src="/applicability.js?v=nomenclature-stock-sort-1"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>

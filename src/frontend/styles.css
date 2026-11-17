@@ -773,7 +773,11 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .nomenclature-stock > .panel__meta { margin-top: 8px; }
 .nomenclature-stock table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
 .nomenclature-stock th, .nomenclature-stock td { padding: 10px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; vertical-align: top; }
-.nomenclature-stock th { color: var(--muted); font-weight: 600; white-space: normal; text-transform: none; }
+.nomenclature-stock th { padding: 9px 12px; color: #8994a1; background: #f4f6f8; font-size: 11px; font-weight: 800; letter-spacing: .03em; white-space: normal; text-transform: uppercase; }
+.nomenclature-stock .table-sort { display: flex; width: 100%; min-height: 28px; gap: 5px; text-align: left; }
+.nomenclature-stock .table-sort > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.nomenclature-stock th:last-child .table-sort { justify-content: flex-end; text-align: right; }
+.nomenclature-stock thead { position: sticky; top: 0; z-index: 3; }
 .nomenclature-stock td { white-space: normal; }
 .nomenclature-stock th:first-child { width: 50%; }
 .nomenclature-stock th:nth-child(2) { width: 26%; }

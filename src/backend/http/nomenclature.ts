@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AuthenticatedUser } from "../auth/user-auth-service.ts";
 import { NomenclatureError, objectFields, parseBarcode, parseLookupResult, parseUuid } from "../nomenclature/contract.ts";
 import { parseStockResult, parseStockQuery } from "../nomenclature/stock-contract.ts";
+import { decodeStockCursor, parseStockSort } from "../nomenclature/stock-sort.ts";
 import type { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
 import { serveJson } from "./responses.ts";
@@ -44,7 +45,7 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         onlyMethod("GET");
         const wait = url.searchParams.get("waitSeconds") ?? "20";
         if ([...url.searchParams.keys()].some((key) => !["waitSeconds", "stock"].includes(key)) || url.searchParams.getAll("waitSeconds").length > 1
-          || url.searchParams.getAll("stock").length > 1 || url.searchParams.has("stock") && !["1", "2", "3"].includes(url.searchParams.get("stock")!)
+          || url.searchParams.getAll("stock").length > 1 || url.searchParams.has("stock") && !["1", "2", "3", "4"].includes(url.searchParams.get("stock")!)
           || !/^(?:\d|1\d|20)$/.test(wait)) throw new NomenclatureError(400, "wait", "Ожидание должно быть от 0 до 20 секунд.");
         const release = service.beginPoll();
         const controller = new AbortController();
@@ -53,7 +54,8 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         try {
           const deadline = Date.now() + Number(wait) * 1000;
           while (!controller.signal.aborted) {
-            const job = service.claim(token, url.searchParams.has("stock"), ["2", "3"].includes(url.searchParams.get("stock")!), url.searchParams.get("stock") === "3");
+            const version = Number(url.searchParams.get("stock") ?? "0");
+            const job = service.claim(token, version >= 1, version >= 2, version >= 3, version >= 4);
             if (job || Date.now() >= deadline) { serveJson(response, 200, { request: job }); break; }
             await service.wait(controller.signal, deadline - Date.now());
           }
@@ -64,16 +66,19 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
 
     if (url.pathname === "/api/nomenclature/stock") {
       onlyMethod("GET");
-      if ([...url.searchParams.keys()].some((key) => !["after", "q"].includes(key)) || url.searchParams.getAll("after").length > 1 || url.searchParams.getAll("q").length > 1) {
+      const allowed = ["after", "q", "sort", "direction"];
+      if ([...url.searchParams.keys()].some((key) => !allowed.includes(key)) || allowed.some((key) => url.searchParams.getAll(key).length > 1)) {
         throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
       }
-      const cursor = url.searchParams.has("after") ? parseUuid(url.searchParams.get("after")) : null;
       const query = parseStockQuery(url.searchParams.get("q") ?? "");
+      const sort = parseStockSort(url.searchParams.get("sort"), url.searchParams.get("direction"));
+      const cursor = url.searchParams.get("after");
+      decodeStockCursor(cursor, query, sort);
       const controller = new AbortController();
       const abort = () => controller.abort();
       response.once("close", abort);
       try {
-        const page = await service.loadStock(cursor, controller.signal, query);
+        const page = await service.loadStock(cursor, controller.signal, query, sort);
         if (!response.destroyed) serveJson(response, 200, page);
       } finally { response.removeListener("close", abort); }
       return true;

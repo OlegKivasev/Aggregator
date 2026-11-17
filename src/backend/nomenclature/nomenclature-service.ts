@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { NomenclatureError, type LookupResult } from "./contract.ts";
 import { StockRequests } from "./stock-requests.ts";
 import type { StockResult } from "./stock-contract.ts";
+import { defaultStockSort, type StockSort } from "./stock-sort.ts";
 
 interface SourceRow { id: string; token_hash: string | null; last_seen: number | null }
 interface LookupRow {
@@ -105,12 +106,12 @@ export class NomenclatureService {
     this.stock.notify();
   }
 
-  loadStock(cursor: string | null, signal: AbortSignal, query = "") {
+  loadStock(cursor: string | null, signal: AbortSignal, query = "", sort: StockSort = defaultStockSort) {
     if (this.closed) throw new NomenclatureError(503, "stopping", "Соединение закрывается.");
     const connection = this.state();
     if (!connection.configured) throw new NomenclatureError(503, "source_unconfigured", "Подключение номенклатуры ещё не настроено.");
     if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.");
-    return this.stock.load(cursor, signal, () => this.changes.emit(source), query);
+    return this.stock.load(cursor, signal, () => this.changes.emit(source), query, sort);
   }
 
   completeStock(token: string | undefined, result: StockResult): void {
@@ -173,7 +174,7 @@ export class NomenclatureService {
     this.database.prepare("UPDATE nomenclature_lookups SET status='cancelled' WHERE id=? AND status IN ('pending','leased')").run(id);
   }
 
-  claim(token: string | undefined, includeStock = false, supportsStockSearch = false, supportsStockTerms = false) {
+  claim(token: string | undefined, includeStock = false, supportsStockSearch = false, supportsStockTerms = false, supportsStockSorting = false) {
     this.heartbeat(token);
     this.cleanup();
     const now = this.now();
@@ -187,14 +188,15 @@ export class NomenclatureService {
           WHERE expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
           AND (query='' OR ?=1)
           AND (query NOT LIKE '% %' OR ?=1)
-        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now, Number(supportsStockSearch), Number(supportsStockTerms));
-      if (oldest?.kind === "stock") return this.stock.claim(supportsStockSearch, supportsStockTerms);
+          AND (sort_field='id' OR ?=1)
+        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now, Number(supportsStockSearch), Number(supportsStockTerms), Number(supportsStockSorting));
+      if (oldest?.kind === "stock") return this.stock.claim(supportsStockSearch, supportsStockTerms, supportsStockSorting);
     }
     const row = this.database.prepare(`UPDATE nomenclature_lookups SET status='leased', lease_id=?, lease_until=? WHERE id=(
       SELECT id FROM nomenclature_lookups WHERE source_id=? AND expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
       ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, source, now, now) as unknown as LookupRow | undefined;
     return row ? { id: row.id, leaseId: row.lease_id!, barcode: row.barcode, expiresAt: new Date(row.expires_at).toISOString() }
-      : includeStock ? this.stock.claim(supportsStockSearch, supportsStockTerms) : null;
+      : includeStock ? this.stock.claim(supportsStockSearch, supportsStockTerms, supportsStockSorting) : null;
   }
 
   complete(token: string | undefined, data: LookupResult & { requestId: string; leaseId: string }): void {

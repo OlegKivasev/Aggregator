@@ -20,6 +20,9 @@ export function bootstrapNomenclatureStock() {
   let blocked = false;
   let nextCursor = null;
   let total = 0;
+  let sortField = "id";
+  let sortDirection = "asc";
+  const sortButtons = [...document.querySelectorAll("[data-nomenclature-sort]")];
   const identities = new Set();
   const cursors = new Set();
   const normalize = (value) => [...new Set(value.normalize("NFC").trim().toLocaleLowerCase("ru-RU").split(/\s+/).filter(Boolean))].sort().join(" ");
@@ -38,6 +41,7 @@ export function bootstrapNomenclatureStock() {
       const parameters = new URLSearchParams();
       if (cursor) parameters.set("after", cursor);
       if (query) parameters.set("q", query);
+      if (sortField !== "id") { parameters.set("sort", sortField); parameters.set("direction", sortDirection); }
       const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(35_000)]);
       const response = await fetch(`/api/nomenclature/stock${parameters.size ? `?${parameters}` : ""}`, {
         cache: "no-store", signal,
@@ -52,7 +56,8 @@ export function bootstrapNomenclatureStock() {
       if (!response.ok) throw new Error(typeof value?.message === "string" ? value.message : "Не удалось загрузить остатки из 1С.");
       if (!value || !Array.isArray(value.products) || value.products.length > 100 || typeof value.hasMore !== "boolean"
         || !Number.isFinite(Date.parse(value.receivedAt)) || (value.hasMore ? value.products.length !== 100
-          || value.nextCursor !== value.products.at(-1)?.id || cursors.has(value.nextCursor) : value.nextCursor !== null)
+          || typeof value.nextCursor !== "string" || value.nextCursor.length > 8192
+          || (sortField === "id" && value.nextCursor !== value.products.at(-1)?.id) || cursors.has(value.nextCursor) : value.nextCursor !== null)
         || value.products.some((item) => !item || typeof item.id !== "string" || identities.has(item.id)
           || typeof item.name !== "string" || typeof item.article !== "string"
           || typeof item.quantity !== "number" || !Number.isFinite(item.quantity) || item.quantity <= 0)
@@ -64,7 +69,7 @@ export function bootstrapNomenclatureStock() {
       if (cursor) cursors.add(cursor);
       total += value.products.length;
       nextCursor = value.nextCursor;
-      table.hidden = total === 0;
+      table.hidden = false;
       table.querySelector("table").setAttribute("aria-rowcount", value.hasMore ? "-1" : String(total + 1));
       renderer.append(value.products);
       status.textContent = total ? `Загружено товаров: ${total}. Получено из 1С в ${new Date(value.receivedAt).toLocaleTimeString("ru-RU")}`
@@ -91,7 +96,7 @@ export function bootstrapNomenclatureStock() {
   };
   const restart = () => {
     stop(); renderer.reset(); identities.clear(); cursors.clear();
-    total = 0; nextCursor = null; blocked = false; table.hidden = true; retry.hidden = true;
+    total = 0; nextCursor = null; blocked = false; table.hidden = !active; retry.hidden = true;
     progress.textContent = "";
     if (active) void load(true);
   };
@@ -99,7 +104,7 @@ export function bootstrapNomenclatureStock() {
     const nextQuery = normalize(input.value);
     if (nextQuery === query && !timer) return;
     stop(); renderer.reset(); identities.clear(); cursors.clear(); total = 0; nextCursor = null;
-    table.hidden = true; retry.hidden = true; blocked = true;
+    table.hidden = false; retry.hidden = true; blocked = true;
     status.textContent = "Ожидаем окончания ввода…"; status.dataset.tone = "notice"; progress.textContent = "";
     timer = setTimeout(() => { query = nextQuery; restart(); }, nextQuery ? 300 : 0);
   };
@@ -108,6 +113,18 @@ export function bootstrapNomenclatureStock() {
   form.addEventListener("submit", (event) => { event.preventDefault(); query = normalize(input.value); restart(); });
   refresh.addEventListener("click", () => { query = normalize(input.value); restart(); });
   retry.addEventListener("click", () => { blocked = false; void load(total === 0); });
+  for (const button of sortButtons) button.addEventListener("click", () => {
+    const field = button.dataset.nomenclatureSort;
+    sortDirection = field === sortField && sortDirection === "asc" ? "desc" : "asc";
+    sortField = field;
+    for (const item of sortButtons) {
+      const selected = item === button;
+      item.classList.toggle("is-active", selected);
+      item.closest("th").setAttribute("aria-sort", selected ? (sortDirection === "asc" ? "ascending" : "descending") : "none");
+    }
+    query = normalize(input.value);
+    restart();
+  });
   new IntersectionObserver((entries) => {
     if (entries.some((entry) => entry.isIntersecting)) void load();
   }, { rootMargin: "400px 0px" }).observe(sentinel);

@@ -6,6 +6,7 @@ export interface StockPage { products: StockProduct[]; hasMore: boolean; nextCur
 export interface StockResult {
   requestId: string; leaseId: string; status: "completed" | "error";
   products: StockProduct[]; hasMore: boolean;
+  lastSortValue?: string | null;
 }
 
 export function parseStockQuery(value: unknown): string {
@@ -18,12 +19,16 @@ export function parseStockQuery(value: unknown): string {
 }
 
 export function parseStockResult(value: unknown): StockResult {
-  const data = objectFields(value, ["requestId", "leaseId", "status", "products", "hasMore"]);
+  const data = objectFields(value, ["requestId", "leaseId", "status", "products", "hasMore", "lastSortValue"]);
   if (!["completed", "error"].includes(data.status as string) || !Array.isArray(data.products)
     || data.products.length > stockPageSize || typeof data.hasMore !== "boolean"
     || data.status === "error" && (data.products.length !== 0 || data.hasMore)
     || data.hasMore && data.products.length !== stockPageSize) {
     throw new NomenclatureError(400, "invalid_stock", "Некорректный список остатков.");
+  }
+  if (data.lastSortValue !== undefined && data.lastSortValue !== null
+    && (typeof data.lastSortValue !== "string" || data.lastSortValue.length > 500)) {
+    throw new NomenclatureError(400, "invalid_stock", "Некорректное значение сортировки.");
   }
   const identities = new Set<string>();
   const products = data.products.map((value): StockProduct => {
@@ -39,5 +44,5 @@ export function parseStockResult(value: unknown): StockResult {
     return { id, name: item.name.trim(), article: item.article.trim(), quantity: item.quantity };
   });
   return { requestId: parseUuid(data.requestId), leaseId: parseUuid(data.leaseId), status: data.status as StockResult["status"],
-    products, hasMore: data.hasMore };
+    products, hasMore: data.hasMore, ...(data.lastSortValue === undefined ? {} : { lastSortValue: data.lastSortValue as string | null }) };
 }
