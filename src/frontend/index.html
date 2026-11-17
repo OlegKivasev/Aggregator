@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=nomenclature-stock-filters-1" />
+    <link rel="stylesheet" href="/styles.css?v=nomenclature-stock-toolbar-2" />
     <link rel="stylesheet" href="/order-notifications.css" />
   </head>
   <body>
@@ -393,14 +393,6 @@
         <header>
           <h2 id="nomenclature-title">Номенклатура</h2>
         </header>
-        <div class="nomenclature-toolbar">
-          <button type="button" class="nomenclature-tool" id="nomenclature-scan" aria-label="Сканировать камерой" title="Сканировать камерой"><span class="nomenclature-scanner-icon" aria-hidden="true"></span></button>
-          <button type="button" class="nomenclature-tool" id="nomenclature-stock-refresh" aria-label="Обновить список" title="Обновить список"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 11.5-1L20 9M4 15l2.5 3A7 7 0 0 0 18 17"/></svg></button>
-          <form class="nomenclature-stock-search" id="nomenclature-stock-search" role="search">
-            <label class="visually-hidden" for="nomenclature-stock-query">Поиск по наименованию или артикулу</label>
-            <input id="nomenclature-stock-query" type="search" maxlength="100" placeholder="Название или артикул товара" autocomplete="off" enterkeyhint="search" aria-controls="nomenclature-stock-rows">
-          </form>
-        </div>
         <details class="nomenclature-filters" open>
           <summary>Фильтры <span id="nomenclature-filter-summary">В наличии</span></summary>
           <div class="nomenclature-filter-controls">
@@ -408,6 +400,16 @@
             <label class="nomenclature-filter"><input id="nomenclature-price-enabled" type="checkbox"><span>Цены</span><select id="nomenclature-price-type" aria-label="Вид цены" disabled><option value="">Вид цены</option></select></label>
           </div>
         </details>
+        <div class="nomenclature-toolbar">
+          <button type="button" class="nomenclature-tool" id="nomenclature-scan" aria-label="Сканировать камерой" title="Сканировать камерой"><span class="nomenclature-scanner-icon" aria-hidden="true"></span></button>
+          <div class="nomenclature-toolbar__actions">
+            <form class="nomenclature-stock-search" id="nomenclature-stock-search" role="search">
+              <label class="visually-hidden" for="nomenclature-stock-query">Поиск по наименованию или артикулу</label>
+              <input id="nomenclature-stock-query" type="search" maxlength="100" placeholder="Название или артикул товара" autocomplete="off" enterkeyhint="search" aria-controls="nomenclature-stock-rows">
+            </form>
+            <button type="button" class="nomenclature-tool" id="nomenclature-stock-refresh" aria-label="Обновить список" title="Обновить список"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 11.5-1L20 9M4 15l2.5 3A7 7 0 0 0 18 17"/></svg></button>
+          </div>
+        </div>
         <p class="nomenclature-feedback" id="nomenclature-feedback" role="status" aria-live="polite"></p>
         <div class="nomenclature-result" id="nomenclature-result" hidden>
           <label for="nomenclature-code">Штрихкод</label>
@@ -430,15 +432,15 @@
           <h3 id="nomenclature-stock-title" class="visually-hidden">Номенклатура</h3>
           <p class="nomenclature-stock-statistics" id="nomenclature-stock-statistics" role="status" aria-live="polite">Всего строк: —; Выделено: 0</p>
           <p class="nomenclature-feedback" id="nomenclature-stock-status" role="status" aria-live="polite"></p>
-          <div class="search-loading nomenclature-loading" id="nomenclature-stock-loading" role="status" aria-live="polite" hidden><div class="search-loading__content"><span class="search-loading__spinner" aria-hidden="true"></span><div><strong>Выполняется поиск</strong></div></div></div>
           <div class="nomenclature-stock-table" id="nomenclature-stock-table" hidden>
             <table aria-label="Номенклатура" aria-multiselectable="true">
               <thead><tr>
                 <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="name"><span>Наименование</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
                 <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="article"><span>Артикул</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
                 <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="quantity" aria-label="Сортировать по остатку"><span class="nomenclature-quantity-label">Остаток</span><span class="nomenclature-quantity-short" aria-hidden="true">Ост.</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
-                <th scope="col" id="nomenclature-stock-price-heading" hidden>Цена</th>
+                <th scope="col" id="nomenclature-stock-price-heading" aria-sort="none" hidden><button type="button" class="table-sort" data-nomenclature-sort="price"><span id="nomenclature-stock-price-label">Цена</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
               </tr></thead>
+              <tbody id="nomenclature-stock-loading-row"><tr><td class="nomenclature-stock-loading-cell" colspan="3"><div class="search-loading nomenclature-loading" id="nomenclature-stock-loading" role="status" aria-live="polite" hidden><div class="search-loading__content"><span class="search-loading__spinner" aria-hidden="true"></span><div><strong>Выполняется поиск</strong></div></div></div></td></tr></tbody>
               <tbody aria-hidden="true"><tr><td class="nomenclature-stock-spacer" id="nomenclature-stock-before" colspan="3"></td></tr></tbody>
               <tbody id="nomenclature-stock-rows"></tbody>
               <tbody aria-hidden="true"><tr><td class="nomenclature-stock-spacer" id="nomenclature-stock-after" colspan="3"></td></tr></tbody>
@@ -446,7 +448,6 @@
           </div>
           <div class="nomenclature-stock-sentinel" id="nomenclature-stock-sentinel">
             <p class="nomenclature-feedback" id="nomenclature-stock-progress" role="status" aria-live="polite"></p>
-            <button type="button" class="btn btn-light" id="nomenclature-stock-retry" hidden>Повторить загрузку</button>
           </div>
         </section>
       </section>

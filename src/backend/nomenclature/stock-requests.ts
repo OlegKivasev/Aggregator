@@ -136,6 +136,9 @@ export class StockRequests {
     const sort: StockSort = { field: row.sort_field, direction: row.sort_direction };
     const after = decodeStockCursor(row.cursor || null, row.query, sort, row.options);
     const options = row.options ? JSON.parse(row.options) as StockOptions : undefined;
+    if (data.status === "completed" && row.sort_field === "price" && !options?.priceType) {
+      throw new NomenclatureError(400, "invalid_stock", "Для сортировки по цене выберите вид цены.");
+    }
     if (data.status === "completed" && (data.products.some((item) =>
       ((options?.availability ?? "available") === "available" && item.quantity <= 0)
       || (options?.availability === "absent" && item.quantity > 0)

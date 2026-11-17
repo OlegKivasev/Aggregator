@@ -35,6 +35,13 @@ test("sorted cursors preserve raw names, empty articles and exact decimals, scop
   for (const value of [null, 1, "0", "-1", "NaN", "1,125", "1e16", " 1", "01", "1e999"]) {
     assert.throws(() => decodeStockCursor(encodeStockCursor({ id, value }, "", sort), "", sort));
   }
+  const priceSort = parseStockSort("price", "asc");
+  const priceValue = JSON.stringify({ hasPrice: true, amount: 1500.5 });
+  const priceCursor = encodeStockCursor({ id, value: priceValue }, "", priceSort);
+  assert.deepEqual(decodeStockCursor(priceCursor, "", priceSort), { id, value: priceValue });
+  for (const value of [JSON.stringify({ hasPrice: false, amount: 1 }), JSON.stringify({ hasPrice: true, amount: -1 }), JSON.stringify({ hasPrice: true, amount: 1e13 }), "null", "{}", "not-json"]) {
+    assert.throws(() => decodeStockCursor(encodeStockCursor({ id, value }, "", priceSort), "", priceSort));
+  }
 });
 
 test("only sorting-aware workers claim sorted pages; queues separate fields and directions", async () => {

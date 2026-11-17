@@ -6,11 +6,61 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
   const productsById = new Map();
   let selectionAnchor;
   let showPrice = false;
+  let highlightTerms = [];
   const currencyFormats = new Map();
   const priceText = (price) => {
     if (!price) return "—";
     if (!currencyFormats.has(price.currency)) currencyFormats.set(price.currency, new Intl.NumberFormat("ru-RU", { style: "currency", currency: price.currency }));
-    return currencyFormats.get(price.currency).format(price.amount) + (price.unit ? ` / ${price.unit}` : "");
+    return currencyFormats.get(price.currency).format(price.amount);
+  };
+  const normalized = (value) => String(value ?? "").normalize("NFC").toLocaleLowerCase("ru-RU");
+  const compact = (value) => [...normalized(value)].filter((character) => /[\p{L}\p{N}]/u.test(character)).join("");
+  const highlightRanges = (text) => {
+    if (!highlightTerms.length || !text) return [];
+    const lower = normalized(text);
+    const compactText = compact(text);
+    const compactPositions = [];
+    for (let index = 0; index < [...lower].length; index += 1) {
+      const character = [...lower][index];
+      if (/[\p{L}\p{N}]/u.test(character)) compactPositions.push(index);
+    }
+    const ranges = [];
+    for (const rawTerm of highlightTerms) {
+      const term = normalized(rawTerm);
+      if (!term) continue;
+      let from = lower.indexOf(term);
+      if (from >= 0) ranges.push([from, from + term.length]);
+      const compactTerm = compact(term);
+      if (!compactTerm) continue;
+      from = compactText.indexOf(compactTerm);
+      if (from >= 0) {
+        const start = compactPositions[from];
+        const end = compactPositions[from + [...compactTerm].length - 1];
+        if (start !== undefined && end !== undefined) ranges.push([start, end + 1]);
+      }
+    }
+    ranges.sort((left, right) => left[0] - right[0] || right[1] - left[1]);
+    const merged = [];
+    for (const range of ranges) {
+      const previous = merged.at(-1);
+      if (previous && range[0] <= previous[1]) previous[1] = Math.max(previous[1], range[1]);
+      else merged.push(range);
+    }
+    return merged;
+  };
+  const appendHighlighted = (cell, value) => {
+    const text = String(value ?? "");
+    const ranges = highlightRanges(text);
+    if (!ranges.length) { cell.textContent = text; return; }
+    const fragment = document.createDocumentFragment();
+    let offset = 0;
+    for (const [start, end] of ranges) {
+      if (start > offset) fragment.append(document.createTextNode(text.slice(offset, start)));
+      const match = document.createElement("strong"); match.textContent = text.slice(start, end); fragment.append(match);
+      offset = end;
+    }
+    if (offset < text.length) fragment.append(document.createTextNode(text.slice(offset)));
+    cell.replaceChildren(fragment);
   };
   const paintSelection = () => {
     for (const row of rows.children) row.setAttribute("aria-selected", String(selected.has(row.dataset.productId)));
@@ -76,9 +126,9 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
           row.tabIndex = 0;
           row.setAttribute("aria-selected", String(selected.has(product.id)));
           row.setAttribute("aria-rowindex", String(index * 100 + position + 2));
-          for (const text of [product.name, product.article || "—", numberFormat.format(product.quantity)]) {
-            const cell = document.createElement("td"); cell.textContent = text; row.append(cell);
-          }
+          const nameCell = document.createElement("td"); appendHighlighted(nameCell, product.name); row.append(nameCell);
+          const articleCell = document.createElement("td"); appendHighlighted(articleCell, product.article); row.append(articleCell);
+          const quantityCell = document.createElement("td"); quantityCell.textContent = numberFormat.format(product.quantity); row.append(quantityCell);
           if (showPrice) { const cell = document.createElement("td"); cell.dataset.stockPrice = ""; cell.textContent = priceText(product.price); row.append(cell); }
           return row;
         }));
@@ -111,7 +161,7 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
     rebuildOffsets(); render(true);
   }).observe(rows.closest("table"));
   return {
-    reset(price = false) { showPrice = price; chunks = []; offsets = [0]; rendered.clear(); productsById.clear(); selected.clear(); selectionAnchor = undefined; range = ""; rows.replaceChildren(); spacer(before, 0); spacer(after, 0); selectionChanged(0); },
+    reset(price = false, query = "") { showPrice = price; highlightTerms = query.split(/\s+/).filter(Boolean); chunks = []; offsets = [0]; rendered.clear(); productsById.clear(); selected.clear(); selectionAnchor = undefined; range = ""; rows.replaceChildren(); spacer(before, 0); spacer(after, 0); selectionChanged(0); },
     append(products) {
       if (!products.length) return;
       for (const product of products) productsById.set(product.id, product);

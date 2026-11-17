@@ -1,6 +1,6 @@
 import { NomenclatureError, objectFields, parseUuid } from "./contract.ts";
 
-export type StockSortField = "id" | "name" | "article" | "quantity";
+export type StockSortField = "id" | "name" | "article" | "quantity" | "price";
 export interface StockSort { field: StockSortField; direction: "asc" | "desc" }
 export interface StockPosition { id: string; value: string | null }
 export const defaultStockSort: StockSort = { field: "id", direction: "asc" };
@@ -8,7 +8,7 @@ const invalid = () => new NomenclatureError(400, "invalid_stock_sort", "Неко
 
 export function parseStockSort(field: string | null, direction: string | null): StockSort {
   const sort = { field: field ?? "id", direction: direction ?? "asc" };
-  if (!["id", "name", "article", "quantity"].includes(sort.field) || !["asc", "desc"].includes(sort.direction)
+  if (!["id", "name", "article", "quantity", "price"].includes(sort.field) || !["asc", "desc"].includes(sort.direction)
     || sort.field === "id" && sort.direction !== "asc") throw invalid();
   return sort as StockSort;
 }
@@ -20,6 +20,13 @@ export function validateStockSortValue(value: unknown, field: StockSortField, si
     // Keep 1C's exact decimal text, even above Number's exact fractional range.
     if (value.length > 64 || !/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value)
       || !Number.isFinite(Number(value)) || (!signed && Number(value) <= 0) || Math.abs(Number(value)) > 1e15) throw invalid();
+  } else if (field === "price") {
+    if (value.length > 160) throw invalid();
+    try {
+      const data = objectFields(JSON.parse(value), ["hasPrice", "amount"]);
+      if (typeof data.hasPrice !== "boolean" || typeof data.amount !== "number" || !Number.isFinite(data.amount)
+        || data.amount < 0 || data.amount > 1e12 || !data.hasPrice && data.amount !== 0) throw invalid();
+    } catch { throw invalid(); }
   } else if (value.length > (field === "name" ? 500 : 50)) throw invalid();
   return value;
 }

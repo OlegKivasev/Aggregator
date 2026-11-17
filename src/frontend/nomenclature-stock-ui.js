@@ -1,4 +1,4 @@
-import { createStockTable } from "./nomenclature-stock-table.js?v=stock-filters-1";
+import { createStockTable } from "./nomenclature-stock-table.js?v=stock-filters-2";
 
 export function bootstrapNomenclatureStock() {
   const status = document.querySelector("#nomenclature-stock-status");
@@ -8,7 +8,6 @@ export function bootstrapNomenclatureStock() {
   const form = document.querySelector("#nomenclature-stock-search");
   const sentinel = document.querySelector("#nomenclature-stock-sentinel");
   const progress = document.querySelector("#nomenclature-stock-progress");
-  const retry = document.querySelector("#nomenclature-stock-retry");
   const loading = document.querySelector("#nomenclature-stock-loading");
   const statistics = document.querySelector("#nomenclature-stock-statistics");
   const availabilityEnabled = document.querySelector("#nomenclature-availability-enabled");
@@ -16,6 +15,8 @@ export function bootstrapNomenclatureStock() {
   const priceEnabled = document.querySelector("#nomenclature-price-enabled");
   const priceType = document.querySelector("#nomenclature-price-type");
   const priceHeading = document.querySelector("#nomenclature-stock-price-heading");
+  const priceLabel = document.querySelector("#nomenclature-stock-price-label");
+  const loadingCell = document.querySelector(".nomenclature-stock-loading-cell");
   let totalCount;
   priceEnabled.disabled = true;
   let selectionCount = 0;
@@ -40,12 +41,19 @@ export function bootstrapNomenclatureStock() {
   const stop = () => { generation += 1; clearTimeout(timer); timer = undefined; controller?.abort(); controller = undefined; busy = false; loading.hidden = true; table.removeAttribute("aria-busy"); };
   const selectedPrice = () => priceEnabled.checked ? priceType.value : "";
   const selectedAvailability = () => availabilityEnabled.checked ? availability.value : "all";
+  const syncSortHeaders = () => {
+    for (const item of sortButtons) {
+      const selected = item.dataset.nomenclatureSort === sortField && (sortField !== "price" || !!selectedPrice());
+      item.classList.toggle("is-active", selected);
+      item.closest("th").setAttribute("aria-sort", selected ? (sortDirection === "asc" ? "ascending" : "descending") : "none");
+    }
+  };
   const nearEnd = () => sentinel.getBoundingClientRect().top < window.innerHeight + 400;
   const load = async (first = false) => {
     if (!active || document.hidden || busy || blocked || (!first && !nextCursor)) return;
     const attempt = generation;
     const abort = new AbortController();
-    controller = abort; busy = true; retry.hidden = true;
+    controller = abort; busy = true;
     progress.textContent = ""; status.textContent = ""; loading.hidden = false; table.setAttribute("aria-busy", "true");
     const cursor = nextCursor;
     try {
@@ -63,8 +71,8 @@ export function bootstrapNomenclatureStock() {
       try { value = await response.json(); }
       catch {
         if (signal.aborted) throw signal.reason;
-        throw new Error(response.ok ? "Сервер вернул пустой или неполный ответ. Повторите загрузку."
-          : `Сервер не смог загрузить остатки (HTTP ${response.status}). Повторите загрузку.`);
+        throw new Error(response.ok ? "Сервер вернул пустой или неполный ответ. Обновите список."
+          : `Сервер не смог загрузить остатки (HTTP ${response.status}). Обновите список.`);
       }
       if (!response.ok) throw new Error(typeof value?.message === "string" ? value.message : "Не удалось загрузить остатки из 1С.");
       if (!value || !Array.isArray(value.products) || value.products.length > 100 || typeof value.hasMore !== "boolean"
@@ -80,7 +88,7 @@ export function bootstrapNomenclatureStock() {
         || first && (!Number.isSafeInteger(value.totalCount) || value.totalCount < value.products.length || !Array.isArray(value.priceTypes)
           || value.priceTypes.some((item) => !item || typeof item.id !== "string" || typeof item.name !== "string"))
         || new Set(value.products.map((item) => item.id)).size !== value.products.length) {
-        throw new Error("Получен некорректный список остатков. Повторите загрузку.");
+        throw new Error("Получен некорректный список остатков. Обновите список.");
       }
       if (attempt !== generation || !active) return;
       if (first) {
@@ -107,11 +115,10 @@ export function bootstrapNomenclatureStock() {
     } catch (error) {
       if (attempt !== generation || !active) return;
       blocked = true;
-      status.textContent = error?.name === "TimeoutError" ? "1С не ответила вовремя. Повторите загрузку."
+      status.textContent = error?.name === "TimeoutError" ? "1С не ответила вовремя. Обновите список."
         : error instanceof Error ? error.message : "Не удалось загрузить остатки из 1С.";
       status.dataset.tone = "error";
       progress.textContent = "";
-      retry.hidden = false;
     } finally {
       if (attempt === generation && active) {
         controller = undefined; busy = false; loading.hidden = true; table.removeAttribute("aria-busy");
@@ -120,22 +127,23 @@ export function bootstrapNomenclatureStock() {
     }
   };
   const restart = () => {
-    stop(); totalCount = undefined; renderer.reset(!!selectedPrice()); identities.clear(); cursors.clear();
-    total = 0; nextCursor = null; blocked = false; table.hidden = !active; retry.hidden = true;
+    stop(); totalCount = undefined; renderer.reset(!!selectedPrice(), query); identities.clear(); cursors.clear();
+    total = 0; nextCursor = null; blocked = false; table.hidden = !active;
     progress.textContent = "";
     priceHeading.hidden = !selectedPrice();
-    priceHeading.textContent = selectedPrice() ? priceType.selectedOptions[0]?.textContent ?? "Цена" : "Цена";
-    priceHeading.title = priceHeading.textContent;
+    priceLabel.textContent = selectedPrice() ? priceType.selectedOptions[0]?.textContent ?? "Цена" : "Цена";
+    priceHeading.title = priceLabel.textContent;
     document.querySelector("#nomenclature-stock-title").textContent = selectedAvailability() === "available" ? "Товары в наличии" : "Номенклатура";
     table.querySelector("table").classList.toggle("has-price", !!selectedPrice());
     for (const spacer of table.querySelectorAll(".nomenclature-stock-spacer")) spacer.colSpan = selectedPrice() ? 4 : 3;
+    loadingCell.colSpan = selectedPrice() ? 4 : 3;
     if (active) void load(true);
   };
   const search = () => {
     const nextQuery = normalize(input.value);
     if (nextQuery === query && !timer) return;
-    stop(); totalCount = undefined; renderer.reset(!!selectedPrice()); identities.clear(); cursors.clear(); total = 0; nextCursor = null;
-    table.hidden = false; retry.hidden = true; blocked = true;
+    stop(); totalCount = undefined; renderer.reset(!!selectedPrice(), nextQuery); identities.clear(); cursors.clear(); total = 0; nextCursor = null;
+    table.hidden = false; blocked = true;
     status.textContent = ""; progress.textContent = "";
     timer = setTimeout(() => { query = nextQuery; restart(); }, nextQuery ? 300 : 0);
   };
@@ -143,11 +151,12 @@ export function bootstrapNomenclatureStock() {
   input.addEventListener("compositionend", search);
   form.addEventListener("submit", (event) => { event.preventDefault(); query = normalize(input.value); restart(); });
   refresh.addEventListener("click", () => { query = normalize(input.value); restart(); });
-  retry.addEventListener("click", () => { blocked = false; void load(total === 0); });
   const filterChanged = () => {
     availability.disabled = !availabilityEnabled.checked;
     priceType.disabled = !priceEnabled.checked;
     if (priceEnabled.checked && !priceType.value) { priceEnabled.checked = false; priceType.disabled = true; return; }
+    if (!selectedPrice() && sortField === "price") { sortField = "id"; sortDirection = "asc"; }
+    syncSortHeaders();
     document.querySelector("#nomenclature-filter-summary").textContent = [
       selectedAvailability() === "available" ? "В наличии" : selectedAvailability() === "absent" ? "Отсутствуют" : "Все товары",
       selectedPrice() ? priceType.selectedOptions[0].textContent : "",
@@ -159,11 +168,7 @@ export function bootstrapNomenclatureStock() {
     const field = button.dataset.nomenclatureSort;
     sortDirection = field === sortField && sortDirection === "asc" ? "desc" : "asc";
     sortField = field;
-    for (const item of sortButtons) {
-      const selected = item === button;
-      item.classList.toggle("is-active", selected);
-      item.closest("th").setAttribute("aria-sort", selected ? (sortDirection === "asc" ? "ascending" : "descending") : "none");
-    }
+    syncSortHeaders();
     query = normalize(input.value);
     restart();
   });
