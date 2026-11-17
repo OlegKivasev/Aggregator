@@ -29,6 +29,8 @@ export class NomenclatureService {
   private closed = false;
   private readonly now: () => number;
   private readonly stock: StockRequests;
+  private readonly stockWorkers = new Map<number, number>();
+  private observedStockVersion: number | null = null;
 
   constructor(path: string, now: () => number = Date.now) {
     this.now = now;
@@ -106,8 +108,19 @@ export class NomenclatureService {
       this.stock.invalidate();
       this.database.exec("COMMIT");
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+    this.stockWorkers.clear();
+    this.observedStockVersion = null;
     this.changes.emit(source);
     this.stock.notify();
+  }
+
+  stockVersion(): number | null {
+    let version: number | null = null;
+    for (const [candidate, seen] of this.stockWorkers) {
+      if (this.now() - seen >= onlineMs) this.stockWorkers.delete(candidate);
+      else version = Math.max(version ?? 0, candidate);
+    }
+    return version;
   }
 
   loadStock(cursor: string | null, signal: AbortSignal, query = "", sort: StockSort = defaultStockSort, options?: StockOptions) {
@@ -115,7 +128,16 @@ export class NomenclatureService {
     const connection = this.state();
     if (!connection.configured) throw new NomenclatureError(503, "source_unconfigured", "Подключение номенклатуры ещё не настроено.");
     if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.");
-    return this.stock.load(cursor, signal, () => this.changes.emit(source), query, sort, options);
+    const required = options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
+    const checkWorker = () => {
+      const version = this.stockVersion();
+      // After a restart, let the first authenticated poll identify the worker.
+      if (version !== null && version < required) {
+        throw new NomenclatureError(503, "stock_unsupported", "Обработчик 1С подключён, но не поддерживает этот список номенклатуры. Обновите расширение в базе 1С и перезапустите задание поиска, затем обновите список.");
+      }
+    };
+    checkWorker();
+    return this.stock.load(cursor, signal, () => this.changes.emit(source), query, sort, options, checkWorker);
   }
 
   completeStock(token: string | undefined, result: StockResult): void {
@@ -180,6 +202,13 @@ export class NomenclatureService {
 
   claim(token: string | undefined, includeStock = false, supportsStockSearch = false, supportsStockTerms = false, supportsStockSorting = false, supportsStockOptions = false) {
     this.heartbeat(token);
+    const previousVersion = this.stockVersion();
+    const version = !includeStock ? 0 : supportsStockOptions ? 5 : supportsStockSorting ? 4 : supportsStockTerms ? 3 : supportsStockSearch ? 2 : 1;
+    this.stockWorkers.set(version, this.now());
+    const currentVersion = this.stockVersion();
+    const changed = currentVersion !== previousVersion || currentVersion !== this.observedStockVersion;
+    this.observedStockVersion = currentVersion;
+    if (changed) this.stock.notify();
     this.cleanup();
     const now = this.now();
     if (includeStock) {

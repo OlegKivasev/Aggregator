@@ -19,6 +19,7 @@ async function fixture(check) {
   const path = join(directory, "stock.sqlite");
   const service = new NomenclatureService(path); const token = service.rotateKey(); service.heartbeat(token);
   const claim = () => service.claim(token, true, true, true, true, true);
+  claim();
   try { await check({ service, token, claim, path }); }
   finally { service.close(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 }

@@ -59,7 +59,7 @@ export class StockRequests {
   notify(): void { this.changes.emit("change"); }
   close(): void { this.closed = true; this.notify(); }
 
-  async load(cursor: string | null, signal: AbortSignal, notifyWorker: () => void, query = "", sort: StockSort = defaultStockSort, options?: StockOptions): Promise<StockPage> {
+  async load(cursor: string | null, signal: AbortSignal, notifyWorker: () => void, query = "", sort: StockSort = defaultStockSort, options?: StockOptions, checkWorker?: () => void): Promise<StockPage> {
     if (signal.aborted) throw signal.reason;
     if (this.closed) throw new NomenclatureError(503, "stopping", "Соединение закрывается.");
     if (this.count >= 100) throw new NomenclatureError(429, "stock_busy", "Слишком много запросов остатков. Повторите позже.");
@@ -93,6 +93,7 @@ export class StockRequests {
           if (this.closed) return finish(new NomenclatureError(503, "stopping", "Соединение закрывается."));
           if (completedId && completedId !== id) return;
           if (completedPage) return finish(undefined, completedPage);
+          try { checkWorker?.(); } catch (error) { return finish(error); }
           const current = this.database.prepare("SELECT * FROM nomenclature_stock_requests WHERE id=?").get(id) as unknown as Row | undefined;
           if (!current || this.now() >= current.expires_at) return finish(new NomenclatureError(504, "stock_timeout", "1С не ответила вовремя. Повторите загрузку остатков."));
           if (current.status === "completed") return finish(undefined, JSON.parse(current.result_json!) as StockPage);

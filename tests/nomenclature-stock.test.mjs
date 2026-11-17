@@ -20,6 +20,7 @@ async function fixture(check) {
   const service = new NomenclatureService(path, () => now);
   const token = service.rotateKey();
   service.heartbeat(token);
+  service.claim(token, true, true, true, true, true);
   try { await check({ service, token, path, advance: (milliseconds) => { now += milliseconds; } }); }
   finally { service.close(); await rm(directory, { recursive: true, force: true }); }
 }
@@ -240,7 +241,9 @@ test("HTTP delivers stock in one waiting browser request and keeps old worker pr
     const token = (await (await request("/api/nomenclature/connection", { method: "POST", ...json({}) })).json()).token;
     const headers = { Authorization: `Bearer ${token}` };
     const poll = async (stock = "") => (await (await request(`/api/integration/1c/nomenclature/requests?waitSeconds=0${stock}`, { headers })).json()).request;
-    await poll();
+    await poll("&stock=5");
+    const status = await (await request("/api/integration/1c/nomenclature/status", { headers })).json();
+    assert.equal(status.stockVersion, 5); assert.equal(status.stockReady, true);
     const waiting = request("/api/nomenclature/stock");
     let job;
     for (let i = 0; i < 100 && !job; i += 1) job = await poll("&stock=1");

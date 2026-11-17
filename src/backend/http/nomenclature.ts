@@ -35,7 +35,9 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
         // Checking a key must not make a stopped worker appear online.
         const state = service.state();
-        serveJson(response, 200, { ready: true, workerOnline: state.online, lastSeenAt: state.lastSeenAt });
+        const stockVersion = service.stockVersion();
+        serveJson(response, 200, { ready: true, workerOnline: state.online, lastSeenAt: state.lastSeenAt,
+          stockVersion, stockReady: state.online && stockVersion !== null && stockVersion >= 5 });
       } else if (match[1] === "results" || match[1] === "stock-results") {
         onlyMethod("POST");
         if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");

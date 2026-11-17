@@ -333,6 +333,21 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await page.locator("#nomenclature-stock-status").getByText("Сервер не смог загрузить остатки (HTTP 502). Обновите список.", { exact: true }).waitFor();
     assert.equal(await page.locator("#nomenclature-stock-progress").textContent(), "", "initial errors appear once");
     assert.equal(reads.length, readsBeforeError + 1); assert.equal(await poll(0, 4), null);
+    const replacement = await (await request("/api/nomenclature/connection", { method: "POST", ...json({}) })).json();
+    headers.Authorization = `Bearer ${replacement.token}`;
+    await poll(0, 4);
+    const beforeIncompatible = reads.length;
+    await input.fill("несовместимый"); await input.press("Enter");
+    await page.locator("#nomenclature-stock-status").getByText(/Обработчик 1С подключён, но не поддерживает/).waitFor();
+    assert.equal(reads.length, beforeIncompatible + 1, "incompatibility needs one browser request and no timeout retries");
+    assert.equal(await poll(0, 4), null, "unsupported reads do not occupy the queue");
+    await poll(0, 5);
+    await page.locator("#nomenclature-stock-refresh").click();
+    const recovered = await poll(20);
+    assert.equal((await complete(recovered, prices)).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), prices.length);
+    assert.equal(await page.locator("#nomenclature-stock-status").textContent(), "");
     assert.deepEqual(errors, []);
     console.log("Stock browser: search/debounce/cancellation, 1200 items in 12 batches, <=300 DOM rows; price sort, keyboard, cancellation and sorted continuation, one HTTP per action.");
   } finally {

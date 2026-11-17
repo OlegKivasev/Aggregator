@@ -52,7 +52,7 @@ test("one nomenclature connection exchanges products, hashes its key and rejects
     const token = await key(request);
     assert.equal((await request("/api/nomenclature/lookups", { method: "POST", ...json({ barcode: "0000123" }) })).status, 503);
     const status = await request("/api/integration/1c/nomenclature/status", { headers: { Authorization: `Bearer ${token}` } });
-    assert.deepEqual(await status.json(), { ready: true, workerOnline: false, lastSeenAt: null });
+    assert.deepEqual(await status.json(), { ready: true, workerOnline: false, lastSeenAt: null, stockVersion: null, stockReady: false });
     assert.deepEqual(await (await request("/api/nomenclature/connection")).json(), { configured: true, online: false, lastSeenAt: null });
     const offline = await request("/api/nomenclature/lookups", { method: "POST", ...json({ barcode: "0000123" }) });
     assert.equal(offline.status, 503);
@@ -65,6 +65,8 @@ test("one nomenclature connection exchanges products, hashes its key and rejects
     const running = await (await request("/api/integration/1c/nomenclature/status", { headers: { Authorization: `Bearer ${token}` } })).json();
     assert.equal(running.ready, true);
     assert.equal(running.workerOnline, true);
+    assert.equal(running.stockVersion, 0);
+    assert.equal(running.stockReady, false);
     assert.ok(Number.isFinite(Date.parse(running.lastSeenAt)));
     assert.equal((await request("/api/nomenclature/lookups", { method: "POST", ...json({ sourceId: "test", barcode: "0000123" }) })).status, 400);
     const created = await request("/api/nomenclature/lookups", { method: "POST", ...json({ barcode: "0000123" }) });
