@@ -5,7 +5,7 @@ import { NomenclatureError } from "./contract.ts";
 import { stockPageSize, type StockPage, type StockResult } from "./stock-contract.ts";
 
 interface Row {
-  id: string; cursor: string; status: string; expires_at: number; lease_id: string | null; result_json: string | null;
+  id: string; cursor: string; query: string; status: string; expires_at: number; lease_id: string | null; result_json: string | null;
 }
 const ttl = 30_000;
 
@@ -23,13 +23,20 @@ export class StockRequests {
     this.changes.setMaxListeners(100);
     database.exec(`CREATE TABLE IF NOT EXISTS nomenclature_stock_requests (
       id TEXT PRIMARY KEY, cursor TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL,
-      expires_at INTEGER NOT NULL, lease_id TEXT, lease_until INTEGER, result_json TEXT
+      expires_at INTEGER NOT NULL, lease_id TEXT, lease_until INTEGER, result_json TEXT, query TEXT NOT NULL DEFAULT ''
     ) STRICT;
-    CREATE UNIQUE INDEX IF NOT EXISTS nomenclature_stock_active_idx ON nomenclature_stock_requests(cursor)
-      WHERE status IN ('pending','leased');
     CREATE INDEX IF NOT EXISTS nomenclature_stock_pending_idx ON nomenclature_stock_requests(created_at,id)
       WHERE status IN ('pending','leased');
     CREATE INDEX IF NOT EXISTS nomenclature_stock_expiry_idx ON nomenclature_stock_requests(expires_at);`);
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      if (!database.prepare("PRAGMA table_info(nomenclature_stock_requests)").all().some((column) => column.name === "query")) {
+        database.exec("ALTER TABLE nomenclature_stock_requests ADD COLUMN query TEXT NOT NULL DEFAULT ''");
+      }
+      database.exec(`DROP INDEX IF EXISTS nomenclature_stock_active_idx;
+        CREATE UNIQUE INDEX IF NOT EXISTS nomenclature_stock_search_active_idx ON nomenclature_stock_requests(cursor,query)
+          WHERE status IN ('pending','leased'); COMMIT`);
+    } catch (error) { database.exec("ROLLBACK"); throw error; }
   }
   cleanup(): void {
     this.database.prepare("UPDATE nomenclature_stock_requests SET status='expired' WHERE status IN ('pending','leased') AND expires_at<=?").run(this.now());
@@ -41,18 +48,18 @@ export class StockRequests {
   notify(): void { this.changes.emit("change"); }
   close(): void { this.closed = true; this.notify(); }
 
-  async load(cursor: string | null, signal: AbortSignal, notifyWorker: () => void): Promise<StockPage> {
+  async load(cursor: string | null, signal: AbortSignal, notifyWorker: () => void, query = ""): Promise<StockPage> {
     if (signal.aborted) throw signal.reason;
     if (this.closed) throw new NomenclatureError(503, "stopping", "Соединение закрывается.");
     if (this.count >= 100) throw new NomenclatureError(429, "stock_busy", "Слишком много запросов остатков. Повторите позже.");
     this.cleanup();
-    let row = this.database.prepare("SELECT * FROM nomenclature_stock_requests WHERE cursor=? AND status IN ('pending','leased')").get(cursor ?? "") as unknown as Row | undefined;
+    let row = this.database.prepare("SELECT * FROM nomenclature_stock_requests WHERE cursor=? AND query=? AND status IN ('pending','leased')").get(cursor ?? "", query) as unknown as Row | undefined;
     if (!row) {
       const active = this.database.prepare("SELECT COUNT(*) AS count FROM nomenclature_stock_requests WHERE status IN ('pending','leased')").get()!.count;
       if (Number(active) >= 20) throw new NomenclatureError(429, "stock_busy", "Очередь остатков занята. Повторите позже.");
       const id = randomUUID();
-      this.database.prepare("INSERT INTO nomenclature_stock_requests VALUES (?,?,'pending',?,?,NULL,NULL,NULL)")
-        .run(id, cursor ?? "", this.now(), this.now() + ttl);
+      this.database.prepare("INSERT INTO nomenclature_stock_requests (id,cursor,status,created_at,expires_at,query) VALUES (?,?,'pending',?,?,?)")
+        .run(id, cursor ?? "", this.now(), this.now() + ttl, query);
       row = this.database.prepare("SELECT * FROM nomenclature_stock_requests WHERE id=?").get(id) as unknown as Row;
       notifyWorker();
     }
@@ -93,13 +100,15 @@ export class StockRequests {
       }
     }
   }
-  claim() {
+  claim(supportsSearch = false) {
     this.cleanup();
     const now = this.now();
     const row = this.database.prepare(`UPDATE nomenclature_stock_requests SET status='leased',lease_id=?,lease_until=? WHERE id=(
       SELECT id FROM nomenclature_stock_requests WHERE expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
-      ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now) as unknown as Row | undefined;
+      AND (query='' OR ?=1)
+      ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now, Number(supportsSearch)) as unknown as Row | undefined;
     return row ? { kind: "stock" as const, id: row.id, leaseId: row.lease_id!, after: row.cursor || null,
+      ...(supportsSearch ? { query: row.query } : {}),
       limit: stockPageSize, expiresAt: new Date(row.expires_at).toISOString() } : null;
   }
   complete(data: StockResult): void {

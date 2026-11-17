@@ -8,6 +8,15 @@ export interface StockResult {
   products: StockProduct[]; hasMore: boolean;
 }
 
+export function parseStockQuery(value: unknown): string {
+  if (typeof value !== "string" || value.length > 100 || /[\u0000-\u001f\u007f-\u009f]/.test(value)) {
+    throw new NomenclatureError(400, "invalid_stock_query", "Поиск должен содержать не более 100 символов без переносов строк.");
+  }
+  const query = value.normalize("NFC").trim().replace(/\s+/g, " ").toLocaleLowerCase("ru-RU");
+  if (query.length > 100) throw new NomenclatureError(400, "invalid_stock_query", "Поиск после нормализации должен содержать не более 100 символов.");
+  return query;
+}
+
 export function parseStockResult(value: unknown): StockResult {
   const data = objectFields(value, ["requestId", "leaseId", "status", "products", "hasMore"]);
   if (!["completed", "error"].includes(data.status as string) || !Array.isArray(data.products)

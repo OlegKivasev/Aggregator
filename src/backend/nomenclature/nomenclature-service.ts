@@ -105,12 +105,12 @@ export class NomenclatureService {
     this.stock.notify();
   }
 
-  loadStock(cursor: string | null, signal: AbortSignal) {
+  loadStock(cursor: string | null, signal: AbortSignal, query = "") {
     if (this.closed) throw new NomenclatureError(503, "stopping", "Соединение закрывается.");
     const connection = this.state();
     if (!connection.configured) throw new NomenclatureError(503, "source_unconfigured", "Подключение номенклатуры ещё не настроено.");
     if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.");
-    return this.stock.load(cursor, signal, () => this.changes.emit(source));
+    return this.stock.load(cursor, signal, () => this.changes.emit(source), query);
   }
 
   completeStock(token: string | undefined, result: StockResult): void {
@@ -173,7 +173,7 @@ export class NomenclatureService {
     this.database.prepare("UPDATE nomenclature_lookups SET status='cancelled' WHERE id=? AND status IN ('pending','leased')").run(id);
   }
 
-  claim(token: string | undefined, includeStock = false) {
+  claim(token: string | undefined, includeStock = false, supportsStockSearch = false) {
     this.heartbeat(token);
     this.cleanup();
     const now = this.now();
@@ -185,14 +185,15 @@ export class NomenclatureService {
         UNION ALL
         SELECT 'stock' AS kind, id, created_at FROM nomenclature_stock_requests
           WHERE expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
-        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now);
-      if (oldest?.kind === "stock") return this.stock.claim();
+          AND (query='' OR ?=1)
+        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now, Number(supportsStockSearch));
+      if (oldest?.kind === "stock") return this.stock.claim(supportsStockSearch);
     }
     const row = this.database.prepare(`UPDATE nomenclature_lookups SET status='leased', lease_id=?, lease_until=? WHERE id=(
       SELECT id FROM nomenclature_lookups WHERE source_id=? AND expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
       ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, source, now, now) as unknown as LookupRow | undefined;
     return row ? { id: row.id, leaseId: row.lease_id!, barcode: row.barcode, expiresAt: new Date(row.expires_at).toISOString() }
-      : includeStock ? this.stock.claim() : null;
+      : includeStock ? this.stock.claim(supportsStockSearch) : null;
   }
 
   complete(token: string | undefined, data: LookupResult & { requestId: string; leaseId: string }): void {

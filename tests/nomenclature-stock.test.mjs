@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { NomenclatureService } from "../src/backend/nomenclature/nomenclature-service.ts";
-import { parseStockResult } from "../src/backend/nomenclature/stock-contract.ts";
+import { parseStockResult, parseStockQuery } from "../src/backend/nomenclature/stock-contract.ts";
 import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 
 const product = { id: randomUUID(), name: "Товар", article: "0000123", quantity: 1.125 };
@@ -39,13 +39,61 @@ test("stock validates bounded complete pages, positive quantities and unmodified
   assert.deepEqual(parseStockResult({ ...valid, status: "error", products: [] }).products, []);
 });
 
-test("1, 10 and 100 concurrent readers share one 1C job per page, with fresh later reads", async () => {
-  for (const count of [1, 10, 100]) await fixture(async ({ service, token, path }) => {
+test("search normalizes bounded text and shares only identical search/cursor combinations", async () => {
+  assert.equal(parseStockQuery("  ФИЛЬТР   00001  "), "фильтр 00001");
+  assert.equal(parseStockQuery("%_[~]"), "%_[~]");
+  for (const value of [null, 1, "x".repeat(101), "İ".repeat(100), "a\nb", "a\u0000b"]) assert.throws(() => parseStockQuery(value));
+  await fixture(async ({ service, token }) => {
+    const signal = new AbortController().signal;
+    const first = service.loadStock(null, signal, "фильтр");
+    const shared = service.loadStock(null, signal, "фильтр");
+    const other = service.loadStock(null, signal, "00001");
+    assert.equal(service.claim(token, true), null, "stock=1 must never silently ignore a search filter");
+    const unfiltered = service.loadStock(null, signal);
+    const legacyJob = service.claim(token, true);
+    assert.equal(Object.hasOwn(legacyJob, "query"), false);
+    service.completeStock(token, result(legacyJob, [])); await unfiltered;
+    const jobs = [service.claim(token, true, true), service.claim(token, true, true)];
+    assert.deepEqual(new Set(jobs.map((job) => job.query)), new Set(["фильтр", "00001"]));
+    assert.equal(service.claim(token, true, true), null);
+    for (const job of jobs) service.completeStock(token, result(job, [{ ...product, name: job.query }]));
+    assert.equal((await first).products[0].name, "фильтр");
+    assert.equal((await shared).products[0].name, "фильтр");
+    assert.equal((await other).products[0].name, "00001");
+  });
+});
+
+test("the initial stock schema migrates without losing results or mixing searches", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stock-search-migration-"));
+  const path = join(directory, "database.sqlite");
+  const database = new DatabaseSync(path);
+  database.exec(`CREATE TABLE nomenclature_stock_requests (id TEXT PRIMARY KEY, cursor TEXT NOT NULL, status TEXT NOT NULL,
+    created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, lease_id TEXT, lease_until INTEGER, result_json TEXT) STRICT;
+    CREATE UNIQUE INDEX nomenclature_stock_active_idx ON nomenclature_stock_requests(cursor) WHERE status IN ('pending','leased');`);
+  database.prepare("INSERT INTO nomenclature_stock_requests VALUES ('old','','completed',?,?,NULL,NULL,?)").run(Date.now(), Date.now() + 30_000, '{"old":true}');
+  database.close();
+  const service = new NomenclatureService(path);
+  try {
+    const inspection = new DatabaseSync(path);
+    assert.equal(inspection.prepare("SELECT query FROM nomenclature_stock_requests WHERE id='old'").get().query, "");
+    assert.equal(inspection.prepare("SELECT result_json FROM nomenclature_stock_requests WHERE id='old'").get().result_json, '{"old":true}');
+    assert.deepEqual(inspection.prepare("PRAGMA index_info(nomenclature_stock_search_active_idx)").all().map((row) => row.name), ["cursor", "query"]);
+    inspection.close();
+    const token = service.rotateKey(); service.heartbeat(token);
+    const a = service.loadStock(null, new AbortController().signal, "a");
+    const b = service.loadStock(null, new AbortController().signal, "b");
+    for (let index = 0; index < 2; index += 1) service.completeStock(token, result(service.claim(token, true, true), []));
+    await Promise.all([a, b]);
+  } finally { service.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("1, 10 and 100 concurrent readers share one job per search/page, with fresh later reads", async () => {
+  for (const query of ["", "фильтр"]) for (const count of [1, 10, 100]) await fixture(async ({ service, token, path }) => {
     const abort = new AbortController();
-    const reads = Array.from({ length: count }, () => service.loadStock(null, abort.signal));
-    if (count === 100) await assert.rejects(service.loadStock(null, abort.signal), (error) => error.statusCode === 429);
+    const reads = Array.from({ length: count }, () => service.loadStock(null, abort.signal, query));
+    if (count === 100) await assert.rejects(service.loadStock(null, abort.signal, query), (error) => error.statusCode === 429);
     assert.equal(service.claim(token), null, "old extensions cannot take stock jobs");
-    const job = service.claim(token, true);
+    const job = service.claim(token, true, true);
     assert.equal(job.kind, "stock"); assert.equal(job.limit, 100); assert.equal(job.after, null);
     assert.equal(service.claim(token, true), null);
     const products = Array.from({ length: 100 }, () => ({ ...product, id: randomUUID() }));
@@ -68,13 +116,13 @@ test("1, 10 and 100 concurrent readers share one 1C job per page, with fresh lat
     }
     service.completeStock(token, result(job, products, true));
     assert.throws(() => service.completeStock(token, result(job)), (error) => error.statusCode === 409);
-    const next = service.loadStock(pages[0].nextCursor, abort.signal);
-    const nextJob = service.claim(token, true);
+    const next = service.loadStock(pages[0].nextCursor, abort.signal, query);
+    const nextJob = service.claim(token, true, true);
     assert.equal(nextJob.after, products.at(-1).id);
     service.completeStock(token, result(nextJob, []));
     assert.deepEqual((await next).products, []);
-    const fresh = service.loadStock(null, abort.signal);
-    const freshJob = service.claim(token, true);
+    const fresh = service.loadStock(null, abort.signal, query);
+    const freshJob = service.claim(token, true, true);
     assert.notEqual(freshJob.id, job.id);
     service.completeStock(token, result(freshJob));
     assert.equal((await fresh).products.length, 1);
@@ -82,7 +130,7 @@ test("1, 10 and 100 concurrent readers share one 1C job per page, with fresh lat
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM nomenclature_stock_requests").get().count, 3,
       "three pages require three 1C jobs independent of reader count");
     database.close();
-    console.log(`Stock ${count} readers: 1 shared initial job, 1 result read, 100 rows; next page and refresh each add 1 job.`);
+    console.log(`Stock ${count} readers (${query || "all"}): 1 shared initial job, 1 result read, 100 rows; next page and refresh each add 1 job.`);
   });
 });
 
@@ -188,11 +236,17 @@ test("HTTP delivers stock in one waiting browser request and keeps old worker pr
     const response = await waiting;
     assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "no-store");
     assert.deepEqual((await response.json()).products, [product]);
-    for (const query of ["?after=wrong", "?after=", `?after=${product.id}&after=${product.id}`, "?limit=10000"]) {
+    const searchResponse = request("/api/nomenclature/stock?q=" + encodeURIComponent("  ФИЛЬТР %_[~] "));
+    let searchJob;
+    for (let index = 0; index < 100 && !searchJob; index += 1) searchJob = await poll("&stock=2");
+    assert.equal(searchJob.query, "фильтр %_[~]");
+    assert.equal((await request("/api/integration/1c/nomenclature/stock-results", { method: "POST", ...json(result(searchJob), headers) })).status, 200);
+    assert.equal((await searchResponse).status, 200);
+    for (const query of ["?after=wrong", "?after=", `?after=${product.id}&after=${product.id}`, "?limit=10000", "?q=a&q=b", "?q=" + "a".repeat(101), "?q=a%0Ab"]) {
       assert.equal((await request("/api/nomenclature/stock" + query)).status, 400);
     }
     assert.equal((await request("/api/nomenclature/stock", { method: "POST", ...json({}) })).status, 405);
-    assert.equal((await request("/api/integration/1c/nomenclature/requests?stock=2", { headers })).status, 400);
+    assert.equal((await request("/api/integration/1c/nomenclature/requests?stock=3", { headers })).status, 400);
   } finally {
     server.closeAllConnections(); await new Promise((done) => server.close(done));
     if (previous === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previous;
