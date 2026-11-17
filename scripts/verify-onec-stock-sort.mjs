@@ -39,7 +39,7 @@ for (const name of ["АС_АгрегаторСервер", "АС_Номенкл�
   assert.deepEqual(stack, []);
 }
 const source = modules.get("АС_НоменклатураАгрегатора");
-const stock = source.slice(source.indexOf("Функция ТоварыВНаличии("), source.indexOf("Функция ВидыЦенДляСписка("));
+const stock = source.slice(source.indexOf("Функция ТоварыВНаличии("), source.indexOf("Функция ШаблонПодстроки("));
 assert.match(stock, /ПЕРВЫЕ 101/);
 assert.equal((stock.match(/Запрос\.Выполнить\(/g) || []).length, 1);
 assert.doesNotMatch(stock, /ПолучитьОбъект\(|СМЕЩЕНИЕ|OFFSET/i);
@@ -65,7 +65,7 @@ assert.match(stock, /ЕстьСортировкаПоЦене = ПолеСорт
 assert.match(stock, /СрезПоследних\(&ДатаЦенСортировки, ВидЦен = &ВидЦенСортировки/);
 assert.match(stock, /ЕстьЦена УБЫВ, " \+ КолонкаСортировки/);
 assert.match(stock, /Новый Структура\("hasPrice,amount"/);
-assert.match(stock, /АС_ПохожеНаАртикул\(Часть\)/);
+assert.match(stock, /КомпактныйКлючАртикула\(Часть\)/);
 // Regression for the compiler error reported in 1C: no global Абс function.
 // Execute only the two numeric guards from the real BSL source, not the module.
 assert.doesNotMatch(source, /(?<![\p{L}\p{N}_])(?:Абс|Abs)\s*\(/iu);
@@ -81,7 +81,7 @@ assert.match(stock, /ЗаписатьJSON\(Запись, ПоследнееЗн�
 for (const column of ["Наименование", "Артикул", "Количество"]) assert.ok(stock.includes(`ПоследнееЗначение = Выборка.${column}`));
 assert.match(stock, /ПоследнееЗначение = Новый Структура\("hasPrice,amount"/);
 const worker = modules.get("АС_АгрегаторСервер");
-assert.equal((worker.match(/stock=5/g) ?? []).length, 3);
+assert.equal((worker.match(/stock=6/g) ?? []).length, 3);
 assert.doesNotMatch(worker, /stock=[34]/);
 assert.match(worker, /ТоварыВНаличии\(Задание\.after, Диагностика, Задание\.query, Задание\.sortField, Задание\.sortDirection, Задание\.options\)/);
 assert.match(worker, /Результат\.lastSortValue = Страница\.lastSortValue/);

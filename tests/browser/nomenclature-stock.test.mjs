@@ -23,14 +23,20 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     const request = (path, options) => fetch(origin + path, options);
     const token = (await (await request("/api/nomenclature/connection", { method: "POST", ...json({}) })).json()).token;
     const headers = { Authorization: `Bearer ${token}` };
-    const poll = async (wait = 0, capability = 5) => {
+    const poll = async (wait = 0, capability = 6) => {
       const response = await request(`/api/integration/1c/nomenclature/requests?waitSeconds=${wait}&stock=${capability}`, { headers });
       assert.equal(response.status, 200);
       return (await response.json()).request;
     };
     const priceTypes = [{ id: randomUUID(), name: "Розничная цена" }, { id: randomUUID(), name: "Закупочная цена" }];
+    const category = randomUUID(), categoryChild = randomUUID(), group = randomUUID(), groupChild = randomUUID(), oemBrand = randomUUID();
+    const navigation = {
+      categories: [{ id: category, name: "Запчасти", parentId: null, isFolder: true }, { id: categoryChild, name: "Фильтры", parentId: category, isFolder: false }],
+      groups: [{ id: group, name: "Расходники", parentId: null, isFolder: true }, { id: groupChild, name: "Масла", parentId: group, isFolder: true }],
+      oemBrands: [{ id: oemBrand, name: "Toyota" }],
+    };
     const complete = (job, products, hasMore = false, status = "completed", lastSortValue = null, totalCount = hasMore ? 1200 : products.length) => request("/api/integration/1c/nomenclature/stock-results", {
-      method: "POST", ...json({ requestId: job.id, leaseId: job.leaseId, products, hasMore, status, lastSortValue, ...(status === "completed" && !job.after ? { totalCount, priceTypes } : {}) }, headers),
+      method: "POST", ...json({ requestId: job.id, leaseId: job.leaseId, products, hasMore, status, lastSortValue, ...(status === "completed" && !job.after ? { totalCount, priceTypes, ...(job.options.navigation ? { navigation } : {}) } : {}) }, headers),
     });
     await poll();
     browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER_EXECUTABLE_PATH });
@@ -61,7 +67,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     const job = await poll(20);
     assert.equal(job.kind, "stock");
     await page.locator("#nomenclature-stock-loading").waitFor();
-    assert.deepEqual(job.options, { availability: "available", priceType: null });
+    assert.deepEqual(job.options, { availability: "available", priceType: null, searchMode: "text", category: null, group: null, oemBrand: null, navigation: true });
     assert.equal(await page.locator("#nomenclature-stock-status").textContent(), "");
     const products = Array.from({ length: 100 }, (_, index) => ({ id: randomUUID(),
       name: index === 0 ? '<img src=x onerror="window.stockXss=1"> Товар с длинным наименованием' : `Тестовый товар ${index + 1}`,
@@ -185,10 +191,11 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.equal((await complete(fragments, brakePads)).status, 200);
     for (const item of brakePads) await page.locator("#nomenclature-stock-rows").getByText(item.name, { exact: true }).waitFor();
     assert.equal(await page.locator("#nomenclature-stock-rows tr").first().locator("strong").count(), 2);
-    const readsBeforeReverse = reads.length;
-    await input.fill(" ТОР кол кол ");
-    assert.equal(await poll(), null);
-    assert.equal(reads.length, readsBeforeReverse, "reversing/repeating fragments preserves the same search without HTTP");
+    await input.fill(" ТОР кол кол "); await input.press("Enter");
+    const reverse = await poll(20);
+    assert.equal(reverse.query, "тор кол кол", "word order and repetition must reach 1C synonym matching unchanged");
+    assert.equal((await complete(reverse, brakePads)).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
 
     await input.fill("Не существует"); await input.press("Enter");
     const missing = await poll(20);
@@ -263,7 +270,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
       const button = page.locator(`[data-nomenclature-sort="${field}"]`);
       const before = reads.length;
       if (direction === "desc") await button.press("Enter"); else await button.click();
-      const sorted = await poll(20, 5);
+      const sorted = await poll(20, 6);
       assert.equal(sorted.sortField, field); assert.equal(sorted.sortDirection, direction); assert.equal(sorted.after, null);
       assert.equal(reads.length, before + 1, "a header click performs one fresh global request");
       assert.equal(await button.locator("..").getAttribute("aria-sort"), direction === "asc" ? "ascending" : "descending");
@@ -273,9 +280,9 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     }
     // An in-flight page from the previous order must not overwrite the selected order.
     await page.locator('[data-nomenclature-sort="name"]').click();
-    const obsoleteSort = await poll(20, 5);
+    const obsoleteSort = await poll(20, 6);
     await page.locator('[data-nomenclature-sort="quantity"]').click();
-    const currentSort = await poll(20, 5);
+    const currentSort = await poll(20, 6);
     const inspection = new DatabaseSync(process.env.GARAGE_DB_PATH);
     try {
       for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -288,7 +295,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.equal((await complete(currentSort, ordered, true, "completed", "100")).status, 200);
     await page.waitForFunction(() => document.querySelectorAll("#nomenclature-stock-rows tr").length === 100);
     await page.locator("#nomenclature-stock-sentinel").scrollIntoViewIfNeeded();
-    const continuation = await poll(20, 5);
+    const continuation = await poll(20, 6);
     assert.equal(continuation.sortField, "quantity"); assert.equal(continuation.sortDirection, "asc");
     assert.deepEqual(continuation.after, { id: ordered.at(-1).id, value: "100" });
     assert.equal((await complete(continuation, [{ ...products[0], id: randomUUID(), name: "Остаток 101", quantity: 101 }])).status, 200);
@@ -300,7 +307,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     // Availability includes zero/negative rows, price selection adds a column without excluding missing prices.
     await page.locator("#nomenclature-availability").selectOption("all");
     const all = await poll(20);
-    assert.deepEqual(all.options, { availability: "all", priceType: null });
+    assert.equal(all.options.availability, "all"); assert.equal(all.options.priceType, null);
     const noStock = [0, -2, 5].map((quantity, index) => ({ id: randomUUID(), name: "Товар " + index, article: "A" + index, quantity }));
     assert.equal((await complete(all, noStock)).status, 200);
     await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
@@ -313,7 +320,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
     await page.locator('[data-nomenclature-sort="price"]').click();
     const sortedPrice = await poll(20);
-    assert.equal(sortedPrice.sortField, "price"); assert.equal(sortedPrice.sortDirection, "asc"); assert.deepEqual(sortedPrice.options, { availability: "all", priceType: priceTypes[0].id });
+    assert.equal(sortedPrice.sortField, "price"); assert.equal(sortedPrice.sortDirection, "asc"); assert.equal(sortedPrice.options.availability, "all"); assert.equal(sortedPrice.options.priceType, priceTypes[0].id);
     assert.equal((await complete(sortedPrice, prices)).status, 200);
     await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#nomenclature-stock-price-heading").textContent(), priceTypes[0].name);
@@ -365,7 +372,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await page.locator("#nomenclature-stock-status").getByText(/Обработчик 1С подключён, но не поддерживает/).waitFor();
     assert.equal(reads.length, beforeIncompatible + 1, "incompatibility needs one browser request and no timeout retries");
     assert.equal(await poll(0, 4), null, "unsupported reads do not occupy the queue");
-    await poll(0, 5);
+    await poll(0, 6);
     await page.locator("#nomenclature-stock-refresh").click();
     const recovered = await poll(20);
     assert.equal((await complete(recovered, prices)).status, 200);
@@ -409,13 +416,92 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.equal(await page.locator("#nomenclature-stock-table").getAttribute("aria-busy"), null);
     await page.evaluate(() => window.dispatchEvent(new Event("scroll")));
     assert.equal(reads.length, beforeOffline + 1, "an offline source stops the spinner after one HTTP request without automatic retries");
-    await poll(0, 5);
+    await poll(0, 6);
     await page.locator("#nomenclature-stock-refresh").click();
     const reconnected = await poll(20);
     assert.equal((await complete(reconnected, prices)).status, 200);
     await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), prices.length);
     assert.equal(await page.locator("#nomenclature-stock-status").textContent(), "");
+    // Tree expansion/search is local; selections are applied to the whole 1C catalogue.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const beforeTree = reads.length;
+    assert.equal(await page.locator("#nomenclature-navigation").isVisible(), true);
+    await page.getByRole("button", { name: "Раскрыть Запчасти", exact: true }).click();
+    await page.locator("#nomenclature-category-query").fill("фильт");
+    await page.locator("#nomenclature-category-tree").getByRole("button", { name: "Фильтры", exact: true }).waitFor();
+    assert.equal(reads.length, beforeTree, "expanding/searching the tree makes no HTTP requests");
+    await page.locator(`[data-navigation-id="${categoryChild}"]`).click();
+    let navigationJob = await poll(20);
+    assert.equal(navigationJob.options.category, categoryChild); assert.equal(navigationJob.options.navigation, false);
+    assert.equal((await complete(navigationJob, prices)).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+    await page.getByRole("radio", { name: "Группы", exact: true }).check();
+    const switchGroup = await poll(20); assert.equal(switchGroup.options.category, null); assert.equal(switchGroup.options.group, null);
+    assert.equal((await complete(switchGroup, prices)).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#nomenclature-category-query").isVisible(), false);
+    await page.locator("#nomenclature-group-query").fill("масл");
+    await page.locator(`[data-navigation-id="${groupChild}"]`).click();
+    navigationJob = await poll(20);
+    assert.equal(navigationJob.options.group, groupChild); assert.equal(navigationJob.options.category, null);
+    assert.equal((await complete(navigationJob, prices)).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+    const beforeClearTreeSearch = reads.length;
+    await page.locator("#nomenclature-group-query").fill("");
+    assert.equal(await page.locator(`[data-navigation-id="${groupChild}"]`).isVisible(), true, "the selected folder remains expanded after clearing the tree search");
+    assert.equal(reads.length, beforeClearTreeSearch);
+    await input.fill("L30914-248"); await input.press("Enter");
+    const article = await poll(20);
+    const exactArticle = { ...prices[0], name: "Фильтр", article: "L309-14-248" };
+    assert.equal((await complete(article, [exactArticle])).status, 200);
+    const highlighted = page.locator("#nomenclature-stock-rows td strong");
+    await highlighted.waitFor(); assert.equal(await highlighted.textContent(), "L309-14-248");
+    assert.equal(await highlighted.evaluate((element) => getComputedStyle(element).color), "rgb(25, 135, 84)");
+    await page.locator("#nomenclature-search-settings").click();
+    await page.getByRole("button", { name: "Поиск по OEM-артикулу", exact: true }).click();
+    const oem = await poll(20); assert.equal(oem.options.searchMode, "oem"); assert.equal(oem.query, "");
+    assert.equal((await complete(oem, prices)).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+    await page.locator("#nomenclature-oem-brand").selectOption(oemBrand);
+    const brandSearch = await poll(20); assert.equal(brandSearch.options.oemBrand, oemBrand);
+    assert.equal((await complete(brandSearch, prices)).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+    await input.fill("90915-YZZJ1"); await input.press("Enter");
+    const oemNumber = await poll(20); assert.equal(oemNumber.query, "90915-yzzj1"); assert.equal(oemNumber.options.oemBrand, oemBrand);
+    assert.equal((await complete(oemNumber, prices)).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+    for (const width of [320, 390, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `OEM controls fit at ${width}`);
+      assert.ok((await input.boundingBox()).width >= 80, "OEM article remains usable beside the brand selector");
+      await page.locator("#nomenclature-search-settings").click();
+      const menuBounds = await page.locator("#nomenclature-search-menu").boundingBox();
+      assert.ok(menuBounds.x >= 0 && menuBounds.x + menuBounds.width <= width, "search settings stay within the viewport");
+      await page.locator("#nomenclature-search-settings").press("Escape");
+      if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, `nomenclature-oem-${width}.png`), fullPage: false });
+    }
+    await page.locator("#nomenclature-search-settings").click();
+    await page.getByRole("button", { name: "Обычный поиск", exact: true }).click();
+    const normal = await poll(20); assert.equal(normal.query, "l30914-248"); assert.equal(normal.options.oemBrand, null);
+    assert.equal(await page.locator("#nomenclature-oem-brand").isVisible(), false);
+    assert.equal((await complete(normal, [exactArticle])).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+    for (const width of [320, 390, 1280, 1920]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `no page overflow at ${width}`);
+      if (width >= 1280) {
+        const layout = await page.evaluate(() => {
+          const main = document.querySelector(".nomenclature-main").getBoundingClientRect();
+          const sidebar = document.querySelector("#nomenclature-navigation").getBoundingClientRect();
+          const search = document.querySelector(".nomenclature-toolbar").getBoundingClientRect();
+          const table = document.querySelector(".nomenclature-stock").getBoundingClientRect();
+          return { main: main.toJSON(), sidebar: sidebar.toJSON(), search: search.toJSON(), table: table.toJSON() };
+        });
+        assert.ok(layout.search.right <= layout.sidebar.left && Math.abs(layout.table.width - layout.main.width) < 1, "search and table stay inside the main column beside navigation");
+      }
+      if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, `nomenclature-navigation-${width}.png`), fullPage: false });
+    }
     assert.deepEqual(errors, []);
     console.log("Stock browser: search/debounce/cancellation, 1200 items in 12 batches, <=300 DOM rows; price sort, keyboard, cancellation and sorted continuation, one HTTP per action.");
   } finally {

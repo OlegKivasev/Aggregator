@@ -12,7 +12,7 @@ const ttl = Number(readFileSync(new URL("../src/backend/nomenclature/stock-reque
 assert.equal(windowSeconds, 45, "preserve the file database worker window");
 assert.equal(reserve, ttl, "reserve a full request lifetime for reading and delivery");
 assert.match(worker, /ТекущаяУниверсальнаяДата\(\) >= ЗавершитьДо - ЗапасНаОбработку/);
-assert.match(worker, /"requests\?waitSeconds=20&stock=5", Неопределено, ЗавершитьДо, ЗапасНаОбработку\)/);
+assert.match(worker, /"requests\?waitSeconds=20&stock=6", Неопределено, ЗавершитьДо, ЗапасНаОбработку\)/);
 assert.match(source, /Функция ЗапросНоменклатуры\(Настройки, Метод, Ресурс, Тело, НеПозднее, ЗапасНаОбработку = 0\)/);
 const expression = source.match(/Формат\((Макс\(0, Мин\(20, Таймаут - 2, Осталось - ЗапасНаОбработку\)\)), "ЧГ=0"\)/)?.[1];
 assert.ok(expression, "poll duration must subtract processing reserve from the remaining window");
@@ -28,7 +28,7 @@ for (const elapsed of [0, 5, 10, 14, 15, 20, 40, 44]) {
 }
 // Before the fix, a poll with five seconds left waited three seconds: only two remained.
 assert.equal(Math.max(0, Math.min(20, 5 - 2)), 3);
-console.log("Static worker timing model: 45-second window retained, poll <=15 seconds, >=30 seconds remain for accepted work; stock=5 and optional HTTP argument verified. Platform not run.");
+console.log("Static worker timing model: 45-second window retained, poll <=15 seconds, >=30 seconds remain for accepted work; stock=6 and optional HTTP argument verified. Platform not run.");
 
 const clientBytes = readFileSync(join(resolve(process.argv[2]), "Ext/ManagedApplicationModule.bsl"));
 const client = clientBytes.toString("utf8");

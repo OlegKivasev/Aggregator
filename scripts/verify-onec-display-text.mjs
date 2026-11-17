@@ -75,7 +75,7 @@ assert.equal(prepare('<img src=x onerror="x">', 500, false, true), '<img src=x o
 assert.ok(source.includes("ПроверитьТекст(СтрокаПоиска, 100, Истина)"));
 assert.ok(source.includes("ПроверитьТекст(Выборка.Наименование, 500, Ложь, Истина)"));
 assert.ok(source.includes("ПроверитьТекст(Выборка.Артикул, 50, Истина, Истина)"));
-const stock = source.slice(source.indexOf("Функция ТоварыВНаличии("), source.indexOf("Функция ВидыЦенДляСписка("));
+const stock = source.slice(source.indexOf("Функция ТоварыВНаличии("), source.indexOf("Функция ШаблонПодстроки("));
 assert.equal((stock.match(/Запрос\.Выполнить\(/g) || []).length, 1);
 
 const directory = await mkdtemp(join(tmpdir(), "stock-text-check-"));

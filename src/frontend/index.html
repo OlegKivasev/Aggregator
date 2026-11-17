@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=nomenclature-stock-toolbar-2" />
+    <link rel="stylesheet" href="/styles.css?v=nomenclature-search-6" />
     <link rel="stylesheet" href="/order-notifications.css" />
   </head>
   <body>
@@ -393,6 +393,8 @@
         <header>
           <h2 id="nomenclature-title">Номенклатура</h2>
         </header>
+        <div class="nomenclature-workspace">
+        <div class="nomenclature-main">
         <details class="nomenclature-filters" open>
           <summary>Фильтры <span id="nomenclature-filter-summary">В наличии</span></summary>
           <div class="nomenclature-filter-controls">
@@ -406,7 +408,17 @@
             <form class="nomenclature-stock-search" id="nomenclature-stock-search" role="search">
               <label class="visually-hidden" for="nomenclature-stock-query">Поиск по наименованию или артикулу</label>
               <input id="nomenclature-stock-query" type="search" maxlength="100" placeholder="Название или артикул товара" autocomplete="off" enterkeyhint="search" aria-controls="nomenclature-stock-rows">
+              <label class="visually-hidden" for="nomenclature-oem-brand">Бренд OEM</label>
+              <select id="nomenclature-oem-brand" aria-label="Бренд OEM" hidden><option value="">Все бренды OEM</option></select>
             </form>
+            <div class="nomenclature-search-settings">
+              <button type="button" class="nomenclature-tool" id="nomenclature-search-settings" aria-label="Настройки поиска" title="Настройки поиска" aria-expanded="false" aria-controls="nomenclature-search-menu"><img src="/nomenclature-search.png" alt=""></button>
+              <div class="nomenclature-search-menu card" id="nomenclature-search-menu" hidden>
+                <button type="button" class="garage-vehicles__button" data-nomenclature-mode="text" aria-pressed="true">Обычный поиск</button>
+                <button type="button" class="garage-vehicles__button" data-nomenclature-mode="oem" aria-pressed="false">Поиск по OEM-артикулу</button>
+              </div>
+            </div>
+            <button type="button" class="nomenclature-tool" id="nomenclature-navigation-toggle" aria-label="Категории и группы" title="Категории и группы" aria-expanded="true" aria-controls="nomenclature-navigation"><img src="/nomenclature-folder.png" alt=""></button>
             <button type="button" class="nomenclature-tool" id="nomenclature-stock-refresh" aria-label="Обновить список" title="Обновить список"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 11.5-1L20 9M4 15l2.5 3A7 7 0 0 0 18 17"/></svg></button>
           </div>
         </div>
@@ -452,6 +464,22 @@
             <button type="button" class="btn btn-light" id="nomenclature-stock-retry" hidden>Повторить загрузку</button>
           </div>
         </section>
+        </div>
+        <aside class="garage-sidebar card border-0 shadow-sm nomenclature-navigation" id="nomenclature-navigation" aria-label="Категории и группы">
+          <div class="nomenclature-navigation-modes" role="group" aria-label="Вид дерева номенклатуры">
+            <label><input type="radio" name="nomenclature-navigation-mode" value="category" checked> Категории</label>
+            <label><input type="radio" name="nomenclature-navigation-mode" value="group"> Группы</label>
+          </div>
+          <div id="nomenclature-category-panel">
+            <div class="garage-search-form search-row"><label class="visually-hidden" for="nomenclature-category-query">Поиск категории</label><input class="search-input" id="nomenclature-category-query" type="search" placeholder="Поиск категории" autocomplete="off"></div>
+            <ul class="garage-vehicles garage-groups" id="nomenclature-category-tree"></ul>
+          </div>
+          <div id="nomenclature-group-panel" hidden>
+            <div class="garage-search-form search-row"><label class="visually-hidden" for="nomenclature-group-query">Поиск группы</label><input class="search-input" id="nomenclature-group-query" type="search" placeholder="Поиск группы" autocomplete="off"></div>
+            <ul class="garage-vehicles garage-groups" id="nomenclature-group-tree"></ul>
+          </div>
+        </aside>
+        </div>
       </section>
       <section id="repairs-function" class="repairs-function results-panel card border-0 shadow-sm overflow-hidden" aria-labelledby="repairs-title" hidden>
         <header class="results-panel__header card-header bg-white border-0">
@@ -1276,7 +1304,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
 
     <script type="module" src="/auth-ui.js"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=nomenclature-stock-prefetch-1"></script>
+    <script type="module" src="/applicability.js?v=nomenclature-search-6"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>

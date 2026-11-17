@@ -1,29 +1,33 @@
 import { NomenclatureError, objectFields, parseUuid } from "./contract.ts";
+import { parseStockNavigation, type StockNavigation } from "./stock-navigation.ts";
 
 export const stockPageSize = 100;
 export interface StockPrice { amount: number; currency: string; unit?: string }
 export interface StockPriceType { id: string; name: string }
 export interface StockProduct { id: string; name: string; article: string; quantity: number; price?: StockPrice | null }
-export interface StockPage { products: StockProduct[]; hasMore: boolean; nextCursor: string | null; receivedAt: string; totalCount?: number; priceTypes?: StockPriceType[] }
+export interface StockPage { products: StockProduct[]; hasMore: boolean; nextCursor: string | null; receivedAt: string; totalCount?: number; priceTypes?: StockPriceType[]; navigation?: StockNavigation }
 export interface StockResult {
   requestId: string; leaseId: string; status: "completed" | "error";
   products: StockProduct[]; hasMore: boolean;
   lastSortValue?: string | null;
   totalCount?: number;
   priceTypes?: StockPriceType[];
+  navigation?: StockNavigation;
 }
 
-export function parseStockQuery(value: unknown): string {
+export function parseStockQuery(value: unknown, preserveOrder = false): string {
   if (typeof value !== "string" || value.length > 100 || /[\u0000-\u001f\u007f-\u009f]/.test(value)) {
     throw new NomenclatureError(400, "invalid_stock_query", "Поиск должен содержать не более 100 символов без переносов строк.");
   }
   const query = value.normalize("NFC").trim().replace(/\s+/g, " ").toLocaleLowerCase("ru-RU");
   if (query.length > 100) throw new NomenclatureError(400, "invalid_stock_query", "Поиск после нормализации должен содержать не более 100 символов.");
-  return [...new Set(query.split(" ").filter(Boolean))].sort().join(" ");
+  if (preserveOrder) return query;
+  const terms = [...new Set(query.split(" ").filter(Boolean))];
+  return terms.sort().join(" ");
 }
 
 export function parseStockResult(value: unknown, signed = false): StockResult {
-  const data = objectFields(value, ["requestId", "leaseId", "status", "products", "hasMore", "lastSortValue", "totalCount", "priceTypes"]);
+  const data = objectFields(value, ["requestId", "leaseId", "status", "products", "hasMore", "lastSortValue", "totalCount", "priceTypes", "navigation"]);
   if (!["completed", "error"].includes(data.status as string) || !Array.isArray(data.products)
     || data.products.length > stockPageSize || typeof data.hasMore !== "boolean"
     || data.status === "error" && (data.products.length !== 0 || data.hasMore)
@@ -72,6 +76,6 @@ export function parseStockResult(value: unknown, signed = false): StockResult {
     });
   }
   return { requestId: parseUuid(data.requestId), leaseId: parseUuid(data.leaseId), status: data.status as StockResult["status"],
-    products, hasMore: data.hasMore, ...(data.lastSortValue === undefined ? {} : { lastSortValue: data.lastSortValue as string | null }),
+    products, hasMore: data.hasMore, ...(data.navigation === undefined ? {} : { navigation: parseStockNavigation(data.navigation) }), ...(data.lastSortValue === undefined ? {} : { lastSortValue: data.lastSortValue as string | null }),
     ...(data.totalCount === undefined ? {} : { totalCount: data.totalCount as number }), ...(priceTypes === undefined ? {} : { priceTypes }) };
 }

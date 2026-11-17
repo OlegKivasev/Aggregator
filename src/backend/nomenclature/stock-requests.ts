@@ -114,7 +114,7 @@ export class StockRequests {
       }
     }
   }
-  claim(supportsSearch = false, supportsTerms = false, supportsSorting = false, supportsOptions = false) {
+  claim(supportsSearch = false, supportsTerms = false, supportsSorting = false, supportsOptions = false, supportsNavigation = false) {
     this.cleanup();
     const now = this.now();
     const row = this.database.prepare(`UPDATE nomenclature_stock_requests SET status='leased',lease_id=?,lease_until=? WHERE id=(
@@ -123,7 +123,8 @@ export class StockRequests {
       AND (query NOT LIKE '% %' OR ?=1)
       AND (sort_field='id' OR ?=1)
       AND (options='' OR ?=1)
-      ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now, Number(supportsSearch), Number(supportsTerms), Number(supportsSorting), Number(supportsOptions)) as unknown as Row | undefined;
+      AND (options='' OR json_extract(NULLIF(options, ''), '$.searchMode') IS NULL OR ?=1)
+      ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now, Number(supportsSearch), Number(supportsTerms), Number(supportsSorting), Number(supportsOptions), Number(supportsNavigation)) as unknown as Row | undefined;
     return row ? { kind: "stock" as const, id: row.id, leaseId: row.lease_id!,
       after: supportsSorting ? decodeStockCursor(row.cursor || null, row.query, { field: row.sort_field, direction: row.sort_direction }, row.options) : row.cursor || null,
       ...(supportsSearch ? { query: row.query } : {}),
@@ -140,7 +141,8 @@ export class StockRequests {
     if (data.status === "completed" && row.sort_field === "price" && !options?.priceType) {
       throw new NomenclatureError(400, "invalid_stock", "Для сортировки по цене выберите вид цены.");
     }
-    if (data.status === "completed" && (data.products.some((item) =>
+    if (data.status === "completed" && ((!!options?.navigation && !after) !== (data.navigation !== undefined)
+      || data.products.some((item) =>
       ((options?.availability ?? "available") === "available" && item.quantity <= 0)
       || (options?.availability === "absent" && item.quantity > 0)
       || (options?.priceType ? item.price === undefined : item.price !== undefined))
@@ -152,6 +154,7 @@ export class StockRequests {
     const lastValue = row.sort_field === "id" ? null : data.hasMore ? validateStockSortValue(data.lastSortValue, row.sort_field, !!options) : null;
     const page: StockPage = { products: data.products, hasMore: data.hasMore,
       nextCursor: data.hasMore ? encodeStockCursor({ id: data.products.at(-1)!.id, value: lastValue }, row.query, sort, row.options) : null, receivedAt: new Date(this.now()).toISOString(),
+      ...(data.navigation === undefined ? {} : { navigation: data.navigation }),
       ...(data.totalCount === undefined ? {} : { totalCount: data.totalCount }), ...(data.priceTypes === undefined ? {} : { priceTypes: data.priceTypes }) };
     // Keep the timestamp of an accepted result when an identical delivery is retried.
     if (row?.result_json) page.receivedAt = (JSON.parse(row.result_json) as StockPage).receivedAt;

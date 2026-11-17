@@ -20,9 +20,10 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
     const lower = normalized(text);
     const compactText = compact(text);
     const compactPositions = [];
-    for (let index = 0; index < [...lower].length; index += 1) {
-      const character = [...lower][index];
+    let index = 0;
+    for (const character of lower) {
       if (/[\p{L}\p{N}]/u.test(character)) compactPositions.push(index);
+      index += character.length;
     }
     const ranges = [];
     for (const rawTerm of highlightTerms) {

@@ -243,7 +243,7 @@ test("HTTP delivers stock in one waiting browser request and keeps old worker pr
     const poll = async (stock = "") => (await (await request(`/api/integration/1c/nomenclature/requests?waitSeconds=0${stock}`, { headers })).json()).request;
     await poll("&stock=5");
     const status = await (await request("/api/integration/1c/nomenclature/status", { headers })).json();
-    assert.equal(status.stockVersion, 5); assert.equal(status.stockReady, true);
+    assert.equal(status.stockVersion, 5); assert.equal(status.stockReady, false);
     const waiting = request("/api/nomenclature/stock");
     let job;
     for (let i = 0; i < 100 && !job; i += 1) job = await poll("&stock=1");
@@ -295,7 +295,7 @@ test("HTTP delivers stock in one waiting browser request and keeps old worker pr
       assert.equal((await request("/api/nomenclature/stock" + query)).status, 400);
     }
     assert.equal((await request("/api/nomenclature/stock", { method: "POST", ...json({}) })).status, 405);
-    assert.equal((await request("/api/integration/1c/nomenclature/requests?stock=6", { headers })).status, 400);
+    assert.equal((await request("/api/integration/1c/nomenclature/requests?stock=7", { headers })).status, 400);
   } finally {
     server.closeAllConnections(); await new Promise((done) => server.close(done));
     if (previous === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previous;

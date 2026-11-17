@@ -1,4 +1,5 @@
-import { createStockTable } from "./nomenclature-stock-table.js?v=stock-filters-2";
+import { createNomenclatureNavigation } from "./nomenclature-navigation.js?v=search-6";
+import { createStockTable } from "./nomenclature-stock-table.js?v=search-6";
 
 export function bootstrapNomenclatureStock() {
   const status = document.querySelector("#nomenclature-stock-status");
@@ -19,6 +20,14 @@ export function bootstrapNomenclatureStock() {
   const priceHeading = document.querySelector("#nomenclature-stock-price-heading");
   const priceLabel = document.querySelector("#nomenclature-stock-price-label");
   const loadingCell = document.querySelector(".nomenclature-stock-loading-cell");
+  const brand = document.querySelector("#nomenclature-oem-brand");
+  const settings = document.querySelector("#nomenclature-search-settings");
+  const menu = document.querySelector("#nomenclature-search-menu");
+  let searchMode = "text";
+  let navigationLoaded = false;
+  let requestNavigation = true;
+  const queries = { text: "", oem: "" };
+  const navigation = createNomenclatureNavigation(() => { query = normalize(input.value); restart(); });
   let totalCount;
   priceEnabled.disabled = true;
   let selectionCount = 0;
@@ -40,7 +49,7 @@ export function bootstrapNomenclatureStock() {
   const sortButtons = [...document.querySelectorAll("[data-nomenclature-sort]")];
   const identities = new Set();
   const cursors = new Set();
-  const normalize = (value) => [...new Set(value.normalize("NFC").trim().toLocaleLowerCase("ru-RU").split(/\s+/).filter(Boolean))].sort().join(" ");
+  const normalize = (value) => value.normalize("NFC").trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ");
   const stop = () => { generation += 1; clearTimeout(timer); timer = undefined; controller?.abort(); controller = undefined; bufferedPage = undefined; busy = false; loading.hidden = true; moreLoading.hidden = true; retry.hidden = true; table.removeAttribute("aria-busy"); };
   const selectedPrice = () => priceEnabled.checked ? priceType.value : "";
   const selectedAvailability = () => availabilityEnabled.checked ? availability.value : "all";
@@ -69,6 +78,10 @@ export function bootstrapNomenclatureStock() {
     try {
       const parameters = new URLSearchParams();
       parameters.set("details", "1"); parameters.set("availability", selectedAvailability());
+      parameters.set("searchMode", searchMode); parameters.set("navigation", requestNavigation ? "1" : "0");
+      if (navigation.selected.category) parameters.set("category", navigation.selected.category);
+      if (navigation.selected.group) parameters.set("group", navigation.selected.group);
+      if (searchMode === "oem" && brand.value) parameters.set("oemBrand", brand.value);
       if (selectedPrice()) parameters.set("priceType", selectedPrice());
       if (cursor) parameters.set("after", cursor);
       if (query) parameters.set("q", query);
@@ -106,6 +119,16 @@ export function bootstrapNomenclatureStock() {
       if (attempt !== generation || !active) return;
       if (!first && !nearEnd()) { bufferedPage = { value, cursor }; return; }
       if (first) {
+        if (requestNavigation) {
+          navigation.update(value.navigation);
+          const selectedBrand = brand.value;
+          const all = document.createElement("option"); all.value = ""; all.textContent = "Все бренды OEM";
+          brand.replaceChildren(all, ...value.navigation.oemBrands.map((item) => {
+            const option = document.createElement("option"); option.value = item.id; option.textContent = item.name; return option;
+          }));
+          if (value.navigation.oemBrands.some((item) => item.id === selectedBrand)) brand.value = selectedBrand;
+          navigationLoaded = true;
+        }
         totalCount = value.totalCount;
         const previous = priceType.value;
         const options = value.priceTypes.map((item) => { const option = document.createElement("option"); option.value = item.id; option.textContent = item.name; return option; });
@@ -144,6 +167,7 @@ export function bootstrapNomenclatureStock() {
     }
   };
   const restart = () => {
+    requestNavigation = !navigationLoaded;
     stop(); totalCount = undefined; renderer.reset(!!selectedPrice(), query); identities.clear(); cursors.clear();
     total = 0; nextCursor = null; blocked = false; table.hidden = !active;
     progress.textContent = "";
@@ -167,7 +191,23 @@ export function bootstrapNomenclatureStock() {
   input.addEventListener("input", (event) => { if (!event.isComposing) search(); });
   input.addEventListener("compositionend", search);
   form.addEventListener("submit", (event) => { event.preventDefault(); query = normalize(input.value); restart(); });
-  refresh.addEventListener("click", () => { query = normalize(input.value); restart(); });
+  refresh.addEventListener("click", () => { navigationLoaded = false; query = normalize(input.value); restart(); });
+  const closeMenu = () => { menu.hidden = true; settings.setAttribute("aria-expanded", "false"); };
+  settings.addEventListener("click", () => { menu.hidden = !menu.hidden; settings.setAttribute("aria-expanded", String(!menu.hidden)); });
+  document.addEventListener("click", (event) => { if (!event.target.closest(".nomenclature-search-settings")) closeMenu(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !menu.hidden) { closeMenu(); settings.focus(); } });
+  for (const button of menu.querySelectorAll("[data-nomenclature-mode]")) button.addEventListener("click", () => {
+    const next = button.dataset.nomenclatureMode;
+    closeMenu();
+    if (next === searchMode) return;
+    queries[searchMode] = input.value; searchMode = next; input.value = queries[searchMode];
+    input.placeholder = searchMode === "oem" ? "OEM-артикул" : "Название или артикул товара";
+    input.setAttribute("aria-label", searchMode === "oem" ? "Поиск по OEM-артикулу" : "Поиск по наименованию или артикулу");
+    brand.hidden = searchMode !== "oem";
+    for (const item of menu.querySelectorAll("[data-nomenclature-mode]")) item.setAttribute("aria-pressed", String(item.dataset.nomenclatureMode === searchMode));
+    query = normalize(input.value); restart(); input.focus();
+  });
+  brand.addEventListener("change", () => { query = normalize(input.value); restart(); });
   retry.addEventListener("click", () => { if (!active || busy) return; blocked = false; void load(); });
   const filterChanged = () => {
     availability.disabled = !availabilityEnabled.checked;
@@ -200,7 +240,7 @@ export function bootstrapNomenclatureStock() {
       const selected = name === "nomenclature";
       if (active === selected) return;
       active = selected;
-      if (active) { query = normalize(input.value); restart(); }
+      if (active) { navigationLoaded = false; query = normalize(input.value); restart(); }
       else { stop(); renderer.reset(); identities.clear(); cursors.clear(); status.textContent = ""; progress.textContent = ""; table.hidden = true; }
     },
   };
