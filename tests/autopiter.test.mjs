@@ -507,6 +507,74 @@ test("Autopiter cancels all prefetched prices and never starts queued catalogs a
   }
 });
 
+test("Autopiter identifies the failed catalog after partial 1214 results without exposing supplier data", async () => {
+  const ids = Array.from({ length: 77 }, (_, index) => String(101 + index));
+  const calls = [];
+  const adapter = new AutopiterApiAdapter(async (method, parameters) => {
+    calls.push(method);
+    if (method === "FindCatalog") return response(method, ids.map((ArticleId) => catalog({ ArticleId, Number: "1214" })).join(""));
+    return response(method, offer({ Number: "1214", ...(parameters.ArticleId === ids[16] ? { SalePrice: "private-price-value" } : {}) }));
+  });
+  const events = [];
+  await runSupplierSearch({ adapter, sessionManager: manager(), query: { article: "1214" }, signal: signal(), emit: (event) => events.push(event) });
+  assert.equal(events.at(-1).status, "error");
+  assert.match(events.at(-1).details, /каталог 17 из 77/);
+  assert.match(events.at(-1).details, /некорректная цена/);
+  assert.equal(events.filter((event) => event.type === "result").length, 16);
+  assert.equal(calls.length, 22); // One catalog read and at most four prefetched price responses.
+  assert.doesNotMatch(JSON.stringify(events), /private-price-value/);
+});
+
+test("Autopiter reports invalid offer fields through safe search diagnostics", async () => {
+  for (const [data, label] of [
+    [{ Number: "" }, "артикул"], [{ CatalogName: "" }, "производитель"], [{ Name: "" }, "наименование"],
+    [{ SalePrice: "private-price-value" }, "цена"], [{ TypeRefusal: "private-refusal-value" }, "возврат"],
+    [{ NumberOfAvailable: "private-quantity-value" }, "количество"], [{ CurrencyName: "private-currency-value" }, "валюта"],
+  ]) {
+    const adapter = new AutopiterApiAdapter(async (method) => response(method, method === "FindCatalog" ? catalog() : offer() + offer(data)));
+    const events = [];
+    await runSupplierSearch({ adapter, sessionManager: manager(), query: { article: "A1" }, signal: signal(), emit: (event) => events.push(event) });
+    assert.equal(events.at(-1).status, "error");
+    assert.match(events.at(-1).details, /каталог 1 из 1/);
+    assert.ok(events.at(-1).details.includes(label), events.at(-1).details);
+    assert.equal(events.filter((event) => event.type === "result").length, 1);
+    assert.doesNotMatch(JSON.stringify(events), /private-.*-value/);
+  }
+});
+
+test("Autopiter diagnoses catalog response and connection failures without forwarding raw errors or retrying", async () => {
+  const method = "FindCatalog";
+  for (const [failure, label] of [
+    [response(method, "", { contentType: "text/html" }), "неподдерживаемого типа"],
+    [response(method, "", { status: 500 }), "отклонил запрос"],
+    [response(method, "", { body: "<broken" }), "повреждённый XML"],
+    [response(method, "", { body: '<!DOCTYPE doc><doc/>' }), "объявления XML"],
+    [response(method, "", { body: '<Envelope><Body><Fault><faultstring>private-fault-value</faultstring></Fault></Body></Envelope>' }), "вернул ошибку"],
+    [response(method, "<Unexpected/>"), "список результатов"],
+    [new SupplierIntegrationError("Supplier response is too large"), "размер"],
+    [new SupplierIntegrationError("Supplier response was interrupted"), "прервалась"],
+    [Object.assign(new Error("private-network-value"), { code: "ECONNRESET" }), "соединения"],
+    [new Error("private-unexpected-value"), "обработку ответа"],
+  ]) {
+    let calls = 0;
+    const adapter = new AutopiterApiAdapter(async () => {
+      calls++;
+      if (failure instanceof Error) throw failure;
+      return failure;
+    });
+    for (const query of [{ article: "1214" }, { mode: "brands", article: "1214" }]) {
+      const events = [];
+      const previousCalls = calls;
+      await runSupplierSearch({ adapter, sessionManager: manager(), query, signal: signal(), emit: (event) => events.push(event) });
+      assert.equal(calls - previousCalls, 1);
+      assert.equal(events.at(-1).status, "error");
+      assert.match(events.at(-1).details, /Ошибка получения списка производителей/);
+      assert.ok(events.at(-1).details.includes(label), events.at(-1).details);
+      assert.doesNotMatch(JSON.stringify(events), /private-.*-value|faultstring|<broken/);
+    }
+  }
+});
+
 test("Autopiter reports a failed catalog and closes outstanding price requests", async () => {
   const failure = new SupplierIntegrationError("fictional upstream failure");
   let requests = 0;
@@ -523,7 +591,11 @@ test("Autopiter reports a failed catalog and closes outstanding price requests",
       }, { once: true }));
     } finally { active--; }
   });
-  await assert.rejects(adapter.search({ article: "A1" }, context(), () => assert.fail("unexpected result"), manager()), (error) => error === failure);
+  await assert.rejects(adapter.search({ article: "A1" }, context(), () => assert.fail("unexpected result"), manager()), (error) => {
+    assert.equal(error.cause, failure);
+    assert.match(error.publicMessage, /каталог 1 из 77/);
+    return error instanceof SupplierIntegrationError;
+  });
   assert.equal(requests, 4);
   assert.equal(cancelled, 3);
   assert.equal(active, 0);

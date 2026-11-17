@@ -8,6 +8,7 @@ import type { SupplierAdapter } from "../supplier-adapter.ts";
 import { attachPurchaseReference, type PurchaseLine } from "../../purchasing/purchase-offer.ts";
 import { autopiterOrderFields, parseAutopiterOrderResult } from "./autopiter-order.ts";
 import { parseAutopiterInvoiceItems, parseAutopiterInvoices } from "./autopiter-history.ts";
+import { autopiterOfferError, autopiterSearchError } from "./autopiter-search-error.ts";
 import { finishOrderHistory, historyDate } from "../../purchasing/order-history-values.ts";
 import type { OrderHistory, OrderHistoryOrder } from "../../purchasing/order-history-contract.ts";
 
@@ -164,7 +165,7 @@ function parseCatalogs(response: SiteHttpResponse, requestedArticle: string): Ca
 
 function normalizeOffer(offer: XmlElement, requestedArticle: string, analogBrand?: string): NormalizedSearchResult | null {
   const article = text(offer, "Number");
-  if (!article) throw new SupplierIntegrationError("Autopiter offer has no article");
+  if (!article) throw autopiterOfferError("Number");
   const brand = text(offer, "CatalogName");
   if (text(offer, "NumberChange")) return null;
   if (analogBrand === undefined ? articleKey(article) !== articleKey(requestedArticle)
@@ -176,11 +177,12 @@ function normalizeOffer(offer: XmlElement, requestedArticle: string, analogBrand
   const rawQuantity = text(offer, "NumberOfAvailable");
   const quantity = /^\d+$/.test(rawQuantity) ? Number(rawQuantity) : null;
   const currency = text(offer, "CurrencyName");
-  if (!brand || !title || !Number.isFinite(price) || price <= 0 || !/^\d+$/.test(refusal)
-    || !Number.isSafeInteger(Number(refusal)) || (rawQuantity && (quantity === null || !Number.isSafeInteger(quantity)))
-    || (currency && currency !== "RUB")) {
-    throw new SupplierIntegrationError("Autopiter returned an invalid offer");
-  }
+  if (!brand) throw autopiterOfferError("CatalogName");
+  if (!title) throw autopiterOfferError("Name");
+  if (!Number.isFinite(price) || price <= 0) throw autopiterOfferError("SalePrice");
+  if (!/^\d+$/.test(refusal) || !Number.isSafeInteger(Number(refusal))) throw autopiterOfferError("TypeRefusal");
+  if (rawQuantity && (quantity === null || !Number.isSafeInteger(quantity))) throw autopiterOfferError("NumberOfAvailable");
+  if (currency && currency !== "RUB") throw autopiterOfferError("CurrencyName");
   const date = deliveryDate(text(offer, "DeliveryDate"));
   const result: NormalizedSearchResult = {
     supplier: "autopiter", brand, article, title, price,
@@ -370,6 +372,9 @@ export class AutopiterApiAdapter implements SupplierAdapter {
         if (!brands.has(brandKey(brand))) brands.set(brandKey(brand), brand);
       }
       onBrands([...brands.values()]);
+    } catch (error) {
+      operation.signal.throwIfAborted();
+      throw autopiterSearchError(error);
     } finally { operation.dispose(); }
   }
 
@@ -378,12 +383,15 @@ export class AutopiterApiAdapter implements SupplierAdapter {
     const controller = new AbortController();
     const searchContext = { ...context, signal: AbortSignal.any([operation.signal, controller.signal]) };
     const pending = new Map<number, Promise<PriceOutcome>>();
+    let catalogIndex = 0;
+    let catalogCount = 0;
     try {
       searchContext.signal.throwIfAborted();
       const recovery: AutopiterSessionRecovery = {};
       const catalogs = await this.requestWithSession("FindCatalog", { Number: query.article }, searchContext, manager, (response) => parseCatalogs(response, query.article), recovery);
       searchContext.signal.throwIfAborted();
       const catalogIds = catalogs.filter(({ brand }) => analogBrand === undefined || brandKey(brand) === brandKey(analogBrand)).map(({ id }) => id);
+      catalogCount = catalogIds.length;
       const emittedAnalogs = new Set<string>();
       const loadPrices = (id: string): Promise<PriceOutcome> => this.requestWithSession(
         "GetPriceId", { ArticleId: id, Currency: "РУБ", SearchCross: analogBrand === undefined ? "0" : "1", MinSalesRating: "0", MinRealTimeInProc: "0" },
@@ -391,6 +399,7 @@ export class AutopiterApiAdapter implements SupplierAdapter {
       ).then((offers) => ({ ok: true, offers }), (error: unknown) => ({ ok: false, error }));
       catalogIds.slice(0, priceRequestConcurrency).forEach((id, index) => pending.set(index, loadPrices(id)));
       for (let index = 0; index < catalogIds.length; index++) {
+        catalogIndex = index + 1;
         const outcome = await pending.get(index)!;
         pending.delete(index);
         searchContext.signal.throwIfAborted();
@@ -411,6 +420,9 @@ export class AutopiterApiAdapter implements SupplierAdapter {
           onResult(result);
         }
       }
+    } catch (error) {
+      searchContext.signal.throwIfAborted();
+      throw autopiterSearchError(error, catalogIndex ? { index: catalogIndex, total: catalogCount } : undefined);
     } finally {
       controller.abort();
       await Promise.allSettled(pending.values());

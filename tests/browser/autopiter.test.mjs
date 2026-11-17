@@ -60,8 +60,11 @@ test("Autopiter connects, searches analogs from offers and discovered brands, fi
             title: mode === "analogs" ? isReturnable ? "Возвратный аналог" : "Невозвратный аналог" : isReturnable ? "Возвратный фильтр" : "Невозвратный фильтр",
             price: isReturnable ? 150 : 100, quantity: 5, warehouse: "Тестовый склад", deliveryDate: null,
             deliveryDateApproximate: false, isReturnable, link: "https://autopiter.ru/" } }));
+        const status = article === "1214" && !mode
+          ? { status: "error", details: "Ошибка получения цен (каталог 17 из 77): некорректная цена." }
+          : { status: "completed" };
         const events = [{ type: "search_started", article, suppliers: ["autopiter"] }, ...results,
-          { type: "supplier_status", supplier: "autopiter", status: "completed" }, { type: "search_completed", article }];
+          { type: "supplier_status", supplier: "autopiter", ...status }, { type: "search_completed", article }];
         return route.fulfill({ contentType: "text/event-stream", body: events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") });
       }
       const data = {
@@ -115,6 +118,13 @@ test("Autopiter connects, searches analogs from offers and discovered brands, fi
     await page.locator("#analogs-results-body").getByText("Невозвратный аналог", { exact: true }).waitFor();
     assert.deepEqual(searchQueries.at(-1), { mode: "analogs", article: "A0", brand: "TEST", suppliers: [] });
     await page.locator("#analogs-modal button[data-close-analogs-modal]").click();
+    await page.locator("#article-input").fill("1214");
+    await page.locator("#submit-button").click();
+    await page.getByText("Возвратный фильтр", { exact: true }).waitFor();
+    await page.locator("#garage-toast").filter({ hasText: "каталог 17 из 77" }).waitFor();
+    assert.equal(await page.locator("#garage-toast").textContent(),
+      "Поиск выполнен не полностью: Автопитер: Ошибка получения цен (каталог 17 из 77): некорректная цена.");
+    assert.equal(await page.locator("#results-body .results-table__row").count(), 2);
     await openSettings();
     await page.locator('[data-supplier="autopiter"] summary').click();
     assert.equal(await page.locator("#autopiter-non-returnable").isChecked(), true);
