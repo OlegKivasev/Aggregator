@@ -52,7 +52,7 @@ test("one nomenclature connection exchanges products, hashes its key and rejects
     const token = await key(request);
     assert.equal((await request("/api/nomenclature/lookups", { method: "POST", ...json({ barcode: "0000123" }) })).status, 503);
     const status = await request("/api/integration/1c/nomenclature/status", { headers: { Authorization: `Bearer ${token}` } });
-    assert.deepEqual(await status.json(), { ready: true, workerOnline: false, lastSeenAt: null });
+    assert.deepEqual(await status.json(), { ready: true, workerOnline: false, lastSeenAt: null, stockVersion: null, stockReady: false });
     assert.deepEqual(await (await request("/api/nomenclature/connection")).json(), { configured: true, online: false, lastSeenAt: null });
     const offline = await request("/api/nomenclature/lookups", { method: "POST", ...json({ barcode: "0000123" }) });
     assert.equal(offline.status, 503);
@@ -65,6 +65,8 @@ test("one nomenclature connection exchanges products, hashes its key and rejects
     const running = await (await request("/api/integration/1c/nomenclature/status", { headers: { Authorization: `Bearer ${token}` } })).json();
     assert.equal(running.ready, true);
     assert.equal(running.workerOnline, true);
+    assert.equal(running.stockVersion, 0);
+    assert.equal(running.stockReady, false);
     assert.ok(Number.isFinite(Date.parse(running.lastSeenAt)));
     assert.equal((await request("/api/nomenclature/lookups", { method: "POST", ...json({ sourceId: "test", barcode: "0000123" }) })).status, 400);
     const created = await request("/api/nomenclature/lookups", { method: "POST", ...json({ barcode: "0000123" }) });
@@ -180,7 +182,10 @@ test("lookup state persists, ownership is enforced, leases are reclaimed and lat
     now += 30_001;
     assert.equal(service.get(expires.id, "first-user", false).status, "expired");
     assert.throws(() => service.complete(token, completion(expiredJob)), (error) => error.statusCode === 409);
+    service.heartbeat(token);
     now += 45_001;
+    assert.equal(service.state().online, true, "a 45-second stock run still has a liveness grace window");
+    now += 45_000;
     assert.throws(() => service.create("0000003", "first-user"), (error) => error.code === "source_offline");
     service.heartbeat(token);
     for (let i = 0; i < 3; i += 1) service.create(`code-${i}`, "first-user");
@@ -194,6 +199,7 @@ test("lookup state persists, ownership is enforced, leases are reclaimed and lat
 test("nomenclature routes enforce form access, administrator settings and request ownership", async () => {
   await withServer(async ({ request, path }) => {
     assert.equal((await request("/api/nomenclature/connection")).status, 401);
+    assert.equal((await request("/api/nomenclature/stock")).status, 401);
     const adminLogin = await request("/api/auth/login", { method: "POST", ...json({ fio: "Администратор", password: "test-admin-password" }) });
     const adminCookie = adminLogin.headers.get("set-cookie").split(";", 1)[0];
     // Simulates an administrator created before the new nomenclature permission existed.
@@ -210,6 +216,8 @@ test("nomenclature routes enforce form access, administrator settings and reques
     const second = await login("Номенклатура два");
     const denied = await login("Без доступа");
     assert.equal((await request("/api/nomenclature/connection", { headers: { Cookie: denied } })).status, 403);
+    assert.equal((await request("/api/nomenclature/stock", { headers: { Cookie: denied } })).status, 403);
+    assert.equal((await request("/api/nomenclature/stock", { headers: { Cookie: first } })).status, 503);
     assert.equal((await request("/api/nomenclature/settings", { headers: { Cookie: first } })).status, 403);
     assert.equal((await request("/api/nomenclature/connection", { method: "POST", ...json({}, { Cookie: first }) })).status, 403);
     assert.equal((await request("/api/nomenclature/connection", { method: "DELETE", headers: { Cookie: first } })).status, 403);

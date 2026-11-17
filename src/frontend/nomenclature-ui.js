@@ -1,5 +1,6 @@
 import { getVideoScanRegion } from "./nomenclature-scan-region.js";
-import { bootstrapNomenclatureLookup, bootstrapNomenclatureSettings } from "./nomenclature-lookup-ui.js?v=search-progress-1";
+import { bootstrapNomenclatureLookup, bootstrapNomenclatureSettings } from "./nomenclature-lookup-ui.js?v=stock-filters-1";
+import { bootstrapNomenclatureStock } from "./nomenclature-stock-ui.js?v=stock-prefetch-1";
 
 let decoderModule;
 
@@ -102,6 +103,7 @@ const cameraErrorMessage = (error) => {
 
 export function bootstrapNomenclature() {
   const lookup = bootstrapNomenclatureLookup();
+  const stock = bootstrapNomenclatureStock();
   bootstrapNomenclatureSettings();
   const section = document.querySelector("#nomenclature-function");
   const scanButton = document.querySelector("#nomenclature-scan");
@@ -323,6 +325,7 @@ export function bootstrapNomenclature() {
     if (!event.detail?.isAdmin && !event.detail?.permissions?.includes("nomenclature")) {
       active = false;
       lookup.setActive(null);
+      stock.setActive(null);
       lookup.clear();
       cancel();
       code.value = "";
@@ -334,6 +337,7 @@ export function bootstrapNomenclature() {
     setActive(name) {
       active = name === "nomenclature" && !section.hidden;
       lookup.setActive(active ? name : null);
+      stock.setActive(active ? name : null);
       if (!active) cancel();
     },
   };
