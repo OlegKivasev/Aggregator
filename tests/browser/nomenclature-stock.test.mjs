@@ -31,7 +31,9 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     const priceTypes = [{ id: randomUUID(), name: "Розничная цена" }, { id: randomUUID(), name: "Закупочная цена" }];
     const category = randomUUID(), categoryChild = randomUUID(), group = randomUUID(), groupChild = randomUUID(), oemBrand = randomUUID();
     const navigation = {
-      categories: [{ id: category, name: "Запчасти", parentId: null, isFolder: true }, { id: categoryChild, name: "Фильтры", parentId: category, isFolder: false }],
+      categories: [{ id: randomUUID(), name: "Б — категория", parentId: null, isFolder: false }, { id: randomUUID(), name: "Я — папка", parentId: null, isFolder: true },
+        { id: category, name: "Запчасти", parentId: null, isFolder: true }, { id: categoryChild, name: "Фильтры", parentId: category, isFolder: false },
+        { id: randomUUID(), name: "А — категория", parentId: null, isFolder: false }, { id: randomUUID(), name: "А — папка", parentId: null, isFolder: true }],
       groups: [{ id: group, name: "Расходники", parentId: null, isFolder: true }, { id: groupChild, name: "Масла", parentId: group, isFolder: true }],
       oemBrands: [{ id: oemBrand, name: "Toyota" }],
     };
@@ -254,6 +256,12 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await page.locator(`[data-product-id="${firstId}"]`).waitFor();
     assert.equal(await page.locator(`[data-product-id="${firstId}"]`).getAttribute("aria-selected"), "true", "selection survives row removal and reconstruction");
     assert.equal(reads.length, beforeLargeList + 12, "scrolling back uses loaded data");
+    await page.setViewportSize({ width: 1920, height: 900 });
+    await page.locator("#nomenclature-navigation-resize").dblclick();
+    const longListOpener = await page.locator("#nomenclature-navigation-toggle").boundingBox();
+    assert.ok(longListOpener.y >= 0 && longListOpener.y + longListOpener.height <= 900, "the three-dot opener stays visible beside a long virtual catalogue");
+    await page.locator("#nomenclature-navigation-toggle").click();
+    assert.equal(reads.length, beforeLargeList + 12, "collapsing a long-list sidebar does not reload inventory");
     assert.ok(await page.locator("#nomenclature-stock-rows tr").count() <= 300);
     await page.setViewportSize({ width: 320, height: 844 });
     await page.locator(`[data-product-id="${firstId}"]`).waitFor();
@@ -427,6 +435,8 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await page.setViewportSize({ width: 1280, height: 900 });
     const beforeTree = reads.length;
     assert.equal(await page.locator("#nomenclature-navigation").isVisible(), true);
+    assert.deepEqual(await page.locator("#nomenclature-category-tree [data-navigation-id]").allTextContents(), ["А — папка", "Запчасти", "Я — папка", "А — категория", "Б — категория"], "folders sort alphabetically before category elements");
+    assert.equal(await page.locator(".nomenclature-tree-expand img").count(), 0, "tree disclosure uses a plain arrow");
     await page.getByRole("button", { name: "Раскрыть Запчасти", exact: true }).click();
     await page.locator("#nomenclature-category-query").fill("фильт");
     await page.locator("#nomenclature-category-tree").getByRole("button", { name: "Фильтры", exact: true }).waitFor();
@@ -457,7 +467,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.equal((await complete(article, [exactArticle])).status, 200);
     const highlighted = page.locator("#nomenclature-stock-rows td strong");
     await highlighted.waitFor(); assert.equal(await highlighted.textContent(), "L309-14-248");
-    assert.equal(await highlighted.evaluate((element) => getComputedStyle(element).color), "rgb(25, 135, 84)");
+    assert.equal(await highlighted.evaluate((element) => getComputedStyle(element).color), "rgb(0, 0, 0)");
     await page.locator("#nomenclature-search-settings").click();
     await page.getByRole("button", { name: "Поиск по OEM-артикулу", exact: true }).click();
     const oem = await poll(20); assert.equal(oem.options.searchMode, "oem"); assert.equal(oem.query, "");
@@ -496,11 +506,50 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
           const sidebar = document.querySelector("#nomenclature-navigation").getBoundingClientRect();
           const search = document.querySelector(".nomenclature-toolbar").getBoundingClientRect();
           const table = document.querySelector(".nomenclature-stock").getBoundingClientRect();
-          return { main: main.toJSON(), sidebar: sidebar.toJSON(), search: search.toJSON(), table: table.toJSON() };
+          const field = document.querySelector("#nomenclature-stock-search").getBoundingClientRect();
+          const scanner = document.querySelector("#nomenclature-scan").getBoundingClientRect();
+          return { main: main.toJSON(), sidebar: sidebar.toJSON(), search: search.toJSON(), table: table.toJSON(), field: field.toJSON(), scanner: scanner.toJSON() };
         });
+        assert.ok(layout.field.width <= 541, "article search keeps its compact maximum width");
+        if (width === 1920) assert.ok(layout.field.left > layout.scanner.right + 100, "search stays on the right with free space after the scanner");
         assert.ok(layout.search.right <= layout.sidebar.left && Math.abs(layout.table.width - layout.main.width) < 1, "search and table stay inside the main column beside navigation");
       }
       if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, `nomenclature-navigation-${width}.png`), fullPage: false });
+    }
+    await page.setViewportSize({ width: 1920, height: 900 });
+    const beforePanel = reads.length;
+    const panel = page.locator("#nomenclature-navigation");
+    const handle = page.locator("#nomenclature-navigation-resize");
+    const toggle = page.locator("#nomenclature-navigation-toggle");
+    assert.equal(Math.round((await panel.boundingBox()).width), 280, "default panel dimensions stay unchanged");
+    assert.equal(await toggle.isVisible(), false, "three-dot opener occupies the panel edge only when collapsed");
+    const bounds = await handle.boundingBox();
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    await page.mouse.down(); await page.mouse.move(bounds.x - 70, bounds.y + bounds.height / 2, { steps: 8 }); await page.mouse.up();
+    assert.equal(Math.round((await panel.boundingBox()).width), 360, "dragging the left edge resizes the panel");
+    assert.equal(await page.evaluate(() => localStorage.getItem("autoservice-aggregator.nomenclature-navigation-width.v1")), "360");
+    await handle.press("Home"); assert.equal(Math.round((await panel.boundingBox()).width), 180);
+    await handle.press("ArrowRight"); assert.equal(await panel.isVisible(), false, "shrinking at minimum width collapses the panel like the garage");
+    assert.equal((await toggle.textContent()).trim(), "⋮"); await toggle.click();
+    assert.equal(await panel.isVisible(), true); assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+    await handle.press("End"); assert.equal(Math.round((await panel.boundingBox()).width), 420);
+    await handle.dblclick(); assert.equal(await panel.isVisible(), false);
+    await toggle.click();
+    // Dragging towards the right edge collapses the panel without changing the active catalogue filter.
+    const narrow = await handle.boundingBox();
+    await page.mouse.move(narrow.x + narrow.width / 2, narrow.y + narrow.height / 2);
+    await page.mouse.down(); await page.mouse.move(narrow.x + 450, narrow.y + narrow.height / 2, { steps: 8 }); await page.mouse.up();
+    assert.equal(await panel.isVisible(), false); await toggle.click();
+    await handle.press("Home");
+    for (let step = 0; step < 10; step += 1) await handle.press("ArrowLeft");
+    assert.equal(Math.round((await panel.boundingBox()).width), 280);
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.locator("#nomenclature-navigation-close").click(); assert.equal(await panel.isVisible(), false);
+    await toggle.click(); assert.equal(await panel.isVisible(), true);
+    assert.equal(reads.length, beforePanel, "resize, collapse and expand use no HTTP or 1C requests");
+    if (process.env.NOMENCLATURE_SCREENSHOT_DIR) {
+      await page.setViewportSize({ width: 1920, height: 900 });
+      await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-panel-final.png"), fullPage: false });
     }
     assert.deepEqual(errors, []);
     console.log("Stock browser: search/debounce/cancellation, 1200 items in 12 batches, <=300 DOM rows; price sort, keyboard, cancellation and sorted continuation, one HTTP per action.");

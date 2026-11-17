@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=nomenclature-search-6" />
+    <link rel="stylesheet" href="/styles.css?v=nomenclature-panel-7" />
     <link rel="stylesheet" href="/order-notifications.css" />
   </head>
   <body>
@@ -418,7 +418,6 @@
                 <button type="button" class="garage-vehicles__button" data-nomenclature-mode="oem" aria-pressed="false">Поиск по OEM-артикулу</button>
               </div>
             </div>
-            <button type="button" class="nomenclature-tool" id="nomenclature-navigation-toggle" aria-label="Категории и группы" title="Категории и группы" aria-expanded="true" aria-controls="nomenclature-navigation"><img src="/nomenclature-folder.png" alt=""></button>
             <button type="button" class="nomenclature-tool" id="nomenclature-stock-refresh" aria-label="Обновить список" title="Обновить список"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 11.5-1L20 9M4 15l2.5 3A7 7 0 0 0 18 17"/></svg></button>
           </div>
         </div>
@@ -465,11 +464,18 @@
           </div>
         </section>
         </div>
+        <div class="nomenclature-navigation-control">
+          <button type="button" class="filters-toggle" id="nomenclature-navigation-toggle" aria-label="Открыть категории и группы" title="Открыть категории и группы" aria-expanded="true" aria-controls="nomenclature-navigation">⋮</button>
+        </div>
+        <div class="nomenclature-navigation-shell">
         <aside class="garage-sidebar card border-0 shadow-sm nomenclature-navigation" id="nomenclature-navigation" aria-label="Категории и группы">
+          <header class="nomenclature-navigation-header">
           <div class="nomenclature-navigation-modes" role="group" aria-label="Вид дерева номенклатуры">
             <label><input type="radio" name="nomenclature-navigation-mode" value="category" checked> Категории</label>
             <label><input type="radio" name="nomenclature-navigation-mode" value="group"> Группы</label>
           </div>
+          <button type="button" class="garage-sidebar__close" id="nomenclature-navigation-close" aria-label="Скрыть категории и группы" title="Скрыть категории и группы">×</button>
+          </header>
           <div id="nomenclature-category-panel">
             <div class="garage-search-form search-row"><label class="visually-hidden" for="nomenclature-category-query">Поиск категории</label><input class="search-input" id="nomenclature-category-query" type="search" placeholder="Поиск категории" autocomplete="off"></div>
             <ul class="garage-vehicles garage-groups" id="nomenclature-category-tree"></ul>
@@ -479,6 +485,8 @@
             <ul class="garage-vehicles garage-groups" id="nomenclature-group-tree"></ul>
           </div>
         </aside>
+        <div class="garage-sidebar__resize" id="nomenclature-navigation-resize" role="separator" aria-label="Изменить ширину категорий и групп" aria-controls="nomenclature-navigation" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="420" aria-valuenow="280" tabindex="0" title="Изменить ширину; двойной щелчок — скрыть панель"></div>
+        </div>
         </div>
       </section>
       <section id="repairs-function" class="repairs-function results-panel card border-0 shadow-sm overflow-hidden" aria-labelledby="repairs-title" hidden>
@@ -1304,7 +1312,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
 
     <script type="module" src="/auth-ui.js"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=nomenclature-search-6"></script>
+    <script type="module" src="/applicability.js?v=nomenclature-panel-7"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>
