@@ -180,7 +180,10 @@ test("lookup state persists, ownership is enforced, leases are reclaimed and lat
     now += 30_001;
     assert.equal(service.get(expires.id, "first-user", false).status, "expired");
     assert.throws(() => service.complete(token, completion(expiredJob)), (error) => error.statusCode === 409);
+    service.heartbeat(token);
     now += 45_001;
+    assert.equal(service.state().online, true, "a 45-second stock run still has a liveness grace window");
+    now += 45_000;
     assert.throws(() => service.create("0000003", "first-user"), (error) => error.code === "source_offline");
     service.heartbeat(token);
     for (let i = 0; i < 3; i += 1) service.create(`code-${i}`, "first-user");

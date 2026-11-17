@@ -15,7 +15,10 @@ interface LookupRow {
 }
 const hash = (value: string) => createHash("sha256").update(value).digest();
 const ttlMs = 30_000;
-const onlineMs = 45_000;
+// A stock run can legitimately occupy the 45-second 1C execution window.
+// Keep one extra window before declaring the worker offline so a long valid run
+// is not rejected by the next browser read.
+const onlineMs = 90_000;
 const source = "nomenclature";
 
 export class NomenclatureService {
