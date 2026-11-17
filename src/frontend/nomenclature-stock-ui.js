@@ -1,5 +1,5 @@
-import { createNomenclatureNavigation } from "./nomenclature-navigation.js?v=panel-7";
-import { createStockTable } from "./nomenclature-stock-table.js?v=panel-7";
+import { createNomenclatureNavigation } from "./nomenclature-navigation.js?v=panel-8";
+import { createStockTable } from "./nomenclature-stock-table.js?v=panel-8";
 
 export function bootstrapNomenclatureStock() {
   const status = document.querySelector("#nomenclature-stock-status");

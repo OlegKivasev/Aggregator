@@ -69,6 +69,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     const job = await poll(20);
     assert.equal(job.kind, "stock");
     await page.locator("#nomenclature-stock-loading").waitFor();
+    assert.equal(await page.locator("#nomenclature-stock-loading strong").evaluate((element) => getComputedStyle(element).color), "rgb(0, 0, 0)", "loading message stays black while result matches are green");
     assert.deepEqual(job.options, { availability: "available", priceType: null, searchMode: "text", category: null, group: null, oemBrand: null, navigation: true });
     assert.equal(await page.locator("#nomenclature-stock-status").textContent(), "");
     const products = Array.from({ length: 100 }, (_, index) => ({ id: randomUUID(),
@@ -467,7 +468,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.equal((await complete(article, [exactArticle])).status, 200);
     const highlighted = page.locator("#nomenclature-stock-rows td strong");
     await highlighted.waitFor(); assert.equal(await highlighted.textContent(), "L309-14-248");
-    assert.equal(await highlighted.evaluate((element) => getComputedStyle(element).color), "rgb(0, 0, 0)");
+    assert.equal(await highlighted.evaluate((element) => getComputedStyle(element).color), "rgb(25, 135, 84)");
     await page.locator("#nomenclature-search-settings").click();
     await page.getByRole("button", { name: "Поиск по OEM-артикулу", exact: true }).click();
     const oem = await poll(20); assert.equal(oem.options.searchMode, "oem"); assert.equal(oem.query, "");
@@ -510,6 +511,16 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
           const scanner = document.querySelector("#nomenclature-scan").getBoundingClientRect();
           return { main: main.toJSON(), sidebar: sidebar.toJSON(), search: search.toJSON(), table: table.toJSON(), field: field.toJSON(), scanner: scanner.toJSON() };
         });
+        const vertical = await page.evaluate(() => {
+          const form = document.querySelector("#nomenclature-function").getBoundingClientRect();
+          const panel = document.querySelector("#nomenclature-navigation").getBoundingClientRect();
+          const handle = document.querySelector("#nomenclature-navigation-resize").getBoundingClientRect();
+          return { bottom: form.bottom, panelBottom: panel.bottom, handleCenter: handle.top + handle.height / 2, panelCenter: panel.top + panel.height / 2,
+            expectedBottom: innerHeight - parseFloat(getComputedStyle(document.querySelector(".page")).paddingBottom), padding: parseFloat(getComputedStyle(document.querySelector("#nomenclature-function")).paddingBottom) };
+        });
+        assert.ok(Math.abs(vertical.bottom - vertical.expectedBottom) <= 1, "short nomenclature fills the viewport down to the page padding");
+        assert.ok(Math.abs(vertical.panelBottom - (vertical.bottom - vertical.padding)) <= 1, "navigation fills the full available form height");
+        assert.ok(Math.abs(vertical.handleCenter - vertical.panelCenter) <= 1, "panel resize grip is centered vertically");
         assert.ok(layout.field.width <= 541, "article search keeps its compact maximum width");
         if (width === 1920) assert.ok(layout.field.left > layout.scanner.right + 100, "search stays on the right with free space after the scanner");
         assert.ok(layout.search.right <= layout.sidebar.left && Math.abs(layout.table.width - layout.main.width) < 1, "search and table stay inside the main column beside navigation");
@@ -548,7 +559,14 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await toggle.click(); assert.equal(await panel.isVisible(), true);
     assert.equal(reads.length, beforePanel, "resize, collapse and expand use no HTTP or 1C requests");
     if (process.env.NOMENCLATURE_SCREENSHOT_DIR) {
-      await page.setViewportSize({ width: 1920, height: 900 });
+      await page.setViewportSize({ width: 1920, height: 1238 });
+      await page.waitForFunction(() => {
+        const form = document.querySelector("#nomenclature-function");
+        const panel = document.querySelector("#nomenclature-navigation");
+        const bottom = innerHeight - parseFloat(getComputedStyle(document.querySelector(".page")).paddingBottom);
+        return Math.abs(form.getBoundingClientRect().bottom - bottom) <= 1
+          && Math.abs(panel.getBoundingClientRect().bottom - (bottom - parseFloat(getComputedStyle(form).paddingBottom))) <= 1;
+      });
       await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-panel-final.png"), fullPage: false });
     }
     assert.deepEqual(errors, []);

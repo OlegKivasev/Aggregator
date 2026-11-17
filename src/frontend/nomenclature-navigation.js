@@ -6,6 +6,17 @@ export function createNomenclatureNavigation(changed) {
   const toggle = document.querySelector("#nomenclature-navigation-toggle");
   const shell = document.querySelector(".nomenclature-navigation-shell");
   const workspace = document.querySelector(".nomenclature-workspace");
+  const fitPanelHeight = () => {
+    if (innerWidth <= 800 || !workspace.getClientRects().length) return;
+    const form = workspace.closest(".nomenclature-function");
+    const page = workspace.closest(".page");
+    const top = workspace.getBoundingClientRect().top + scrollY;
+    const height = Math.max(180, Math.floor(innerHeight - top - parseFloat(getComputedStyle(form).paddingBottom) - parseFloat(getComputedStyle(page).paddingBottom)));
+    const value = `${height}px`;
+    if (workspace.style.getPropertyValue("--nomenclature-navigation-height") !== value) workspace.style.setProperty("--nomenclature-navigation-height", value);
+  };
+  new ResizeObserver(fitPanelHeight).observe(workspace);
+  window.addEventListener("resize", fitPanelHeight);
   const resize = document.querySelector("#nomenclature-navigation-resize");
   const close = document.querySelector("#nomenclature-navigation-close");
   const widthKey = "autoservice-aggregator.nomenclature-navigation-width.v1";
