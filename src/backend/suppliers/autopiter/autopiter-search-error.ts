@@ -3,7 +3,6 @@ import { SupplierAuthError, SupplierIntegrationError, SupplierSessionInvalidated
 const offerFieldReasons = {
   Number: "не указан артикул",
   CatalogName: "не указан производитель",
-  Name: "не указано наименование",
   SalePrice: "некорректная цена",
   TypeRefusal: "некорректные условия возврата",
   NumberOfAvailable: "некорректное количество",

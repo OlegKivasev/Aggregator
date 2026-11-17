@@ -525,9 +525,49 @@ test("Autopiter identifies the failed catalog after partial 1214 results without
   assert.doesNotMatch(JSON.stringify(events), /private-price-value/);
 });
 
+test("Autopiter completes all 77 catalogs when catalog 8 has an offer without its optional name", async () => {
+  const ids = Array.from({ length: 77 }, (_, index) => String(101 + index));
+  for (const analogs of [false, true]) {
+    const calls = [];
+    const adapter = new AutopiterApiAdapter(async (method, parameters) => {
+      calls.push({ method, parameters });
+      if (method === "FindCatalog") return response(method, ids.map((ArticleId) => catalog({ ArticleId, Number: "1214" })).join(""));
+      const data = offer({ Number: analogs ? "CROSS-1214" : "1214", CatalogName: analogs ? "CROSS" : "TEST", DetailUid: `fixture-${parameters.ArticleId}` });
+      return response(method, parameters.ArticleId === ids[7] ? data.replace(/<Name>.*?<\/Name>/, "") : data);
+    });
+    const events = [];
+    await runSupplierSearch({ adapter, sessionManager: manager(), query: analogs
+      ? { mode: "analogs", article: "1214", brand: "TEST" } : { article: "1214" }, signal: signal(), emit: (event) => events.push(event) });
+    assert.equal(events.at(-1).status, "completed");
+    const results = events.filter((event) => event.type === "result").map((event) => event.result);
+    assert.equal(results.length, 77);
+    assert.equal(results[7].title, analogs ? "CROSS CROSS-1214" : "TEST 1214");
+    assert.equal(results[7].price, 125.5);
+    assert.equal(results[7].quantity, 7);
+    assert.equal(results[7].isReturnable, true);
+    assert.deepEqual(getPurchaseReference(results[7]), { supplier: "autopiter", detailUid: `fixture-${ids[7]}`, sellerId: "10" });
+    assert.deepEqual(calls.slice(1).map((call) => call.parameters.ArticleId), ids);
+    assert.ok(calls.slice(1).every((call) => call.parameters.SearchCross === (analogs ? "1" : "0")));
+    assert.equal(calls.length, 78);
+  }
+});
+
+test("Autopiter accepts empty, whitespace and self-closing optional names and preserves supplied descriptions", async () => {
+  for (const name of ["", " \n\t ", "<self-closing>"]) {
+    const data = name === "<self-closing>" ? offer({ Name: "" }).replace("<Name></Name>", "<Name />") : offer({ Name: name });
+    const [result] = await searchOffers(data);
+    assert.equal(result.title, "TEST A-1");
+    assert.deepEqual(getPurchaseReference(result), { supplier: "autopiter", detailUid: "fixture-detail", sellerId: "10" });
+  }
+  assert.equal((await searchOffers(offer({ Name: " Исходное название " })))[0].title, "Исходное название");
+  for (const data of [{ Name: "", SalePrice: "0" }, { Name: "", NumberOfAvailable: "-1" }, { Name: "", TypeRefusal: "" }]) {
+    await assert.rejects(searchOffers(offer(data)), SupplierIntegrationError);
+  }
+});
+
 test("Autopiter reports invalid offer fields through safe search diagnostics", async () => {
   for (const [data, label] of [
-    [{ Number: "" }, "артикул"], [{ CatalogName: "" }, "производитель"], [{ Name: "" }, "наименование"],
+    [{ Number: "" }, "артикул"], [{ CatalogName: "" }, "производитель"],
     [{ SalePrice: "private-price-value" }, "цена"], [{ TypeRefusal: "private-refusal-value" }, "возврат"],
     [{ NumberOfAvailable: "private-quantity-value" }, "количество"], [{ CurrencyName: "private-currency-value" }, "валюта"],
   ]) {
@@ -617,7 +657,7 @@ test("Autopiter preserves unknown quantity and dates, rejects invalid prices, re
   for (const value of ["", "invalid", "0001-01-01T00:00:00", "2026-02-30T00:00:00", "2026-11-10T25:00:00"]) {
     assert.equal((await searchOffers(offer({ DeliveryDate: value })))[0].deliveryDate, null);
   }
-  for (const data of [{ SalePrice: "Infinity" }, { SalePrice: "0" }, { SalePrice: "-1" }, { CatalogName: "" }, { Name: "" },
+  for (const data of [{ SalePrice: "Infinity" }, { SalePrice: "0" }, { SalePrice: "-1" }, { CatalogName: "" },
     { TypeRefusal: "" }, { TypeRefusal: "NaN" }, { TypeRefusal: "3.5" }, { NumberOfAvailable: "-1" }, { NumberOfAvailable: "1.5" }, { CurrencyName: "USD" }]) {
     await assert.rejects(searchOffers(offer(data)), SupplierIntegrationError);
   }

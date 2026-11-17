@@ -170,7 +170,8 @@ function normalizeOffer(offer: XmlElement, requestedArticle: string, analogBrand
   if (text(offer, "NumberChange")) return null;
   if (analogBrand === undefined ? articleKey(article) !== articleKey(requestedArticle)
     : articleKey(article) === articleKey(requestedArticle) && brandKey(brand) === brandKey(analogBrand)) return null;
-  const title = text(offer, "Name");
+  // Name is optional in the API. Use the offer's own identity when no description is supplied.
+  const title = text(offer, "Name") || `${brand} ${article}`;
   const rawPrice = text(offer, "SalePrice");
   const price = /^\d+(?:\.\d+)?$/.test(rawPrice) ? Number(rawPrice) : NaN;
   const refusal = text(offer, "TypeRefusal");
@@ -178,7 +179,6 @@ function normalizeOffer(offer: XmlElement, requestedArticle: string, analogBrand
   const quantity = /^\d+$/.test(rawQuantity) ? Number(rawQuantity) : null;
   const currency = text(offer, "CurrencyName");
   if (!brand) throw autopiterOfferError("CatalogName");
-  if (!title) throw autopiterOfferError("Name");
   if (!Number.isFinite(price) || price <= 0) throw autopiterOfferError("SalePrice");
   if (!/^\d+$/.test(refusal) || !Number.isSafeInteger(Number(refusal))) throw autopiterOfferError("TypeRefusal");
   if (rawQuantity && (quantity === null || !Number.isSafeInteger(quantity))) throw autopiterOfferError("NumberOfAvailable");
