@@ -27,6 +27,7 @@ const details = {
     original: 0, replacement: 0, returnDays: null, discountAmount: 0, discountPercent: 0, price: 341, total: 682 }],
   work: [{ name: "Замена ремня ГРМ", performer: "Тестовый механик", price: 1400, hours: 1.5, multiplier: 1, total: 2100, seller: "Тестовый продавец" }],
 };
+const awaitingPart = { ...details.goods[1], name: "Подшипник под заказ", productId: randomUUID(), stock: 0, awaitingDelivery: true };
 const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
 
 test("employee opens a single fresh repair order and its allowed supplier orders on desktop and mobile", async () => {
@@ -101,7 +102,8 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       return job.id;
     };
     const requestId = await open({ ...details,
-      goods: [...details.goods, ...[4, 3, 2, 1, 0, -3, 6].map((returnDays) => ({ ...details.goods[1], returnDays }))],
+      goods: [...details.goods, awaitingPart, { ...awaitingPart, name: "Нет на складе", productId: randomUUID(), awaitingDelivery: false },
+        ...[4, 3, 2, 1, 0, -3, 6].map((returnDays) => ({ ...details.goods[1], returnDays, awaitingDelivery: returnDays === 2 }))],
       work: [...details.work, { ...details.work[0], name: "Замена фильтра", hours: 1, multiplier: 2 }],
     }, { ...card, urgentReturnDays: 0 });
     assert.equal(await page.evaluate(() => document.activeElement.id), "repair-order-title");
@@ -129,6 +131,19 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     assert.deepEqual(await dialog.locator(".repair-order-return-urgent .repair-order-return-days").allTextContents(), ["5", "4", "3", "2", "1", "0", "0"]);
     assert.equal(await dialog.locator(".repair-order-return-urgent").first().evaluate((row) => getComputedStyle(row).outlineStyle), "solid");
     const goodsTable = dialog.getByRole("table", { name: "Товары" });
+    const waitingRow = goodsTable.getByRole("row", { name: /Подшипник под заказ/ });
+    const waitStyles = (row) => row.evaluate((node) => ({
+      color: getComputedStyle(node).outlineColor,
+      shadow: getComputedStyle(node).boxShadow,
+    }));
+    assert.equal(await goodsTable.locator(".repair-order-awaiting-delivery").count(), 2);
+    assert.equal((await waitStyles(waitingRow)).color, "rgb(187, 137, 9)");
+    assert.equal(await waitingRow.getByRole("rowheader").getAttribute("title"), "Ожидает поставки по заказ-наряду");
+    assert.doesNotMatch(await goodsTable.getByRole("row", { name: /Нет на складе/ }).getAttribute("class") ?? "", /awaiting-delivery/);
+    assert.doesNotMatch(await goodsTable.getByRole("row", { name: /Комплект ГРМ/ }).getAttribute("class") ?? "", /awaiting-delivery/);
+    const dual = goodsTable.locator(".repair-order-awaiting-delivery.repair-order-return-urgent");
+    assert.equal(await dual.locator(".repair-order-return-days").textContent(), "2");
+    assert.match((await waitStyles(dual)).shadow, /rgb\(177, 38, 32\)/);
     for (const heading of ["Остаток", "Цена", "Кол-во", "Возврат, дн.", "Сумма"]) {
       const column = goodsTable.getByRole("columnheader", { name: heading, exact: true });
       assert.equal(await column.evaluate((node) => getComputedStyle(node).textAlign), "center");
@@ -171,6 +186,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       assert.deepEqual(await labels(firstRow), ["Артикул", "Остаток", "Цена", "Кол-во", "Возврат, дн.", "Скидка", "Сумма"]);
       assert.deepEqual(await labels(emptyOptionals), ["Остаток", "Цена", "Кол-во", "Сумма"]);
       assert.equal(await goodsTable.locator("[data-incoming-side]:visible").count(), 0);
+      assert.equal((await waitStyles(waitingRow)).color, "rgb(187, 137, 9)");
       const productName = firstRow.getByRole("rowheader");
       assert.equal(await productName.evaluate((node) => getComputedStyle(node).webkitTapHighlightColor), "rgba(0, 0, 0, 0)");
       await productName.tap();
@@ -186,7 +202,8 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     await dialog.getByRole("button", { name: "К заказ-нарядам" }).click();
     assert.equal(await dialog.isVisible(), false);
     await open({ ...details, contract: "", vin: "", mileage: 0, keySlot: 0, cashPayment: false, total: 9200, discountAmount: 0, discountPercent: 0, work: [],
-      goods: details.goods.map((row) => ({ ...row, original: 0, replacement: 0, returnDays: null, discountAmount: 0, discountPercent: 0 })) },
+      goods: [...details.goods.map((row) => ({ ...row, original: 0, replacement: 0, returnDays: null, discountAmount: 0, discountPercent: 0 })),
+        { ...awaitingPart, stock: 2, awaitingDelivery: false }] },
     { ...card, amountDue: 6500, contactPhone: undefined });
     const fields = dialog.locator(".repair-order-details, .repair-order-footer");
     for (const label of ["Договор", "VIN", "Пробег", "Телефон контрагента", "Ячейка для ключей", "К поступлению", "Возврат, дн.", "Скидка", "Ручная скидка"]) {
@@ -194,6 +211,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     }
     assert.equal(await dialog.getByRole("tablist").count(), 0);
     assert.equal(await goodsTable.isVisible(), true);
+    assert.equal(await goodsTable.locator(".repair-order-awaiting-delivery").count(), 0);
     assert.equal(await bankCard.getAttribute("aria-pressed"), "true");
     assert.equal(await footerValue("Доплатить картой").textContent(), money.format(6500));
     await cash.click();

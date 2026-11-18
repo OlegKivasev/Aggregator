@@ -27,9 +27,10 @@ function lines<T>(value: unknown, parse: (line: unknown) => T): T[] {
 
 function parseGoods(value: unknown) {
   const row = object(value, ["name", "article", "productId", "stock", "quantity", "price", "original", "replacement",
-    "returnDays", "discountPercent", "discountAmount", "total", "seller"]);
+    "returnDays", "discountPercent", "discountAmount", "total", "seller", "awaitingDelivery"]);
   const productId = label(row.productId, 36);
   if (productId && !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(productId)) invalid();
+  if (row.awaitingDelivery !== undefined && typeof row.awaitingDelivery !== "boolean") invalid();
   return {
     name: label(row.name), article: label(row.article), productId,
     stock: row.stock === null ? null : numeric(row.stock), quantity: numeric(row.quantity), price: numeric(row.price),
@@ -37,6 +38,7 @@ function parseGoods(value: unknown) {
     returnDays: row.returnDays === null ? null : Math.max(0, numeric(row.returnDays)),
     discountPercent: numeric(row.discountPercent), discountAmount: numeric(row.discountAmount),
     total: numeric(row.total), seller: label(row.seller),
+    ...(row.awaitingDelivery === undefined ? {} : { awaitingDelivery: row.awaitingDelivery }),
   };
 }
 

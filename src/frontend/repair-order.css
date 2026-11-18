@@ -41,6 +41,7 @@ html:has(.repair-order[open]) { overflow: hidden; }
   --order-ink: #1d2c38;
   --order-danger: #b12620;
   --order-danger-surface: #fff4f2;
+  --order-awaiting: #bb8909;
   color: var(--order-ink);
   background: #fff;
   width: min(1440px, calc(100% - 48px));
@@ -131,10 +132,17 @@ html:has(.repair-order[open]) { overflow: hidden; }
 .repair-order-table .repair-order-numeric, .repair-order-table .repair-order-line-total { text-align: center; white-space: nowrap; }
 .repair-order-table thead .repair-order-numeric { white-space: normal; }
 .repair-order-line-total { font-weight: 750; }
+.repair-order-table tbody tr:is(.repair-order-return-urgent, .repair-order-awaiting-delivery) {
+  outline: 2px solid;
+  outline-offset: -2px;
+}
 .repair-order-table tbody tr.repair-order-return-urgent {
   background: var(--order-danger-surface);
-  outline: 2px solid var(--order-danger);
-  outline-offset: -2px;
+  outline-color: var(--order-danger);
+}
+.repair-order-table tbody tr.repair-order-awaiting-delivery { outline-color: var(--order-awaiting); }
+.repair-order-table tbody tr.repair-order-return-urgent.repair-order-awaiting-delivery {
+  box-shadow: inset 0 0 0 4px var(--order-danger);
 }
 .repair-order-return-days {
   display: inline-block;

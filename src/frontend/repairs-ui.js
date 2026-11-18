@@ -1,6 +1,6 @@
 import { splitRepairVehicleName } from "./repair-vehicle-presentation.js";
 import { filterRepairCards } from "./repair-search.js";
-import { createRepairOrderView } from "./repair-order-view.js?v=repair-order-3";
+import { createRepairOrderView } from "./repair-order-view.js?v=repair-order-4";
 
 export function bootstrapRepairs({ onActiveEmpty } = {}) {
   const views = [false, true].map((testPlatform) => {

@@ -44,7 +44,7 @@ function paymentAmounts(card, data) {
   return { selected, totals, paid, balance };
 }
 
-function lines(columns, rows, title, warn = () => false) {
+function lines(columns, rows, title) {
   const table = element("table", undefined, "repair-order-table");
   table.setAttribute("role", "table");
   table.setAttribute("aria-label", title);
@@ -61,7 +61,8 @@ function lines(columns, rows, title, warn = () => false) {
   for (const row of rows) {
     const tr = body.insertRow();
     tr.setAttribute("role", "row");
-    if (warn(row)) tr.className = "repair-order-return-urgent";
+    if (urgentReturn(row)) tr.classList.add("repair-order-return-urgent");
+    if (row.awaitingDelivery === true) tr.classList.add("repair-order-awaiting-delivery");
     for (const [index, [label, value, className, showOnMobile]] of columns.entries()) {
       const cell = element(index ? "td" : "th", undefined, className);
       if (showOnMobile && !showOnMobile(row)) cell.classList.add("repair-order-desktop-only");
@@ -73,6 +74,7 @@ function lines(columns, rows, title, warn = () => false) {
       } else {
         cell.scope = "row";
         cell.classList.add("repair-order-line-name");
+        if (row.awaitingDelivery === true) cell.title = "Ожидает поставки по заказ-наряду";
       }
       cell.append(value(row) || missing);
       tr.append(cell);
@@ -245,7 +247,7 @@ export function createRepairOrderView() {
       ...(data.goods.some(hasDiscount) ? [["Скидка", (row) => discount(row, tableMoney), "repair-order-numeric repair-order-extra", hasDiscount]] : []),
       ["Сумма", (row) => tableMoney.format(row.total), "repair-order-line-total"],
       ["Продавец", (row) => row.seller, "repair-order-desktop-only"],
-    ], data.goods, "Товары", urgentReturn));
+    ], data.goods, "Товары"));
     if (work) panels[1].replaceChildren(lines([
       ["Наименование", (row) => row.name], ["Исполнитель", (row) => row.performer],
       ["Цена", (row) => tableMoney.format(row.price), "repair-order-numeric"],
