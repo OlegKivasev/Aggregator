@@ -160,25 +160,34 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     assert.equal((await fetch(`${origin}${supplyPath}${stock.productId}`, { headers: { Cookie: other } })).status, 404);
     assert.equal((await page.request.get(`${origin}${supplyPath}${randomUUID()}`)).status(), 404);
     assert.equal((await page.request.get(`${origin}/api/nomenclature/incoming?side=original&product=${stock.productId}`)).status(), 403);
-    for (const side of ["original", "replacement"]) {
-      const width = 1440;
-      const scroll = await dialog.locator(".repair-order-scroll").evaluate((node) => ({ outer: node.clientWidth, content: node.scrollWidth }));
-      assert.ok(scroll.content <= scroll.outer, `Видимая ширина ${scroll.outer}px, содержимое ${scroll.content}px при окне ${width}px`);
-      await goodsTable.getByRole("row", { name: /Комплект ГРМ/ })
-        .getByRole("button", { name: side === "original" ? /Поставки оригинала/ : /Поставки замен/ }).click();
+    const engineRow = goodsTable.getByRole("row", { name: /Комплект ГРМ/ });
+    async function checkSupply(row, product, side, width, mobile = false) {
+      const button = row.getByRole("button", { name: side === "original" ? /Поставки оригинала/ : /Поставки замен/ });
+      if (mobile) assert.ok((await button.boundingBox()).height >= 44);
+      const before = repairRequests.length;
+      await button[mobile ? "tap" : "click"]();
       const job = await claim("stock", 5);
-      assert.deepEqual(job.options.incomingDetails, { productId: stock.productId, side });
+      assert.deepEqual(job.options.incomingDetails, { productId: product.productId, side });
       assert.equal((await post("/api/integration/1c/nomenclature/stock-results", {
         requestId: job.id, leaseId: job.leaseId, status: "completed", products: [], hasMore: false,
-        incomingDetails: { orders: [{ orderId: randomUUID(), productId: side === "original" ? stock.productId : randomUUID(),
-          supplier: "Тестовый поставщик", number: "001", name: stock.name, article: stock.article,
+        incomingDetails: { orders: [{ orderId: randomUUID(), productId: side === "original" ? product.productId : randomUUID(),
+          supplier: "Тестовый поставщик", number: "001", name: product.name, article: product.article,
           ordered: 3, quantity: 2, expectedDate: "2026-11-19" }], hasMore: false },
       }, nomenclatureHeader)).status, 200);
       const popover = dialog.locator("#repair-order-incoming");
       await popover.getByText(/Тестовый поставщик/).waitFor();
+      assert.match(await popover.getByRole("listitem").innerText(), /19 нояб\. 2026/);
       const box = await popover.boundingBox();
       assert.ok(box.x >= 0 && box.x + box.width <= width);
-      await popover.getByRole("button", { name: "Закрыть поставки" }).click();
+      await popover.getByRole("button", { name: "Закрыть поставки" })[mobile ? "tap" : "click"]();
+      assert.equal(await popover.isVisible(), false);
+      assert.equal(await button.getAttribute("aria-expanded"), "false");
+      assert.equal(repairRequests.length - before, 1, "one request for the tapped shipment details");
+    }
+    const desktopScroll = await dialog.locator(".repair-order-scroll").evaluate((node) => ({ outer: node.clientWidth, content: node.scrollWidth }));
+    assert.ok(desktopScroll.content <= desktopScroll.outer);
+    for (const side of ["original", "replacement"]) {
+      await checkSupply(engineRow, stock, side, 1440);
     }
 
     for (const width of [390, 320]) {
@@ -188,10 +197,13 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       const firstRow = goodsTable.locator("tbody tr").nth(0);
       const emptyOptionals = goodsTable.locator("tbody tr").nth(1);
       const labels = (row) => row.locator(".repair-order-cell-label:visible").allTextContents();
-      assert.deepEqual(await labels(firstRow), ["Артикул", "Остаток", "Цена", "Кол-во", "Возврат, дн.", "Скидка", "Сумма"]);
+      assert.deepEqual(await labels(firstRow), ["Артикул", "Остаток", "Цена", "Кол-во", "К поступлению", "Возврат, дн.", "Скидка", "Сумма"]);
       assert.deepEqual(await labels(emptyOptionals), ["Остаток", "Цена", "Кол-во", "Сумма"]);
-      assert.equal(await goodsTable.locator("[data-incoming-side]:visible").count(), 0);
+      assert.equal(await goodsTable.locator("[data-incoming-side]:visible").count(), 3);
+      assert.equal(await emptyOptionals.getByText("К поступлению", { exact: true }).isVisible(), false);
       assert.equal((await waitStyles(waitingRow)).color, "rgb(187, 137, 9)");
+      await checkSupply(waitingRow, awaitingPart, "original", width, true);
+      await checkSupply(firstRow, stock, "replacement", width, true);
       const productName = firstRow.getByRole("rowheader");
       assert.equal(await productName.evaluate((node) => getComputedStyle(node).webkitTapHighlightColor), "rgba(0, 0, 0, 0)");
       await productName.tap();

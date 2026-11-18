@@ -232,6 +232,17 @@ html:has(.repair-order[open]) { overflow: hidden; }
   #repair-order-goods .repair-order-stock { order: 3; }
   #repair-order-goods .repair-order-line-total { order: 4; }
   #repair-order-goods .repair-order-extra { order: 5; grid-column: span 2; text-align: left; }
+  #repair-order-goods .repair-order-supply:not(.repair-order-desktop-only) {
+    order: 6;
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 8px;
+  }
+  .repair-order-supply .repair-order-cell-label { margin: 0; }
+  .repair-order-incoming button { min-width: 44px; min-height: 44px; padding-inline: 8px; }
+  #repair-order-incoming .nomenclature-incoming-close { flex-basis: 44px; height: 44px; }
   .repair-order-footer { grid-template-columns: 1fr; gap: 8px; padding: 8px 12px max(8px, env(safe-area-inset-bottom)); }
   .repair-order-footer dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); font-size: 13px; gap: 4px 10px; }
   .repair-order-footer dl > div:first-child dd { font-size: 17px; }

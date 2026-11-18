@@ -7,6 +7,7 @@ const date = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeZone: "U
 const missing = "—";
 const urgentReturn = (row) => row.returnDays != null && row.returnDays <= 5;
 const hasIncoming = (row) => row.original > 0 || row.replacement > 0;
+const canViewIncoming = (row) => Boolean(row.productId) && hasIncoming(row);
 const hasDiscount = (row) => row.discountPercent !== 0 || row.discountAmount !== 0;
 
 function element(tag, text, className) {
@@ -161,7 +162,7 @@ export function createRepairOrderView() {
   };
 
   const incoming = (row, source) => {
-    if (!row.productId || !hasIncoming(row)) return missing;
+    if (!canViewIncoming(row)) return missing;
     const group = element("span", undefined, "repair-order-incoming");
     for (const [side, count, letter, label] of [
       ["original", row.original, "О", "Поставки оригинала"], ["replacement", row.replacement, "З", "Поставки замен"],
@@ -236,7 +237,7 @@ export function createRepairOrderView() {
       ["Остаток", (row) => row.stock === null ? missing : number.format(row.stock), "repair-order-numeric repair-order-stock"],
       ["Цена", (row) => tableMoney.format(row.price), "repair-order-numeric repair-order-price"],
       ["Кол-во", (row) => number.format(row.quantity), "repair-order-numeric repair-order-quantity"],
-      ...(data.goods.some(hasIncoming) ? [["К поступлению", (row) => incoming(row, supplySource), "repair-order-desktop-only"]] : []),
+      ...(data.goods.some(hasIncoming) ? [["К поступлению", (row) => incoming(row, supplySource), "repair-order-supply", canViewIncoming]] : []),
       ...(data.goods.some((row) => row.returnDays !== null) ? [
         ["Возврат, дн.", (row) => {
           if (row.returnDays === null) return missing;
