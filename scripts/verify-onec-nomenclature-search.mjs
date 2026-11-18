@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 if (!process.argv[2]) throw new Error("Usage: node scripts/verify-onec-nomenclature-search.mjs <extension-directory>");
 const root = resolve(process.argv[2]);
@@ -11,7 +12,7 @@ const synonyms = read("АС_СинонимыПоискаСервер");
 const oem = read("АС_ИндексOEMСервер");
 const worker = read("АС_АгрегаторСервер");
 for (const [module, text, names] of [["АС_НоменклатураСервер", articles, ["КомпактныйКлючАртикула"]],
-  ["АС_СинонимыПоискаСервер", synonyms, ["ВариантыСтрокиПоиска", "НайтиНоменклатуруПоВариантам"]],
+  ["АС_СинонимыПоискаСервер", synonyms, ["ВариантыСтрокиПоиска", "ПодготовитьПоискСинонимов", "ПроверенныеСинонимы"]],
   ["АС_ИндексOEMСервер", oem, ["НормализоватьOEM", "ОбеспечитьИндекс"]]]) {
   for (const name of names) {
     assert.match(text, new RegExp(`(?:Функция|Процедура) ${name}\\([^\\r\\n]*\\) Экспорт`), `${module}.${name} exists in the server module`);
@@ -44,4 +45,85 @@ assert.match(synonyms, /Названия = СтрРазделить\(Выбор�
 assert.match(synonyms, /ЗаменыПоФразам\.Получить\(Фраза\)[\s\S]*?Префикс \+ " " \+ Вариант/);
 assert.match(worker, /Результат\.Вставить\("navigation", Страница\.navigation\)/);
 assert.match(worker, /Тело\.Удалить\("navigation"\)/);
-console.log("Static search checks: article normalization, shared synonym/OEM exports, vehicle aliases, hierarchy filters, fixed navigation reads and result forwarding verified. 1C platform not run.");
+const stock = source.slice(source.indexOf("Функция ТоварыВНаличии("), source.indexOf("Функция ПодтвердитьСинонимыСписка("));
+assert.match(stock, /ТекстПакета = ТекстТоварныхОтборов\([^)]+\);[\s\S]*?ПодтвердитьСинонимыСписка\(МенеджерТаблиц, ТекстПакета, УсловияСправочника/);
+assert.match(stock, /ИсточникКаталога = "АС_КандидатыПоиска";[\s\S]*?ТекстПакета = "";/);
+assert.match(stock, /Запрос\.МенеджерВременныхТаблиц = МенеджерТаблиц/);
+assert.doesNotMatch(stock, /НайтиНоменклатуруПоВариантам/);
+const scoped = source.slice(source.indexOf("Функция ПодтвердитьСинонимыСписка("), source.indexOf("Функция ТекстТоварныхОтборов("));
+assert.match(scoped, /ПОМЕСТИТЬ АС_КандидатыПоиска[\s\S]*?СтрСоединить\(УсловияСправочника, " И "\)/);
+assert.match(scoped, /НЕ Найденные\.Недействителен И " \+ Синонимы\.Условие/);
+assert.match(scoped, /ГДЕ НЕ Кандидаты\.ПрямоеСовпадение/);
+assert.equal((scoped.match(/Запрос\.Выполнить\(/g) ?? []).length, 1);
+assert.match(synonyms, /Поиск\.Варианты\.Добавить\(СтрРазделить\(НормализованныйВариант/);
+assert.match(synonyms, /ИмяПараметра = ИменаШаблонов\.Получить\(Шаблон\)/);
+assert.match(synonyms, /СтрДлина\(СловоПоиска\) > 2[\s\S]*?АС_СтрокаСодержитСокращениеСКомплектом/);
+const form = readFileSync(join(root, "Catalogs/Номенклатура/Forms/ФормаСписка/Ext/Form/Module.bsl"), "utf8");
+assert.equal((form.match(/АС_СинонимыПоискаСервер\.ДополнитьПоискСинонимами\(/g) ?? []).length, 2);
+assert.match(synonyms, /УжеНайденные\.Получить\(Выборка\.Номенклатура\)[^\r\n]+Продолжить/);
+
+// Model the candidate transfer over a local SQL fixture. The native 1C
+// collation, query plans and runtime are outside this measurement.
+const db = new DatabaseSync(":memory:");
+db.function("contains_token", (text, term) => String(text).toLowerCase().includes(term) ? 1 : 0);
+db.exec(`
+  CREATE TABLE products(id INTEGER PRIMARY KEY, name TEXT, full_name TEXT, article TEXT, category INTEGER,
+    received INTEGER, stock INTEGER, deleted INTEGER, inactive INTEGER);
+  WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 60000)
+  INSERT INTO products
+  SELECT i, CASE WHEN i%5=0 THEN 'Втулка Ауди ' WHEN i%3=0 THEN 'Втулка Audi ' ELSE 'Фильтр ' END||i,
+    CASE WHEN i%7=0 THEN 'Комплект Audi' ELSE 'Деталь' END, 'P-'||i,
+    i%3, i%97=0, i%11<>0, 0, i%137=0 FROM n;
+  INSERT INTO products VALUES
+    (70001,'Подшипник','Подшипник','АУДИ-1',0,1,1,0,0),
+    (70002,'Амортизатор','Сборка Audi A6','A6',0,1,1,0,0),
+    (70003,'Ауди','Ауди','A6',0,1,1,0,1),
+    (70004,'Audi','Audi','A6',0,1,1,0,1),
+    (70005,'Audi','Audi','A6',0,1,1,1,0),
+    (70006,'Втулка Audi','Втулка Audi','A6',1,1,1,0,0),
+    (70007,'Втулка Audi','Втулка Audi','A6',0,0,1,0,0),
+    (70008,'Втулка Audi','Втулка Audi','A6',0,1,0,0,0);`);
+const direct = "(contains_token(name,'ауди') OR contains_token(article,'ауди'))";
+const alias = "(NOT inactive AND (contains_token(name,'ауди') OR contains_token(full_name,'ауди') OR contains_token(name,'audi') OR contains_token(full_name,'audi')))";
+const alphabet = /Разделители = "([^"]+)"/.exec(synonyms)[1];
+const normalize = (value) => [...value.toLowerCase().replaceAll("ё", "е").replace(/[х*]/g, "x")]
+  .filter((character) => !alphabet.includes(character)).join("").trim().replace(/\s+/g, " ");
+const wordsMatch = (value, word) => word.length > 2 ? value.includes(word) : ` ${value} `.includes(` ${word} `);
+assert.equal(wordsMatch(normalize("Р/К"), "рк"), true);
+assert.equal(wordsMatch(normalize("6РК2100"), "рк"), false);
+const verify = (candidate, once) => {
+  const terms = ["ауди", "audi"];
+  if (!once) return terms.some((term) => wordsMatch(normalize(candidate.name), term)
+    || wordsMatch(normalize(candidate.full_name), term));
+  const matches = (field) => {
+    const prepared = normalize(field);
+    return terms.some((term) => wordsMatch(prepared, term));
+  };
+  return matches(candidate.name) || candidate.name !== candidate.full_name && matches(candidate.full_name);
+};
+try {
+  const beforeStart = performance.now();
+  const allCandidates = db.prepare(`SELECT id,name,full_name FROM products WHERE NOT deleted AND ${alias}`).all();
+  const verified = new Set(allCandidates.filter((candidate) => verify(candidate, false)).map(({ id }) => id));
+  const beforeMs = performance.now() - beforeStart;
+  for (const scopes of ["1", "received", "received AND category=0", "received AND category=0 AND id>30000"]) {
+    const expected = db.prepare(`SELECT id, ${direct} AS matched FROM products WHERE NOT deleted AND stock AND (${scopes}) ORDER BY id`).all()
+      .filter(({ id, matched }) => matched || verified.has(id)).map(({ id }) => id);
+    const started = performance.now();
+    const stage = db.prepare(`SELECT id,name,full_name,${direct} AS matched FROM products
+      WHERE NOT deleted AND (${scopes}) AND (${direct} OR ${alias}) ORDER BY id`).all();
+    const confirmed = stage.filter(({ matched, ...candidate }) => !matched && verify(candidate, true)).map(({ id }) => id);
+    const afterMs = performance.now() - started;
+    const selected = new Set(confirmed);
+    const inStock = new Set(db.prepare("SELECT id FROM products WHERE stock").all().map(({ id }) => id));
+    const actual = stage.filter(({ id, matched }) => inStock.has(id) && (matched || selected.has(id))).map(({ id }) => id);
+    assert.deepEqual(actual, expected);
+    if (scopes === "received AND category=0") {
+      for (const id of [70001, 70002, 70003]) assert.ok(actual.includes(id));
+      for (const id of [70004, 70005, 70006, 70007, 70008]) assert.ok(!actual.includes(id));
+      const candidatesChecked = stage.filter(({ matched }) => !matched).length;
+      assert.ok(candidatesChecked < allCandidates.length / 100);
+      console.log(`Audi model with receipt and category: ${allCandidates.length} → ${candidatesChecked} candidate names checked, ${beforeMs.toFixed(1)} → ${afterMs.toFixed(1)} ms locally for selection and verification; identical final results. Platform not run.`);
+    }
+  }
+} finally { db.close(); }

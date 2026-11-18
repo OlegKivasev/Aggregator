@@ -78,7 +78,7 @@ export function bootstrapNomenclatureStock() {
   const nearEnd = () => sentinel.getBoundingClientRect().top < window.innerHeight + preloadDistance;
   const load = async (first = false) => {
     if (!active || document.hidden || busy || blocked || (!first && !nextCursor)) return;
-    if (!first && sales.enabled.checked && !nearEnd()) return;
+    if (!first && (sales.enabled.checked || query && searchMode === "text") && !nearEnd()) return;
     // Keep one completed page ahead without downloading the entire catalogue.
     if (bufferedPage && !nearEnd()) return;
     const prepared = bufferedPage;
@@ -240,7 +240,13 @@ export function bootstrapNomenclatureStock() {
   };
   input.addEventListener("input", (event) => { if (!event.isComposing) search(); });
   input.addEventListener("compositionend", search);
-  form.addEventListener("submit", (event) => { event.preventDefault(); query = normalize(input.value); restart(); });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const submitted = normalize(input.value);
+    if (busy && !nextCursor && !timer && submitted === query) return;
+    query = submitted;
+    restart();
+  });
   refresh.addEventListener("click", () => { navigationLoaded = false; query = normalize(input.value); restart(); });
   const closeMenu = () => { menu.hidden = true; settings.setAttribute("aria-expanded", "false"); };
   settings.addEventListener("click", () => { menu.hidden = !menu.hidden; settings.setAttribute("aria-expanded", String(!menu.hidden)); });

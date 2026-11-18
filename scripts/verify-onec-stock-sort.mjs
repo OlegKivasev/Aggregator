@@ -39,7 +39,7 @@ for (const name of ["АС_АгрегаторСервер", "АС_Номенкл�
   assert.deepEqual(stack, []);
 }
 const source = modules.get("АС_НоменклатураАгрегатора");
-const stock = source.slice(source.indexOf("Функция ТоварыВНаличии("), source.indexOf("Функция ТекстТоварныхОтборов("));
+const stock = source.slice(source.indexOf("Функция ТоварыВНаличии("), source.indexOf("Функция ПодтвердитьСинонимыСписка("));
 assert.match(stock, /ПЕРВЫЕ 101/);
 assert.equal((stock.match(/Запрос\.Выполнить\(/g) || []).length, 1);
 assert.doesNotMatch(stock, /ПолучитьОбъект\(|СМЕЩЕНИЕ|OFFSET/i);

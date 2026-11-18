@@ -156,10 +156,14 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), 0);
     const search = await poll(20);
     assert.equal(search.query, "фильтр"); assert.equal(search.after, null);
+    await input.press("Enter");
     assert.equal(reads.length, 3, "rapid typing makes one search request");
+    assert.equal(await poll(), null, "Enter while the same initial search is running does not lease another job");
     const filtered = products.map((product, index) => ({ ...product, id: randomUUID(), name: `Фильтр ${index + 1}` }));
     assert.equal((await complete(search, filtered, true)).status, 200);
     await page.waitForFunction(() => document.querySelectorAll("#nomenclature-stock-rows tr").length === 100);
+    assert.equal(await poll(), null, "text search does not prepare a second page before scrolling");
+    await page.locator("#nomenclature-stock-sentinel").scrollIntoViewIfNeeded();
     const obsoletePrefetch = await poll(20);
     await input.fill("фильтрx"); await input.fill("ФИЛЬТР");
     const reverted = await poll(20);
@@ -499,6 +503,8 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
       return route.fulfill({ json: { products: [{ ...networkProducts[0], id: randomUUID(), name: "После восстановления сети" }], hasMore: false, nextCursor: null, receivedAt: new Date().toISOString() } });
     });
     await input.fill("сеть"); await input.press("Enter");
+    await page.waitForFunction(() => document.querySelectorAll("#nomenclature-stock-rows tr").length === 100);
+    await page.locator("#nomenclature-stock-sentinel").scrollIntoViewIfNeeded();
     await page.locator("#nomenclature-stock-progress").getByText("Соединение с агрегатором прервано. Повторите загрузку.", { exact: true }).waitFor();
     assert.equal(await page.locator("#nomenclature-stock-rows tr").count(), 100);
     assert.equal(await page.locator("#nomenclature-stock-status").textContent(), "");
