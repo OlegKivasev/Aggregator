@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { NomenclatureError, type LookupResult } from "./contract.ts";
-import { StockRequests } from "./stock-requests.ts";
+import { StockRequests, stockWorkerConditions, stockWorkerFlags } from "./stock-requests.ts";
 import type { StockResult } from "./stock-contract.ts";
 import { defaultStockSort, type StockSort } from "./stock-sort.ts";
 import type { StockOptions } from "./stock-options.ts";
@@ -128,7 +128,7 @@ export class NomenclatureService {
     const connection = this.state();
     if (!connection.configured) throw new NomenclatureError(503, "source_unconfigured", "Подключение номенклатуры ещё не настроено.");
     if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.");
-    const required = options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
+    const required = options?.inventory ? 7 : options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
     const checkWorker = () => {
       const version = this.stockVersion();
       // After a restart, let the first authenticated poll identify the worker.
@@ -200,10 +200,10 @@ export class NomenclatureService {
     this.database.prepare("UPDATE nomenclature_lookups SET status='cancelled' WHERE id=? AND status IN ('pending','leased')").run(id);
   }
 
-  claim(token: string | undefined, includeStock = false, supportsStockSearch = false, supportsStockTerms = false, supportsStockSorting = false, supportsStockOptions = false, supportsStockNavigation = false) {
+  claim(token: string | undefined, includeStock = false, supportsStockSearch = false, supportsStockTerms = false, supportsStockSorting = false, supportsStockOptions = false, supportsStockNavigation = false, supportsInventory = false) {
     this.heartbeat(token);
     const previousVersion = this.stockVersion();
-    const version = !includeStock ? 0 : supportsStockNavigation ? 6 : supportsStockOptions ? 5 : supportsStockSorting ? 4 : supportsStockTerms ? 3 : supportsStockSearch ? 2 : 1;
+    const version = !includeStock ? 0 : supportsInventory ? 7 : supportsStockNavigation ? 6 : supportsStockOptions ? 5 : supportsStockSorting ? 4 : supportsStockTerms ? 3 : supportsStockSearch ? 2 : 1;
     this.stockWorkers.set(version, this.now());
     const currentVersion = this.stockVersion();
     const changed = currentVersion !== previousVersion || currentVersion !== this.observedStockVersion;
@@ -219,19 +219,15 @@ export class NomenclatureService {
         UNION ALL
         SELECT 'stock' AS kind, id, created_at FROM nomenclature_stock_requests
           WHERE expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
-          AND (query='' OR ?=1)
-          AND (query NOT LIKE '% %' OR ?=1)
-          AND (sort_field='id' OR ?=1)
-          AND (options='' OR ?=1)
-          AND (options='' OR json_extract(NULLIF(options, ''), '$.searchMode') IS NULL OR ?=1)
-        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now, Number(supportsStockSearch), Number(supportsStockTerms), Number(supportsStockSorting), Number(supportsStockOptions), Number(supportsStockNavigation));
-      if (oldest?.kind === "stock") return this.stock.claim(supportsStockSearch, supportsStockTerms, supportsStockSorting, supportsStockOptions, supportsStockNavigation);
+          ${stockWorkerConditions}
+        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now, ...stockWorkerFlags(version));
+      if (oldest?.kind === "stock") return this.stock.claim(version);
     }
     const row = this.database.prepare(`UPDATE nomenclature_lookups SET status='leased', lease_id=?, lease_until=? WHERE id=(
       SELECT id FROM nomenclature_lookups WHERE source_id=? AND expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
       ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, source, now, now) as unknown as LookupRow | undefined;
     return row ? { id: row.id, leaseId: row.lease_id!, barcode: row.barcode, expiresAt: new Date(row.expires_at).toISOString() }
-      : includeStock ? this.stock.claim(supportsStockSearch, supportsStockTerms, supportsStockSorting, supportsStockOptions, supportsStockNavigation) : null;
+      : includeStock ? this.stock.claim(version) : null;
   }
 
   complete(token: string | undefined, data: LookupResult & { requestId: string; leaseId: string }): void {

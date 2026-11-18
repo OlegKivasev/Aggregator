@@ -7,7 +7,7 @@ if (!process.argv[2]) throw new Error("Usage: node scripts/verify-onec-stock-sor
 const root = resolve(process.argv[2]);
 const dump = readFileSync(join(root, "ConfigDumpInfo.xml"), "utf8");
 const modules = new Map();
-for (const name of ["АС_АгрегаторСервер", "АС_НоменклатураАгрегатора"]) {
+for (const name of ["АС_АгрегаторСервер", "АС_НоменклатураАгрегатора", "АС_ПродажиНоменклатурыСервер", "АС_СинонимыПоискаСервер"]) {
   const bytes = readFileSync(join(root, "CommonModules", name, "Ext/Module.bsl"));
   const source = bytes.toString("utf8"); modules.set(name, source);
   assert.equal(bytes.subarray(0, 3).toString("hex"), "efbbbf");
@@ -39,7 +39,7 @@ for (const name of ["АС_АгрегаторСервер", "АС_Номенкл�
   assert.deepEqual(stack, []);
 }
 const source = modules.get("АС_НоменклатураАгрегатора");
-const stock = source.slice(source.indexOf("Функция ТоварыВНаличии("), source.indexOf("Функция ШаблонПодстроки("));
+const stock = source.slice(source.indexOf("Функция ТоварыВНаличии("), source.indexOf("Функция ТекстТоварныхОтборов("));
 assert.match(stock, /ПЕРВЫЕ 101/);
 assert.equal((stock.match(/Запрос\.Выполнить\(/g) || []).length, 1);
 assert.doesNotMatch(stock, /ПолучитьОбъект\(|СМЕЩЕНИЕ|OFFSET/i);
@@ -48,8 +48,25 @@ assert.match(stock, /Порядок = Порядок \+ ", Номенклату�
 assert.match(stock, /ИначеЕсли ПолеСортировки <> "quantity"(?: И ПолеСортировки <> "price")? Тогда[\s\S]*?Найденные\.Ссылка > &ПослеНоменклатуры/);
 assert.match(stock, /Если ЕстьКурсор И ПолеСортировки = "quantity" Тогда[\s\S]*?ОтборИтога = ОтборИтога \+[\s\S]*?Найденные\.Ссылка > &ПослеНоменклатуры/);
 assert.match(stock, /Итог = "ЕСТЬNULL\(Остатки\.Количество, 0\)"/);
-assert.match(stock, /ЛЕВОЕ СОЕДИНЕНИЕ[\s\S]*?СУММА\(Остатки\.КоличествоОстаток\)[\s\S]*?СГРУППИРОВАТЬ ПО[\s\S]*?ГДЕ " \+ Каталог \+ " И " \+ ОтборИтога/);
+assert.match(stock, /СУММА\(Остатки\.КоличествоОстаток\)[\s\S]*?СГРУППИРОВАТЬ ПО[\s\S]*?ОтборКаталога \+ " И "\) \+ ОтборИтога/);
 assert.equal((stock.match(/ЗапасыНаСкладах\.Остатки\(/g) ?? []).length, 1);
+assert.match(stock, /СУММА\(Остатки\.Количество \+ Остатки\.Резерв\)[\s\S]*?РегистрСведений\.ОстаткиТоваров/);
+assert.match(stock, /РегистрНакопления\.ЗаказыПокупателей\.Остатки\([\s\S]*?Заказы\.КоличествоОстаток > 0/);
+assert.match(stock, /Итог \+ " - ЕСТЬNULL\(АктивныеЗаказы\.Количество, 0\)"/);
+assert.match(stock, /ПОМЕСТИТЬ АС_КаталогСтраницы/);
+assert.match(stock, /Поступления = ПоступленияСтраницыНоменклатуры\(Ссылки\);\s*Для Индекс[\s\S]*?Поступления\.Получить/);
+const incoming = source.slice(source.indexOf("Функция ПоступленияСтраницыНоменклатуры("), source.indexOf("Функция ШаблонПодстроки("));
+assert.equal((incoming.match(/Запрос\.Выполнить\(/g) ?? []).length, 1);
+assert.match(incoming, /ТекстЗапросаСвязейПоступления\(Истина\)[\s\S]*?ТекстЗапросаПоступления\(Ложь, Ложь, Ложь, Истина\)[\s\S]*?ТекстЗапросаПоступленияЗамен\(Истина\)/);
+const formPath = join(root, "Catalogs/Номенклатура/Forms/ФормаСписка/Ext/Form");
+const form = readFileSync(join(formPath, "Module.bsl"), "utf8");
+const opening = form.slice(form.indexOf("Процедура АС_ПриОткрытииПосле("), form.indexOf("Процедура АС_ЗаполнитьПериодПоступленийПоУмолчанию("));
+assert.match(opening, /Если Не РежимВыбора И Не ЭтоПодбор Тогда[\s\S]*?АС_ПоступившиеЗаПериод = Истина;[\s\S]*?АС_ДатаПоступленияС = НачалоДня\(ДатаСеанса\);\s*АС_ДатаПоступленияПо = КонецДня\(ДатаСеанса\);/);
+const sales = modules.get("АС_ПродажиНоменклатурыСервер");
+for (const method of ["ТекстОтбораПоступлений", "ТекстОтбораПродаж", "ТекстЗапросаПоступленияЗамен"]) {
+  assert.match(sales, new RegExp(`Функция ${method}\\([^\\r\\n]*\\) Экспорт`));
+  for (const caller of [source, form]) assert.ok(caller.includes(`АС_ПродажиНоменклатурыСервер.${method}(`));
+}
 assert.match(stock, /СчитатьВсего = РасширенныйСписок И Не ЕстьКурсор/);
 assert.equal((stock.match(/Запрос\.ВыполнитьПакет\(/g) ?? []).length, 1);
 assert.match(stock, /ПОМЕСТИТЬ СписокНоменклатуры[\s\S]*?ПЕРВЫЕ 101[\s\S]*?КОЛИЧЕСТВО\(\*\)/);
@@ -81,8 +98,8 @@ assert.match(stock, /ЗаписатьJSON\(Запись, ПоследнееЗн�
 for (const column of ["Наименование", "Артикул", "Количество"]) assert.ok(stock.includes(`ПоследнееЗначение = Выборка.${column}`));
 assert.match(stock, /ПоследнееЗначение = Новый Структура\("hasPrice,amount"/);
 const worker = modules.get("АС_АгрегаторСервер");
-assert.equal((worker.match(/stock=6/g) ?? []).length, 3);
-assert.doesNotMatch(worker, /stock=[34]/);
+assert.match(worker, /ВерсияОстатков = 7;[\s\S]*?"requests", Неопределено, ЗавершитьДо[\s\S]*?ВерсияОстатков\)/);
+assert.match(worker, /ЭтоОпрос И ВерсияОстатков = 7 И Ответ.КодСостояния = 400[\s\S]*?ВерсияОстатков = 6;/);
 assert.match(worker, /ТоварыВНаличии\(Задание\.after, Диагностика, Задание\.query, Задание\.sortField, Задание\.sortDirection, Задание\.options\)/);
 assert.match(worker, /Результат\.lastSortValue = Страница\.lastSortValue/);
-console.log("Static 1C sort check: both modules have balanced blocks, BOM/CRLF and matching SHA1; one aggregation source, initial count in the same temporary-table package, subsequent bounded query, batched display-price read, conditional price sort join, quantity range after sum, reference tie key, exact decimal cursor. Numeric guard model: 9 valid / 10 invalid cases; no unsupported Abs call. Platform not run.");
+console.log("Static 1C stock check: balanced modules, BOM/CRLF and SHA1; shared period SQL, page batch for original and replacement supply, stock with orders before filtering and sorting, legacy v6, scoped counts and cursors. Platform not run.");

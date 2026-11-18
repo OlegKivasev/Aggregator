@@ -36,7 +36,12 @@ const oemSearch = source.slice(source.indexOf("Функция Номенклат
 assert.match(oemSearch, /КлючOEM = &КлючOEM/);
 assert.match(oemSearch, /НормализоватьOEM\(Выборка\.OEM\) <> КлючOEM/);
 assert.match(oemSearch, /Данные\.Марка = &Марка/);
-assert.match(worker, /stock=6/);
+assert.match(worker, /ВерсияОстатков = 7/);
+assert.match(synonyms, /ПакетСинонимов = Запрос\.ВыполнитьПакет\(\)/);
+assert.match(synonyms, /АС_ДобавитьВариантыМарокИМоделей\(Результат, НормализованнаяСтрока, ПакетСинонимов\[1\]\.Выбрать\(\)\)/);
+assert.match(synonyms, /Справочник\.АС_Автомобили КАК Автомобили[\s\S]*?НЕ Автомобили\.ПометкаУдаления/);
+assert.match(synonyms, /Названия = СтрРазделить\(Выборка\.Синонимы,[\s\S]*?Названия\.Добавить\(Выборка\.Наименование\)/);
+assert.match(synonyms, /ЗаменыПоФразам\.Получить\(Фраза\)[\s\S]*?Префикс \+ " " \+ Вариант/);
 assert.match(worker, /Результат\.Вставить\("navigation", Страница\.navigation\)/);
 assert.match(worker, /Тело\.Удалить\("navigation"\)/);
-console.log("Static search checks: 5 article spellings share the real compact alphabet; synonym/OEM exports, hierarchy filters, fixed navigation reads, v6 result forwarding and failure cleanup verified. 1C platform not run.");
+console.log("Static search checks: article normalization, shared synonym/OEM exports, vehicle aliases, hierarchy filters, fixed navigation reads and result forwarding verified. 1C platform not run.");

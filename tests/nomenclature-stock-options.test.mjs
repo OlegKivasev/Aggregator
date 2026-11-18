@@ -91,3 +91,52 @@ test("100 readers share one filtered price page and one stored result read", asy
     console.log("Stock filters: 100 readers -> 1 shared job, 1 result read; metadata only on initial page, one optional price per product, <=100 products.");
   });
 });
+
+test("inventory periods validate calendar dates and scope leases, counts and cursors", async () => {
+  const filter = (overrides = {}) => new URLSearchParams({
+    inventory: "1", receiptFrom: "2024-02-29", receiptTo: "2024-02-29", receiptSource: "free",
+    saleFrom: "2024-02-01", saleTo: "2024-02-29", saleSource: "all", oemPresence: "absent", oemFilterBrand: retail,
+    ...overrides,
+  });
+  for (const overrides of [{ inventory: "0" }, { receiptFrom: "2023-02-29" }, { receiptTo: "2024-02-28" },
+    { receiptSource: "" }, { saleTo: "2024-02-30" }, { oemFilterBrand: "Toyota" }, { oemPresence: "all" }]) {
+    assert.throws(() => parseStockOptions("all", null, filter(overrides)), { statusCode: 400 });
+  }
+  const options = parseStockOptions("all", null, filter());
+  const different = parseStockOptions("all", null, filter({ receiptTo: "2024-03-01" }));
+  assert.deepEqual(options.receipts, { from: "2024-02-29", to: "2024-02-29", source: "free" });
+  assert.deepEqual(options.sales, { from: "2024-02-01", to: "2024-02-29", source: "all" });
+  assert.equal(options.oemFilterBrand, retail);
+  await fixture(async ({ service, token, path }) => {
+    const claim = (version) => service.claim(token, ...[1, 2, 3, 4, 5, 6, 7].map((minimum) => version >= minimum));
+    claim(6);
+    assert.throws(() => service.loadStock(null, new AbortController().signal, "лада гранта", defaultStockSort, options), { code: "stock_unsupported" });
+    claim(7);
+    const started = performance.now();
+    const reads = Array.from({ length: 99 }, () => service.loadStock(null, new AbortController().signal, "лада гранта", defaultStockSort, options));
+    const other = service.loadStock(null, new AbortController().signal, "лада гранта", defaultStockSort, different);
+    assert.equal(claim(6), null);
+    const job = claim(7);
+    const otherJob = claim(7);
+    assert.equal(claim(7), null);
+    assert.deepEqual([job.options, otherJob.options], [options, different]);
+    const products = Array.from({ length: 100 }, () => ({ ...item(0), incoming: { original: 100.125, replacement: 1200 } }));
+    const response = result(job, products, { hasMore: true, totalCount: 101, priceTypes: [] });
+    for (const incoming of [null, { original: -1, replacement: 0 }, { original: 0 }]) {
+      assert.throws(() => parseStockResult({ ...response, products: [{ ...products[0], incoming }], hasMore: false }, true), { statusCode: 400 });
+    }
+    assert.throws(() => service.completeStock(token, { ...response, products: [item(0), ...products.slice(1)] }), { code: "invalid_stock" });
+    assert.throws(() => service.completeStock(token, { ...response, products: [{ ...products[0], quantity: -1 }, ...products.slice(1)] }), { code: "invalid_stock" });
+    service.completeStock(token, parseStockResult(response, true));
+    service.completeStock(token, result(otherJob, [], { totalCount: 0, priceTypes: [] }));
+    const [page, ...rest] = await Promise.all(reads);
+    assert.ok(rest.every((entry) => entry === page));
+    assert.equal((await other).totalCount, 0);
+    assert.deepEqual(page.products[0].incoming, products[0].incoming);
+    assert.throws(() => decodeStockCursor(page.nextCursor, "лада гранта", defaultStockSort, stockOptionsKey(different)));
+    const database = new DatabaseSync(path);
+    try { assert.equal(database.prepare("SELECT COUNT(*) AS count FROM nomenclature_stock_requests").get().count, 2); }
+    finally { database.close(); }
+    console.log(`Inventory periods: 100 reads, 2 distinct filter sets, 2 jobs, ${(performance.now() - started).toFixed(1)} ms in local SQLite.`);
+  });
+});

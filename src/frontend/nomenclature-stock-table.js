@@ -1,4 +1,5 @@
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
+const incomingFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 
 // Keep three batches in the DOM. Measured spacers preserve access to earlier rows.
 export function createStockTable(rows, before, after, selectionChanged = () => {}) {
@@ -130,6 +131,21 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
           const nameCell = document.createElement("td"); appendHighlighted(nameCell, product.name); row.append(nameCell);
           const articleCell = document.createElement("td"); appendHighlighted(articleCell, product.article); row.append(articleCell);
           const quantityCell = document.createElement("td"); quantityCell.textContent = numberFormat.format(product.quantity); row.append(quantityCell);
+          const incoming = document.createElement("td");
+          incoming.className = "nomenclature-incoming nomenclature-incoming-values";
+          const pair = document.createElement("div");
+          pair.className = "nomenclature-incoming-pair";
+          for (const [key, label] of [["original", "Оригинал"], ["replacement", "Замена"]]) {
+            const count = product.incoming[key];
+            const value = document.createElement("span");
+            const rounded = Math.round(count);
+            value.textContent = rounded > 999 ? "1k+" : rounded > 0 ? incomingFormat.format(rounded) : "";
+            value.title = `${label}: ${numberFormat.format(count)}`;
+            value.setAttribute("aria-label", value.title);
+            pair.append(value);
+          }
+          incoming.append(pair);
+          row.append(incoming);
           if (showPrice) { const cell = document.createElement("td"); cell.dataset.stockPrice = ""; cell.textContent = priceText(product.price); row.append(cell); }
           return row;
         }));

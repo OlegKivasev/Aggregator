@@ -4,7 +4,8 @@ import { parseStockNavigation, type StockNavigation } from "./stock-navigation.t
 export const stockPageSize = 100;
 export interface StockPrice { amount: number; currency: string; unit?: string }
 export interface StockPriceType { id: string; name: string }
-export interface StockProduct { id: string; name: string; article: string; quantity: number; price?: StockPrice | null }
+export interface StockIncoming { original: number; replacement: number }
+export interface StockProduct { id: string; name: string; article: string; quantity: number; incoming?: StockIncoming; price?: StockPrice | null }
 export interface StockPage { products: StockProduct[]; hasMore: boolean; nextCursor: string | null; receivedAt: string; totalCount?: number; priceTypes?: StockPriceType[]; navigation?: StockNavigation }
 export interface StockResult {
   requestId: string; leaseId: string; status: "completed" | "error";
@@ -40,7 +41,7 @@ export function parseStockResult(value: unknown, signed = false): StockResult {
   }
   const identities = new Set<string>();
   const products = data.products.map((value): StockProduct => {
-    const item = objectFields(value, ["id", "name", "article", "quantity", "price"]);
+    const item = objectFields(value, ["id", "name", "article", "quantity", "incoming", "price"]);
     const id = parseUuid(item.id);
     if (identities.has(id) || typeof item.name !== "string" || !item.name.trim() || item.name.length > 500
       || typeof item.article !== "string" || item.article.length > 50
@@ -58,7 +59,15 @@ export function parseStockResult(value: unknown, signed = false): StockResult {
       if (value.unit !== undefined && (typeof value.unit !== "string" || value.unit.length > 100 || /[\u0000-\u001f\u007f-\u009f]/.test(value.unit))) throw new NomenclatureError(400, "invalid_stock", "Некорректная единица цены.");
       price = { amount: value.amount, currency: value.currency, ...(value.unit === undefined ? {} : { unit: value.unit as string }) };
     }
-    return { id, name: item.name.trim(), article: item.article.trim(), quantity: item.quantity, ...(price === undefined ? {} : { price }) };
+    let incoming: StockIncoming | undefined;
+    if (item.incoming !== undefined) {
+      const { original, replacement } = objectFields(item.incoming, ["original", "replacement"]);
+      const valid = (count: unknown): count is number => typeof count === "number" && Number.isFinite(count) && count >= 0 && count <= 1e15;
+      if (!valid(original) || !valid(replacement)) throw new NomenclatureError(400, "invalid_stock", "Некорректное количество к поступлению.");
+      incoming = { original, replacement };
+    }
+    return { id, name: item.name.trim(), article: item.article.trim(), quantity: item.quantity,
+      ...(incoming === undefined ? {} : { incoming }), ...(price === undefined ? {} : { price }) };
   });
   if (data.totalCount !== undefined && (!Number.isSafeInteger(data.totalCount) || Number(data.totalCount) < products.length || Number(data.totalCount) > 1e9)) {
     throw new NomenclatureError(400, "invalid_stock", "Некорректное число строк.");

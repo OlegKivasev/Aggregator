@@ -13,6 +13,14 @@ interface Row {
 }
 const ttl = 30_000;
 
+// The FIFO peek and atomic lease must use identical capability rules.
+export const stockWorkerConditions = `AND (query='' OR ?=1)
+  AND (query NOT LIKE '% %' OR ?=1)
+  AND (sort_field='id' OR ?=1)
+  AND (options='' OR ?=1)
+  AND (options='' OR json_extract(NULLIF(options, ''), '$.searchMode') IS NULL OR ?=1)
+  AND (options='' OR json_extract(NULLIF(options, ''), '$.inventory') IS NULL OR ?=1)`;
+
 // Only in-progress reads are shared. Every later opening/refresh reads 1C again.
 export class StockRequests {
   private readonly changes = new EventEmitter();
@@ -114,22 +122,18 @@ export class StockRequests {
       }
     }
   }
-  claim(supportsSearch = false, supportsTerms = false, supportsSorting = false, supportsOptions = false, supportsNavigation = false) {
+  claim(version: number) {
     this.cleanup();
     const now = this.now();
     const row = this.database.prepare(`UPDATE nomenclature_stock_requests SET status='leased',lease_id=?,lease_until=? WHERE id=(
       SELECT id FROM nomenclature_stock_requests WHERE expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
-      AND (query='' OR ?=1)
-      AND (query NOT LIKE '% %' OR ?=1)
-      AND (sort_field='id' OR ?=1)
-      AND (options='' OR ?=1)
-      AND (options='' OR json_extract(NULLIF(options, ''), '$.searchMode') IS NULL OR ?=1)
-      ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now, Number(supportsSearch), Number(supportsTerms), Number(supportsSorting), Number(supportsOptions), Number(supportsNavigation)) as unknown as Row | undefined;
+      ${stockWorkerConditions}
+      ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now, ...stockWorkerFlags(version)) as unknown as Row | undefined;
     return row ? { kind: "stock" as const, id: row.id, leaseId: row.lease_id!,
-      after: supportsSorting ? decodeStockCursor(row.cursor || null, row.query, { field: row.sort_field, direction: row.sort_direction }, row.options) : row.cursor || null,
-      ...(supportsSearch ? { query: row.query } : {}),
-      ...(supportsSorting ? { sortField: row.sort_field, sortDirection: row.sort_direction } : {}),
-      ...(supportsOptions ? { options: row.options ? JSON.parse(row.options) as StockOptions : null } : {}),
+      after: version >= 4 ? decodeStockCursor(row.cursor || null, row.query, { field: row.sort_field, direction: row.sort_direction }, row.options) : row.cursor || null,
+      ...(version >= 2 ? { query: row.query } : {}),
+      ...(version >= 4 ? { sortField: row.sort_field, sortDirection: row.sort_direction } : {}),
+      ...(version >= 5 ? { options: row.options ? JSON.parse(row.options) as StockOptions : null } : {}),
       limit: stockPageSize, expiresAt: new Date(row.expires_at).toISOString() } : null;
   }
   complete(data: StockResult): void {
@@ -145,6 +149,7 @@ export class StockRequests {
       || data.products.some((item) =>
       ((options?.availability ?? "available") === "available" && item.quantity <= 0)
       || (options?.availability === "absent" && item.quantity > 0)
+      || (options?.inventory ? item.incoming === undefined || item.quantity < 0 : item.incoming !== undefined)
       || (options?.priceType ? item.price === undefined : item.price !== undefined))
       || options && !after && (data.totalCount === undefined || data.priceTypes === undefined
         || (data.hasMore ? data.totalCount <= data.products.length : data.totalCount !== data.products.length))
@@ -168,3 +173,5 @@ export class StockRequests {
     this.changes.emit("change", row.id, data.status === "completed" ? page : undefined);
   }
 }
+
+export const stockWorkerFlags = (version: number): number[] => [2, 3, 4, 5, 6, 7].map((minimum) => Number(version >= minimum));

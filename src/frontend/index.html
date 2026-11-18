@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=nomenclature-panel-8" />
+    <link rel="stylesheet" href="/styles.css?v=nomenclature-inventory-7" />
     <link rel="stylesheet" href="/order-notifications.css" />
   </head>
   <body>
@@ -396,10 +396,37 @@
         <div class="nomenclature-workspace">
         <div class="nomenclature-main">
         <details class="nomenclature-filters" open>
-          <summary>Фильтры <span id="nomenclature-filter-summary">В наличии</span></summary>
+          <summary>Фильтры <span id="nomenclature-filter-summary">В наличии · Поступления</span></summary>
           <div class="nomenclature-filter-controls">
             <label class="nomenclature-filter"><input id="nomenclature-availability-enabled" type="checkbox" checked><span>Остатки</span><select id="nomenclature-availability" aria-label="Отбор по остаткам"><option value="all">Все</option><option value="available" selected>В наличии</option><option value="absent">Отсутствуют</option></select></label>
             <label class="nomenclature-filter"><input id="nomenclature-price-enabled" type="checkbox"><span>Цены</span><select id="nomenclature-price-type" aria-label="Вид цены" disabled><option value="">Вид цены</option></select></label>
+            <div class="nomenclature-filter nomenclature-inventory-filter">
+              <label><input id="nomenclature-receipt-enabled" type="checkbox" checked> Поступившие за период</label>
+              <div class="nomenclature-filter-values" id="nomenclature-receipt-values">
+                <input id="nomenclature-receipt-from" type="date" aria-label="Поступления с">
+                <input id="nomenclature-receipt-to" type="date" aria-label="Поступления по">
+                <select id="nomenclature-receipt-source" aria-label="Назначение поступления">
+                  <option value="free">Для свободной продажи</option><option value="customer">Под заказ покупателя</option><option value="all">Все поступления</option>
+                </select>
+              </div>
+            </div>
+            <div class="nomenclature-filter nomenclature-inventory-filter">
+              <label><input id="nomenclature-sale-enabled" type="checkbox"> Проданные за период</label>
+              <div class="nomenclature-filter-values" id="nomenclature-sale-values" hidden>
+                <input id="nomenclature-sale-from" type="date" aria-label="Продажи с">
+                <input id="nomenclature-sale-to" type="date" aria-label="Продажи по">
+                <select id="nomenclature-sale-source" aria-label="Источник продажи">
+                  <option value="free">Из свободного наличия</option><option value="customer">Под заказ покупателя</option><option value="all">Все продажи</option>
+                </select>
+              </div>
+            </div>
+            <div class="nomenclature-filter nomenclature-inventory-filter">
+              <label><input id="nomenclature-oem-enabled" type="checkbox"> OEM-артикулы</label>
+              <div class="nomenclature-filter-values" id="nomenclature-oem-values" hidden>
+                <select id="nomenclature-oem-presence" aria-label="Наличие OEM-артикулов"><option value="absent">Отсутствуют</option><option value="present">Есть</option></select>
+                <select id="nomenclature-oem-filter-brand" aria-label="Марка для отбора OEM"><option value="">Все марки</option></select>
+              </div>
+            </div>
           </div>
         </details>
         <div class="nomenclature-toolbar">
@@ -458,12 +485,13 @@
                 <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="name"><span>Наименование</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
                 <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="article"><span>Артикул</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
                 <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="quantity" aria-label="Сортировать по остатку"><span class="nomenclature-quantity-label">Остаток</span><span class="nomenclature-quantity-short" aria-hidden="true">Ост.</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                <th scope="col" class="nomenclature-incoming" title="К поступлению: оригинал и замена" aria-label="К поступлению: оригинал и замена"><span class="nomenclature-incoming-title">К поступлению</span><div class="nomenclature-incoming-pair" aria-hidden="true"><span>O</span><span>Z</span></div></th>
                 <th scope="col" id="nomenclature-stock-price-heading" aria-sort="none" hidden><button type="button" class="table-sort" data-nomenclature-sort="price"><span id="nomenclature-stock-price-label">Цена</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
               </tr></thead>
-              <tbody id="nomenclature-stock-loading-row"><tr><td class="nomenclature-stock-loading-cell" colspan="3"><div class="search-loading nomenclature-loading" id="nomenclature-stock-loading" role="status" aria-live="polite" hidden><div class="search-loading__content"><span class="search-loading__spinner" aria-hidden="true"></span><div><strong>Выполняется поиск</strong></div></div></div></td></tr></tbody>
-              <tbody aria-hidden="true"><tr><td class="nomenclature-stock-spacer" id="nomenclature-stock-before" colspan="3"></td></tr></tbody>
+              <tbody id="nomenclature-stock-loading-row"><tr><td class="nomenclature-stock-loading-cell" colspan="4"><div class="search-loading nomenclature-loading" id="nomenclature-stock-loading" role="status" aria-live="polite" hidden><div class="search-loading__content"><span class="search-loading__spinner" aria-hidden="true"></span><div><strong>Выполняется поиск</strong></div></div></div></td></tr></tbody>
+              <tbody aria-hidden="true"><tr><td class="nomenclature-stock-spacer" id="nomenclature-stock-before" colspan="4"></td></tr></tbody>
               <tbody id="nomenclature-stock-rows"></tbody>
-              <tbody aria-hidden="true"><tr><td class="nomenclature-stock-spacer" id="nomenclature-stock-after" colspan="3"></td></tr></tbody>
+              <tbody aria-hidden="true"><tr><td class="nomenclature-stock-spacer" id="nomenclature-stock-after" colspan="4"></td></tr></tbody>
             </table>
           </div>
           <div class="nomenclature-stock-sentinel" id="nomenclature-stock-sentinel">
@@ -1321,7 +1349,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
 
     <script type="module" src="/auth-ui.js"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=nomenclature-panel-8"></script>
+    <script type="module" src="/applicability.js?v=nomenclature-inventory-7"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>

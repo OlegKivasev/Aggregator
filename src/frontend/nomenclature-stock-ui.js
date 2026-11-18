@@ -1,5 +1,10 @@
 import { createNomenclatureNavigation } from "./nomenclature-navigation.js?v=panel-8";
-import { createStockTable } from "./nomenclature-stock-table.js?v=panel-8";
+import { createStockTable } from "./nomenclature-stock-table.js?v=inventory-7";
+
+const stockDay = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Samara", year: "numeric", month: "2-digit", day: "2-digit" });
+const readPeriod = (prefix) => Object.fromEntries(["enabled", "values", "from", "to", "source"].map(
+  (key) => [key, document.querySelector(`#nomenclature-${prefix}-${key}`)],
+));
 
 export function bootstrapNomenclatureStock() {
   const status = document.querySelector("#nomenclature-stock-status");
@@ -15,6 +20,15 @@ export function bootstrapNomenclatureStock() {
   const statistics = document.querySelector("#nomenclature-stock-statistics");
   const availabilityEnabled = document.querySelector("#nomenclature-availability-enabled");
   const availability = document.querySelector("#nomenclature-availability");
+  const receipts = readPeriod("receipt");
+  const sales = readPeriod("sale");
+  const oemEnabled = document.querySelector("#nomenclature-oem-enabled");
+  const oemValues = document.querySelector("#nomenclature-oem-values");
+  const oemPresence = document.querySelector("#nomenclature-oem-presence");
+  const oemFilterBrand = document.querySelector("#nomenclature-oem-filter-brand");
+  const filterSummary = document.querySelector("#nomenclature-filter-summary");
+  let previousStockFilter;
+  let defaultDay;
   const priceEnabled = document.querySelector("#nomenclature-price-enabled");
   const priceType = document.querySelector("#nomenclature-price-type");
   const priceHeading = document.querySelector("#nomenclature-stock-price-heading");
@@ -77,7 +91,17 @@ export function bootstrapNomenclatureStock() {
     const cursor = prepared?.cursor ?? nextCursor;
     try {
       const parameters = new URLSearchParams();
-      parameters.set("details", "1"); parameters.set("availability", selectedAvailability());
+      parameters.set("details", "1"); parameters.set("inventory", "1"); parameters.set("availability", selectedAvailability());
+      for (const [prefix, period] of [["receipt", receipts], ["sale", sales]]) {
+        if (!period.enabled.checked) continue;
+        parameters.set(prefix + "From", period.from.value);
+        parameters.set(prefix + "To", period.to.value);
+        parameters.set(prefix + "Source", period.source.value);
+      }
+      if (oemEnabled.checked) {
+        parameters.set("oemPresence", oemPresence.value);
+        if (oemFilterBrand.value) parameters.set("oemFilterBrand", oemFilterBrand.value);
+      }
       parameters.set("searchMode", searchMode); parameters.set("navigation", requestNavigation ? "1" : "0");
       if (navigation.selected.category) parameters.set("category", navigation.selected.category);
       if (navigation.selected.group) parameters.set("group", navigation.selected.group);
@@ -108,6 +132,7 @@ export function bootstrapNomenclatureStock() {
         || value.products.some((item) => !item || typeof item.id !== "string" || identities.has(item.id)
           || typeof item.name !== "string" || typeof item.article !== "string"
           || typeof item.quantity !== "number" || !Number.isFinite(item.quantity)
+          || !item.incoming || ![item.incoming.original, item.incoming.replacement].every((count) => Number.isFinite(count) && count >= 0)
           || selectedAvailability() === "available" && item.quantity <= 0 || selectedAvailability() === "absent" && item.quantity > 0
           || selectedPrice() && (item.price === undefined || item.price !== null && (typeof item.price.amount !== "number" || !Number.isFinite(item.price.amount)
             || item.price.amount < 0 || typeof item.price.currency !== "string" || !/^[A-Z]{3}$/.test(item.price.currency))))
@@ -121,12 +146,15 @@ export function bootstrapNomenclatureStock() {
       if (first) {
         if (requestNavigation) {
           navigation.update(value.navigation);
-          const selectedBrand = brand.value;
-          const all = document.createElement("option"); all.value = ""; all.textContent = "Все бренды OEM";
-          brand.replaceChildren(all, ...value.navigation.oemBrands.map((item) => {
-            const option = document.createElement("option"); option.value = item.id; option.textContent = item.name; return option;
-          }));
-          if (value.navigation.oemBrands.some((item) => item.id === selectedBrand)) brand.value = selectedBrand;
+          for (const [select, label] of [[brand, "Все бренды OEM"], [oemFilterBrand, "Все марки"]]) {
+            const selection = select.selectedOptions[0];
+            const selectedBrand = selection?.value;
+            select.replaceChildren(new Option(label, ""), ...value.navigation.oemBrands.map((item) => new Option(item.name, item.id)));
+            if (selectedBrand) {
+              if (!value.navigation.oemBrands.some((item) => item.id === selectedBrand)) select.append(selection);
+              select.value = selectedBrand;
+            }
+          }
           navigationLoaded = true;
         }
         totalCount = value.totalCount;
@@ -167,6 +195,23 @@ export function bootstrapNomenclatureStock() {
     }
   };
   const restart = () => {
+    const today = stockDay.format(new Date());
+    if (!defaultDay || receipts.from.value === defaultDay && receipts.to.value === defaultDay) {
+      receipts.from.value = today;
+      receipts.to.value = today;
+    }
+    if (!defaultDay) {
+      sales.from.value = stockDay.format(new Date(Date.now() - 7 * 86_400_000));
+      sales.to.value = today;
+    }
+    defaultDay = today;
+    filterSummary.textContent = [
+      selectedAvailability() === "available" ? "В наличии" : selectedAvailability() === "absent" ? "Отсутствуют" : "Все остатки",
+      receipts.enabled.checked ? "Поступления" : "",
+      sales.enabled.checked ? "Продажи" : "",
+      oemEnabled.checked ? "OEM" : "",
+      selectedPrice() ? priceType.selectedOptions[0]?.textContent : "",
+    ].filter(Boolean).join(" · ");
     requestNavigation = !navigationLoaded;
     stop(); totalCount = undefined; renderer.reset(!!selectedPrice(), query); identities.clear(); cursors.clear();
     total = 0; nextCursor = null; blocked = false; table.hidden = !active;
@@ -176,9 +221,13 @@ export function bootstrapNomenclatureStock() {
     priceHeading.title = priceLabel.textContent;
     document.querySelector("#nomenclature-stock-title").textContent = selectedAvailability() === "available" ? "Товары в наличии" : "Номенклатура";
     table.querySelector("table").classList.toggle("has-price", !!selectedPrice());
-    for (const spacer of table.querySelectorAll(".nomenclature-stock-spacer")) spacer.colSpan = selectedPrice() ? 4 : 3;
-    loadingCell.colSpan = selectedPrice() ? 4 : 3;
-    if (active) void load(true);
+    for (const spacer of table.querySelectorAll(".nomenclature-stock-spacer")) spacer.colSpan = selectedPrice() ? 5 : 4;
+    loadingCell.colSpan = selectedPrice() ? 5 : 4;
+    if (!active) return;
+    if ([receipts, sales].some(({ enabled, from, to }) => enabled.checked && (!from.value || !to.value || from.value > to.value))) {
+      status.textContent = "Укажите начало и конец периода.";
+      status.dataset.tone = "error";
+    } else void load(true);
   };
   const search = () => {
     const nextQuery = normalize(input.value);
@@ -209,19 +258,28 @@ export function bootstrapNomenclatureStock() {
   });
   brand.addEventListener("change", () => { query = normalize(input.value); restart(); });
   retry.addEventListener("click", () => { if (!active || busy) return; blocked = false; void load(); });
-  const filterChanged = () => {
+  const filterChanged = (event) => {
+    if (event.target === sales.enabled) {
+      if (sales.enabled.checked) {
+        previousStockFilter = [availabilityEnabled.checked, availability.value];
+        availability.value = "all";
+      } else if (previousStockFilter) {
+        [availabilityEnabled.checked, availability.value] = previousStockFilter;
+      }
+    }
+    for (const period of [receipts, sales]) period.values.hidden = !period.enabled.checked;
+    oemValues.hidden = !oemEnabled.checked;
     availability.disabled = !availabilityEnabled.checked;
     priceType.disabled = !priceEnabled.checked;
     if (priceEnabled.checked && !priceType.value) { priceEnabled.checked = false; priceType.disabled = true; return; }
     if (!selectedPrice() && sortField === "price") { sortField = "id"; sortDirection = "asc"; }
     syncSortHeaders();
-    document.querySelector("#nomenclature-filter-summary").textContent = [
-      selectedAvailability() === "available" ? "В наличии" : selectedAvailability() === "absent" ? "Отсутствуют" : "Все товары",
-      selectedPrice() ? priceType.selectedOptions[0].textContent : "",
-    ].filter(Boolean).join(" · ");
     query = normalize(input.value); restart();
   };
-  for (const control of [availabilityEnabled, availability, priceEnabled, priceType]) control.addEventListener("change", filterChanged);
+  for (const control of [availabilityEnabled, availability, priceEnabled, priceType, oemEnabled, oemPresence, oemFilterBrand,
+    ...[receipts, sales].flatMap(({ enabled, from, to, source }) => [enabled, from, to, source])]) {
+    control.addEventListener("change", filterChanged);
+  }
   for (const button of sortButtons) button.addEventListener("click", () => {
     const field = button.dataset.nomenclatureSort;
     sortDirection = field === sortField && sortDirection === "asc" ? "desc" : "asc";

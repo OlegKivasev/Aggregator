@@ -781,10 +781,15 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .nomenclature-filters summary > span { margin-left: 8px; color: var(--muted); font-weight: 400; }
 .nomenclature-filter-controls { display: flex; flex-direction: column; gap: 10px; padding: 0 14px 14px; }
 .nomenclature-filter { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
-.nomenclature-filter input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.nomenclature-filter input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 .nomenclature-filter select { min-width: 145px; max-width: 300px; min-height: 34px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 26px 5px 10px; color: var(--ink); background: #f8fafc; font: inherit; }
 .nomenclature-filter select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .nomenclature-filter select:disabled { opacity: .55; }
+.nomenclature-inventory-filter, .nomenclature-filter-values { flex-wrap: wrap; }
+.nomenclature-inventory-filter > label { display: flex; align-items: center; gap: 8px; }
+.nomenclature-filter-values:not([hidden]) { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.nomenclature-filter-values :is(select, input[type="date"]) { flex: 0 1 auto; width: auto; min-width: 0; max-width: 100%; }
+.nomenclature-filter-values input[type="date"] { min-height: 34px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; background: #f8fafc; color: var(--ink); font: inherit; }
 .nomenclature-stock-statistics { padding-bottom: 10px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .nomenclature-stock-loading-cell { height: 0; padding: 0 !important; border-bottom: 0 !important; }
 .nomenclature-stock .nomenclature-loading { min-height: 76px; padding: 12px; }
@@ -794,10 +799,9 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .nomenclature-stock tr[data-product-id]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .nomenclature-stock td[data-stock-price] { text-align: right; }
 .nomenclature-quantity-short { display: none; }
-.nomenclature-stock table.has-price th:first-child { width: 42%; }
-.nomenclature-stock table.has-price th:nth-child(2) { width: 22%; }
-.nomenclature-stock table.has-price th:nth-child(3) { width: 14%; text-align: right; }
-.nomenclature-stock table.has-price th:last-child { width: 22%; }
+.nomenclature-stock table.has-price th:nth-child(2) { width: 20%; }
+.nomenclature-stock table.has-price th:nth-child(3) { width: 14%; }
+.nomenclature-stock table.has-price th:last-child { width: 20%; }
 .nomenclature-stock-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .nomenclature-stock-heading h3 { margin: 0; font-size: 18px; font-weight: 800; }
 .nomenclature-stock > .panel__meta { margin-top: 8px; }
@@ -809,24 +813,31 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .nomenclature-stock th:nth-child(3) .table-sort, .nomenclature-stock th:last-child .table-sort { justify-content: flex-end; text-align: right; }
 .nomenclature-stock thead { position: sticky; top: 0; z-index: 3; }
 .nomenclature-stock td { white-space: normal; }
-.nomenclature-stock th:first-child { width: 50%; }
-.nomenclature-stock th:nth-child(2) { width: 26%; }
-.nomenclature-stock th:nth-child(3), .nomenclature-stock td:nth-child(3) { width: 24%; text-align: right; font-variant-numeric: tabular-nums; }
+.nomenclature-stock th:nth-child(2) { width: 24%; }
+.nomenclature-stock th:nth-child(3), .nomenclature-stock td:nth-child(3) { width: 16%; text-align: right; font-variant-numeric: tabular-nums; }
+.nomenclature-stock .nomenclature-incoming { width: 8rem; text-align: center; padding-inline: 4px; }
+.nomenclature-incoming-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); font-variant-numeric: tabular-nums; }
+.nomenclature-incoming-pair > span + span { border-left: 1px solid var(--line); }
+.nomenclature-incoming-values .nomenclature-incoming-pair { white-space: nowrap; }
 .nomenclature-stock-search { margin: 0; min-width: 0; width: min(540px, 42vw); }
 .nomenclature-stock-search input { width: 100%; min-width: 0; min-height: 40px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font: inherit; font-size: 13px; }
 .nomenclature-stock-search input:focus { outline: 2px solid rgba(255,75,19,.25); border-color: var(--accent); }
 @media (max-width: 600px) {
   .nomenclature-filter select { flex: 1; width: 0; max-width: none; min-width: 0; }
   .nomenclature-filter > span { width: 56px; }
-  .nomenclature-stock table.has-price { font-size: 12px; }
+  .nomenclature-filter-values { flex: 1 1 100%; }
+  .nomenclature-filter-values select { flex: 0 1 auto; width: auto; }
+  .nomenclature-filter-values input[type="date"] { flex: 1 1 calc(50% - 3px); max-width: calc(50% - 3px); }
+  .nomenclature-stock table { font-size: 12px; }
   .nomenclature-stock table.has-price th { padding: 8px 4px; font-size: 10px; letter-spacing: 0; }
-  .nomenclature-stock table.has-price .table-sort { gap: 2px; }
-  .nomenclature-stock table.has-price .nomenclature-quantity-label { display: none; }
-  .nomenclature-stock table.has-price .nomenclature-quantity-short { display: inline; }
-  .nomenclature-stock table.has-price th:first-child { width: 38%; }
-  .nomenclature-stock table.has-price th:nth-child(2) { width: 21%; }
+  .nomenclature-stock .table-sort { gap: 2px; }
+  .nomenclature-stock .nomenclature-quantity-label { display: none; }
+  .nomenclature-stock .nomenclature-quantity-short { display: inline; }
+  .nomenclature-stock .nomenclature-incoming { width: 72px; }
+  .nomenclature-incoming-title { text-transform: none; }
+  .nomenclature-stock table.has-price th:nth-child(2) { width: 17%; }
   .nomenclature-stock table.has-price th:nth-child(3) { width: 16%; }
-  .nomenclature-stock table.has-price th:last-child { width: 25%; }
+  .nomenclature-stock table.has-price th:last-child { width: 20%; }
 }
 .nomenclature-stock td strong { color: #198754; font-weight: 800; }
 .nomenclature-stock table.has-price th:last-child .table-sort { white-space: normal; }
