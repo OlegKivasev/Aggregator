@@ -23,7 +23,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     const request = (path, options) => fetch(origin + path, options);
     const token = (await (await request("/api/nomenclature/connection", { method: "POST", ...json({}) })).json()).token;
     const headers = { Authorization: `Bearer ${token}` };
-    const poll = async (wait = 0, capability = 7) => {
+    const poll = async (wait = 0, capability = 8) => {
       const response = await request(`/api/integration/1c/nomenclature/requests?waitSeconds=${wait}&stock=${capability}`, { headers });
       assert.equal(response.status, 200);
       return (await response.json()).request;
@@ -96,7 +96,8 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.deepEqual(second.options.receipts, job.options.receipts);
     const amounts = page.locator("#nomenclature-stock-rows tr").first().locator("td:nth-child(4) span");
     assert.deepEqual(await amounts.allTextContents(), ["100", "1k+"]);
-    assert.equal((await amounts.nth(1).getAttribute("title")).replace(/\s/g, ""), "Замена:1200");
+    assert.equal((await amounts.nth(1).locator("button").getAttribute("title")).replace(/\s/g, ""), "Замена:1200");
+    assert.deepEqual(await page.locator("th.nomenclature-incoming .nomenclature-incoming-pair span").allTextContents(), ["О", "З"]);
     assert.equal(reads.length, 2, "one initial read and one background page ahead, without browser polling");
     assert.equal(await page.locator("#nomenclature-stock-loading").isVisible(), false, "continuation never shows the initial spinner above the rows");
     assert.equal(await page.locator("#nomenclature-stock-more-loading").isVisible(), true);
@@ -403,6 +404,69 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.equal(oemByBrand.options.searchMode, "text");
     assert.equal((await complete(oemByBrand, prices)).status, 200);
     await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+
+    const beforeDetails = reads.length;
+    const popover = page.getByRole("dialog", { name: "Поставки замен" });
+    const replacementButton = page.locator("#nomenclature-stock-rows [data-incoming-side=replacement]").first();
+    const originalButton = page.locator("#nomenclature-stock-rows [data-incoming-side=original]").first();
+    const supplierOrder = (productId = randomUUID()) => ({
+      orderId: randomUUID(), productId, supplier: 'Мотор-Снаб <b>поставка</b>', number: "0042",
+      name: "Фильтр-замена", article: "ALT-11", ordered: 12, quantity: 8, expectedDate: "2026-11-22",
+    });
+    const sendIncoming = (job, orders, hasMore = false) => request("/api/integration/1c/nomenclature/stock-results", {
+      method: "POST", ...json({ requestId: job.id, leaseId: job.leaseId, products: [], hasMore: false, status: "completed",
+        incomingDetails: { orders, hasMore } }, headers),
+    });
+    await page.setViewportSize({ width: 320, height: 844 });
+    await replacementButton.click();
+    await popover.getByText("Загружаются заказы…").waitFor();
+    assert.equal(await poll(0, 7), null, "v7 never receives supplier detail jobs");
+    const details = await poll(20);
+    assert.deepEqual(details.options.incomingDetails, { productId: prices[0].id, side: "replacement" });
+    assert.equal((await sendIncoming(details, [supplierOrder(prices[0].id)])).status, 400);
+    const incomingRows = Array.from({ length: 100 }, () => supplierOrder());
+    assert.equal((await sendIncoming(details, incomingRows, true)).status, 200);
+    await popover.getByText("Фильтр-замена · ALT-11", { exact: true }).first().waitFor();
+    assert.equal(await popover.locator("b").count(), 0, "supplier text is never inserted as markup");
+    assert.deepEqual(await popover.locator("dl").first().locator("dd").allTextContents(), ["12", "8", "22 нояб. 2026 г."]);
+    const firstBounds = await popover.boundingBox();
+    assert.ok(firstBounds.x >= 7 && firstBounds.x + firstBounds.width <= 320, "supplier details fit the mobile viewport");
+    if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await popover.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-incoming-320.png") });
+    await popover.getByRole("button", { name: "Показать ещё" }).click();
+    const moreIncoming = await poll(20);
+    const lastOrder = incomingRows.at(-1);
+    assert.deepEqual(moreIncoming.options.incomingDetails.after, { orderId: lastOrder.orderId, productId: lastOrder.productId });
+    assert.equal((await sendIncoming(moreIncoming, [{ ...supplierOrder(), expectedDate: null }])).status, 200);
+    await popover.getByText("Не указана", { exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    await popover.waitFor({ state: "hidden" });
+    assert.equal(await replacementButton.evaluate((button) => button === document.activeElement), true);
+    await originalButton.press("Enter");
+    const original = await poll(20);
+    assert.equal(original.options.incomingDetails.side, "original");
+    await page.keyboard.press("Escape");
+    await waitForCancellation(original);
+    assert.equal((await sendIncoming(original, [supplierOrder(prices[0].id)])).status, 409);
+    assert.equal(reads.length, beforeDetails, "opening, paging and closing supplier orders never reloads the stock list");
+
+    await page.setViewportSize({ width: 1280, height: 844 });
+    await page.locator("#nomenclature-stock-refresh").click();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const firstSales = await poll(20);
+    const soldProducts = products.map((item) => ({ ...item, price: null }));
+    assert.equal((await complete(firstSales, soldProducts, true, "completed", '{"hasPrice":false,"amount":0}', 101)).status, 200);
+    await page.waitForFunction(() => document.querySelectorAll("#nomenclature-stock-rows tr").length === 100);
+    assert.equal(await poll(), null, "sales continuation waits until the user approaches the end");
+    await page.locator("#nomenclature-stock-sentinel").scrollIntoViewIfNeeded();
+    const nextSales = await poll(20);
+    assert.deepEqual(nextSales.options.sales, firstSales.options.sales);
+    assert.equal((await complete(nextSales, [{ ...soldProducts[0], id: randomUUID() }])).status, 200);
+    await page.locator("#nomenclature-sale-enabled").uncheck();
+    const withoutSales = await poll(20);
+    assert.equal(withoutSales.options.sales, undefined);
+    assert.equal((await complete(withoutSales, prices)).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
+
     const readsBeforeError = reads.length;
     await page.route((url) => url.pathname === "/api/nomenclature/stock" && url.searchParams.get("q") === "пустой", (route) => route.fulfill({ status: 502, body: "" }));
     await input.fill("пустой"); await input.press("Enter");

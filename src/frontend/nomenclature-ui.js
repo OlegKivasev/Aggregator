@@ -1,6 +1,6 @@
 import { getVideoScanRegion } from "./nomenclature-scan-region.js";
 import { bootstrapNomenclatureLookup, bootstrapNomenclatureSettings } from "./nomenclature-lookup-ui.js?v=stock-filters-1";
-import { bootstrapNomenclatureStock } from "./nomenclature-stock-ui.js?v=inventory-7";
+import { bootstrapNomenclatureStock } from "./nomenclature-stock-ui.js?v=incoming-8";
 
 let decoderModule;
 

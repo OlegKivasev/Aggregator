@@ -54,8 +54,8 @@ assert.match(stock, /СУММА\(Остатки\.Количество \+ Ост�
 assert.match(stock, /РегистрНакопления\.ЗаказыПокупателей\.Остатки\([\s\S]*?Заказы\.КоличествоОстаток > 0/);
 assert.match(stock, /Итог \+ " - ЕСТЬNULL\(АктивныеЗаказы\.Количество, 0\)"/);
 assert.match(stock, /ПОМЕСТИТЬ АС_КаталогСтраницы/);
-assert.match(stock, /Поступления = ПоступленияСтраницыНоменклатуры\(Ссылки\);\s*Для Индекс[\s\S]*?Поступления\.Получить/);
-const incoming = source.slice(source.indexOf("Функция ПоступленияСтраницыНоменклатуры("), source.indexOf("Функция ШаблонПодстроки("));
+assert.match(stock, /Поступления = ПоступленияСтраницыНоменклатуры\(Ссылки\);\s*ЧтениеПоставокМС = [^;]+;\s*Для Индекс[\s\S]*?Поступления\.Получить/);
+const incoming = source.slice(source.indexOf("Функция ПоступленияСтраницыНоменклатуры("), source.indexOf("Функция ЗаказыКПоступлению("));
 assert.equal((incoming.match(/Запрос\.Выполнить\(/g) ?? []).length, 1);
 assert.match(incoming, /ТекстЗапросаСвязейПоступления\(Истина\)[\s\S]*?ТекстЗапросаПоступления\(Ложь, Ложь, Ложь, Истина\)[\s\S]*?ТекстЗапросаПоступленияЗамен\(Истина\)/);
 const formPath = join(root, "Catalogs/Номенклатура/Forms/ФормаСписка/Ext/Form");
@@ -98,8 +98,8 @@ assert.match(stock, /ЗаписатьJSON\(Запись, ПоследнееЗн�
 for (const column of ["Наименование", "Артикул", "Количество"]) assert.ok(stock.includes(`ПоследнееЗначение = Выборка.${column}`));
 assert.match(stock, /ПоследнееЗначение = Новый Структура\("hasPrice,amount"/);
 const worker = modules.get("АС_АгрегаторСервер");
-assert.match(worker, /ВерсияОстатков = 7;[\s\S]*?"requests", Неопределено, ЗавершитьДо[\s\S]*?ВерсияОстатков\)/);
-assert.match(worker, /ЭтоОпрос И ВерсияОстатков = 7 И Ответ.КодСостояния = 400[\s\S]*?ВерсияОстатков = 6;/);
+assert.match(worker, /ВерсияОстатков = 8;[\s\S]*?"requests", Неопределено, ЗавершитьДо[\s\S]*?ВерсияОстатков\)/);
+assert.match(worker, /ЭтоОпрос И ВерсияОстатков > 6 И Ответ.КодСостояния = 400[\s\S]*?ВерсияОстатков = ВерсияОстатков - 1;/);
 assert.match(worker, /ТоварыВНаличии\(Задание\.after, Диагностика, Задание\.query, Задание\.sortField, Задание\.sortDirection, Задание\.options\)/);
 assert.match(worker, /Результат\.lastSortValue = Страница\.lastSortValue/);
 console.log("Static 1C stock check: balanced modules, BOM/CRLF and SHA1; shared period SQL, page batch for original and replacement supply, stock with orders before filtering and sorting, legacy v6, scoped counts and cursors. Platform not run.");

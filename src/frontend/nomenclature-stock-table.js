@@ -1,8 +1,11 @@
+import { createIncomingPopover } from "./nomenclature-incoming-popover.js";
+
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const incomingFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 
 // Keep three batches in the DOM. Measured spacers preserve access to earlier rows.
 export function createStockTable(rows, before, after, selectionChanged = () => {}) {
+  const incomingPopover = createIncomingPopover();
   const selected = new Set();
   const productsById = new Map();
   let selectionAnchor;
@@ -82,9 +85,15 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
     }
     paintSelection();
   };
-  rows.addEventListener("click", (event) => { const row = event.target.closest("tr[data-product-id]"); if (row) select(row, event); });
+  rows.addEventListener("click", (event) => {
+    const row = event.target.closest("tr[data-product-id]");
+    if (!row) return;
+    const button = event.target.closest("[data-incoming-side]");
+    if (button) incomingPopover.open(button, productsById.get(row.dataset.productId), event);
+    else select(row, event);
+  });
   rows.addEventListener("keydown", (event) => {
-    if (![" ", "Enter"].includes(event.key)) return;
+    if (![" ", "Enter"].includes(event.key) || event.target.closest("[data-incoming-side]")) return;
     const row = event.target.closest("tr[data-product-id]");
     if (row) { event.preventDefault(); select(row, event); }
   });
@@ -139,9 +148,19 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
             const count = product.incoming[key];
             const value = document.createElement("span");
             const rounded = Math.round(count);
-            value.textContent = rounded > 999 ? "1k+" : rounded > 0 ? incomingFormat.format(rounded) : "";
-            value.title = `${label}: ${numberFormat.format(count)}`;
-            value.setAttribute("aria-label", value.title);
+            if (count > 0) {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = "nomenclature-incoming-button";
+              button.dataset.incomingSide = key;
+              button.textContent = rounded > 999 ? "1k+" : rounded > 0 ? incomingFormat.format(rounded) : "<1";
+              button.title = `${label}: ${numberFormat.format(count)}`;
+              button.setAttribute("aria-label", `${label}, ${numberFormat.format(count)} к поступлению`);
+              button.setAttribute("aria-haspopup", "dialog");
+              button.setAttribute("aria-controls", "nomenclature-incoming-popover");
+              button.setAttribute("aria-expanded", "false");
+              value.append(button);
+            }
             pair.append(value);
           }
           incoming.append(pair);
@@ -153,6 +172,7 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
       fragment.append(...rendered.get(index));
     }
     rows.replaceChildren(fragment);
+    incomingPopover.reposition();
     for (let index = start; index < end; index += 1) {
       const elements = rendered.get(index);
       chunks[index].height = elements.at(-1).getBoundingClientRect().bottom - elements[0].getBoundingClientRect().top;
@@ -178,7 +198,7 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
     rebuildOffsets(); render(true);
   }).observe(rows.closest("table"));
   return {
-    reset(price = false, query = "") { showPrice = price; highlightTerms = query.split(/\s+/).filter(Boolean); chunks = []; offsets = [0]; rendered.clear(); productsById.clear(); selected.clear(); selectionAnchor = undefined; range = ""; rows.replaceChildren(); spacer(before, 0); spacer(after, 0); selectionChanged(0); },
+    reset(price = false, query = "") { incomingPopover.close(); showPrice = price; highlightTerms = query.split(/\s+/).filter(Boolean); chunks = []; offsets = [0]; rendered.clear(); productsById.clear(); selected.clear(); selectionAnchor = undefined; range = ""; rows.replaceChildren(); spacer(before, 0); spacer(after, 0); selectionChanged(0); },
     append(products) {
       if (!products.length) return;
       for (const product of products) productsById.set(product.id, product);

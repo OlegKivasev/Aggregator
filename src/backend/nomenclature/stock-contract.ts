@@ -1,12 +1,13 @@
 import { NomenclatureError, objectFields, parseUuid } from "./contract.ts";
 import { parseStockNavigation, type StockNavigation } from "./stock-navigation.ts";
+import { parseIncomingDetails, type IncomingDetails } from "./incoming-contract.ts";
 
 export const stockPageSize = 100;
 export interface StockPrice { amount: number; currency: string; unit?: string }
 export interface StockPriceType { id: string; name: string }
 export interface StockIncoming { original: number; replacement: number }
 export interface StockProduct { id: string; name: string; article: string; quantity: number; incoming?: StockIncoming; price?: StockPrice | null }
-export interface StockPage { products: StockProduct[]; hasMore: boolean; nextCursor: string | null; receivedAt: string; totalCount?: number; priceTypes?: StockPriceType[]; navigation?: StockNavigation }
+export interface StockPage { products: StockProduct[]; hasMore: boolean; nextCursor: string | null; receivedAt: string; totalCount?: number; priceTypes?: StockPriceType[]; navigation?: StockNavigation; incomingDetails?: IncomingDetails }
 export interface StockResult {
   requestId: string; leaseId: string; status: "completed" | "error";
   products: StockProduct[]; hasMore: boolean;
@@ -14,6 +15,7 @@ export interface StockResult {
   totalCount?: number;
   priceTypes?: StockPriceType[];
   navigation?: StockNavigation;
+  incomingDetails?: IncomingDetails;
 }
 
 export function parseStockQuery(value: unknown, preserveOrder = false): string {
@@ -28,7 +30,7 @@ export function parseStockQuery(value: unknown, preserveOrder = false): string {
 }
 
 export function parseStockResult(value: unknown, signed = false): StockResult {
-  const data = objectFields(value, ["requestId", "leaseId", "status", "products", "hasMore", "lastSortValue", "totalCount", "priceTypes", "navigation"]);
+  const data = objectFields(value, ["requestId", "leaseId", "status", "products", "hasMore", "lastSortValue", "totalCount", "priceTypes", "navigation", "incomingDetails"]);
   if (!["completed", "error"].includes(data.status as string) || !Array.isArray(data.products)
     || data.products.length > stockPageSize || typeof data.hasMore !== "boolean"
     || data.status === "error" && (data.products.length !== 0 || data.hasMore)
@@ -86,5 +88,6 @@ export function parseStockResult(value: unknown, signed = false): StockResult {
   }
   return { requestId: parseUuid(data.requestId), leaseId: parseUuid(data.leaseId), status: data.status as StockResult["status"],
     products, hasMore: data.hasMore, ...(data.navigation === undefined ? {} : { navigation: parseStockNavigation(data.navigation) }), ...(data.lastSortValue === undefined ? {} : { lastSortValue: data.lastSortValue as string | null }),
+    ...(data.incomingDetails === undefined ? {} : { incomingDetails: parseIncomingDetails(data.incomingDetails) }),
     ...(data.totalCount === undefined ? {} : { totalCount: data.totalCount as number }), ...(priceTypes === undefined ? {} : { priceTypes }) };
 }

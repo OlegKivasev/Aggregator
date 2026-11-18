@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AuthenticatedUser } from "../auth/user-auth-service.ts";
 import { NomenclatureError, objectFields, parseBarcode, parseLookupResult, parseUuid } from "../nomenclature/contract.ts";
 import { parseStockResult, parseStockQuery } from "../nomenclature/stock-contract.ts";
+import { parseIncomingRequest } from "../nomenclature/incoming-contract.ts";
 import { decodeStockCursor, parseStockSort } from "../nomenclature/stock-sort.ts";
 import { inventoryParameters, parseStockOptions, stockOptionsKey } from "../nomenclature/stock-options.ts";
 import type { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
@@ -48,7 +49,7 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         onlyMethod("GET");
         const wait = url.searchParams.get("waitSeconds") ?? "20";
         if ([...url.searchParams.keys()].some((key) => !["waitSeconds", "stock"].includes(key)) || url.searchParams.getAll("waitSeconds").length > 1
-          || url.searchParams.getAll("stock").length > 1 || url.searchParams.has("stock") && !/^[1-7]$/.test(url.searchParams.get("stock")!)
+          || url.searchParams.getAll("stock").length > 1 || url.searchParams.has("stock") && !/^[1-8]$/.test(url.searchParams.get("stock")!)
           || !/^(?:\d|1\d|20)$/.test(wait)) throw new NomenclatureError(400, "wait", "Ожидание должно быть от 0 до 20 секунд.");
         const release = service.beginPoll();
         const controller = new AbortController();
@@ -58,7 +59,7 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
           const deadline = Date.now() + Number(wait) * 1000;
           while (!controller.signal.aborted) {
             const version = Number(url.searchParams.get("stock") ?? "0");
-            const job = service.claim(token, version >= 1, version >= 2, version >= 3, version >= 4, version >= 5, version >= 6, version >= 7);
+            const job = service.claim(token, version >= 1, version >= 2, version >= 3, version >= 4, version >= 5, version >= 6, version >= 7, version >= 8);
             if (job || Date.now() >= deadline) { serveJson(response, 200, { request: job }); break; }
             await service.wait(controller.signal, deadline - Date.now());
           }
@@ -67,6 +68,18 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
       return true;
     }
 
+    if (url.pathname === "/api/nomenclature/incoming") {
+      onlyMethod("GET");
+      const incomingDetails = parseIncomingRequest(url.searchParams);
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      response.once("close", abort);
+      try {
+        const page = await service.loadStock(null, controller.signal, "", undefined, { availability: "all", priceType: null, incomingDetails });
+        if (!response.destroyed) serveJson(response, 200, page.incomingDetails);
+      } finally { response.removeListener("close", abort); }
+      return true;
+    }
     if (url.pathname === "/api/nomenclature/stock") {
       onlyMethod("GET");
       const allowed = ["after", "q", "sort", "direction", "details", "availability", "priceType", "searchMode", "category", "group", "oemBrand", "navigation", ...inventoryParameters];
@@ -86,8 +99,12 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
       const abort = () => controller.abort();
       response.once("close", abort);
       try {
+        const started = performance.now();
         const page = await service.loadStock(cursor, controller.signal, query, sort, options);
-        if (!response.destroyed) serveJson(response, 200, page);
+        if (!response.destroyed) {
+          response.setHeader("Server-Timing", `stock;dur=${(performance.now() - started).toFixed(1)}`);
+          serveJson(response, 200, page);
+        }
       } finally { response.removeListener("close", abort); }
       return true;
     }

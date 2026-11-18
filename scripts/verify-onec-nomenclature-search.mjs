@@ -36,7 +36,7 @@ const oemSearch = source.slice(source.indexOf("Функция Номенклат
 assert.match(oemSearch, /КлючOEM = &КлючOEM/);
 assert.match(oemSearch, /НормализоватьOEM\(Выборка\.OEM\) <> КлючOEM/);
 assert.match(oemSearch, /Данные\.Марка = &Марка/);
-assert.match(worker, /ВерсияОстатков = 7/);
+assert.match(worker, /ВерсияОстатков = 8/);
 assert.match(synonyms, /ПакетСинонимов = Запрос\.ВыполнитьПакет\(\)/);
 assert.match(synonyms, /АС_ДобавитьВариантыМарокИМоделей\(Результат, НормализованнаяСтрока, ПакетСинонимов\[1\]\.Выбрать\(\)\)/);
 assert.match(synonyms, /Справочник\.АС_Автомобили КАК Автомобили[\s\S]*?НЕ Автомобили\.ПометкаУдаления/);

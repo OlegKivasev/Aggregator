@@ -128,7 +128,7 @@ export class NomenclatureService {
     const connection = this.state();
     if (!connection.configured) throw new NomenclatureError(503, "source_unconfigured", "Подключение номенклатуры ещё не настроено.");
     if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.");
-    const required = options?.inventory ? 7 : options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
+    const required = options?.incomingDetails ? 8 : options?.inventory ? 7 : options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
     const checkWorker = () => {
       const version = this.stockVersion();
       // After a restart, let the first authenticated poll identify the worker.
@@ -200,10 +200,10 @@ export class NomenclatureService {
     this.database.prepare("UPDATE nomenclature_lookups SET status='cancelled' WHERE id=? AND status IN ('pending','leased')").run(id);
   }
 
-  claim(token: string | undefined, includeStock = false, supportsStockSearch = false, supportsStockTerms = false, supportsStockSorting = false, supportsStockOptions = false, supportsStockNavigation = false, supportsInventory = false) {
+  claim(token: string | undefined, includeStock = false, supportsStockSearch = false, supportsStockTerms = false, supportsStockSorting = false, supportsStockOptions = false, supportsStockNavigation = false, supportsInventory = false, supportsIncoming = false) {
     this.heartbeat(token);
     const previousVersion = this.stockVersion();
-    const version = !includeStock ? 0 : supportsInventory ? 7 : supportsStockNavigation ? 6 : supportsStockOptions ? 5 : supportsStockSorting ? 4 : supportsStockTerms ? 3 : supportsStockSearch ? 2 : 1;
+    const version = !includeStock ? 0 : supportsIncoming ? 8 : supportsInventory ? 7 : supportsStockNavigation ? 6 : supportsStockOptions ? 5 : supportsStockSorting ? 4 : supportsStockTerms ? 3 : supportsStockSearch ? 2 : 1;
     this.stockWorkers.set(version, this.now());
     const currentVersion = this.stockVersion();
     const changed = currentVersion !== previousVersion || currentVersion !== this.observedStockVersion;

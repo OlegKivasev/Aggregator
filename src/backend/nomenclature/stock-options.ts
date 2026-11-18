@@ -1,4 +1,5 @@
 import { NomenclatureError, parseUuid } from "./contract.ts";
+import { validCalendarDate, type IncomingRequest } from "./incoming-contract.ts";
 
 interface StockPeriod {
   from: string;
@@ -17,6 +18,7 @@ export interface StockOptions {
   sales?: StockPeriod;
   oemPresence?: "present" | "absent";
   oemFilterBrand?: string;
+  incomingDetails?: IncomingRequest;
 }
 
 function parsePeriod(params: URLSearchParams, prefix: "receipt" | "sale"): StockPeriod | undefined {
@@ -24,10 +26,7 @@ function parsePeriod(params: URLSearchParams, prefix: "receipt" | "sale"): Stock
   const to = params.get(prefix + "To");
   const source = params.get(prefix + "Source");
   if (from === null && to === null && source === null) return;
-  const validDate = (date: string | null): date is string => date !== null
-    && /^(?!0000)\d{4}-\d{2}-\d{2}$/.test(date)
-    && Number.isFinite(Date.parse(date)) && new Date(date).toISOString().slice(0, 10) === date;
-  if (!validDate(from) || !validDate(to) || from > to || (source !== "free" && source !== "customer" && source !== "all")) {
+  if (!validCalendarDate(from) || !validCalendarDate(to) || from > to || (source !== "free" && source !== "customer" && source !== "all")) {
     throw new NomenclatureError(400, "invalid_stock_filter", "Выберите корректный период и источник товара.");
   }
   return { from, to, source };

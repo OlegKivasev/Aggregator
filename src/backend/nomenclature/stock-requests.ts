@@ -19,7 +19,8 @@ export const stockWorkerConditions = `AND (query='' OR ?=1)
   AND (sort_field='id' OR ?=1)
   AND (options='' OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.searchMode') IS NULL OR ?=1)
-  AND (options='' OR json_extract(NULLIF(options, ''), '$.inventory') IS NULL OR ?=1)`;
+  AND (options='' OR json_extract(NULLIF(options, ''), '$.inventory') IS NULL OR ?=1)
+  AND (options='' OR json_extract(NULLIF(options, ''), '$.incomingDetails') IS NULL OR ?=1)`;
 
 // Only in-progress reads are shared. Every later opening/refresh reads 1C again.
 export class StockRequests {
@@ -145,7 +146,17 @@ export class StockRequests {
     if (data.status === "completed" && row.sort_field === "price" && !options?.priceType) {
       throw new NomenclatureError(400, "invalid_stock", "Для сортировки по цене выберите вид цены.");
     }
-    if (data.status === "completed" && ((!!options?.navigation && !after) !== (data.navigation !== undefined)
+    const incoming = options?.incomingDetails;
+    if (incoming) {
+      if (data.products.length || data.hasMore || data.lastSortValue != null || data.totalCount !== undefined
+        || data.priceTypes !== undefined || data.navigation !== undefined
+        || (data.status === "completed") !== (data.incomingDetails !== undefined)
+        || data.incomingDetails?.orders.some((order) =>
+          (order.productId === incoming.productId) !== (incoming.side === "original")
+          || order.orderId === incoming.after?.orderId && order.productId === incoming.after?.productId)) {
+        throw new NomenclatureError(400, "invalid_incoming", "Ответ не соответствует запросу поставок.");
+      }
+    } else if (data.incomingDetails !== undefined || data.status === "completed" && ((!!options?.navigation && !after) !== (data.navigation !== undefined)
       || data.products.some((item) =>
       ((options?.availability ?? "available") === "available" && item.quantity <= 0)
       || (options?.availability === "absent" && item.quantity > 0)
@@ -160,6 +171,7 @@ export class StockRequests {
     const page: StockPage = { products: data.products, hasMore: data.hasMore,
       nextCursor: data.hasMore ? encodeStockCursor({ id: data.products.at(-1)!.id, value: lastValue }, row.query, sort, row.options) : null, receivedAt: new Date(this.now()).toISOString(),
       ...(data.navigation === undefined ? {} : { navigation: data.navigation }),
+      ...(data.incomingDetails === undefined ? {} : { incomingDetails: data.incomingDetails }),
       ...(data.totalCount === undefined ? {} : { totalCount: data.totalCount }), ...(data.priceTypes === undefined ? {} : { priceTypes: data.priceTypes }) };
     // Keep the timestamp of an accepted result when an identical delivery is retried.
     if (row?.result_json) page.receivedAt = (JSON.parse(row.result_json) as StockPage).receivedAt;
@@ -174,4 +186,4 @@ export class StockRequests {
   }
 }
 
-export const stockWorkerFlags = (version: number): number[] => [2, 3, 4, 5, 6, 7].map((minimum) => Number(version >= minimum));
+export const stockWorkerFlags = (version: number): number[] => [2, 3, 4, 5, 6, 7, 8].map((minimum) => Number(version >= minimum));
