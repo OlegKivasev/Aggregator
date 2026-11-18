@@ -17,16 +17,17 @@ const card = {
 };
 const stock = {
   name: "Комплект ГРМ 21214, Шеви Нива", article: "101006001BGC", productId: randomUUID(), stock: 0, quantity: 1,
-  price: 6453, original: 3, replacement: 2, returnDays: 0, discountPercent: 5, discountAmount: 322.65,
+  price: 6453, original: 3, replacement: 2, returnDays: 5, discountPercent: 5, discountAmount: 322.65,
   total: 6130.35, seller: "Тестовый продавец",
 };
 const details = {
   customer: "Chevrolet Niva 2123 | У994СМ163", contract: "ТО автомобиля", mileage: 123456, vin: "XTA21230000012345",
-  keySlot: 3, cashPayment: true, total: 8400, cashTotal: 8400, discountAmount: 322.65, discountPercent: 5,
+  keySlot: 3, cashPayment: true, total: 8400, cashTotal: 8400, cardTotal: 9200, paidAmount: 2700, discountAmount: 322.65, discountPercent: 5,
   goods: [stock, { ...stock, name: "Очиститель тормозов", article: "2105", productId: randomUUID(), stock: 19, quantity: 2,
     original: 0, replacement: 0, returnDays: null, discountAmount: 0, discountPercent: 0, price: 341, total: 682 }],
   work: [{ name: "Замена ремня ГРМ", performer: "Тестовый механик", price: 1400, hours: 1.5, multiplier: 1, total: 2100, seller: "Тестовый продавец" }],
 };
+const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
 
 test("employee opens a single fresh repair order and its allowed supplier orders on desktop and mobile", async () => {
   const dir = await mkdtemp(join(tmpdir(), "repair-order-browser-"));
@@ -65,9 +66,12 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     await page.request.post(`${origin}/api/auth/login`, { data: { fio: card.responsibleFio, password: "test-user-password" } });
     const pageErrors = [];
     const jobs = [];
+    const repairRequests = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     page.on("request", (req) => {
-      if (req.method() === "POST" && new URL(req.url()).pathname === "/api/repairs/refresh") jobs.push(req.postDataJSON());
+      const path = new URL(req.url()).pathname;
+      if (path.startsWith("/api/repairs/refresh")) repairRequests.push(path);
+      if (req.method() === "POST" && path === "/api/repairs/refresh") jobs.push(req.postDataJSON());
     });
     await page.route("**/*", async (route) => {
       const url = route.request().url();
@@ -90,19 +94,42 @@ test("employee opens a single fresh repair order and its allowed supplier orders
         const response = await post("/api/integration/1c/repairs/refresh/results", reply, workerHeader);
         assert.equal((await response.json()).status, "completed");
       }
-      await dialog.getByRole("tab", { name: "Товары (2)" }).waitFor();
+      await dialog.getByRole("group", { name: "Способ оплаты" }).waitFor();
       return job.id;
     };
-    const requestId = await open(details, card);
+    const requestId = await open({ ...details,
+      goods: [...details.goods, ...[4, 3, 2, 1, 0, -3, 6].map((returnDays) => ({ ...details.goods[1], returnDays }))],
+      work: [...details.work, { ...details.work[0], name: "Замена фильтра", hours: 1, multiplier: 2 }],
+    }, card);
+    const cash = dialog.getByRole("button", { name: "Наличными", exact: true });
+    const bankCard = dialog.getByRole("button", { name: "Картой", exact: true });
+    const footerValue = (label) => dialog.locator("footer dl > div").filter({ has: page.getByText(label, { exact: true }) }).locator("dd");
+    assert.equal(await cash.getAttribute("aria-pressed"), "true");
+    assert.equal(await footerValue("Всего").textContent(), money.format(8400));
+    assert.equal(await footerValue("Доплатить наличными").textContent(), money.format(5700));
+    const beforePreview = repairRequests.length;
+    await bankCard.click();
+    assert.equal(await bankCard.getAttribute("aria-pressed"), "true");
+    assert.equal(await footerValue("Всего").textContent(), money.format(9200));
+    assert.equal(await footerValue("Доплатить картой").textContent(), money.format(6500));
+    assert.equal(await footerValue("Доплатить наличными").count(), 0);
+    assert.equal(await dialog.locator("footer dt").filter({ hasText: /^Наличными$/ }).count(), 0);
+    assert.equal(repairRequests.length, beforePreview, "switching payment makes no API request");
     assert.equal(await dialog.getByText("№ НФНФ-002327").isVisible(), true);
     assert.equal(await dialog.getByText("ТО автомобиля").isVisible(), true);
     assert.equal(await dialog.getByText(details.vin).isVisible(), true);
     assert.equal(await dialog.getByText(card.contactPhone).isVisible(), true);
     assert.equal(await dialog.getByText("Ячейка для ключей").isVisible(), true);
     assert.equal(await dialog.getByText("Организация").count(), 0);
-    assert.equal(await dialog.getByRole("columnheader", { name: "Дней до возврата" }).count(), 1);
-    assert.match(await dialog.getByRole("row", { name: /Комплект ГРМ/ }).innerText(), /0/);
-    assert.equal(await dialog.getByText("Доплатить наличными").isVisible(), true);
+    assert.equal(await dialog.getByRole("columnheader", { name: "Возврат, дн." }).count(), 1);
+    assert.deepEqual(await dialog.locator(".repair-order-return-urgent .repair-order-return-days").allTextContents(), ["5", "4", "3", "2", "1", "0", "0"]);
+    assert.equal(await dialog.locator(".repair-order-return-urgent").first().evaluate((row) => getComputedStyle(row).outlineStyle), "solid");
+    const goodsTable = dialog.getByRole("table", { name: "Товары" });
+    for (const heading of ["Остаток", "Цена", "Кол-во", "Возврат, дн.", "Сумма"]) {
+      const column = goodsTable.getByRole("columnheader", { name: heading, exact: true });
+      assert.equal(await column.evaluate((node) => getComputedStyle(node).textAlign), "center");
+    }
+    assert.doesNotMatch(await goodsTable.innerText(), /₽/);
     assert.equal(await dialog.getByText("Ручная скидка").isVisible(), true);
     assert.equal(await dialog.getByRole("columnheader", { name: "Скидка" }).count(), 1);
 
@@ -129,19 +156,53 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       assert.ok(box.x >= 0 && box.x + box.width <= width);
       await popover.getByRole("button", { name: "Закрыть поставки" }).click();
     }
-    await dialog.getByRole("tab", { name: "Работы (1)" }).click();
-    assert.equal(await dialog.getByText("Тестовый механик").isVisible(), true);
-    assert.equal(await dialog.getByText("1,5 н·ч").isVisible(), true);
+    await dialog.getByRole("tab", { name: "Работы (2)" }).click();
+    assert.equal(await dialog.getByText("Тестовый механик").first().isVisible(), true);
+    assert.equal(await dialog.getByRole("columnheader", { name: "Норма времени" }).count(), 1);
+    assert.equal(await dialog.getByRole("columnheader", { name: "Кратность" }).count(), 1);
+    assert.doesNotMatch(await dialog.getByRole("table", { name: "Работы" }).innerText(), /₽/);
     assert.equal(await dialog.getByRole("columnheader", { name: "Скидка" }).count(), 0);
     await dialog.getByRole("button", { name: "К заказ-нарядам" }).click();
     assert.equal(await dialog.isVisible(), false);
-    await open({ ...details, contract: "", vin: "", keySlot: 0, cashPayment: false, discountAmount: 0, discountPercent: 0,
-      goods: details.goods.map((row) => ({ ...row, returnDays: null, discountAmount: 0, discountPercent: 0 })) }, { ...card, contactPhone: undefined });
-    for (const label of ["Договор", "VIN", "Телефон контрагента", "Ячейка для ключей", "Дней до возврата", "Скидка", "Ручная скидка"]) {
-      assert.equal(await dialog.getByText(label, { exact: true }).count(), 0);
+    await open({ ...details, contract: "", vin: "", mileage: 0, keySlot: 0, cashPayment: false, total: 9200, discountAmount: 0, discountPercent: 0, work: [],
+      goods: details.goods.map((row) => ({ ...row, original: 0, replacement: 0, returnDays: null, discountAmount: 0, discountPercent: 0 })) },
+    { ...card, amountDue: 6500, contactPhone: undefined });
+    const fields = dialog.locator(".repair-order-details, .repair-order-footer");
+    for (const label of ["Договор", "VIN", "Пробег", "Телефон контрагента", "Ячейка для ключей", "К поступлению", "Возврат, дн.", "Скидка", "Ручная скидка"]) {
+      assert.equal(await fields.getByText(label, { exact: true }).count(), 0, `Скрытое поле ${label}`);
     }
-    assert.equal(await dialog.getByText("Доплатить картой").isVisible(), true);
-    assert.equal(jobs.length, 2);
+    assert.equal(await dialog.getByRole("tablist").count(), 0);
+    assert.equal(await goodsTable.isVisible(), true);
+    assert.equal(await bankCard.getAttribute("aria-pressed"), "true");
+    assert.equal(await footerValue("Доплатить картой").textContent(), money.format(6500));
+    await cash.click();
+    assert.equal(await footerValue("Доплатить наличными").textContent(), money.format(5700));
+    await dialog.getByRole("button", { name: "Закрыть заказ-наряд" }).click();
+    assert.equal(await dialog.isVisible(), false);
+
+    const settledCard = { ...card, paymentStatus: "paid", amountDue: 0 };
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await open({ ...details, goods: [], work: [{ ...details.work[0], hours: 1, multiplier: 2 }], paidAmount: 8400 }, settledCard);
+    assert.equal(await dialog.getByRole("tablist").count(), 0);
+    assert.equal(await goodsTable.count(), 0);
+    assert.equal(await dialog.getByRole("table", { name: "Работы" }).isVisible(), true);
+    assert.equal(await dialog.getByRole("columnheader", { name: "Норма времени" }).count(), 0);
+    assert.equal(await dialog.getByRole("columnheader", { name: "Кратность" }).count(), 1);
+    assert.equal(await footerValue("Доплатить наличными").count(), 0);
+    await bankCard.click();
+    assert.equal(await footerValue("Доплатить картой").textContent(), money.format(800));
+    await page.mouse.click(2, 2);
+    assert.equal(await dialog.isVisible(), false);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await open({ ...details, goods: [], cashPayment: false, cashTotal: null, cardTotal: undefined, paidAmount: undefined }, settledCard);
+    assert.equal(await cash.isDisabled(), true);
+    assert.equal(await bankCard.getAttribute("aria-pressed"), "true");
+    assert.equal(await dialog.getByRole("columnheader", { name: "Норма времени" }).count(), 1);
+    assert.equal(await dialog.getByRole("columnheader", { name: "Кратность" }).count(), 0);
+    await page.mouse.click(2, 2);
+    assert.equal(await dialog.isVisible(), false);
+    assert.equal(jobs.length, 4);
     assert.deepEqual(pageErrors, []);
     const list = (await (await page.request.get(`${origin}/api/repairs?testPlatform=false`)).json()).repairs;
     assert.equal(list.length, 1);

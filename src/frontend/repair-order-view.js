@@ -2,8 +2,11 @@ import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=repa
 
 const number = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
+const tableMoney = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const date = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeZone: "UTC" });
 const missing = "—";
+const urgentReturn = (row) => row.returnDays != null && row.returnDays <= 5;
+const hasIncoming = (row) => row.original > 0 || row.replacement > 0;
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -20,20 +23,34 @@ function facts(container, entries) {
   }));
 }
 
-function discount({ discountPercent, discountAmount }) {
-  return [discountPercent && `${number.format(discountPercent)}%`, discountAmount && money.format(discountAmount)]
+function discount({ discountPercent, discountAmount }, formatter = money) {
+  return [discountPercent && `${number.format(discountPercent)}%`, discountAmount && formatter.format(discountAmount)]
     .filter(Boolean).join(" / ");
 }
 
-function lines(columns, rows, title) {
-  if (!rows.length) return element("p", title === "Товары" ? "Товары не добавлены." : "Работы не добавлены.", "repair-order-empty");
+function paymentAmounts(card, data) {
+  const selected = data.cashPayment ? "cash" : "card";
+  const paid = data.paidAmount ?? (card.amountDue > 0 ? data.total - card.amountDue : undefined);
+  // Older replies can only recover the card total when its remaining balance is known and positive.
+  const oldCardDue = card.paymentOptions?.cardAmountDue;
+  const oldCardTotal = paid !== undefined && oldCardDue > 0 ? paid + oldCardDue : null;
+  const totals = { cash: data.cashTotal, card: data.cardTotal === undefined ? oldCardTotal : data.cardTotal, [selected]: data.total };
+  const balance = (mode) => {
+    if (mode === selected && card.amountDue !== undefined) return card.amountDue;
+    if (paid !== undefined && totals[mode] != null) return Math.max(0, Math.round(totals[mode] * 100) - Math.round(paid * 100)) / 100;
+    return card.paymentOptions?.[`${mode}AmountDue`];
+  };
+  return { selected, totals, paid, balance };
+}
+
+function lines(columns, rows, title, warn = () => false) {
   const table = element("table", undefined, "repair-order-table");
   table.setAttribute("role", "table");
   table.setAttribute("aria-label", title);
   const header = table.createTHead().insertRow();
   header.setAttribute("role", "row");
-  for (const [label] of columns) {
-    const heading = element("th", label);
+  for (const [label, , className] of columns) {
+    const heading = element("th", label, className);
     heading.scope = "col";
     heading.setAttribute("role", "columnheader");
     header.append(heading);
@@ -43,6 +60,7 @@ function lines(columns, rows, title) {
   for (const row of rows) {
     const tr = body.insertRow();
     tr.setAttribute("role", "row");
+    if (warn(row)) tr.className = "repair-order-return-urgent";
     for (const [index, [label, value, className]] of columns.entries()) {
       const cell = element(index ? "td" : "th", undefined, className);
       cell.setAttribute("role", index ? "cell" : "rowheader");
@@ -66,7 +84,10 @@ export function createRepairOrderView() {
   dialog.setAttribute("aria-labelledby", "repair-order-title");
   dialog.innerHTML = `
     <header class="repair-order-heading">
-      <button type="button" class="repair-order-back">← К заказ-нарядам</button>
+      <div class="repair-order-heading-actions">
+        <button type="button" class="repair-order-back"><span aria-hidden="true">←</span> К заказ-нарядам</button>
+        <button type="button" class="repair-order-close" aria-label="Закрыть заказ-наряд">×</button>
+      </div>
       <h2 id="repair-order-title"></h2>
       <div class="repair-order-number"></div>
     </header>
@@ -81,9 +102,17 @@ export function createRepairOrderView() {
         </div>
         <div id="repair-order-goods" role="tabpanel" aria-labelledby="repair-order-goods-tab"></div>
         <div id="repair-order-work" role="tabpanel" aria-labelledby="repair-order-work-tab" hidden></div>
+        <p class="repair-order-empty" hidden>В заказ-наряде нет товаров и работ.</p>
       </div>
     </div>
-    <footer class="repair-order-footer" hidden><dl></dl></footer>`;
+    <footer class="repair-order-footer" hidden>
+      <div class="repair-order-payment" role="group" aria-label="Способ оплаты">
+        <button type="button" data-payment="cash">Наличными</button>
+        <button type="button" data-payment="card">Картой</button>
+        <p class="repair-order-payment-note" hidden>1С не передала расчёт для второго способа.</p>
+      </div>
+      <dl aria-live="polite" aria-atomic="true"></dl>
+    </footer>`;
   document.body.append(dialog);
   const popover = createIncomingPopover(dialog, "repair-order-incoming");
   const back = dialog.querySelector(".repair-order-back");
@@ -92,9 +121,15 @@ export function createRepairOrderView() {
   const details = dialog.querySelector(".repair-order-details");
   const footer = dialog.querySelector(".repair-order-footer");
   const summary = dialog.querySelector(".repair-order-facts");
+  const tabList = dialog.querySelector('[role="tablist"]');
   const tabs = [...dialog.querySelectorAll('[role="tab"]')];
   const panels = [...dialog.querySelectorAll('[role="tabpanel"]')];
+  const empty = dialog.querySelector(".repair-order-empty");
+  const paymentButtons = [...footer.querySelectorAll("[data-payment]")];
+  const paymentNote = footer.querySelector(".repair-order-payment-note");
+  const totals = footer.querySelector("dl");
   let current;
+  let previewPayment;
 
   const showTab = (active) => {
     popover.close();
@@ -122,7 +157,7 @@ export function createRepairOrderView() {
   };
 
   const incoming = (row, source) => {
-    if (!row.productId || !(row.original > 0 || row.replacement > 0)) return missing;
+    if (!row.productId || !hasIncoming(row)) return missing;
     const group = element("span", undefined, "repair-order-incoming");
     for (const [side, count, letter, label] of [
       ["original", row.original, "О", "Поставки оригинала"], ["replacement", row.replacement, "З", "Поставки замен"],
@@ -142,50 +177,83 @@ export function createRepairOrderView() {
     return group;
   };
 
+  const renderPayment = (card, data) => {
+    const amounts = paymentAmounts(card, data);
+    const reduction = discount(data);
+    paymentNote.hidden = amounts.totals.cash != null && amounts.totals.card != null;
+    previewPayment = (mode) => {
+      for (const button of paymentButtons) {
+        button.disabled = amounts.totals[button.dataset.payment] == null;
+        button.setAttribute("aria-pressed", String(button.dataset.payment === mode));
+      }
+      const due = amounts.balance(mode);
+      const showDue = due != null && (card.paymentStatus === "partially_paid" || amounts.paid > 0 && due > 0);
+      facts(totals, [
+        ["Всего", money.format(amounts.totals[mode])],
+        ...(reduction ? [["Ручная скидка", reduction]] : []),
+        ...(showDue ? [[mode === "cash" ? "Доплатить наличными" : "Доплатить картой", money.format(due)]] : []),
+      ]);
+    };
+    previewPayment(amounts.selected);
+  };
+  for (const button of paymentButtons) button.addEventListener("click", () => previewPayment?.(button.dataset.payment));
+
   const render = (card, data, supplySource) => {
     showHeading(card);
     facts(summary, [
       ["Покупатель", data.customer || card.counterpartyName || card.vehicleName || missing],
       ...(data.contract ? [["Договор", data.contract]] : []),
-      ["Пробег", `${number.format(data.mileage)} км`],
+      ...(data.mileage ? [["Пробег", `${number.format(data.mileage)} км`]] : []),
       ...(data.vin ? [["VIN", data.vin]] : []),
       ...(card.contactPhone ? [["Телефон контрагента", card.contactPhone]] : []),
       ...(data.keySlot ? [["Ячейка для ключей", number.format(data.keySlot)]] : []),
       ["Ответственный", card.responsibleFio || missing],
-      ["Оплата", data.cashPayment ? "Наличными" : "Картой"],
     ]);
-    tabs[0].textContent = `Товары (${data.goods.length})`;
-    tabs[1].textContent = `Работы (${data.work.length})`;
-    panels[0].replaceChildren(lines([
+    const goods = data.goods.length;
+    const work = data.work.length;
+    tabs[0].textContent = `Товары (${goods})`;
+    tabs[1].textContent = `Работы (${work})`;
+    const useTabs = goods > 0 && work > 0;
+    tabList.hidden = !useTabs;
+    empty.hidden = goods > 0 || work > 0;
+    for (const [index, panel] of panels.entries()) {
+      panel.setAttribute("role", useTabs ? "tabpanel" : "region");
+      if (useTabs) {
+        panel.setAttribute("aria-labelledby", tabs[index].id);
+        panel.removeAttribute("aria-label");
+      } else {
+        panel.removeAttribute("aria-labelledby");
+        panel.setAttribute("aria-label", index === 0 ? "Товары" : "Работы");
+      }
+    }
+    if (goods) panels[0].replaceChildren(lines([
       ["Наименование", (row) => row.name],
       ["Артикул", (row) => row.article],
-      ["Остаток с заказами", (row) => row.stock === null ? missing : number.format(row.stock), "repair-order-numeric"],
-      ["Цена", (row) => money.format(row.price), "repair-order-numeric"],
+      ["Остаток", (row) => row.stock === null ? missing : number.format(row.stock), "repair-order-numeric"],
+      ["Цена", (row) => tableMoney.format(row.price), "repair-order-numeric"],
       ["Кол-во", (row) => number.format(row.quantity), "repair-order-numeric"],
-      ["К поступлению", (row) => incoming(row, supplySource)],
+      ...(data.goods.some(hasIncoming) ? [["К поступлению", (row) => incoming(row, supplySource)]] : []),
       ...(data.goods.some((row) => row.returnDays !== null) ? [
-        ["Дней до возврата", (row) => row.returnDays === null ? missing : number.format(row.returnDays), "repair-order-numeric"],
+        ["Возврат, дн.", (row) => {
+          if (row.returnDays === null) return missing;
+          const days = number.format(row.returnDays);
+          return urgentReturn(row) ? element("span", days, "repair-order-return-days") : days;
+        }, "repair-order-numeric"],
       ] : []),
-      ...(data.goods.some((row) => row.discountPercent || row.discountAmount) ? [["Скидка", discount, "repair-order-numeric"]] : []),
-      ["Сумма", (row) => money.format(row.total), "repair-order-line-total"],
+      ...(data.goods.some((row) => row.discountPercent || row.discountAmount) ? [["Скидка", (row) => discount(row, tableMoney), "repair-order-numeric"]] : []),
+      ["Сумма", (row) => tableMoney.format(row.total), "repair-order-line-total"],
       ["Продавец", (row) => row.seller],
-    ], data.goods, "Товары"));
-    panels[1].replaceChildren(lines([
+    ], data.goods, "Товары", urgentReturn));
+    if (work) panels[1].replaceChildren(lines([
       ["Наименование", (row) => row.name], ["Исполнитель", (row) => row.performer],
-      ["Цена", (row) => money.format(row.price), "repair-order-numeric"],
-      ["Норма времени / кратность", (row) => [row.hours && `${number.format(row.hours)} н·ч`,
-        row.multiplier && (row.multiplier !== 1 || !row.hours) && `×${number.format(row.multiplier)}`].filter(Boolean).join(" / ")],
-      ["Сумма", (row) => money.format(row.total), "repair-order-line-total"],
+      ["Цена", (row) => tableMoney.format(row.price), "repair-order-numeric"],
+      ...(data.work.some((row) => row.hours !== 1) ? [["Норма времени", (row) => number.format(row.hours), "repair-order-numeric"]] : []),
+      ...(data.work.some((row) => row.multiplier !== 1) ? [["Кратность", (row) => number.format(row.multiplier), "repair-order-numeric"]] : []),
+      ["Сумма", (row) => tableMoney.format(row.total), "repair-order-line-total"],
       ["Продавец", (row) => row.seller],
     ], data.work, "Работы"));
-    const reduction = discount(data);
-    facts(footer.querySelector("dl"), [
-      ["Всего", money.format(data.total)],
-      ["Наличными", data.cashTotal === null ? missing : money.format(data.cashTotal)],
-      ...(reduction ? [["Ручная скидка", reduction]] : []),
-      ...(card.paymentStatus === "partially_paid" ? [[data.cashPayment ? "Доплатить наличными" : "Доплатить картой", money.format(card.amountDue)]] : []),
-    ]);
-    showTab(0);
+    showTab(goods ? 0 : work ? 1 : -1);
+    renderPayment(card, data);
     details.hidden = footer.hidden = false;
     status.hidden = true;
   };
@@ -244,18 +312,28 @@ export function createRepairOrderView() {
     if (!current) return;
     const view = current;
     current = undefined;
+    previewPayment = undefined;
     view.controller.abort();
     cancel(view.route);
     popover.close();
     dialog.close();
     panels.forEach((panel) => panel.replaceChildren());
     summary.replaceChildren();
-    footer.querySelector("dl").replaceChildren();
+    totals.replaceChildren();
     view.trigger.focus({ preventScroll: true });
   };
   back.addEventListener("click", close);
+  dialog.querySelector(".repair-order-close").addEventListener("click", close);
   retry.addEventListener("click", () => { if (current) void load(current); });
   dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(); });
+  const onBackdrop = (event) => {
+    if (event.target !== dialog) return false;
+    const rect = dialog.getBoundingClientRect();
+    return event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom;
+  };
+  let backdropPress = false;
+  dialog.addEventListener("pointerdown", (event) => { backdropPress = onBackdrop(event); });
+  dialog.addEventListener("click", (event) => { if (backdropPress && onBackdrop(event)) close(); });
   return {
     open(card, testPlatform, trigger) {
       close();

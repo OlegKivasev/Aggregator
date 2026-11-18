@@ -34,7 +34,7 @@ function parseGoods(value: unknown) {
     name: label(row.name), article: label(row.article), productId,
     stock: row.stock === null ? null : numeric(row.stock), quantity: numeric(row.quantity), price: numeric(row.price),
     original: numeric(row.original), replacement: numeric(row.replacement),
-    returnDays: row.returnDays === null ? null : numeric(row.returnDays),
+    returnDays: row.returnDays === null ? null : Math.max(0, numeric(row.returnDays)),
     discountPercent: numeric(row.discountPercent), discountAmount: numeric(row.discountAmount),
     total: numeric(row.total), seller: label(row.seller),
   };
@@ -50,13 +50,15 @@ function parseWork(value: unknown) {
 
 export function parseRepairDetails(value: unknown) {
   const data = object(value, ["customer", "contract", "mileage", "vin", "keySlot", "cashPayment", "goods", "work",
-    "total", "cashTotal", "discountAmount", "discountPercent"]);
+    "total", "cashTotal", "cardTotal", "paidAmount", "discountAmount", "discountPercent"]);
   if (typeof data.cashPayment !== "boolean") invalid();
   return {
     customer: label(data.customer), contract: label(data.contract), mileage: numeric(data.mileage),
     vin: label(data.vin, 100), keySlot: numeric(data.keySlot), cashPayment: data.cashPayment,
     goods: lines(data.goods, parseGoods), work: lines(data.work, parseWork), total: numeric(data.total),
     cashTotal: data.cashTotal === null ? null : numeric(data.cashTotal),
+    ...(data.cardTotal === undefined ? {} : { cardTotal: data.cardTotal === null ? null : numeric(data.cardTotal) }),
+    ...(data.paidAmount === undefined ? {} : { paidAmount: numeric(data.paidAmount) }),
     discountAmount: numeric(data.discountAmount), discountPercent: numeric(data.discountPercent),
   };
 }
