@@ -1,5 +1,6 @@
 import { splitRepairVehicleName } from "./repair-vehicle-presentation.js";
 import { filterRepairCards } from "./repair-search.js";
+import { createRepairOrderView } from "./repair-order-view.js";
 
 export function bootstrapRepairs({ onActiveEmpty } = {}) {
   const views = [false, true].map((testPlatform) => {
@@ -22,6 +23,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
   let liveController;
   let liveRequest;
   let liveGeneration = 0;
+  const orderView = createRepairOrderView();
   const failureMessage = "Произошёл сбой обновления заказ-нарядов. Достоверность данных не подтверждена. Обратитесь в магазин.";
   const initialAuthState = window.aggregatorAuthState;
   let authReady = initialAuthState?.ready === true;
@@ -186,7 +188,14 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       vehicle.className = "repairs-vehicle-name";
       const { name, plate } = splitRepairVehicleName(card.vehicleName);
       vehicle.textContent = name || (card.counterpartyName ? "Договор не указан" : "—");
-      vehicleCell.append(vehicle);
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "repair-order-link";
+      open.setAttribute("aria-haspopup", "dialog");
+      open.setAttribute("aria-label", `Открыть заказ-наряд ${card.number}, ${name || card.counterpartyName || ""}`);
+      open.append(vehicle);
+      vehicleCell.append(open);
+      open.addEventListener("click", () => orderView.open(card, testPlatform, open));
       if (plate) {
         const registration = document.createElement("span");
         registration.className = "repairs-vehicle-plate";
@@ -425,6 +434,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
   document.addEventListener("visibilitychange", resume);
   window.addEventListener("focus", resume);
   document.addEventListener("aggregator-auth-ready", (event) => {
+    orderView.close();
     liveGeneration += 1;
     liveController?.abort();
     if (liveRequest) void fetch(liveRequest, { method: "DELETE", keepalive: true }).catch(() => {});

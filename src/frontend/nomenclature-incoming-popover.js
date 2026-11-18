@@ -25,16 +25,16 @@ function renderOrder(order) {
   return item;
 }
 
-export function createIncomingPopover() {
+export function createIncomingPopover(container = document.body, id = "nomenclature-incoming-popover") {
   const panel = document.createElement("section");
-  panel.id = "nomenclature-incoming-popover";
+  panel.id = id;
   panel.className = "nomenclature-incoming-popover";
   panel.hidden = true;
   panel.setAttribute("role", "dialog");
-  panel.setAttribute("aria-labelledby", "nomenclature-incoming-heading");
+  panel.setAttribute("aria-labelledby", `${id}-heading`);
   panel.innerHTML = `
     <header>
-      <div><h3 id="nomenclature-incoming-heading" tabindex="-1"></h3><p></p></div>
+      <div><h3 tabindex="-1"></h3><p></p></div>
       <button class="nomenclature-incoming-close" type="button" aria-label="Закрыть поставки">×</button>
     </header>
     <div class="nomenclature-incoming-content">
@@ -42,8 +42,9 @@ export function createIncomingPopover() {
       <p role="status"></p>
       <button type="button" class="btn btn-light nomenclature-incoming-more" hidden>Показать ещё</button>
     </div>`;
-  document.body.append(panel);
+  container.append(panel);
   const title = panel.querySelector("h3");
+  title.id = `${id}-heading`;
   const subtitle = panel.querySelector("header p");
   const list = panel.querySelector("ul");
   const status = panel.querySelector("[role=status]");
@@ -53,6 +54,7 @@ export function createIncomingPopover() {
   let position;
   let request;
   let params;
+  let endpoint;
   let frame;
 
   const close = (restoreFocus = false) => {
@@ -91,7 +93,9 @@ export function createIncomingPopover() {
     reposition();
     try {
       const signal = AbortSignal.any([current.signal, AbortSignal.timeout(35_000)]);
-      const response = await fetch(`/api/nomenclature/incoming?${params}`, { signal, cache: "no-store" });
+      const url = new URL(endpoint, location.origin);
+      for (const [key, value] of params) url.searchParams.set(key, value);
+      const response = await fetch(url, { signal, cache: "no-store" });
       const data = await response.json();
       if (request !== current) return;
       if (!response.ok) throw new Error(data.message || "Не удалось загрузить заказы.");
@@ -124,13 +128,14 @@ export function createIncomingPopover() {
   document.addEventListener("keydown", (event) => {
     if (anchor && event.key === "Escape") { event.preventDefault(); close(true); }
   });
-  window.addEventListener("scroll", reposition, { passive: true });
+  window.addEventListener("scroll", reposition, { capture: true, passive: true });
   window.addEventListener("resize", reposition);
   return {
-    open(button, product, event) {
+    open(button, product, event, source = "/api/nomenclature/incoming") {
       if (button === anchor) { close(true); return; }
       close();
       anchor = button;
+      endpoint = source;
       const rect = button.getBoundingClientRect();
       position = event.detail && rect.width && rect.height ? {
         x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),

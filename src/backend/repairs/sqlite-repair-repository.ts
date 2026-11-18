@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { parseRepairPaymentOptions, type GoodsReadiness, type RepairCard } from "./repair-card.ts";
-import { RepairRefreshService } from "./repair-refresh-service.ts";
+import { repairOwnerMatches, RepairRefreshService } from "./repair-refresh-service.ts";
 
 export class SqliteRepairRepository {
   readonly refreshes: RepairRefreshService;
@@ -117,6 +117,10 @@ export class SqliteRepairRepository {
       }, (result, test) => {
         for (const card of result.repairs) this.save(card);
         for (const id of result.removedDocumentIds) this.remove(id, test);
+      }, Date.now, (id, test, fio) => {
+        const table = test ? "test_repair_cards" : "repair_cards";
+        const row = this.database.prepare(`SELECT responsible_fio FROM ${table} WHERE document_id=? AND status='В работе'`).get(id);
+        return row !== undefined && repairOwnerMatches({ responsibleFio: typeof row.responsible_fio === "string" ? row.responsible_fio : undefined }, fio);
       });
       this.listStatement = this.database.prepare(`
         SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, contact_name AS contactName, contact_phone AS contactPhone, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, 0 AS testPlatform

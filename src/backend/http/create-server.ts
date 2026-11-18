@@ -288,7 +288,7 @@ export function createAggregatorServer({
     const repairFio = authenticatedUser && !authenticatedUser.isAdmin
       ? authenticatedUser.fio.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU")
       : undefined;
-    if (await serveRepairs(request, response, url, repairs, repairIntegrationSecret,
+    if (await serveRepairs(request, response, url, repairs, nomenclature, repairIntegrationSecret,
       () => reportError({ operation: "repairs", category: "internal" }), repairFio, authenticatedUser?.id)) return;
     if (await serveNomenclature(request, response, url, nomenclature, authenticatedUser,
       () => reportError({ operation: "nomenclature", category: "internal" }))) return;
