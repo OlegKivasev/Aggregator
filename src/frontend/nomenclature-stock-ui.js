@@ -1,5 +1,5 @@
 import { createNomenclatureNavigation } from "./nomenclature-navigation.js?v=panel-8";
-import { createStockTable } from "./nomenclature-stock-table.js?v=incoming-8";
+import { createStockTable } from "./nomenclature-stock-table.js?v=synonym-highlight-8";
 
 const stockDay = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Samara", year: "numeric", month: "2-digit", day: "2-digit" });
 const readPeriod = (prefix) => Object.fromEntries(["enabled", "values", "from", "to", "source"].map(

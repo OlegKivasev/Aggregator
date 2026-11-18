@@ -19,8 +19,8 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
   };
   const normalized = (value) => String(value ?? "").normalize("NFC").toLocaleLowerCase("ru-RU");
   const compact = (value) => [...normalized(value)].filter((character) => /[\p{L}\p{N}]/u.test(character)).join("");
-  const highlightRanges = (text) => {
-    if (!highlightTerms.length || !text) return [];
+  const highlightRanges = (text, terms) => {
+    if (!terms.length || !text) return [];
     const lower = normalized(text);
     const compactText = compact(text);
     const compactPositions = [];
@@ -30,7 +30,7 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
       index += character.length;
     }
     const ranges = [];
-    for (const rawTerm of highlightTerms) {
+    for (const rawTerm of terms) {
       const term = normalized(rawTerm);
       if (!term) continue;
       let from = lower.indexOf(term);
@@ -53,9 +53,10 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
     }
     return merged;
   };
-  const appendHighlighted = (cell, value) => {
+  const appendHighlighted = (cell, value, extraTerms) => {
     const text = String(value ?? "");
-    const ranges = highlightRanges(text);
+    const terms = extraTerms?.length ? [...new Set([...highlightTerms, ...extraTerms])] : highlightTerms;
+    const ranges = highlightRanges(text, terms);
     if (!ranges.length) { cell.textContent = text; return; }
     const fragment = document.createDocumentFragment();
     let offset = 0;
@@ -137,7 +138,7 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
           row.tabIndex = 0;
           row.setAttribute("aria-selected", String(selected.has(product.id)));
           row.setAttribute("aria-rowindex", String(index * 100 + position + 2));
-          const nameCell = document.createElement("td"); appendHighlighted(nameCell, product.name); row.append(nameCell);
+          const nameCell = document.createElement("td"); appendHighlighted(nameCell, product.name, product.nameMatches); row.append(nameCell);
           const articleCell = document.createElement("td"); appendHighlighted(articleCell, product.article); row.append(articleCell);
           const quantityCell = document.createElement("td"); quantityCell.textContent = numberFormat.format(product.quantity); row.append(quantityCell);
           const incoming = document.createElement("td");

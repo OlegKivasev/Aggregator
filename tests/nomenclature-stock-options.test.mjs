@@ -36,6 +36,10 @@ test("stock options use only whitelisted presence and actual UUID price types", 
   }
   assert.throws(() => parseStockResult(result(job, [], { totalCount: -1 }), true));
   assert.throws(() => parseStockResult(result(job, [], { priceTypes: [...types, ...types] }), true));
+  assert.deepEqual(parseStockResult(result(job, [{ ...item(1), nameMatches: ["granta", "granta"] }]), true).products[0].nameMatches, ["granta"]);
+  for (const nameMatches of [null, [], ["a\nb"], ["a b"], [42], ["a".repeat(101)], Array(17).fill("a")]) {
+    assert.throws(() => parseStockResult(result(job, [{ ...item(1), nameMatches }]), true), { code: "invalid_stock" });
+  }
 });
 test("availability and prices isolate jobs; old workers cannot silently consume filters", async () => {
   await fixture(async ({ service, token, claim }) => {

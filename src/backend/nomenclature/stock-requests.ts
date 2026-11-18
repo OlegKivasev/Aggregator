@@ -22,6 +22,9 @@ export const stockWorkerConditions = `AND (query='' OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.inventory') IS NULL OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.incomingDetails') IS NULL OR ?=1)`;
 
+const highlightsRequested = (query: string, options?: StockOptions | null): boolean =>
+  !!query && options?.inventory === true && options.searchMode === "text";
+
 // Only in-progress reads are shared. Every later opening/refresh reads 1C again.
 export class StockRequests {
   private readonly changes = new EventEmitter();
@@ -130,11 +133,12 @@ export class StockRequests {
       SELECT id FROM nomenclature_stock_requests WHERE expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
       ${stockWorkerConditions}
       ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now, ...stockWorkerFlags(version)) as unknown as Row | undefined;
+    const options = row?.options ? JSON.parse(row.options) as StockOptions : null;
     return row ? { kind: "stock" as const, id: row.id, leaseId: row.lease_id!,
       after: version >= 4 ? decodeStockCursor(row.cursor || null, row.query, { field: row.sort_field, direction: row.sort_direction }, row.options) : row.cursor || null,
       ...(version >= 2 ? { query: row.query } : {}),
       ...(version >= 4 ? { sortField: row.sort_field, sortDirection: row.sort_direction } : {}),
-      ...(version >= 5 ? { options: row.options ? JSON.parse(row.options) as StockOptions : null } : {}),
+      ...(version >= 5 ? { options: highlightsRequested(row.query, options) ? { ...options, highlightSynonyms: true } : options } : {}),
       limit: stockPageSize, expiresAt: new Date(row.expires_at).toISOString() } : null;
   }
   complete(data: StockResult): void {
@@ -161,7 +165,8 @@ export class StockRequests {
       ((options?.availability ?? "available") === "available" && item.quantity <= 0)
       || (options?.availability === "absent" && item.quantity > 0)
       || (options?.inventory ? item.incoming === undefined || item.quantity < 0 : item.incoming !== undefined)
-      || (options?.priceType ? item.price === undefined : item.price !== undefined))
+      || (options?.priceType ? item.price === undefined : item.price !== undefined)
+      || (item.nameMatches !== undefined && !highlightsRequested(row.query, options)))
       || options && !after && (data.totalCount === undefined || data.priceTypes === undefined
         || (data.hasMore ? data.totalCount <= data.products.length : data.totalCount !== data.products.length))
       || options && after && (data.totalCount !== undefined || data.priceTypes !== undefined))) {

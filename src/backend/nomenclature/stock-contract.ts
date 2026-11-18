@@ -6,7 +6,7 @@ export const stockPageSize = 100;
 export interface StockPrice { amount: number; currency: string; unit?: string }
 export interface StockPriceType { id: string; name: string }
 export interface StockIncoming { original: number; replacement: number }
-export interface StockProduct { id: string; name: string; article: string; quantity: number; incoming?: StockIncoming; price?: StockPrice | null }
+export interface StockProduct { id: string; name: string; article: string; quantity: number; incoming?: StockIncoming; price?: StockPrice | null; nameMatches?: string[] }
 export interface StockPage { products: StockProduct[]; hasMore: boolean; nextCursor: string | null; receivedAt: string; totalCount?: number; priceTypes?: StockPriceType[]; navigation?: StockNavigation; incomingDetails?: IncomingDetails }
 export interface StockResult {
   requestId: string; leaseId: string; status: "completed" | "error";
@@ -43,7 +43,7 @@ export function parseStockResult(value: unknown, signed = false): StockResult {
   }
   const identities = new Set<string>();
   const products = data.products.map((value): StockProduct => {
-    const item = objectFields(value, ["id", "name", "article", "quantity", "incoming", "price"]);
+    const item = objectFields(value, ["id", "name", "article", "quantity", "incoming", "price", "nameMatches"]);
     const id = parseUuid(item.id);
     if (identities.has(id) || typeof item.name !== "string" || !item.name.trim() || item.name.length > 500
       || typeof item.article !== "string" || item.article.length > 50
@@ -68,7 +68,18 @@ export function parseStockResult(value: unknown, signed = false): StockResult {
       if (!valid(original) || !valid(replacement)) throw new NomenclatureError(400, "invalid_stock", "Некорректное количество к поступлению.");
       incoming = { original, replacement };
     }
+    let nameMatches: string[] | undefined;
+    if (item.nameMatches !== undefined) {
+      const matches = item.nameMatches;
+      if (!Array.isArray(matches) || matches.length === 0 || matches.length > 16
+        || matches.some((term) => typeof term !== "string" || !term.length || /[\u0000-\u0020\u007f-\u009f]/u.test(term))
+        || matches.join("").length > 100) {
+        throw new NomenclatureError(400, "invalid_stock", "Некорректные совпадения в наименовании.");
+      }
+      nameMatches = [...new Set(matches)];
+    }
     return { id, name: item.name.trim(), article: item.article.trim(), quantity: item.quantity,
+      ...(nameMatches === undefined ? {} : { nameMatches }),
       ...(incoming === undefined ? {} : { incoming }), ...(price === undefined ? {} : { price }) };
   });
   if (data.totalCount !== undefined && (!Number.isSafeInteger(data.totalCount) || Number(data.totalCount) < products.length || Number(data.totalCount) > 1e9)) {

@@ -61,6 +61,11 @@ assert.match(synonyms, /СтрДлина\(СловоПоиска\) > 2[\s\S]*?А
 const form = readFileSync(join(root, "Catalogs/Номенклатура/Forms/ФормаСписка/Ext/Form/Module.bsl"), "utf8");
 assert.equal((form.match(/АС_СинонимыПоискаСервер\.ДополнитьПоискСинонимами\(/g) ?? []).length, 2);
 assert.match(synonyms, /УжеНайденные\.Получить\(Выборка\.Номенклатура\)[^\r\n]+Продолжить/);
+assert.match(stock, /Свойство\("highlightSynonyms", ЗапрошенаПодсветка\)/);
+assert.match(stock, /Товары\.Количество\(\) = 100 Тогда ЕстьЕще = Истина; Прервать; КонецЕсли;[\s\S]*?СловаСинонимовДляПодсветки\(Товар\.name, Синонимы\.Варианты, ИсходныеСлова\)[\s\S]*?Товар\.Вставить\("nameMatches", СловаПодсветки\)/);
+const nameMatches = synonyms.slice(synonyms.indexOf("Функция СловаСинонимовДляПодсветки("), synonyms.indexOf("Функция НормализоватьСтроку("));
+assert.match(nameMatches, /Экспорт[\s\S]*?АС_СтрокаСодержитВсеСлова\(Имя, НормализованноеИмя, СловаПоиска\)[\s\S]*?ИсходныеСлова\.Получить\(Слово\)/);
+assert.doesNotMatch(nameMatches, /Новый Запрос|Выполнить\(/);
 
 // Model the candidate transfer over a local SQL fixture. The native 1C
 // collation, query plans and runtime are outside this measurement.

@@ -568,6 +568,26 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await page.locator("#nomenclature-group-query").fill("");
     assert.equal(await page.locator(`[data-navigation-id="${groupChild}"]`).isVisible(), true, "the selected folder remains expanded after clearing the tree search");
     assert.equal(reads.length, beforeClearTreeSearch);
+    await input.fill("Гранта"); await input.press("Enter");
+    const synonymSearch = await poll(20);
+    assert.equal(synonymSearch.query, "гранта");
+    assert.equal(synonymSearch.options.highlightSynonyms, true);
+    const synonymRows = [
+      { ...prices[0], id: randomUUID(), name: "Опора Lada Granta", article: "GRANTA-123", nameMatches: ["granta"] },
+      { ...prices[0], id: randomUUID(), name: "Кронштейн Гранта / Granta", nameMatches: ["granta"] },
+      { ...prices[0], id: randomUUID(), name: "Гранта", article: "00001" },
+    ];
+    assert.equal((await complete(synonymSearch, synonymRows)).status, 200);
+    const synonymName = page.locator(`[data-product-id="${synonymRows[0].id}"] td`).first();
+    await synonymName.locator("strong").waitFor();
+    assert.equal(await synonymName.textContent(), "Опора Lada Granta");
+    assert.equal(await synonymName.locator("strong").textContent(), "Granta");
+    assert.equal(await synonymName.locator("strong").evaluate((element) => getComputedStyle(element).color), "rgb(25, 135, 84)");
+    assert.equal(await page.locator(`[data-product-id="${synonymRows[0].id}"] td:nth-child(2) strong`).count(), 0);
+    assert.deepEqual(await page.locator(`[data-product-id="${synonymRows[1].id}"] td:first-child strong`).allTextContents(), ["Гранта", "Granta"]);
+    assert.equal(await page.locator(`[data-product-id="${synonymRows[2].id}"] td:first-child strong`).textContent(), "Гранта");
+    assert.equal(reads.length, beforeClearTreeSearch + 1, "synonym highlighting rides in the original stock response");
+
     await input.fill("L30914-248"); await input.press("Enter");
     const article = await poll(20);
     const exactArticle = { ...prices[0], name: "Фильтр", article: "L309-14-248" };
@@ -586,6 +606,8 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
     await input.fill("90915-YZZJ1"); await input.press("Enter");
     const oemNumber = await poll(20); assert.equal(oemNumber.query, "90915-yzzj1"); assert.equal(oemNumber.options.oemBrand, oemBrand);
+    assert.equal(oemNumber.options.highlightSynonyms, undefined);
+    assert.equal((await complete(oemNumber, [{ ...prices[0], nameMatches: ["granta"] }])).status, 400);
     assert.equal((await complete(oemNumber, prices)).status, 200);
     await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
     for (const width of [320, 390, 1280]) {
