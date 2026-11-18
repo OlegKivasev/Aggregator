@@ -1,6 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { parseRepairCard, parseRepairRemoval, RepairValidationError } from "../repairs/repair-card.ts";
+import { repairDetailsForUser, repairProductForUser } from "../repairs/repair-details.ts";
+import type { AuthenticatedUser } from "../auth/user-auth-service.ts";
 import type { SqliteRepairRepository } from "../repairs/sqlite-repair-repository.ts";
 import { RepairRefreshError, refreshFailure } from "../repairs/repair-refresh-service.ts";
 import { parseIncomingRequest } from "../nomenclature/incoming-contract.ts";
@@ -20,6 +22,7 @@ export async function serveRepairs(
   reportError: () => void,
   responsibleFio?: string,
   ownerId = "shared",
+  readCurrentUser?: () => AuthenticatedUser | null,
 ): Promise<boolean> {
   const importCard = url.pathname === "/api/integration/1c/repairs";
   const checkStatus = url.pathname === "/api/integration/1c/repairs/status";
@@ -81,6 +84,16 @@ export async function serveRepairs(
       return true;
     }
   }
+  // 1C may answer after an administrator has changed this user's position or access.
+  const currentVisibility = () => {
+    if (!readCurrentUser) return undefined;
+    const user = readCurrentUser();
+    if (!user || user.id !== ownerId || (!user.isAdmin && (
+      !user.permissions.includes(testPlatformFilter ? "testRepairs" : "repairs")
+      || user.fio.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU") !== responsibleFio
+    ))) throw new RepairRefreshError(403, "Доступ к заказ-наряду изменился.");
+    return user.repairVisibility;
+  };
   try {
     if (workerRequests) {
       if ([...url.searchParams.keys()].some((key) => !["testPlatform", "waitSeconds"].includes(key))
@@ -111,7 +124,11 @@ export async function serveRepairs(
       if (!refresh.details?.goods.some((row) => row.productId === incoming.productId && row[incoming.side] > 0)) {
         throw new RepairRefreshError(404, "Поставки недоступны. Откройте заказ-наряд заново.");
       }
-      await serveIncoming(response, nomenclature, incoming);
+      await serveIncoming(response, nomenclature, incoming, (details) => {
+        const visibility = currentVisibility();
+        if (!visibility || (!visibility.hideArticle && !visibility.hideBrand)) return details;
+        return { ...details, orders: details.orders.map((row) => repairProductForUser(row, visibility)) };
+      });
     } else if (refreshRoute) {
       if (!secret) throw new RepairRefreshError(503);
       const id = refreshRoute[1];
@@ -128,7 +145,9 @@ export async function serveRepairs(
         response.once("close", stop);
         try {
           const refresh = await repository.refreshes.getWhenReady(id, testPlatformFilter!, ownerId, responsibleFio, abort.signal, resultWaitSeconds * 1000);
-          if (!response.destroyed) serveJson(response, 200, { refresh });
+          if (!response.destroyed) serveJson(response, 200, { refresh: refresh.details
+            ? { ...refresh, details: repairDetailsForUser(refresh.details, currentVisibility()) }
+            : refresh });
         } finally { response.removeListener("close", stop); }
       }
     } else if (deleteCard) {

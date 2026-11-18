@@ -32,7 +32,7 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
         return route.fulfill({ contentType: "text/css", body: await readFile(process.env.REPAIRS_BOOTSTRAP_CSS_PATH) });
       }
       if (url.origin !== origin) return route.abort();
-      if (!url.pathname.startsWith("/api/") || /^\/api\/(?:auth\/|users$|repairs)/.test(url.pathname)) return route.continue();
+      if (!url.pathname.startsWith("/api/") || /^\/api\/(?:auth\/|users(?:$|\/positions$)|repairs)/.test(url.pathname)) return route.continue();
       const responses = {
         "/api/suppliers/sessions": { sessions: [] },
         "/api/applicability/api-key": { configured: false, persistent: false, maskedKey: null },
@@ -87,6 +87,20 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
       await page.screenshot({ path: join(process.env.USER_SETTINGS_SCREENSHOT_DIR, "settings-overview-mobile.png"), fullPage: true });
     }
     await page.locator("#users-settings > summary").click();
+    const positions = page.locator("#user-positions-dialog");
+    await page.locator("#user-positions-open").click();
+    await positions.getByRole("button", { name: "Новая должность" }).click();
+    assert.equal(await positions.evaluate((element) => element.scrollWidth <= element.clientWidth), true);
+    await positions.getByRole("textbox", { name: "Название" }).fill("Механик");
+    await positions.getByRole("checkbox", { name: "Скрывать артикул" }).check();
+    await positions.getByRole("checkbox", { name: "Скрывать бренд" }).check();
+    await positions.getByRole("button", { name: "Сохранить" }).click();
+    await positions.getByText("Артикул скрыт · Бренд скрыт").waitFor();
+    await positions.getByRole("button", { name: "Изменить должность Механик" }).click();
+    await positions.getByRole("textbox", { name: "Название" }).fill("Мастер цеха");
+    await positions.getByRole("button", { name: "Сохранить" }).click();
+    await positions.getByText("Мастер цеха", { exact: true }).waitFor();
+    await positions.getByRole("button", { name: "Закрыть должности" }).click();
     const createRequests = [];
     page.on("request", (request) => {
       if (new URL(request.url()).pathname === "/api/users" && request.method() === "POST") createRequests.push(request);
@@ -104,6 +118,7 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
     await createOpen.click();
     assert.equal(await create.locator("#user-fio").inputValue(), "");
     assert.equal(await create.locator("#user-password").inputValue(), "");
+    assert.equal(await create.locator("#user-position").inputValue(), "");
     assert.equal(await create.locator("input[type=checkbox]:checked").count(), 0);
     await create.locator("#user-fio").fill("Пробное имя");
     assert.equal(await createDialog.evaluate((element) => element.scrollWidth <= element.clientWidth), true);
@@ -133,6 +148,7 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
     await create.locator(".password-toggle").click();
     assert.equal(await create.locator("#user-password").getAttribute("type"), "password");
     await create.locator('input[value="repairs"]').check();
+    await create.locator("#user-position").selectOption({ label: "Мастер цеха" });
     if (process.env.USER_SETTINGS_SCREENSHOT_DIR) {
       await page.screenshot({ path: join(process.env.USER_SETTINGS_SCREENSHOT_DIR, "user-create-desktop.png"), fullPage: true });
     }
@@ -142,10 +158,13 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
     assert.equal(createRequests.length, 2);
     assert.equal(await userRow("Отменённый").count(), 0);
     const employee = userRow("Иванов");
+    assert.equal(await employee.locator("summary").getByText("Мастер цеха", { exact: true }).isVisible(), true);
     assert.equal(await employee.getAttribute("open"), null);
     assert.equal(await employee.locator("form").isVisible(), false);
     await employee.locator("summary").click();
     const fioField = employee.locator('[name="fio"]');
+    const positionField = employee.locator('[name="positionId"]');
+    assert.equal(await positionField.locator("option:checked").textContent(), "Мастер цеха");
     const passwordField = employee.locator('[name="password"]');
     const eye = employee.locator(".password-toggle");
     assert.equal(await passwordField.inputValue(), "");

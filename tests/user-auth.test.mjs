@@ -93,6 +93,40 @@ test("default administrator creates a restricted user and repair cards are filte
   });
 });
 
+test("positions stay optional and administrators can manage and assign them without changing access permissions", async () => {
+  await withServer(async (baseUrl) => {
+    const admin = await login(baseUrl, "Администратор", "admin-password-123");
+    const request = (path, method = "GET", data, cookie = admin) => fetch(`${baseUrl}${path}`, {
+      method, headers: { Cookie: cookie, "Content-Type": "application/json" }, ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+    });
+    const path = "/api/users/positions";
+    const input = { name: "Механик", hideArticle: true, hideBrand: false };
+    const create = await request(path, "POST", input);
+    assert.equal(create.status, 201);
+    const { position } = await create.json();
+    assert.equal((await request(path, "POST", { ...input, name: "  МЕХАНИК " })).status, 409);
+    const credentials = { fio: "Механик смены", password: "staff-password-123", permissions: ["repairs"] };
+    const created = await request("/api/users", "POST", { ...credentials, positionId: position.id });
+    assert.equal(created.status, 201);
+    const { user } = await created.json();
+    const staff = await login(baseUrl, credentials.fio, credentials.password);
+    assert.equal((await request(path, "GET", undefined, staff)).status, 403);
+    assert.equal((await request(path, "PATCH", { ...position, hideBrand: true }, staff)).status, 403);
+    assert.equal((await request(path, "DELETE", { id: position.id })).status, 409);
+    assert.equal((await request(path, "PATCH", { ...position, hideBrand: true })).status, 200);
+    const session = async () => (await (await request("/api/auth/session", "GET", undefined, staff)).json()).user;
+    assert.deepEqual((await session()).repairVisibility, { hideArticle: true, hideBrand: true });
+    assert.deepEqual((await session()).permissions, ["repairs"]);
+    const editUser = { id: user.id, fio: user.fio, permissions: user.permissions };
+    assert.equal((await request("/api/users", "PATCH", editUser)).status, 200);
+    assert.equal((await session()).positionId, position.id);
+    assert.equal((await request("/api/users", "PATCH", { ...editUser, positionId: null })).status, 200);
+    assert.equal((await session()).positionId, undefined);
+    assert.equal((await session()).repairVisibility, undefined);
+    assert.equal((await request(path, "DELETE", { id: position.id })).status, 204);
+  });
+});
+
 test("serves the login page before authentication while protecting API routes", async () => {
   await withServer(async (baseUrl) => {
     const page = await fetch(`${baseUrl}/`);

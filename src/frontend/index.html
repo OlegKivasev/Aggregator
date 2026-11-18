@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=nomenclature-incoming-8" />
+    <link rel="stylesheet" href="/styles.css?v=user-positions-1" />
     <link rel="stylesheet" href="/order-notifications.css" />
     <link rel="stylesheet" href="/repair-order.css?v=repair-order-4" />
   </head>
@@ -608,7 +608,10 @@
           <summary class="suppliers-panel__summary">Пользователи</summary>
           <div class="users-settings__content">
             <p class="settings-drawer__hint">Создавайте учетные записи и выбирайте разделы, доступные каждому сотруднику. Заказ-наряды сотрудник увидит только по своему ФИО в поле «Ответственный».</p>
-            <button class="btn btn-primary users-settings__create" id="user-create-open" type="button" aria-haspopup="dialog" aria-controls="user-create-dialog">Создать пользователя</button>
+            <div class="users-settings__actions">
+              <button class="btn btn-primary users-settings__create" id="user-create-open" type="button" aria-haspopup="dialog" aria-controls="user-create-dialog">Создать пользователя</button>
+              <button class="btn btn-light" id="user-positions-open" type="button" aria-haspopup="dialog" aria-controls="user-positions-dialog">Должности</button>
+            </div>
             <p class="auth-feedback" id="users-feedback" role="status" aria-live="polite"></p>
             <div class="users-list" id="users-list"></div>
           </div>
@@ -986,6 +989,7 @@
       <form id="user-create-form" class="auth-form">
         <label class="field" for="user-fio"><span>ФИО</span><input id="user-fio" type="text" autocomplete="off" maxlength="256" required autofocus></label>
         <label class="field" for="user-password"><span>Пароль</span><span class="password-field"><input id="user-password" type="password" autocomplete="new-password" minlength="3" maxlength="4096" required><button class="password-toggle" type="button" aria-label="Показать пароль" aria-controls="user-password"><span aria-hidden="true">&#128065;</span></button></span></label>
+        <label class="field" for="user-position"><span>Должность</span><select id="user-position" data-user-position><option value="">Без должности</option></select></label>
         <fieldset class="supplier-options__list" id="user-permissions">
           <legend>Доступные формы</legend>
           <label><input type="checkbox" value="markup"><span>Проценка</span></label>
@@ -1000,6 +1004,32 @@
           <button class="btn btn-primary" id="user-create-submit" type="submit">Создать</button>
         </footer>
       </form>
+    </dialog>
+
+    <dialog class="user-create-dialog" id="user-positions-dialog" aria-labelledby="user-positions-title">
+      <header class="user-create-dialog__header">
+        <h2 id="user-positions-title">Должности</h2>
+        <button class="btn btn-light settings-close" type="button" id="user-positions-close" aria-label="Закрыть должности">×</button>
+      </header>
+      <div id="user-positions-directory" class="user-positions-directory">
+        <button class="btn btn-primary users-settings__create" id="user-positions-add" type="button">Новая должность</button>
+        <ul id="user-positions-list" class="user-positions-list"></ul>
+        <p id="user-positions-empty" class="settings-drawer__hint" hidden>Должностей пока нет.</p>
+      </div>
+      <form id="user-positions-form" class="auth-form" hidden>
+        <label class="field"><span>Название</span><input name="name" type="text" maxlength="100" autocomplete="off" required></label>
+        <fieldset class="supplier-options__list">
+          <legend>Товары в заказ-нарядах</legend>
+          <label><input name="hideArticle" type="checkbox"><span>Скрывать артикул</span></label>
+          <label><input name="hideBrand" type="checkbox"><span>Скрывать бренд</span></label>
+        </fieldset>
+        <div class="auth-actions user-create-dialog__actions">
+          <button class="btn btn-light user-positions-delete" id="user-positions-delete" type="button" hidden>Удалить</button>
+          <button class="btn btn-light" id="user-positions-back" type="button">Назад</button>
+          <button class="btn btn-primary" type="submit">Сохранить</button>
+        </div>
+      </form>
+      <p class="auth-feedback" id="user-positions-feedback" role="status" aria-live="polite"></p>
     </dialog>
 
     <div class="result-context-menu card border-0 shadow" id="result-context-menu" role="menu" hidden>
@@ -1348,9 +1378,9 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
       </div>
     </aside>
 
-    <script type="module" src="/auth-ui.js"></script>
+    <script type="module" src="/auth-ui.js?v=user-positions-1"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=repair-order-4"></script>
+    <script type="module" src="/applicability.js?v=repair-order-5"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>

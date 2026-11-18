@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, RequestBodyError } from "../http/request-body.ts";
 import { serveJson } from "../http/responses.ts";
+import { parsePositionId, UserPositionStore, type RepairVisibility } from "./user-position-store.ts";
 
 export const userPermissions = ["markup", "applicability", "repairs", "testRepairs", "nomenclature"] as const;
 export type UserPermission = typeof userPermissions[number];
@@ -14,11 +15,14 @@ export interface AuthenticatedUser {
   fio: string;
   isAdmin: boolean;
   permissions: UserPermission[];
+  positionId?: string;
+  repairVisibility?: RepairVisibility;
 }
 export interface UserInput {
   fio: string;
   password?: string;
   permissions: UserPermission[];
+  positionId?: string | null;
 }
 
 interface StoredUser extends AuthenticatedUser {
@@ -112,23 +116,33 @@ function storedUser(row: Record<string, unknown>): StoredUser {
   }
   let permissions: unknown;
   try { permissions = JSON.parse(row.permissions); } catch { throw new Error("Invalid stored user permissions"); }
+  if (row.position_id !== null && (typeof row.position_id !== "string"
+    || (row.hide_article !== 0 && row.hide_article !== 1) || (row.hide_brand !== 0 && row.hide_brand !== 1))) {
+    throw new Error("Invalid stored user position");
+  }
   return {
     id: row.id,
     fio: row.fio,
     isAdmin: row.is_admin === 1,
     permissions: parsePermissions(permissions),
+    ...(typeof row.position_id === "string" ? {
+      positionId: row.position_id,
+      repairVisibility: { hideArticle: row.hide_article === 1, hideBrand: row.hide_brand === 1 },
+    } : {}),
     passwordHash: row.password_hash,
     passwordSalt: row.password_salt,
   };
 }
 
 function publicUser(user: StoredUser): AuthenticatedUser {
-  return { id: user.id, fio: user.fio, isAdmin: user.isAdmin, permissions: user.permissions };
+  const { passwordHash, passwordSalt, ...visible } = user;
+  return visible;
 }
 
 export class UserAuthService {
   readonly enabled: boolean;
   private readonly database: DatabaseSync;
+  private readonly positions: UserPositionStore;
   private readonly findByIdStatement: StatementSync;
   private readonly findByFioStatement: StatementSync;
   private readonly listStatement: StatementSync;
@@ -166,11 +180,15 @@ export class UserAuthService {
         position INTEGER NOT NULL CHECK (position >= 0)
       ) STRICT;
     `);
-    this.findByIdStatement = this.database.prepare("SELECT id, fio, password_hash, password_salt, is_admin, permissions FROM aggregator_users WHERE id = ?");
-    this.findByFioStatement = this.database.prepare("SELECT id, fio, password_hash, password_salt, is_admin, permissions FROM aggregator_users WHERE fio_key = ?");
-    this.listStatement = this.database.prepare(`SELECT id, fio, password_hash, password_salt, is_admin, permissions
-      FROM aggregator_users LEFT JOIN aggregator_user_order ON user_id = id
-      ORDER BY position IS NULL, position, is_admin DESC, fio_key ASC`);
+    this.positions = new UserPositionStore(this.database);
+    const selectUser = `SELECT u.id, u.fio, u.password_hash, u.password_salt, u.is_admin, u.permissions,
+      u.position_id, p.hide_article, p.hide_brand
+      FROM aggregator_users u LEFT JOIN aggregator_user_positions p ON p.id = u.position_id`;
+    this.findByIdStatement = this.database.prepare(`${selectUser} WHERE u.id = ?`);
+    this.findByFioStatement = this.database.prepare(`${selectUser} WHERE u.fio_key = ?`);
+    this.listStatement = this.database.prepare(`${selectUser}
+      LEFT JOIN aggregator_user_order o ON o.user_id = u.id
+      ORDER BY o.position IS NULL, o.position, u.is_admin DESC, u.fio_key ASC`);
     this.findSessionStatement = this.database.prepare("SELECT user_id, expires_at FROM aggregator_sessions WHERE token_hash = ?");
     this.createSessionStatement = this.database.prepare("INSERT INTO aggregator_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)");
     this.deleteSessionStatement = this.database.prepare("DELETE FROM aggregator_sessions WHERE token_hash = ?");
@@ -230,7 +248,10 @@ export class UserAuthService {
   }
 
   async serve(request: IncomingMessage, response: ServerResponse, url: URL): Promise<boolean> {
-    if (url.pathname.startsWith("/api/auth") || url.pathname === "/api/users" || url.pathname === "/api/users/order") response.setHeader("Cache-Control", "no-store");
+    const positionsRoute = url.pathname === "/api/users/positions";
+    if (url.pathname.startsWith("/api/auth") || url.pathname === "/api/users" || url.pathname === "/api/users/order" || positionsRoute) {
+      response.setHeader("Cache-Control", "no-store");
+    }
     if (url.pathname === "/api/auth/users" && request.method === "GET") {
       serveJson(response, 200, { users: this.listUsers().filter((user) => !user.isAdmin).map(({ fio }) => ({ fio })) });
       return true;
@@ -269,6 +290,27 @@ export class UserAuthService {
       serveJson(response, 200, { ok: true });
       return true;
     }
+    if (positionsRoute) {
+      if (!this.requireAdmin(request, response)) return true;
+      try {
+        if (request.method === "POST" || request.method === "PATCH") {
+          const create = request.method === "POST";
+          serveJson(response, create ? 201 : 200, { position: this.positions.save(await readJsonBody(request, 16 * 1024), create) });
+        } else if (request.method === "DELETE") {
+          this.positions.delete(await readJsonBody(request, 16 * 1024));
+          serveJson(response, 204, null);
+        } else if (request.method === "GET") {
+          serveJson(response, 200, { positions: this.positions.list() });
+        } else {
+          response.setHeader("Allow", "GET, POST, PATCH, DELETE");
+          serveJson(response, 405, { message: "Method not allowed" });
+        }
+      } catch (error) {
+        serveJson(response, error instanceof RequestBodyError ? error.statusCode : 500,
+          { message: error instanceof RequestBodyError ? error.message : "Не удалось сохранить должность." });
+      }
+      return true;
+    }
     if (url.pathname === "/api/users" || url.pathname === "/api/users/order") {
       const user = this.requireAdmin(request, response);
       if (!user) return true;
@@ -282,7 +324,7 @@ export class UserAuthService {
             serveJson(response, 200, { ok: true });
           }
         } else if (request.method === "GET") {
-          serveJson(response, 200, { users: this.listUsers() });
+          serveJson(response, 200, { users: this.listUsers(), positions: this.positions.list() });
         } else if (request.method === "POST") {
           const payload = await readJsonBody(request);
           const input = this.parseUserInput(payload, true);
@@ -322,7 +364,10 @@ export class UserAuthService {
   private parseUserInput(payload: unknown, passwordRequired: boolean): UserInput {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new RequestBodyError(400, "User object is required");
     const value = payload as Record<string, unknown>;
-    return { fio: validateFio(value.fio), password: validatePassword(value.password, passwordRequired), permissions: parsePermissions(value.permissions) };
+    return {
+      fio: validateFio(value.fio), password: validatePassword(value.password, passwordRequired), permissions: parsePermissions(value.permissions),
+      positionId: value.positionId == null ? value.positionId : parsePositionId(value.positionId),
+    };
   }
 
   private listUsers(): AuthenticatedUser[] {
@@ -355,11 +400,12 @@ export class UserAuthService {
   private createUser(input: UserInput): AuthenticatedUser {
     if (!input.password) throw new RequestBodyError(400, "password is required");
     if (this.findByFioStatement.get(fioKey(input.fio))) throw new Error("User with this FIO already exists");
+    if (input.positionId) this.positions.requireExisting(input.positionId);
     const { hash, salt } = hashPassword(input.password);
     const id = randomBytes(16).toString("hex");
-    this.database.prepare("INSERT INTO aggregator_users (id, fio, fio_key, password_hash, password_salt, is_admin, permissions, created_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)")
-      .run(id, input.fio, fioKey(input.fio), hash, salt, JSON.stringify(input.permissions), new Date().toISOString());
-    return { id, fio: input.fio, isAdmin: false, permissions: input.permissions };
+    this.database.prepare("INSERT INTO aggregator_users (id, fio, fio_key, password_hash, password_salt, is_admin, permissions, created_at, position_id) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)")
+      .run(id, input.fio, fioKey(input.fio), hash, salt, JSON.stringify(input.permissions), new Date().toISOString(), input.positionId ?? null);
+    return publicUser(storedUser(this.findByIdStatement.get(id)!));
   }
 
   private updateUser(id: string, input: UserInput): AuthenticatedUser {
@@ -368,10 +414,12 @@ export class UserAuthService {
     const existing = storedUser(row);
     const duplicate = this.findByFioStatement.get(fioKey(input.fio)) as Record<string, unknown> | undefined;
     if (duplicate && duplicate.id !== id) throw new Error("User with this FIO already exists");
+    if (input.positionId) this.positions.requireExisting(input.positionId);
     const credentials = input.password ? hashPassword(input.password) : { hash: existing.passwordHash, salt: existing.passwordSalt };
-    this.database.prepare("UPDATE aggregator_users SET fio = ?, fio_key = ?, password_hash = ?, password_salt = ?, permissions = ? WHERE id = ?")
-      .run(input.fio, fioKey(input.fio), credentials.hash, credentials.salt, JSON.stringify(input.permissions), id);
-    return { id, fio: input.fio, isAdmin: existing.isAdmin, permissions: input.permissions };
+    this.database.prepare(`UPDATE aggregator_users SET fio = ?, fio_key = ?, password_hash = ?, password_salt = ?, permissions = ?,
+      position_id = CASE WHEN ? THEN ? ELSE position_id END WHERE id = ?`)
+      .run(input.fio, fioKey(input.fio), credentials.hash, credentials.salt, JSON.stringify(input.permissions), Number(input.positionId !== undefined), input.positionId ?? null, id);
+    return publicUser(storedUser(this.findByIdStatement.get(id)!));
   }
 
   private deleteUser(id: string, currentUserId: string): void {

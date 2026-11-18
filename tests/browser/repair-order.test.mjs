@@ -27,7 +27,7 @@ const details = {
     original: 0, replacement: 0, returnDays: null, discountAmount: 0, discountPercent: 0, price: 341, total: 682 }],
   work: [{ name: "Замена ремня ГРМ", performer: "Тестовый механик", price: 1400, hours: 1.5, multiplier: 1, total: 2100, seller: "Тестовый продавец" }],
 };
-const awaitingPart = { ...details.goods[1], name: "Подшипник под заказ", productId: randomUUID(), stock: 0, awaitingDelivery: true };
+const awaitingPart = { ...details.goods[1], name: "Подшипник под заказ", productId: randomUUID(), stock: 0, original: 2, awaitingDelivery: true };
 const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
 
 test("employee opens a single fresh repair order and its allowed supplier orders on desktop and mobile", async () => {
@@ -88,11 +88,14 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     assert.equal(await readiness.getByText("Возврат · 5 дн.").isVisible(), true);
     const trigger = page.getByRole("button", { name: /Открыть заказ-наряд НФНФ-002327/ });
     const dialog = page.getByRole("dialog", { name: "Заказ-наряд 2327 от 16.11.2026" });
-    const open = async (value, currentCard) => {
+    const open = async (value, currentCard, beforeReply) => {
+      const waiting = beforeReply ? page.waitForRequest((request) => request.method() === "GET"
+        && request.url().includes("/api/repairs/refresh/") && request.url().includes("waitSeconds=")) : null;
       await trigger.click();
       const job = await claim("repair", 5);
       assert.deepEqual(job.documentIds, [card.documentId]);
       assert.equal(job.includeDetails, true);
+      if (waiting) { await waiting; await beforeReply(); }
       const reply = { requestId: job.id, leaseId: job.leaseId, testPlatform: false, status: "success", repairs: [currentCard], removedDocumentIds: [], details: value };
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const response = await post("/api/integration/1c/repairs/refresh/results", reply, workerHeader);
@@ -102,7 +105,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       return job.id;
     };
     const requestId = await open({ ...details,
-      goods: [...details.goods, awaitingPart, { ...awaitingPart, name: "Нет на складе", productId: randomUUID(), awaitingDelivery: false },
+      goods: [...details.goods, awaitingPart, { ...awaitingPart, name: "Нет на складе", productId: randomUUID(), original: 0, awaitingDelivery: false },
         ...[4, 3, 2, 1, 0, -3, 6].map((returnDays) => ({ ...details.goods[1], returnDays, awaitingDelivery: returnDays === 2 }))],
       work: [...details.work, { ...details.work[0], name: "Замена фильтра", hours: 1, multiplier: 2 }],
     }, { ...card, urgentReturnDays: 0 });
@@ -138,6 +141,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     }));
     assert.equal(await goodsTable.locator(".repair-order-awaiting-delivery").count(), 2);
     assert.equal((await waitStyles(waitingRow)).color, "rgb(187, 137, 9)");
+    assert.equal(await waitingRow.getByRole("button", { name: "Поставки оригинала, 2" }).isVisible(), true);
     assert.equal(await waitingRow.getByRole("rowheader").getAttribute("title"), "Ожидает поставки по заказ-наряду");
     assert.doesNotMatch(await goodsTable.getByRole("row", { name: /Нет на складе/ }).getAttribute("class") ?? "", /awaiting-delivery/);
     assert.doesNotMatch(await goodsTable.getByRole("row", { name: /Комплект ГРМ/ }).getAttribute("class") ?? "", /awaiting-delivery/);
@@ -160,7 +164,8 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       const width = 1440;
       const scroll = await dialog.locator(".repair-order-scroll").evaluate((node) => ({ outer: node.clientWidth, content: node.scrollWidth }));
       assert.ok(scroll.content <= scroll.outer, `Видимая ширина ${scroll.outer}px, содержимое ${scroll.content}px при окне ${width}px`);
-      await dialog.getByRole("button", { name: side === "original" ? /Поставки оригинала/ : /Поставки замен/ }).click();
+      await goodsTable.getByRole("row", { name: /Комплект ГРМ/ })
+        .getByRole("button", { name: side === "original" ? /Поставки оригинала/ : /Поставки замен/ }).click();
       const job = await claim("stock", 5);
       assert.deepEqual(job.options.incomingDetails, { productId: stock.productId, side });
       assert.equal((await post("/api/integration/1c/nomenclature/stock-results", {
@@ -203,7 +208,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     assert.equal(await dialog.isVisible(), false);
     await open({ ...details, contract: "", vin: "", mileage: 0, keySlot: 0, cashPayment: false, total: 9200, discountAmount: 0, discountPercent: 0, work: [],
       goods: [...details.goods.map((row) => ({ ...row, original: 0, replacement: 0, returnDays: null, discountAmount: 0, discountPercent: 0 })),
-        { ...awaitingPart, stock: 2, awaitingDelivery: false }] },
+        { ...awaitingPart, stock: 2, original: 0, awaitingDelivery: false }] },
     { ...card, amountDue: 6500, contactPhone: undefined });
     const fields = dialog.locator(".repair-order-details, .repair-order-footer");
     for (const label of ["Договор", "VIN", "Пробег", "Телефон контрагента", "Ячейка для ключей", "К поступлению", "Возврат, дн.", "Скидка", "Ручная скидка"]) {
@@ -251,6 +256,56 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     await page.waitForLoadState("networkidle");
     assert.equal(await readiness.getByText("В наличии 1 из 2 позиций").isVisible(), true);
     assert.equal(await readiness.locator(".repairs-urgent-return").count(), 0);
+
+    const createPosition = await post("/api/users/positions", { name: "Механик", hideArticle: true, hideBrand: true }, { Cookie: admin });
+    assert.equal(createPosition.status, 201);
+    const { position } = await createPosition.json();
+    const userList = await (await fetch(`${origin}/api/users`, { headers: { Cookie: admin } })).json();
+    const employee = userList.users.find((user) => user.fio === card.responsibleFio);
+    const adminEdit = (path, data) => fetch(`${origin}${path}`, {
+      method: "PATCH", headers: { Cookie: admin, "Content-Type": "application/json" }, body: JSON.stringify(data),
+    });
+    const assign = (positionId) => adminEdit("/api/users", { id: employee.id, fio: employee.fio, permissions: employee.permissions, positionId });
+    const branded = { ...stock, name: "Комплект ГРМ | Закрытый бренд | Серия", article: "PRIVATE-ARTICLE" };
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const restrictedId = await open({ ...details, goods: [branded] }, card, async () => {
+      assert.equal((await assign(position.id)).status, 200);
+    });
+    const rawSnapshot = async () => (await (await page.request.get(`${origin}/api/repairs/refresh/${restrictedId}?testPlatform=false`)).json()).refresh.details;
+    const restricted = await rawSnapshot();
+    assert.equal(restricted.hideArticles, true);
+    assert.equal(restricted.goods[0].name, "Комплект ГРМ");
+    assert.equal(restricted.goods[0].article, "");
+    assert.equal(await goodsTable.getByRole("columnheader", { name: "Артикул" }).count(), 0);
+    assert.equal(await goodsTable.getByRole("rowheader", { name: "Комплект ГРМ", exact: true }).isVisible(), true);
+
+    const receipt = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith(`/refresh/${restrictedId}/incoming`));
+    await dialog.getByRole("button", { name: /Поставки оригинала/ }).click();
+    const supplyJob = await claim("stock", 5);
+    assert.equal((await post("/api/integration/1c/nomenclature/stock-results", {
+      requestId: supplyJob.id, leaseId: supplyJob.leaseId, status: "completed", products: [], hasMore: false,
+      incomingDetails: { orders: [{ orderId: randomUUID(), productId: branded.productId,
+        supplier: "Тестовый поставщик", number: "002", name: "Комплект ГРМ | Закрытый бренд", article: branded.article,
+        ordered: 3, quantity: 2, expectedDate: "2026-11-19" }], hasMore: false },
+    }, nomenclatureHeader)).status, 200);
+    const supply = (await (await receipt).json()).orders[0];
+    assert.equal(supply.name, "Комплект ГРМ");
+    assert.equal(supply.article, "");
+    assert.equal(supply.expectedDate, "2026-11-19");
+    const popover = dialog.locator("#repair-order-incoming");
+    await popover.getByText(/Тестовый поставщик/).waitFor();
+    assert.doesNotMatch(await popover.innerText(), /Закрытый бренд|PRIVATE-ARTICLE/);
+
+    assert.equal((await adminEdit("/api/users/positions", { ...position, hideArticle: false })).status, 200);
+    const brandOnly = await rawSnapshot();
+    assert.equal(brandOnly.hideArticles, undefined);
+    assert.equal(brandOnly.goods[0].article, branded.article);
+    assert.equal(brandOnly.goods[0].name, "Комплект ГРМ");
+    assert.equal((await assign(null)).status, 200);
+    const unrestricted = await rawSnapshot();
+    assert.equal(unrestricted.goods[0].name, branded.name);
+    assert.equal(unrestricted.goods[0].article, branded.article);
+    assert.deepEqual(pageErrors, []);
   } finally {
     await browser?.close();
     server.closeAllConnections();

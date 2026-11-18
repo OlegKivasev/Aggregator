@@ -1,4 +1,5 @@
 import { setupUserListOrder } from "./user-list-order.js";
+import { setupUserPositions } from "./user-positions-ui.js";
 
 const authScreen = document.querySelector("#auth-screen");
 const loginForm = document.querySelector("#auth-login-form");
@@ -23,6 +24,7 @@ const userCreateFeedback = document.querySelector("#user-create-feedback");
 const userCreateCancelButtons = [...document.querySelectorAll("[data-user-create-cancel]")];
 const userFioInput = document.querySelector("#user-fio");
 const userPasswordInput = document.querySelector("#user-password");
+const userPositionInput = document.querySelector("#user-position");
 const permissionInputs = [...document.querySelectorAll("#user-permissions input[type=checkbox]")];
 
 const messageFor = async (response, fallback) => {
@@ -33,6 +35,8 @@ const messageFor = async (response, fallback) => {
     return fallback;
   }
 };
+
+const positionsUi = setupUserPositions(messageFor);
 
 const accessLabel = (user) => user.isAdmin ? "Администратор" : user.permissions.map((permission) => ({
   markup: "Проценка", applicability: "Применимость", repairs: "Заказ-наряды", testRepairs: "Тестовые заказ-наряды", nomenclature: "Номенклатура",
@@ -103,7 +107,10 @@ const renderUsers = (users) => {
     const permissions = document.createElement("span");
     permissions.textContent = accessLabel(user);
     permissions.className = "panel__meta";
-    info.append(fio, permissions);
+    const positionSummary = document.createElement("span");
+    positionSummary.className = "panel__meta";
+    positionsUi.updateSummary(positionSummary, user.positionId);
+    info.append(fio, positionSummary, permissions);
     summary.append(info);
     const handle = document.createElement("button");
     handle.type = "button";
@@ -121,6 +128,7 @@ const renderUsers = (users) => {
     form.className = "auth-form users-list__form";
     form.innerHTML = `
       <label class="field"><span>ФИО</span><input name="fio" type="text" maxlength="256" autocomplete="off" required></label>
+      <label class="field"><span>Должность</span><select name="positionId" data-user-position></select></label>
       <label class="field"><span>Новый пароль</span><span class="password-field"><input name="password" type="password" autocomplete="new-password" minlength="3" maxlength="4096"><button class="password-toggle" type="button" aria-label="Показать пароль" aria-pressed="false"><span aria-hidden="true">&#128065;</span></button></span></label>
       <p class="settings-drawer__hint">Оставьте пароль пустым, чтобы сохранить текущий.</p>
       <fieldset class="supplier-options__list"><legend>Доступные формы</legend></fieldset>
@@ -128,6 +136,8 @@ const renderUsers = (users) => {
       <p class="auth-feedback" role="status" aria-live="polite"></p>`;
     const fioInput = form.elements.namedItem("fio");
     fioInput.value = user.fio;
+    const positionInput = form.elements.namedItem("positionId");
+    positionsUi.fillSelect(positionInput, user.positionId);
     const passwordInput = form.elements.namedItem("password");
     passwordInput.id = `user-edit-password-${usersList.children.length}`;
     const passwordToggle = form.querySelector(".password-toggle");
@@ -165,15 +175,19 @@ const renderUsers = (users) => {
         const response = await fetch("/api/users", {
           method: "PATCH", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: user.id, fio: fioInput.value, password: passwordInput.value,
+            positionId: positionInput.value || null,
             permissions: [...fieldset.querySelectorAll("input:checked")].map((input) => input.value) }),
         });
         if (!response.ok) throw new Error(await messageFor(response, "Не удалось сохранить пользователя."));
         const payload = await response.json();
         Object.assign(user, payload.user);
+        user.positionId = payload.user.positionId;
+        user.repairVisibility = payload.user.repairVisibility;
         fio.textContent = user.fio;
         handle.setAttribute("aria-label", `Переместить пользователя ${user.fio}`);
         fioInput.value = user.fio;
         permissions.textContent = accessLabel(user);
+        positionsUi.updateSummary(positionSummary, user.positionId);
         passwordInput.value = "";
         hidePassword();
         if (window.aggregatorAuthState?.user?.id === user.id) applyAccess(user);
@@ -313,6 +327,7 @@ const loadUsers = async () => {
   if (!response.ok) throw new Error(await messageFor(response, "Не удалось загрузить пользователей."));
   const payload = await response.json();
   if (!Array.isArray(payload?.users)) throw new Error("Некорректный список пользователей.");
+  positionsUi.setPositions(payload.positions ?? []);
   renderUsers(payload.users);
 };
 
@@ -384,7 +399,8 @@ userCreateForm?.addEventListener("submit", async (event) => {
     const response = await fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fio: userFioInput.value, password: userPasswordInput.value, permissions }),
+      body: JSON.stringify({ fio: userFioInput.value, password: userPasswordInput.value, permissions,
+        ...(userPositionInput.value ? { positionId: userPositionInput.value } : {}) }),
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) throw new Error(await messageFor(response, "Не удалось создать пользователя."));

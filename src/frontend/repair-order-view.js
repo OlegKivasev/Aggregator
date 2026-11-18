@@ -232,7 +232,7 @@ export function createRepairOrderView() {
     }
     if (goods) panels[0].replaceChildren(lines([
       ["Наименование", (row) => row.name],
-      ["Артикул", (row) => row.article, "repair-order-article", (row) => Boolean(row.article)],
+      ...(data.hideArticles ? [] : [["Артикул", (row) => row.article, "repair-order-article", (row) => Boolean(row.article)]]),
       ["Остаток", (row) => row.stock === null ? missing : number.format(row.stock), "repair-order-numeric repair-order-stock"],
       ["Цена", (row) => tableMoney.format(row.price), "repair-order-numeric repair-order-price"],
       ["Кол-во", (row) => number.format(row.quantity), "repair-order-numeric repair-order-quantity"],

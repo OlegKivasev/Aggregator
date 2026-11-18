@@ -2,20 +2,21 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AuthenticatedUser } from "../auth/user-auth-service.ts";
 import { NomenclatureError, objectFields, parseBarcode, parseLookupResult, parseUuid } from "../nomenclature/contract.ts";
 import { parseStockResult, parseStockQuery } from "../nomenclature/stock-contract.ts";
-import { parseIncomingRequest, type IncomingRequest } from "../nomenclature/incoming-contract.ts";
+import { parseIncomingRequest, type IncomingDetails, type IncomingRequest } from "../nomenclature/incoming-contract.ts";
 import { decodeStockCursor, parseStockSort } from "../nomenclature/stock-sort.ts";
 import { inventoryParameters, parseStockOptions, stockOptionsKey } from "../nomenclature/stock-options.ts";
 import type { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
 import { serveJson } from "./responses.ts";
 
-export async function serveIncoming(response: ServerResponse, service: NomenclatureService, incomingDetails: IncomingRequest) {
+export async function serveIncoming(response: ServerResponse, service: NomenclatureService, incomingDetails: IncomingRequest,
+  project?: (details: IncomingDetails) => IncomingDetails) {
   const controller = new AbortController();
   const abort = () => controller.abort();
   response.once("close", abort);
   try {
     const page = await service.loadStock(null, controller.signal, "", undefined, { availability: "all", priceType: null, incomingDetails });
-    if (!response.destroyed) serveJson(response, 200, page.incomingDetails);
+    if (!response.destroyed) serveJson(response, 200, page.incomingDetails && project ? project(page.incomingDetails) : page.incomingDetails);
   } finally { response.removeListener("close", abort); }
 }
 

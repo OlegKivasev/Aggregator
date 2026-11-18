@@ -620,6 +620,7 @@ input {
 .users-settings__content > .users-list { margin-top: 0; }
 .users-settings__content > .auth-feedback:empty { display: none; }
 .users-settings__content > .auth-feedback[data-state="success"] { color: #18794e; }
+.users-settings__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .users-settings__create { justify-self: start; color: #fff; border-color: var(--accent); background: var(--accent); }
 .users-settings__create:hover, .users-settings__create:focus-visible { color: #fff; border-color: var(--accent-dark); background: var(--accent-dark); }
 .user-create-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 24px; overflow: auto; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); background: var(--surface); box-shadow: 0 16px 48px rgba(23, 32, 42, .2); }
@@ -632,6 +633,19 @@ input {
 .user-create-dialog .auth-feedback { margin: 0; }
 .user-create-dialog .auth-feedback:empty { display: none; }
 .user-create-dialog__actions { justify-content: flex-end; flex-wrap: wrap; margin-top: 8px; }
+.user-create-dialog [hidden], .users-list__summary [hidden] { display: none; }
+.user-positions-directory { display: grid; gap: 12px; }
+.user-positions-directory > p { margin: 0; }
+.user-positions-list { display: grid; gap: 6px; padding: 0; margin: 0; list-style: none; }
+.user-positions-list:empty { display: none; }
+.user-positions-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.user-positions-list li > div { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
+.user-positions-list .panel__meta { display: block; margin-top: 2px; }
+.user-positions-delete { margin-right: auto; color: #a32f27; }
+#user-positions-feedback:not(:empty) { margin-top: 12px; }
+#user-positions-feedback[data-state="success"] { color: #18794e; }
+.field select[data-user-position] { width: 100%; min-width: 0; min-height: 40px; padding: 8px 12px; border: 1px solid #dce3ea; border-radius: 8px; color: var(--ink); background: var(--surface); }
+.field select[data-user-position]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .users-settings__content fieldset { margin: 0; padding: 10px 0; border: 0; }
 .users-settings__content legend { margin-bottom: 6px; font-size: 13px; font-weight: 700; }
 .users-list { display: grid; gap: 8px; margin-top: 18px; }

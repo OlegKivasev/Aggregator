@@ -289,7 +289,8 @@ export function createAggregatorServer({
       ? authenticatedUser.fio.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU")
       : undefined;
     if (await serveRepairs(request, response, url, repairs, nomenclature, repairIntegrationSecret,
-      () => reportError({ operation: "repairs", category: "internal" }), repairFio, authenticatedUser?.id)) return;
+      () => reportError({ operation: "repairs", category: "internal" }), repairFio, authenticatedUser?.id,
+      auth && authenticatedUser ? () => auth.currentUser(request) : undefined)) return;
     if (await serveNomenclature(request, response, url, nomenclature, authenticatedUser,
       () => reportError({ operation: "nomenclature", category: "internal" }))) return;
 

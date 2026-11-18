@@ -1,4 +1,5 @@
 import { RepairValidationError } from "./repair-card.ts";
+import type { RepairVisibility } from "../auth/user-position-store.ts";
 
 function object(value: unknown, fields: string[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)
@@ -66,3 +67,21 @@ export function parseRepairDetails(value: unknown) {
 }
 
 export type RepairDetails = ReturnType<typeof parseRepairDetails>;
+
+export function repairProductForUser<T extends { name: string; article: string }>(row: T, visibility: RepairVisibility): T {
+  const separator = visibility.hideBrand ? row.name.indexOf("|") : -1;
+  return {
+    ...row,
+    name: separator < 0 ? row.name : row.name.slice(0, separator).trimEnd(),
+    article: visibility.hideArticle ? "" : row.article,
+  };
+}
+
+export function repairDetailsForUser(details: RepairDetails, visibility?: RepairVisibility) {
+  if (!visibility || (!visibility.hideArticle && !visibility.hideBrand)) return details;
+  return {
+    ...details,
+    ...(visibility.hideArticle ? { hideArticles: true } : {}),
+    goods: details.goods.map((row) => repairProductForUser(row, visibility)),
+  };
+}
