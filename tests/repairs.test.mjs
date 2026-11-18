@@ -479,10 +479,10 @@ test("goods readiness accepts verified empty/full/partial position counts and re
   for (const goodsReadiness of invalid) assert.throws(() => parseRepairCard({ ...card, goodsReadiness }), /goodsReadiness:/);
 });
 
-test("HTTP readiness persists separately for test/live cards, updates and never invents availability for legacy imports", async () => {
+test("HTTP readiness and urgent return persist separately for test/live cards and clear on newer snapshots", async () => {
   await withServer(secret, async ({ baseUrl, close }, { start, reports }) => {
-    const partial = { ...card, goodsReadiness: { totalPositions: 5, availablePositions: 2 } };
-    const fullTest = { ...card, testPlatform: true, goodsReadiness: { totalPositions: 5, availablePositions: 5 } };
+    const partial = { ...card, goodsReadiness: { totalPositions: 5, availablePositions: 2 }, urgentReturnDays: 0 };
+    const fullTest = { ...card, testPlatform: true, goodsReadiness: { totalPositions: 5, availablePositions: 5 }, urgentReturnDays: 5 };
     assert.deepEqual(await (await send(baseUrl, partial)).json(), { repair: partial });
     assert.deepEqual(await (await send(baseUrl, fullTest)).json(), { repair: fullTest });
     assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [partial, fullTest] });
@@ -490,6 +490,11 @@ test("HTTP readiness persists separately for test/live cards, updates and never 
       const invalid = await send(baseUrl, { ...card, goodsReadiness });
       assert.equal(invalid.status, 400);
       assert.match((await invalid.json()).message, /^goodsReadiness:/);
+    }
+    for (const urgentReturnDays of [-1, 6, 2.5, "5", null, false]) {
+      const invalid = await send(baseUrl, { ...partial, urgentReturnDays });
+      assert.equal(invalid.status, 400);
+      assert.match((await invalid.json()).message, /^urgentReturnDays:/);
     }
     assert.deepEqual(await (await fetch(`${baseUrl}/api/repairs`)).json(), { repairs: [partial, fullTest] });
     await close();

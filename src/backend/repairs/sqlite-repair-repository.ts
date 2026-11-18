@@ -74,6 +74,9 @@ export class SqliteRepairRepository {
               this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} INTEGER`);
             }
           }
+          if (!columns.some((column) => column.name === "urgent_return_days")) {
+            this.database.exec(`ALTER TABLE ${table} ADD COLUMN urgent_return_days INTEGER CHECK (urgent_return_days BETWEEN 0 AND 5)`);
+          }
           const previousTotal = columns.some((column) => column.name === "total_positions");
           const previousAvailable = columns.some((column) => column.name === "available_positions");
           if (previousTotal !== previousAvailable) throw new Error("Incomplete previous repair readiness schema");
@@ -94,22 +97,24 @@ export class SqliteRepairRepository {
         throw error;
       }
       this.saveStatement = this.database.prepare(`
-        INSERT INTO repair_cards (document_id, number, date, vehicle_name, status, responsible_fio, counterparty_name, contact_name, contact_phone, goods_total_positions, goods_available_positions, payment_status, amount_due_minor, card_amount_due_minor, cash_amount_due_minor, cash_discount_hundredths) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO repair_cards (document_id, number, date, vehicle_name, status, responsible_fio, counterparty_name, contact_name, contact_phone, goods_total_positions, goods_available_positions, payment_status, amount_due_minor, card_amount_due_minor, cash_amount_due_minor, cash_discount_hundredths, urgent_return_days) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
           number = excluded.number, date = excluded.date,
           vehicle_name = excluded.vehicle_name, status = excluded.status, responsible_fio = excluded.responsible_fio, counterparty_name = excluded.counterparty_name,
           contact_name = excluded.contact_name, contact_phone = excluded.contact_phone,
           goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions, payment_status = excluded.payment_status, amount_due_minor = excluded.amount_due_minor,
-          card_amount_due_minor = excluded.card_amount_due_minor, cash_amount_due_minor = excluded.cash_amount_due_minor, cash_discount_hundredths = excluded.cash_discount_hundredths
+          card_amount_due_minor = excluded.card_amount_due_minor, cash_amount_due_minor = excluded.cash_amount_due_minor, cash_discount_hundredths = excluded.cash_discount_hundredths,
+          urgent_return_days = excluded.urgent_return_days
       `);
       this.testSaveStatement = this.database.prepare(`
-        INSERT INTO test_repair_cards (document_id, number, date, vehicle_name, status, responsible_fio, counterparty_name, contact_name, contact_phone, goods_total_positions, goods_available_positions, payment_status, amount_due_minor, card_amount_due_minor, cash_amount_due_minor, cash_discount_hundredths) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO test_repair_cards (document_id, number, date, vehicle_name, status, responsible_fio, counterparty_name, contact_name, contact_phone, goods_total_positions, goods_available_positions, payment_status, amount_due_minor, card_amount_due_minor, cash_amount_due_minor, cash_discount_hundredths, urgent_return_days) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
           number = excluded.number, date = excluded.date,
           vehicle_name = excluded.vehicle_name, status = excluded.status, responsible_fio = excluded.responsible_fio, counterparty_name = excluded.counterparty_name,
           contact_name = excluded.contact_name, contact_phone = excluded.contact_phone,
           goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions, payment_status = excluded.payment_status, amount_due_minor = excluded.amount_due_minor,
-          card_amount_due_minor = excluded.card_amount_due_minor, cash_amount_due_minor = excluded.cash_amount_due_minor, cash_discount_hundredths = excluded.cash_discount_hundredths
+          card_amount_due_minor = excluded.card_amount_due_minor, cash_amount_due_minor = excluded.cash_amount_due_minor, cash_discount_hundredths = excluded.cash_discount_hundredths,
+          urgent_return_days = excluded.urgent_return_days
       `);
       this.refreshes = new RepairRefreshService(this.database, () => this.list(true), (id, test) => {
         const table = test ? "test_repair_cards" : "repair_cards";
@@ -123,10 +128,10 @@ export class SqliteRepairRepository {
         return row !== undefined && repairOwnerMatches({ responsibleFio: typeof row.responsible_fio === "string" ? row.responsible_fio : undefined }, fio);
       });
       this.listStatement = this.database.prepare(`
-        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, contact_name AS contactName, contact_phone AS contactPhone, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, 0 AS testPlatform
+        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, contact_name AS contactName, contact_phone AS contactPhone, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, urgent_return_days AS urgentReturnDays, 0 AS testPlatform
         FROM repair_cards WHERE status = 'В работе' OR ? = 1
         UNION ALL
-        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, contact_name AS contactName, contact_phone AS contactPhone, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, 1 AS testPlatform
+        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, contact_name AS contactName, contact_phone AS contactPhone, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, urgent_return_days AS urgentReturnDays, 1 AS testPlatform
         FROM test_repair_cards WHERE status = 'В работе' OR ? = 1
         ORDER BY date DESC, documentId ASC, testPlatform ASC
       `);
@@ -142,7 +147,8 @@ export class SqliteRepairRepository {
       card.amountDue !== undefined ? Math.round(card.amountDue * 100) : null,
       card.paymentOptions !== undefined ? Math.round(card.paymentOptions.cardAmountDue * 100) : null,
       card.paymentOptions?.cashAmountDue != null ? Math.round(card.paymentOptions.cashAmountDue * 100) : null,
-      card.paymentOptions?.cashDiscountPercent != null ? Math.round(card.paymentOptions.cashDiscountPercent * 100) : null);
+      card.paymentOptions?.cashDiscountPercent != null ? Math.round(card.paymentOptions.cashDiscountPercent * 100) : null,
+      card.urgentReturnDays ?? null);
   }
 
   list(includeInactive = false): RepairCard[] {
@@ -172,6 +178,10 @@ export class SqliteRepairRepository {
       }) : undefined;
       const total = row.goodsTotalPositions;
       const available = row.goodsAvailablePositions;
+      const urgent = row.urgentReturnDays;
+      if (urgent !== null && (typeof urgent !== "number" || !Number.isSafeInteger(urgent) || urgent < 0 || urgent > 5)) {
+        throw new Error("Invalid SQLite urgent return days");
+      }
       let goodsReadiness: GoodsReadiness | undefined;
       if (total !== null || available !== null) {
         if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || total > 100_000
@@ -187,6 +197,7 @@ export class SqliteRepairRepository {
         ...(contactName !== null ? { contactName } : {}),
         ...(contactPhone !== null ? { contactPhone } : {}),
         ...(goodsReadiness !== undefined ? { goodsReadiness } : {}),
+        ...(urgent !== null ? { urgentReturnDays: urgent } : {}),
         ...(paymentStatus !== null ? { paymentStatus } : {}),
         ...(typeof due === "number" ? { amountDue: due / 100 } : {}),
         ...(paymentOptions !== undefined ? { paymentOptions } : {}),

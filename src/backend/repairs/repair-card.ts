@@ -23,6 +23,7 @@ export interface RepairCard {
   contactName?: string;
   contactPhone?: string;
   goodsReadiness?: GoodsReadiness;
+  urgentReturnDays?: number;
   paymentStatus?: RepairPaymentStatus;
   amountDue?: number;
   paymentOptions?: RepairPaymentOptions;
@@ -30,7 +31,7 @@ export interface RepairCard {
 
 export class RepairValidationError extends Error {}
 
-const fields = ["documentId", "number", "date", "vehicleName", "status", "responsibleFio", "testPlatform", "counterpartyName", "contactName", "contactPhone", "goodsReadiness", "paymentStatus", "amountDue", "paymentOptions"];
+const fields = ["documentId", "number", "date", "vehicleName", "status", "responsibleFio", "testPlatform", "counterpartyName", "contactName", "contactPhone", "goodsReadiness", "urgentReturnDays", "paymentStatus", "amountDue", "paymentOptions"];
 
 function validAmount(value: unknown, maximum = 9_999_999_999_999.99): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= maximum
@@ -101,10 +102,15 @@ export function parseRepairCard(value: unknown): RepairCard {
   }
   const payload = value as Record<string, unknown>;
   if (Object.keys(payload).some((key) => !fields.includes(key))) {
-    throw new RepairValidationError("Допустимы только поля documentId, number, date, vehicleName, status, responsibleFio, testPlatform, counterpartyName, contactName, contactPhone, goodsReadiness, paymentStatus, amountDue, paymentOptions.");
+    throw new RepairValidationError(`Допустимы только поля ${fields.join(", ")}.`);
   }
   if (payload.testPlatform !== undefined && typeof payload.testPlatform !== "boolean") {
     throw new RepairValidationError("testPlatform: требуется логическое значение true или false.");
+  }
+  const { urgentReturnDays } = payload;
+  if (urgentReturnDays !== undefined && (typeof urgentReturnDays !== "number" || !Number.isSafeInteger(urgentReturnDays)
+    || urgentReturnDays < 0 || urgentReturnDays > 5)) {
+    throw new RepairValidationError("urgentReturnDays: требуется целое число от 0 до 5.");
   }
   if (payload.paymentStatus !== undefined && payload.paymentStatus !== "paid" && payload.paymentStatus !== "payment_required" && payload.paymentStatus !== "partially_paid") {
     throw new RepairValidationError("paymentStatus: требуется paid, payment_required или partially_paid.");
@@ -144,6 +150,7 @@ export function parseRepairCard(value: unknown): RepairCard {
     ...(contactName !== undefined ? { contactName } : {}),
     ...(contactPhone !== undefined ? { contactPhone } : {}),
     ...(payload.goodsReadiness !== undefined ? { goodsReadiness: parseGoodsReadiness(payload.goodsReadiness) } : {}),
+    ...(urgentReturnDays !== undefined ? { urgentReturnDays } : {}),
     ...(payload.paymentStatus !== undefined ? { paymentStatus: payload.paymentStatus } : {}),
     ...(payload.amountDue !== undefined ? { amountDue: payload.amountDue as number } : {}),
     ...(payload.paymentOptions !== undefined ? { paymentOptions: parseRepairPaymentOptions(payload.paymentOptions) } : {}),

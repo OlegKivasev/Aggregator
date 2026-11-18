@@ -7,6 +7,7 @@ const date = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeZone: "U
 const missing = "—";
 const urgentReturn = (row) => row.returnDays != null && row.returnDays <= 5;
 const hasIncoming = (row) => row.original > 0 || row.replacement > 0;
+const hasDiscount = (row) => row.discountPercent !== 0 || row.discountAmount !== 0;
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -61,8 +62,9 @@ function lines(columns, rows, title, warn = () => false) {
     const tr = body.insertRow();
     tr.setAttribute("role", "row");
     if (warn(row)) tr.className = "repair-order-return-urgent";
-    for (const [index, [label, value, className]] of columns.entries()) {
+    for (const [index, [label, value, className, showOnMobile]] of columns.entries()) {
       const cell = element(index ? "td" : "th", undefined, className);
+      if (showOnMobile && !showOnMobile(row)) cell.classList.add("repair-order-desktop-only");
       cell.setAttribute("role", index ? "cell" : "rowheader");
       if (index) {
         const mobile = element("span", label, "repair-order-cell-label");
@@ -88,7 +90,7 @@ export function createRepairOrderView() {
         <button type="button" class="repair-order-back"><span aria-hidden="true">←</span> К заказ-нарядам</button>
         <button type="button" class="repair-order-close" aria-label="Закрыть заказ-наряд">×</button>
       </div>
-      <h2 id="repair-order-title"></h2>
+      <h2 id="repair-order-title" tabindex="-1" autofocus></h2>
       <div class="repair-order-number"></div>
     </header>
     <div class="repair-order-scroll">
@@ -228,21 +230,21 @@ export function createRepairOrderView() {
     }
     if (goods) panels[0].replaceChildren(lines([
       ["Наименование", (row) => row.name],
-      ["Артикул", (row) => row.article],
-      ["Остаток", (row) => row.stock === null ? missing : number.format(row.stock), "repair-order-numeric"],
-      ["Цена", (row) => tableMoney.format(row.price), "repair-order-numeric"],
-      ["Кол-во", (row) => number.format(row.quantity), "repair-order-numeric"],
-      ...(data.goods.some(hasIncoming) ? [["К поступлению", (row) => incoming(row, supplySource)]] : []),
+      ["Артикул", (row) => row.article, "repair-order-article", (row) => Boolean(row.article)],
+      ["Остаток", (row) => row.stock === null ? missing : number.format(row.stock), "repair-order-numeric repair-order-stock"],
+      ["Цена", (row) => tableMoney.format(row.price), "repair-order-numeric repair-order-price"],
+      ["Кол-во", (row) => number.format(row.quantity), "repair-order-numeric repair-order-quantity"],
+      ...(data.goods.some(hasIncoming) ? [["К поступлению", (row) => incoming(row, supplySource), "repair-order-desktop-only"]] : []),
       ...(data.goods.some((row) => row.returnDays !== null) ? [
         ["Возврат, дн.", (row) => {
           if (row.returnDays === null) return missing;
           const days = number.format(row.returnDays);
           return urgentReturn(row) ? element("span", days, "repair-order-return-days") : days;
-        }, "repair-order-numeric"],
+        }, "repair-order-numeric repair-order-extra", (row) => row.returnDays !== null],
       ] : []),
-      ...(data.goods.some((row) => row.discountPercent || row.discountAmount) ? [["Скидка", (row) => discount(row, tableMoney), "repair-order-numeric"]] : []),
+      ...(data.goods.some(hasDiscount) ? [["Скидка", (row) => discount(row, tableMoney), "repair-order-numeric repair-order-extra", hasDiscount]] : []),
       ["Сумма", (row) => tableMoney.format(row.total), "repair-order-line-total"],
-      ["Продавец", (row) => row.seller],
+      ["Продавец", (row) => row.seller, "repair-order-desktop-only"],
     ], data.goods, "Товары", urgentReturn));
     if (work) panels[1].replaceChildren(lines([
       ["Наименование", (row) => row.name], ["Исполнитель", (row) => row.performer],
@@ -250,7 +252,7 @@ export function createRepairOrderView() {
       ...(data.work.some((row) => row.hours !== 1) ? [["Норма времени", (row) => number.format(row.hours), "repair-order-numeric"]] : []),
       ...(data.work.some((row) => row.multiplier !== 1) ? [["Кратность", (row) => number.format(row.multiplier), "repair-order-numeric"]] : []),
       ["Сумма", (row) => tableMoney.format(row.total), "repair-order-line-total"],
-      ["Продавец", (row) => row.seller],
+      ["Продавец", (row) => row.seller, "repair-order-desktop-only"],
     ], data.work, "Работы"));
     showTab(goods ? 0 : work ? 1 : -1);
     renderPayment(card, data);
@@ -342,7 +344,6 @@ export function createRepairOrderView() {
       details.hidden = footer.hidden = true;
       dialog.showModal();
       dialog.querySelector(".repair-order-scroll").scrollTop = 0;
-      back.focus({ preventScroll: true });
       void load(current);
     },
     close,

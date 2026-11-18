@@ -1,6 +1,6 @@
 import { splitRepairVehicleName } from "./repair-vehicle-presentation.js";
 import { filterRepairCards } from "./repair-search.js";
-import { createRepairOrderView } from "./repair-order-view.js?v=repair-order-2";
+import { createRepairOrderView } from "./repair-order-view.js?v=repair-order-3";
 
 export function bootstrapRepairs({ onActiveEmpty } = {}) {
   const views = [false, true].map((testPlatform) => {
@@ -71,10 +71,12 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     && Number.isSafeInteger(value.totalPositions) && value.totalPositions >= 0 && value.totalPositions <= 100_000
     && Number.isSafeInteger(value.availablePositions) && value.availablePositions >= 0 && value.availablePositions <= value.totalPositions);
 
-  const readinessCell = (readiness) => {
+  const readinessCell = (readiness, urgentReturnDays) => {
     const cell = document.createElement("td");
     const badge = document.createElement("span");
+    const facts = document.createElement("div");
     badge.className = "repairs-readiness";
+    facts.className = "repairs-readiness-facts";
     let tone = "unknown";
     let label = "Наличие ещё не проверено";
     if (readiness) {
@@ -85,12 +87,19 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
         const detail = document.createElement("span");
         detail.className = "repairs-readiness-detail panel__meta";
         detail.textContent = `В наличии ${available} из ${total} позиций`;
-        cell.append(detail);
+        facts.append(detail);
       }
     }
     badge.dataset.tone = tone;
     badge.textContent = label;
-    cell.prepend(badge);
+    cell.append(badge);
+    if (urgentReturnDays !== undefined) {
+      const reminder = document.createElement("span");
+      reminder.className = "repairs-urgent-return";
+      reminder.textContent = `Возврат · ${urgentReturnDays} дн.`;
+      facts.append(reminder);
+    }
+    if (facts.childElementCount) cell.append(facts);
     return cell;
   };
 
@@ -159,6 +168,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
         && (typeof card[field] !== "string" || !card[field].trim() || card[field].length > (field === "contactName" ? 500 : 200)
           || /[\u0000-\u001f\u007f-\u009f]/u.test(card[field])))
       || !validReadiness(card.goodsReadiness) || fresh && !card.goodsReadiness
+      || card.urgentReturnDays !== undefined && (!Number.isSafeInteger(card.urgentReturnDays) || card.urgentReturnDays < 0 || card.urgentReturnDays > 5)
       || !validPayment(card) || !validPaymentOptions(card.paymentOptions)
       || (card.testPlatform !== undefined && typeof card.testPlatform !== "boolean")
       || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(card.date))) {
@@ -215,7 +225,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
         contact.textContent = card[field];
         vehicleCell.append(contact);
       }
-      row.append(vehicleCell, readinessCell(card.goodsReadiness), paymentCell(card));
+      row.append(vehicleCell, readinessCell(card.goodsReadiness, card.urgentReturnDays), paymentCell(card));
       fragment.append(row);
     }
     rows.replaceChildren(fragment);

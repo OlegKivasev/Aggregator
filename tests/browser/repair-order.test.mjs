@@ -23,7 +23,7 @@ const stock = {
 const details = {
   customer: "Chevrolet Niva 2123 | У994СМ163", contract: "ТО автомобиля", mileage: 123456, vin: "XTA21230000012345",
   keySlot: 3, cashPayment: true, total: 8400, cashTotal: 8400, cardTotal: 9200, paidAmount: 2700, discountAmount: 322.65, discountPercent: 5,
-  goods: [stock, { ...stock, name: "Очиститель тормозов", article: "2105", productId: randomUUID(), stock: 19, quantity: 2,
+  goods: [stock, { ...stock, name: "Очиститель тормозов", article: "", productId: randomUUID(), stock: 19, quantity: 2,
     original: 0, replacement: 0, returnDays: null, discountAmount: 0, discountPercent: 0, price: 341, total: 682 }],
   work: [{ name: "Замена ремня ГРМ", performer: "Тестовый механик", price: 1400, hours: 1.5, multiplier: 1, total: 2100, seller: "Тестовый продавец" }],
 };
@@ -58,11 +58,11 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     };
     await claim("repair", 0);
     await claim("stock", 0);
-    assert.equal((await post("/api/integration/1c/repairs", card, workerHeader)).status, 200);
+    assert.equal((await post("/api/integration/1c/repairs", { ...card, urgentReturnDays: 5 }, workerHeader)).status, 200);
     assert.equal((await post("/api/integration/1c/repairs", { ...card, documentId: randomUUID(), responsibleFio: "Другой мастер" }, workerHeader)).status, 200);
 
     browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER_EXECUTABLE_PATH });
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, timezoneId: "America/Los_Angeles" });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, hasTouch: true, timezoneId: "America/Los_Angeles" });
     await page.request.post(`${origin}/api/auth/login`, { data: { fio: card.responsibleFio, password: "test-user-password" } });
     const pageErrors = [];
     const jobs = [];
@@ -82,6 +82,9 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     });
     await page.goto(origin);
     await page.waitForLoadState("networkidle");
+    const readiness = page.locator(".repairs-readiness-facts");
+    assert.equal(await readiness.getByText("В наличии 1 из 2 позиций").isVisible(), true);
+    assert.equal(await readiness.getByText("Возврат · 5 дн.").isVisible(), true);
     const trigger = page.getByRole("button", { name: /Открыть заказ-наряд НФНФ-002327/ });
     const dialog = page.getByRole("dialog", { name: "Заказ-наряд 2327 от 16.11.2026" });
     const open = async (value, currentCard) => {
@@ -100,7 +103,8 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     const requestId = await open({ ...details,
       goods: [...details.goods, ...[4, 3, 2, 1, 0, -3, 6].map((returnDays) => ({ ...details.goods[1], returnDays }))],
       work: [...details.work, { ...details.work[0], name: "Замена фильтра", hours: 1, multiplier: 2 }],
-    }, card);
+    }, { ...card, urgentReturnDays: 0 });
+    assert.equal(await page.evaluate(() => document.activeElement.id), "repair-order-title");
     const cash = dialog.getByRole("button", { name: "Наличными", exact: true });
     const bankCard = dialog.getByRole("button", { name: "Картой", exact: true });
     const footerValue = (label) => dialog.locator("footer dl > div").filter({ has: page.getByText(label, { exact: true }) }).locator("dd");
@@ -137,8 +141,8 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     assert.equal((await fetch(`${origin}${supplyPath}${stock.productId}`, { headers: { Cookie: other } })).status, 404);
     assert.equal((await page.request.get(`${origin}${supplyPath}${randomUUID()}`)).status(), 404);
     assert.equal((await page.request.get(`${origin}/api/nomenclature/incoming?side=original&product=${stock.productId}`)).status(), 403);
-    for (const [width, side] of [[1440, "original"], [390, "replacement"], [320, "original"]]) {
-      await page.setViewportSize({ width, height: 844 });
+    for (const side of ["original", "replacement"]) {
+      const width = 1440;
       const scroll = await dialog.locator(".repair-order-scroll").evaluate((node) => ({ outer: node.clientWidth, content: node.scrollWidth }));
       assert.ok(scroll.content <= scroll.outer, `Видимая ширина ${scroll.outer}px, содержимое ${scroll.content}px при окне ${width}px`);
       await dialog.getByRole("button", { name: side === "original" ? /Поставки оригинала/ : /Поставки замен/ }).click();
@@ -156,12 +160,29 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       assert.ok(box.x >= 0 && box.x + box.width <= width);
       await popover.getByRole("button", { name: "Закрыть поставки" }).click();
     }
+
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      const scroll = await dialog.locator(".repair-order-scroll").evaluate((node) => ({ outer: node.clientWidth, content: node.scrollWidth }));
+      assert.ok(scroll.content <= scroll.outer, `Мобильная карточка помещается при ширине ${width}px`);
+      const firstRow = goodsTable.locator("tbody tr").nth(0);
+      const emptyOptionals = goodsTable.locator("tbody tr").nth(1);
+      const labels = (row) => row.locator(".repair-order-cell-label:visible").allTextContents();
+      assert.deepEqual(await labels(firstRow), ["Артикул", "Остаток", "Цена", "Кол-во", "Возврат, дн.", "Скидка", "Сумма"]);
+      assert.deepEqual(await labels(emptyOptionals), ["Остаток", "Цена", "Кол-во", "Сумма"]);
+      assert.equal(await goodsTable.locator("[data-incoming-side]:visible").count(), 0);
+      const productName = firstRow.getByRole("rowheader");
+      assert.equal(await productName.evaluate((node) => getComputedStyle(node).webkitTapHighlightColor), "rgba(0, 0, 0, 0)");
+      await productName.tap();
+      assert.equal(await productName.evaluate((node) => getComputedStyle(node).outlineStyle), "none");
+    }
     await dialog.getByRole("tab", { name: "Работы (2)" }).click();
     assert.equal(await dialog.getByText("Тестовый механик").first().isVisible(), true);
     assert.equal(await dialog.getByRole("columnheader", { name: "Норма времени" }).count(), 1);
     assert.equal(await dialog.getByRole("columnheader", { name: "Кратность" }).count(), 1);
     assert.doesNotMatch(await dialog.getByRole("table", { name: "Работы" }).innerText(), /₽/);
     assert.equal(await dialog.getByRole("columnheader", { name: "Скидка" }).count(), 0);
+    assert.equal(await dialog.locator("#repair-order-work .repair-order-desktop-only:visible").count(), 0);
     await dialog.getByRole("button", { name: "К заказ-нарядам" }).click();
     assert.equal(await dialog.isVisible(), false);
     await open({ ...details, contract: "", vin: "", mileage: 0, keySlot: 0, cashPayment: false, total: 9200, discountAmount: 0, discountPercent: 0, work: [],
@@ -207,6 +228,11 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     const list = (await (await page.request.get(`${origin}/api/repairs?testPlatform=false`)).json()).repairs;
     assert.equal(list.length, 1);
     assert.equal(list[0].details, undefined);
+    assert.equal(list[0].urgentReturnDays, undefined);
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    assert.equal(await readiness.getByText("В наличии 1 из 2 позиций").isVisible(), true);
+    assert.equal(await readiness.locator(".repairs-urgent-return").count(), 0);
   } finally {
     await browser?.close();
     server.closeAllConnections();
