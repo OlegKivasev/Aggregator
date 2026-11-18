@@ -84,7 +84,9 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await page.locator("#nomenclature-stock-loading").waitFor();
     assert.equal(await page.locator("#nomenclature-stock-loading strong").evaluate((element) => getComputedStyle(element).color), "rgb(0, 0, 0)", "loading message stays black while result matches are green");
     assert.deepEqual(job.options, { availability: "available", priceType: null, searchMode: "text", category: null, group: null, oemBrand: null,
-      navigation: true, inventory: true, receipts: { from: "2026-11-18", to: "2026-11-18", source: "free" } });
+      navigation: true, inventory: true });
+    assert.equal(await page.locator("#nomenclature-receipt-enabled").isChecked(), false);
+    assert.equal(await page.locator("#nomenclature-receipt-values").isVisible(), false);
     assert.equal(await page.locator("#nomenclature-stock-status").textContent(), "");
     const products = Array.from({ length: 100 }, (_, index) => ({ id: randomUUID(),
       name: index === 0 ? '<img src=x onerror="window.stockXss=1"> Товар с длинным наименованием' : `Тестовый товар ${index + 1}`,
@@ -93,7 +95,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await page.waitForFunction(() => document.querySelectorAll("#nomenclature-stock-rows tr").length === 100);
     const second = await poll(20);
     assert.deepEqual(second.after, { id: products.at(-1).id, value: null });
-    assert.deepEqual(second.options.receipts, job.options.receipts);
+    assert.equal(second.options.receipts, undefined);
     const amounts = page.locator("#nomenclature-stock-rows tr").first().locator("td:nth-child(4) span");
     assert.deepEqual(await amounts.allTextContents(), ["100", "1k+"]);
     assert.equal((await amounts.nth(1).locator("button").getAttribute("title")).replace(/\s/g, ""), "Замена:1200");
@@ -385,6 +387,13 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#nomenclature-stock-progress").textContent(), "");
     assert.equal(await page.locator("#nomenclature-function").getByText("1С на связи", { exact: true }).count(), 0);
+    const beforeReceiptFilter = reads.length;
+    await page.locator("#nomenclature-receipt-enabled").check();
+    const receiptsToday = await poll(20);
+    assert.deepEqual(receiptsToday.options.receipts, { from: "2026-11-18", to: "2026-11-18", source: "free" });
+    assert.equal(reads.length, beforeReceiptFilter + 1);
+    assert.equal((await complete(receiptsToday, prices)).status, 200);
+    await page.locator("#nomenclature-stock-loading").waitFor({ state: "hidden" });
     await page.locator("#nomenclature-receipt-from").fill("2026-11-17");
     const longerPeriod = await poll(20);
     assert.deepEqual(longerPeriod.options.receipts, { from: "2026-11-17", to: "2026-11-18", source: "free" });
