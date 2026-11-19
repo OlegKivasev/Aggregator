@@ -197,6 +197,8 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.equal(failed.query, "фильтр"); assert.deepEqual(failed.after, { id: filtered.at(-1).id, value: null });
     assert.equal((await complete(failed, [], false, "error")).status, 200);
     await page.waitForFunction(() => document.querySelector("#nomenclature-stock-progress").dataset.tone === "error");
+    assert.match(await page.locator("#nomenclature-stock-progress").textContent(), /1С вернула ошибку при расчёте остатков/);
+    assert.ok((await page.locator("#nomenclature-stock-progress").textContent()).includes(failed.id));
     assert.equal(await page.locator("#nomenclature-stock-status").textContent(), "", "continuation errors stay below the table");
     assert.equal(await page.locator("#nomenclature-stock-loading").isVisible(), false);
     assert.equal(await page.locator("#nomenclature-stock-more-loading").isVisible(), false);

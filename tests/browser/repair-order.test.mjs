@@ -67,10 +67,12 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     await page.request.post(`${origin}/api/auth/login`, { data: { fio: card.responsibleFio, password: "test-user-password" } });
     const pageErrors = [];
     const jobs = [];
+    const apiRequests = [];
     const repairRequests = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     page.on("request", (req) => {
       const path = new URL(req.url()).pathname;
+      if (path.startsWith("/api/")) apiRequests.push(path);
       if (path.startsWith("/api/repairs/refresh")) repairRequests.push(path);
       if (req.method() === "POST" && path === "/api/repairs/refresh") jobs.push(req.postDataJSON());
     });
@@ -136,13 +138,28 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     assert.deepEqual(await dialog.locator(".repair-order-return-urgent .repair-order-return-days").allTextContents(), ["5", "4", "3", "2", "1", "0", "0"]);
     assert.equal(await dialog.locator(".repair-order-return-urgent").first().evaluate((row) => getComputedStyle(row).outlineStyle), "solid");
     const goodsTable = dialog.getByRole("table", { name: "Товары" });
-    await goodsTable.getByRole("button", { name: /Остаток 20/ }).click();
-    const breakdown = page.getByRole("dialog", { name: "Остаток с учётом заказов" });
-    assert.equal(await breakdown.getByText("PRIVATE-REPLACEMENT").isVisible(), true);
-    assert.equal(await breakdown.getByText("Всего 20").isVisible(), true);
+    const stockButton = goodsTable.getByRole("button", { name: /Остаток 20/ });
+    const stockPopover = dialog.getByRole("dialog", { name: "Остаток с учётом заказов" });
+    async function checkStockPopover(width, open) {
+      const before = apiRequests.length;
+      await open();
+      await stockPopover.waitFor();
+      assert.equal(await stockPopover.getAttribute("id"), "repair-order-incoming");
+      assert.equal(await stockPopover.getByText("PRIVATE-REPLACEMENT").isVisible(), true);
+      assert.equal(await stockPopover.getByText("Всего 20").isVisible(), true);
+      assert.equal(await stockButton.getAttribute("aria-expanded"), "true");
+      assert.equal(await stockPopover.getByRole("region", { name: "Оригинал" }).locator("dd").textContent(), "5");
+      assert.equal(await stockPopover.getByRole("region", { name: "Замена" }).locator("dd").textContent(), "15");
+      const box = await stockPopover.boundingBox();
+      assert.ok(box.x >= 0 && box.x + box.width <= width);
+      assert.equal(apiRequests.length, before, "stock details use the order snapshot");
+    }
+    await checkStockPopover(1440, () => stockButton.press("Enter"));
     await page.keyboard.press("Escape");
+    assert.equal(await stockPopover.isVisible(), false);
+    assert.equal(await stockButton.getAttribute("aria-expanded"), "false");
+    assert.equal(await stockButton.evaluate((node) => document.activeElement === node), true);
     assert.equal(await dialog.isVisible(), true);
-    assert.equal(repairRequests.length, beforePreview, "stock details use the order snapshot");
     const waitingRow = goodsTable.getByRole("row", { name: /Подшипник под заказ/ });
     const waitStyles = (row) => row.evaluate((node) => ({
       color: getComputedStyle(node).outlineColor,
@@ -211,6 +228,9 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       assert.equal(await goodsTable.locator("[data-incoming-side]:visible").count(), 3);
       assert.equal(await emptyOptionals.getByText("К поступлению", { exact: true }).isVisible(), false);
       assert.equal((await waitStyles(waitingRow)).color, "rgb(187, 137, 9)");
+      await checkStockPopover(width, () => stockButton.tap());
+      await stockPopover.getByRole("button", { name: "Закрыть расшифровку остатка" }).tap();
+      assert.equal(await stockPopover.isVisible(), false);
       await checkSupply(waitingRow, awaitingPart, "original", width, true);
       await checkSupply(firstRow, stock, "replacement", width, true);
       const productName = firstRow.getByRole("rowheader");

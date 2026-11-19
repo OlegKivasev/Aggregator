@@ -1,3 +1,5 @@
+import { renderStockGroups } from "./stock-details.js";
+
 const amount = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const date = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
@@ -41,6 +43,7 @@ export function createIncomingPopover(container = document.body, id = "nomenclat
       <ul></ul>
       <p role="status"></p>
       <button type="button" class="btn btn-light nomenclature-incoming-more" hidden>Показать ещё</button>
+      <div class="stock-detail-groups" hidden></div>
     </div>`;
   container.append(panel);
   const title = panel.querySelector("h3");
@@ -50,6 +53,9 @@ export function createIncomingPopover(container = document.body, id = "nomenclat
   const status = panel.querySelector("[role=status]");
   const content = panel.querySelector(".nomenclature-incoming-content");
   const more = panel.querySelector(".nomenclature-incoming-more");
+  const closeButton = panel.querySelector(".nomenclature-incoming-close");
+  const stockGroups = panel.querySelector(".stock-detail-groups");
+  stockGroups.id = id + "-stock";
   let anchor;
   let position;
   let request;
@@ -65,6 +71,7 @@ export function createIncomingPopover(container = document.body, id = "nomenclat
     const previousAnchor = anchor;
     anchor = undefined;
     panel.hidden = true;
+    stockGroups.replaceChildren();
     if (restoreFocus && previousAnchor.isConnected) previousAnchor.focus({ preventScroll: true });
   };
   const reposition = () => {
@@ -120,10 +127,29 @@ export function createIncomingPopover(container = document.body, id = "nomenclat
       if (request === current) { request = undefined; reposition(); }
     }
   };
-  panel.querySelector(".nomenclature-incoming-close").addEventListener("click", () => close(true));
+  const begin = (button, event) => {
+    if (button === anchor) { close(true); return false; }
+    close();
+    anchor = button;
+    const rect = button.getBoundingClientRect();
+    position = event.detail && rect.width && rect.height ? {
+      x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
+    } : { x: 0.5, y: 1 };
+    return true;
+  };
+  const show = () => {
+    panel.hidden = false;
+    content.scrollTop = 0;
+    anchor.setAttribute("aria-expanded", "true");
+    title.focus({ preventScroll: true });
+    reposition();
+  };
+  closeButton.addEventListener("click", () => close(true));
   more.addEventListener("click", load);
   document.addEventListener("click", (event) => {
-    if (anchor && !panel.contains(event.target) && !event.target.closest("[data-incoming-side]")) close();
+    if (anchor && !panel.contains(event.target) && !anchor.contains(event.target)
+      && !event.target.closest("[data-incoming-side]")) close();
   });
   document.addEventListener("keydown", (event) => {
     if (anchor && event.key === "Escape") { event.preventDefault(); close(true); }
@@ -131,26 +157,30 @@ export function createIncomingPopover(container = document.body, id = "nomenclat
   window.addEventListener("scroll", reposition, { capture: true, passive: true });
   window.addEventListener("resize", reposition);
   return {
+    id,
     open(button, product, event, source = "/api/nomenclature/incoming") {
-      if (button === anchor) { close(true); return; }
-      close();
-      anchor = button;
+      if (!begin(button, event)) return;
       endpoint = source;
-      const rect = button.getBoundingClientRect();
-      position = event.detail && rect.width && rect.height ? {
-        x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
-        y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
-      } : { x: 0.5, y: 1 };
       const side = button.dataset.incomingSide;
       params = new URLSearchParams({ product: product.id, side });
       title.textContent = side === "original" ? "Поставки оригинала" : "Поставки замен";
       subtitle.textContent = product.name;
+      closeButton.setAttribute("aria-label", "Закрыть поставки");
       list.replaceChildren();
-      panel.hidden = false;
-      content.scrollTop = 0;
-      button.setAttribute("aria-expanded", "true");
-      title.focus({ preventScroll: true });
+      list.hidden = status.hidden = false;
+      stockGroups.hidden = true;
+      show();
       void load();
+    },
+    openStock(button, product, total, event) {
+      if (!begin(button, event)) return;
+      title.textContent = "Остаток с учётом заказов";
+      subtitle.textContent = "Всего " + amount.format(total);
+      closeButton.setAttribute("aria-label", "Закрыть расшифровку остатка");
+      list.hidden = status.hidden = more.hidden = true;
+      stockGroups.hidden = false;
+      renderStockGroups(stockGroups, product, product.stockDetails);
+      show();
     },
     close,
     reposition,
