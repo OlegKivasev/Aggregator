@@ -54,6 +54,7 @@ import { serveRosskoOrderSettings, type RosskoOrderSettingsApplication } from ".
 import type { AuthenticatedUser, UserAuthService, UserPermission } from "../auth/user-auth-service.ts";
 import { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
 import { serveNomenclature } from "./nomenclature.ts";
+import { serveSupplierOrders } from "./supplier-orders.ts";
 
 export interface AggregatorApplication extends RosskoOrderSettingsApplication {
   testCartOrder?: TestOrder;
@@ -126,6 +127,7 @@ function requiredPermission(url: URL): UserPermission | "admin" | null {
   if (pathname.startsWith("/api/applicability/")) return "applicability";
   if (pathname === "/api/nomenclature/settings") return "admin";
   if (pathname.startsWith("/api/nomenclature/")) return "nomenclature";
+  if (pathname.startsWith("/api/purchasing/")) return "purchasing";
   if (pathname.startsWith("/api/")) return "markup";
   return null;
 }
@@ -293,6 +295,12 @@ export function createAggregatorServer({
       auth && authenticatedUser ? () => auth.currentUser(request) : undefined)) return;
     if (await serveNomenclature(request, response, url, nomenclature, authenticatedUser,
       () => reportError({ operation: "nomenclature", category: "internal" }))) return;
+    if (url.pathname.startsWith("/api/purchasing/")) {
+      await serveSupplierOrders(request, response, url, nomenclature,
+        () => !auth?.enabled || Boolean(auth.authorize(request, response, "purchasing")),
+        () => reportError({ operation: "supplier-orders", category: "internal" }));
+      return;
+    }
 
     if (await serveVkNotifications(request, response, url, notifications)) return;
     if (await serveOrderNotifications(request, response, url, notifications)) return;

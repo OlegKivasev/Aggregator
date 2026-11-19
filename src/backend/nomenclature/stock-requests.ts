@@ -20,7 +20,8 @@ export const stockWorkerConditions = `AND (query='' OR ?=1)
   AND (options='' OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.searchMode') IS NULL OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.inventory') IS NULL OR ?=1)
-  AND (options='' OR json_extract(NULLIF(options, ''), '$.incomingDetails') IS NULL OR ?=1)`;
+  AND (options='' OR json_extract(NULLIF(options, ''), '$.incomingDetails') IS NULL OR ?=1)
+  AND (options='' OR json_extract(NULLIF(options, ''), '$.supplierOrders') IS NULL OR ?=1)`;
 
 const highlightsRequested = (query: string, options?: StockOptions | null): boolean =>
   !!query && options?.inventory === true && options.searchMode === "text";
@@ -150,8 +151,21 @@ export class StockRequests {
     if (data.status === "completed" && row.sort_field === "price" && !options?.priceType) {
       throw new NomenclatureError(400, "invalid_stock", "Для сортировки по цене выберите вид цены.");
     }
-    const incoming = options?.incomingDetails;
-    if (incoming) {
+    const purchasing = options?.supplierOrders;
+    const supplierOrders = data.supplierOrders;
+    if (purchasing || supplierOrders) {
+      const pageAfter = purchasing?.view === "list" ? purchasing.after : null;
+      if (!purchasing || data.products.length || data.hasMore || data.lastSortValue != null || data.totalCount !== undefined
+        || data.priceTypes !== undefined || data.navigation !== undefined || data.incomingDetails !== undefined
+        || (data.status === "completed") !== (supplierOrders !== undefined)
+        || supplierOrders && (supplierOrders.view !== purchasing.view
+          || supplierOrders.view !== "list" && purchasing.view !== "list" && supplierOrders.id !== purchasing.id
+          || supplierOrders.view === "list" && pageAfter
+            && supplierOrders.orders.some((order) => order.date > pageAfter.date || order.id === pageAfter.id))) {
+        throw new NomenclatureError(400, "invalid_supplier_orders", "Ответ не соответствует запросу заказов поставщикам.");
+      }
+    } else if (options?.incomingDetails) {
+      const incoming = options.incomingDetails;
       if (data.products.length || data.hasMore || data.lastSortValue != null || data.totalCount !== undefined
         || data.priceTypes !== undefined || data.navigation !== undefined
         || (data.status === "completed") !== (data.incomingDetails !== undefined)
@@ -177,6 +191,7 @@ export class StockRequests {
       nextCursor: data.hasMore ? encodeStockCursor({ id: data.products.at(-1)!.id, value: lastValue }, row.query, sort, row.options) : null, receivedAt: new Date(this.now()).toISOString(),
       ...(data.navigation === undefined ? {} : { navigation: data.navigation }),
       ...(data.incomingDetails === undefined ? {} : { incomingDetails: data.incomingDetails }),
+      ...(supplierOrders === undefined ? {} : { supplierOrders }),
       ...(data.totalCount === undefined ? {} : { totalCount: data.totalCount }), ...(data.priceTypes === undefined ? {} : { priceTypes: data.priceTypes }) };
     // Keep the timestamp of an accepted result when an identical delivery is retried.
     if (row?.result_json) page.receivedAt = (JSON.parse(row.result_json) as StockPage).receivedAt;
@@ -191,4 +206,4 @@ export class StockRequests {
   }
 }
 
-export const stockWorkerFlags = (version: number): number[] => [2, 3, 4, 5, 6, 7, 8].map((minimum) => Number(version >= minimum));
+export const stockWorkerFlags = (version: number): number[] => [2, 3, 4, 5, 6, 7, 8, 9].map((minimum) => Number(version >= minimum));

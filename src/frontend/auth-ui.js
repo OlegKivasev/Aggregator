@@ -39,7 +39,7 @@ const messageFor = async (response, fallback) => {
 const positionsUi = setupUserPositions(messageFor);
 
 const accessLabel = (user) => user.isAdmin ? "Администратор" : user.permissions.map((permission) => ({
-  markup: "Проценка", applicability: "Применимость", repairs: "Заказ-наряды", testRepairs: "Тестовые заказ-наряды", nomenclature: "Номенклатура",
+  markup: "Проценка", applicability: "Применимость", repairs: "Заказ-наряды", testRepairs: "Тестовые заказ-наряды", nomenclature: "Номенклатура", purchasing: "Закупки",
 }[permission] ?? permission)).join(", ") || "Нет доступа";
 
 const applyAccess = (user) => {
@@ -50,6 +50,7 @@ const applyAccess = (user) => {
   const canRepairs = user?.isAdmin || user?.permissions?.includes("repairs");
   const canTestRepairs = user?.isAdmin || user?.permissions?.includes("testRepairs");
   const canNomenclature = user?.isAdmin || user?.permissions?.includes("nomenclature");
+  const canPurchase = user?.isAdmin || user?.permissions?.includes("purchasing");
   const singleForm = !user?.isAdmin && user?.permissions?.length === 1;
   const functionTabs = document.querySelector(".function-tabs");
   if (functionTabs) functionTabs.hidden = singleForm;
@@ -59,21 +60,25 @@ const applyAccess = (user) => {
   const repairsTab = document.querySelector("#repairs-function-tab");
   const testRepairsTab = document.querySelector("#test-repairs-function-tab");
   const nomenclatureTab = document.querySelector("#nomenclature-function-tab");
+  const purchasingTab = document.querySelector("#purchasing-function-tab");
   const markupSection = document.querySelector("#markup-function");
   const applicabilitySection = document.querySelector("#applicability-function");
   const repairsSection = document.querySelector("#repairs-function");
   const testRepairsSection = document.querySelector("#test-repairs-function");
   const nomenclatureSection = document.querySelector("#nomenclature-function");
+  const purchasingSection = document.querySelector("#purchasing-function");
   if (markupTab) markupTab.hidden = !canMarkup;
   if (applicabilityTab) applicabilityTab.hidden = !canApplicability;
   if (repairsTab) repairsTab.hidden = !canRepairs;
   if (testRepairsTab) testRepairsTab.hidden = !canTestRepairs;
   if (nomenclatureTab) nomenclatureTab.hidden = !canNomenclature;
+  if (purchasingTab) purchasingTab.hidden = !canPurchase;
   if (markupSection) markupSection.hidden = !canMarkup;
   if (applicabilitySection) applicabilitySection.hidden = !canApplicability;
   if (repairsSection) repairsSection.hidden = !canRepairs;
   if (testRepairsSection) testRepairsSection.hidden = !canTestRepairs;
   if (nomenclatureSection) nomenclatureSection.hidden = !canNomenclature;
+  if (purchasingSection) purchasingSection.hidden = !canPurchase;
   document.querySelectorAll("[data-admin-only]").forEach((element) => { element.hidden = !user?.isAdmin; });
   const settingsToggle = document.querySelector("#settings-toggle");
   if (settingsToggle) settingsToggle.hidden = !user?.isAdmin;

@@ -7,6 +7,7 @@ import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { setupSearchHistory } from "./search-history-ui.js";
 import { bootstrapRepairs } from "./repairs-ui.js?v=repair-incoming-mobile-1";
 import { bootstrapNomenclature } from "./nomenclature-ui.js?v=synonym-highlight-8";
+import { bootstrapSupplierOrders } from "./supplier-orders-ui.js";
 import { moveApplicabilityGroupRelative, moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, moveApplicabilityTabRelative, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "./applicability-tab-groups.js";
 
 const markupFunction = document.querySelector("#markup-function");
@@ -23,6 +24,9 @@ const testRepairsTab = document.querySelector("#test-repairs-function-tab");
 const nomenclatureFunction = document.querySelector("#nomenclature-function");
 const nomenclatureTab = document.querySelector("#nomenclature-function-tab");
 const nomenclatureUi = bootstrapNomenclature();
+const purchasingFunction = document.querySelector("#purchasing-function");
+const purchasingTab = document.querySelector("#purchasing-function-tab");
+const supplierOrdersUi = bootstrapSupplierOrders(purchasingFunction);
 const applicabilityTabsList = document.querySelector("#applicability-tabs-list");
 const applicabilityTabs = applicabilityTabsList.closest(".applicability-tabs");
 const tabUngroupDrop = document.querySelector("#applicability-tab-ungroup-drop");
@@ -189,7 +193,7 @@ const getActiveTab = () => tabs.find((tab) => tab.id === activeTabId);
 
 const setActiveFunction = (name) => {
   const user = window.aggregatorAuthState?.user;
-  const permissionFor = { markup: "markup", applicability: "applicability", repairs: "repairs", "test-repairs": "testRepairs", nomenclature: "nomenclature" };
+  const permissionFor = { markup: "markup", applicability: "applicability", repairs: "repairs", "test-repairs": "testRepairs", nomenclature: "nomenclature", purchasing: "purchasing" };
   if (user && !user.isAdmin && !user.permissions.includes(permissionFor[name])) {
     name = Object.keys(permissionFor).find((key) => user.permissions.includes(permissionFor[key]));
   }
@@ -199,6 +203,7 @@ const setActiveFunction = (name) => {
     ["markup", markupFunction, markupTab], ["applicability", applicabilityFunction, applicabilityTab], ["repairs", repairsFunction, repairsTab],
     ["test-repairs", testRepairsFunction, testRepairsTab],
     ["nomenclature", nomenclatureFunction, nomenclatureTab],
+    ["purchasing", purchasingFunction, purchasingTab],
   ]) {
     section.hidden = name !== key;
     button.classList.toggle("active", name === key);
@@ -215,6 +220,7 @@ const setActiveFunction = (name) => {
   }
   repairsUi.setActive(name);
   nomenclatureUi.setActive(name);
+  supplierOrdersUi.setActive(name);
 };
 
 const setFeedback = (message, tone = "error") => {
@@ -1523,6 +1529,7 @@ applicabilityTab.addEventListener("click", () => setActiveFunction("applicabilit
 repairsTab.addEventListener("click", () => setActiveFunction("repairs"));
 testRepairsTab.addEventListener("click", () => setActiveFunction("test-repairs"));
 nomenclatureTab.addEventListener("click", () => setActiveFunction("nomenclature"));
+purchasingTab.addEventListener("click", () => setActiveFunction("purchasing"));
 newApplicabilityTabButton.addEventListener("click", addTab);
 listButton.addEventListener("click", () => openDocumentModal());
 multiListButton.addEventListener("click", openGroupDocument);
@@ -2068,7 +2075,7 @@ const makesReady = loadMakes();
 const apiKeyReady = loadApiKeyState();
 try {
   const savedFunction = localStorage.getItem(activeFunctionStorageKey);
-  setActiveFunction(["applicability", "repairs", "test-repairs", "nomenclature"].includes(savedFunction) ? savedFunction : "markup");
+  setActiveFunction(["applicability", "repairs", "test-repairs", "nomenclature", "purchasing"].includes(savedFunction) ? savedFunction : "markup");
 } catch {
   // The selected function is a convenience preference.
 }

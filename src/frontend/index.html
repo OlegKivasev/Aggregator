@@ -17,6 +17,7 @@
     <link rel="stylesheet" href="/styles.css?v=user-positions-1" />
     <link rel="stylesheet" href="/order-notifications.css" />
     <link rel="stylesheet" href="/repair-order.css?v=repair-incoming-mobile-1" />
+    <link rel="stylesheet" href="/supplier-orders.css" />
   </head>
   <body>
     <div class="auth-screen" id="auth-screen" hidden>
@@ -47,6 +48,7 @@
         <button type="button" class="function-tab active" id="markup-function-tab" aria-controls="markup-function" aria-selected="true">Проценка</button>
         <button type="button" class="function-tab" id="applicability-function-tab" aria-controls="applicability-function" aria-selected="false">Применимость</button>
         <button type="button" class="function-tab" id="nomenclature-function-tab" aria-controls="nomenclature-function" aria-selected="false" hidden>Номенклатура</button>
+        <button type="button" class="function-tab" id="purchasing-function-tab" aria-controls="purchasing-function" aria-selected="false" hidden>Закупки</button>
         <button type="button" class="function-tab" id="repairs-function-tab" aria-controls="repairs-function" aria-selected="false" hidden>Заказ-наряды</button>
         <button type="button" class="function-tab" id="test-repairs-function-tab" aria-controls="test-repairs-function" aria-selected="false" hidden>Заказ-наряды (тест)</button>
       </nav>
@@ -527,6 +529,18 @@
         </div>
         </div>
       </section>
+      <section id="purchasing-function" class="results-panel card border-0 shadow-sm" aria-labelledby="supplier-orders-title" hidden>
+        <header class="results-panel__header card-header bg-white border-0">
+          <div class="results-panel__heading"><h2 id="supplier-orders-title">Заказы поставщикам</h2></div>
+          <button type="button" class="btn btn-light" id="supplier-orders-refresh">Обновить</button>
+        </header>
+        <p class="supplier-orders-feedback" id="supplier-orders-status" role="status"></p>
+        <table class="supplier-orders-table supplier-orders-list" id="supplier-orders-table" role="table" aria-labelledby="supplier-orders-title" hidden>
+          <thead role="rowgroup"><tr role="row"><th scope="col" class="supplier-orders-action" aria-label="Быстрый просмотр"></th><th scope="col" class="supplier-orders-date">Дата</th><th scope="col" class="supplier-orders-link">Номер</th><th scope="col">Поставщик</th><th scope="col">Покупатель</th><th scope="col" class="supplier-orders-money">Сумма</th></tr></thead>
+          <tbody role="rowgroup" id="supplier-orders-rows"></tbody>
+        </table>
+        <div class="supplier-orders-pagination" id="supplier-orders-pagination" hidden><button type="button" class="btn btn-light" id="supplier-orders-more">Показать ещё</button></div>
+      </section>
       <section id="repairs-function" class="repairs-function results-panel card border-0 shadow-sm overflow-hidden" aria-labelledby="repairs-title" hidden>
         <header class="results-panel__header card-header bg-white border-0">
           <div class="results-panel__heading">
@@ -572,6 +586,31 @@
       </div>
       </div>
     </main>
+
+    <dialog class="repair-order supplier-orders-dialog" id="supplier-order-dialog" aria-labelledby="supplier-order-title">
+      <header class="repair-order-heading">
+        <div class="repair-order-heading-actions">
+          <button class="repair-order-back" id="supplier-order-back" type="button"><span aria-hidden="true">‹</span> К списку</button>
+          <button class="repair-order-close" id="supplier-order-close" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <h2 id="supplier-order-title" tabindex="-1"></h2>
+        <div class="repair-order-number" id="supplier-order-date"></div>
+      </header>
+      <div class="repair-order-scroll" id="supplier-order-content">
+        <p class="supplier-orders-feedback" id="supplier-order-status" role="status"></p>
+        <button type="button" class="btn btn-light" id="supplier-order-retry" hidden>Повторить</button>
+        <dl class="repair-order-facts" id="supplier-order-facts" hidden></dl>
+        <h3 id="supplier-order-goods-title" hidden>Товары</h3>
+        <table class="supplier-orders-table supplier-orders-goods" id="supplier-order-goods" role="table" aria-label="Товары" hidden>
+          <thead role="rowgroup"><tr role="row" id="supplier-order-columns"></tr></thead>
+          <tbody role="rowgroup" id="supplier-order-products"></tbody>
+        </table>
+      </div>
+      <footer class="repair-order-footer supplier-order-footer" id="supplier-order-footer" hidden>
+        <div id="supplier-order-total" hidden><span>Всего</span> <strong></strong></div>
+        <button type="button" class="btn btn-primary" id="supplier-order-open" hidden>Открыть заказ</button>
+      </footer>
+    </dialog>
 
     <dialog class="nomenclature-preview" id="nomenclature-preview" aria-labelledby="nomenclature-camera-title" aria-describedby="nomenclature-camera-hint">
       <video id="nomenclature-video" autoplay muted playsinline aria-label="Камера для сканирования штрихкода"></video>
@@ -995,6 +1034,7 @@
           <label><input type="checkbox" value="markup"><span>Проценка</span></label>
           <label><input type="checkbox" value="applicability"><span>Применимость</span></label>
           <label><input type="checkbox" value="nomenclature"><span>Номенклатура</span></label>
+          <label><input type="checkbox" value="purchasing"><span>Закупки</span></label>
           <label><input type="checkbox" value="repairs"><span>Заказ-наряды</span></label>
           <label><input type="checkbox" value="testRepairs"><span>Тестовые заказ-наряды</span></label>
         </fieldset>
@@ -1378,9 +1418,9 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
       </div>
     </aside>
 
-    <script type="module" src="/auth-ui.js?v=user-positions-1"></script>
+    <script type="module" src="/auth-ui.js?v=supplier-orders-1"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=repair-incoming-mobile-1"></script>
+    <script type="module" src="/applicability.js?v=supplier-orders-1"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>
