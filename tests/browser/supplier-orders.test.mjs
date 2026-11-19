@@ -210,6 +210,79 @@ test("supplier orders search and sort across pages with one 1C job per action an
     await supplier(market.number).waitFor();
     assert.equal(requests.length, beforeSearch + 4);
     assert.equal(await claim(10), null);
+
+    const product = { ...goods, stock: 7, receipt: "Не пришёл", price: 971.5, amount: 1943, returnDays: 14, expectedDate: null };
+    const different = { ...product, name: "Другой товар с тем же артикулом" };
+    const duplicate = { ...product, quantity: 1 };
+    const card = (order, products) => ({ view: "order", id: order.id, order: { ...order, contract: "", market: false, products } });
+    const beforeNotes = requests.length;
+    await supplier(other.number).click();
+    assert.equal((await reply(await claim(10, 5), card(other, [product, different, duplicate]))).status, 200);
+    const productRows = dialog.locator("tbody tr");
+    const noteButton = (index) => productRows.nth(index).getByRole("button", { name: /заметка|добавить заметку/i });
+    assert.ok((await noteButton(0).boundingBox()).height >= 44);
+    await noteButton(0).click();
+    assert.equal(requests.length, beforeNotes + 1, "The card supplies notes without requests per row or per editor");
+    const editor = page.getByRole("dialog", { name: "Заметка к товару" });
+    const draft = editor.getByRole("textbox", { name: "Текст заметки" });
+    const save = editor.getByRole("button", { name: "Сохранить" });
+    assert.equal(await draft.inputValue(), "");
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 760 });
+      assert.equal(await editor.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+    }
+    await draft.fill("Черновик");
+    await page.keyboard.press("Escape");
+    await editor.waitFor({ state: "hidden" });
+    assert.equal(await noteButton(0).evaluate((node) => node === document.activeElement), true);
+    await noteButton(0).click();
+    assert.equal(await draft.inputValue(), "");
+    assert.equal(requests.length, beforeNotes + 1, "Closing an editor does not write a draft");
+
+    const noteText = "Бренд: Trialli\nАртикул: <b>AB123</b>\nСумма: 1 943 ₽";
+    await draft.fill(noteText);
+    const firstSave = page.waitForResponse((response) => response.request().method() === "PUT" && response.url().endsWith("/note"));
+    await save.click();
+    const saved = await firstSave;
+    assert.equal(saved.status(), 200);
+    await editor.waitFor({ state: "hidden" });
+    assert.equal(requests.length, beforeNotes + 2, "Saving sends one local PUT");
+    assert.equal(await claim(10), null, "Saving does not enqueue a job in 1C");
+    assert.equal(await noteButton(0).locator(".supplier-note-preview").textContent(), noteText);
+    assert.equal(await noteButton(0).locator("b").count(), 0, "Note text is displayed without interpreting markup");
+    assert.equal(await noteButton(1).locator(".supplier-note-preview").isVisible(), false);
+    assert.equal(await noteButton(2).locator(".supplier-note-preview").isVisible(), false);
+
+    const noteUrl = new URL(saved.url()).pathname;
+    const putNote = (cookie, text, revision) => request(noteUrl, { method: "PUT", body: JSON.stringify({ text, revision }),
+      headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) } });
+    const { note } = await saved.json();
+    assert.equal((await putNote(null, "Закрыто", note.revision)).status, 401);
+    assert.equal((await putNote(blocked, "Закрыто", note.revision)).status, 403);
+    assert.equal((await putNote(admin, "X".repeat(2001), note.revision)).status, 400);
+
+    const adminCard = request(`${path}/${other.id}`, { headers: { Cookie: admin } });
+    assert.equal((await reply(await claim(10, 5), card(other, [different, { ...product, quantity: 4 }, duplicate]))).status, 200);
+    const { products: adminProducts } = await (await adminCard).json();
+    assert.deepEqual(adminProducts.map((item) => item.note?.text ?? null), [null, noteText, null],
+      "A second user sees the note after distinct rows move and the order quantity changes");
+    const anotherOrder = request(`${path}/${market.id}`, { headers: { Cookie: admin } });
+    assert.equal((await reply(await claim(10, 5), card({ ...market, amount: 1943 }, [product]))).status, 200);
+    assert.equal((await (await anotherOrder).json()).products[0].note, null);
+
+    await noteButton(0).click();
+    assert.equal(await draft.inputValue(), noteText);
+    await draft.fill("Наш черновик");
+    assert.equal((await putNote(admin, "Заметка коллеги", note.revision)).status, 200);
+    await save.click();
+    await editor.getByText("Заметка коллеги", { exact: true }).waitFor();
+    assert.equal(await draft.inputValue(), "Наш черновик");
+    assert.match(await editor.getByRole("status").textContent(), /уже изменили/);
+    await draft.fill("");
+    await save.click();
+    await editor.waitFor({ state: "hidden" });
+    assert.equal(await noteButton(0).locator(".supplier-note-preview").isVisible(), false);
+    assert.equal(await claim(10), null);
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

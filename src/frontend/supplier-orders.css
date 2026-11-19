@@ -65,6 +65,68 @@
 .supplier-order-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; text-align: right; }
 .supplier-order-footer strong { margin-left: 6px; font-size: 20px; font-variant-numeric: tabular-nums; }
 
+.supplier-note-button {
+  display: block;
+  max-width: 100%;
+  min-height: 32px;
+  margin-top: 4px;
+  padding: 3px 0;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+.supplier-note-button:hover span:first-child { text-decoration: underline; }
+.supplier-note-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: #526174;
+  font-weight: 400;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.supplier-note-preview[hidden] { display: none; }
+.supplier-note-dialog {
+  width: min(460px, calc(100% - 24px));
+  max-height: calc(100dvh - 24px);
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  background: #fff;
+}
+.supplier-note-dialog::backdrop { background: rgba(23, 32, 42, .32); }
+.supplier-note-dialog h2 { margin: 0 0 8px; font-size: 18px; font-weight: 800; }
+#supplier-note-product { margin: 0 0 12px; color: #526174; overflow-wrap: anywhere; }
+#supplier-note-text {
+  display: block;
+  width: 100%;
+  min-height: 96px;
+  padding: 8px 10px;
+  border: 1px solid #9aa9b8;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 16px;
+  resize: vertical;
+}
+#supplier-note-current {
+  max-height: 112px;
+  overflow: auto;
+  padding: 8px 10px;
+  background: #f4f6f8;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.supplier-note-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.supplier-note-actions button { min-height: 44px; }
+
 @media (max-width: 880px) {
   .supplier-orders-dialog .repair-order-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .supplier-orders-dialog .repair-order-facts > div:last-child:nth-child(2) { grid-column: 1 / -1; }
@@ -82,6 +144,7 @@
   }
   .supplier-orders-goods-frame .supplier-orders-goods tbody td { padding: 0; border: 0; text-align: left; }
   .supplier-orders-goods .supplier-order-name { grid-column: 1 / -1; width: auto; font-size: 14px; }
+  .supplier-note-button { min-height: 44px; }
   .supplier-orders-goods .supplier-order-receipt { grid-column: 1 / -1; }
   .supplier-orders-goods .supplier-order-receipt .supplier-orders-label { display: inline; margin-right: 8px; }
   .supplier-orders-goods .supplier-orders-label { display: block; }

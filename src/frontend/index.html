@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="/styles.css?v=stock-popup-1" />
     <link rel="stylesheet" href="/order-notifications.css" />
     <link rel="stylesheet" href="/repair-order.css?v=repair-incoming-mobile-1" />
-    <link rel="stylesheet" href="/supplier-orders.css?v=supplier-orders-search-1" />
+    <link rel="stylesheet" href="/supplier-orders.css?v=supplier-order-notes-1" />
   </head>
   <body>
     <div class="auth-screen" id="auth-screen" hidden>
@@ -625,6 +625,20 @@
       <footer class="repair-order-footer supplier-order-footer" id="supplier-order-footer" hidden>
         <div id="supplier-order-total"><span>Всего</span> <strong></strong></div>
       </footer>
+    </dialog>
+
+    <dialog class="supplier-note-dialog" id="supplier-note-dialog" aria-labelledby="supplier-note-title" aria-describedby="supplier-note-product">
+      <form id="supplier-note-form">
+        <h2 id="supplier-note-title">Заметка к товару</h2>
+        <p id="supplier-note-product"></p>
+        <textarea id="supplier-note-text" aria-label="Текст заметки" maxlength="2000" rows="5" placeholder="Бренд, артикул, сумма" autofocus></textarea>
+        <p id="supplier-note-status" class="supplier-orders-feedback" role="status"></p>
+        <p id="supplier-note-current" hidden></p>
+        <div class="supplier-note-actions">
+          <button type="button" class="btn btn-light" id="supplier-note-cancel">Отмена</button>
+          <button type="submit" class="btn btn-primary" id="supplier-note-save">Сохранить</button>
+        </div>
+      </form>
     </dialog>
 
     <dialog class="nomenclature-preview" id="nomenclature-preview" aria-labelledby="nomenclature-camera-title" aria-describedby="nomenclature-camera-hint">
@@ -1435,7 +1449,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
 
     <script type="module" src="/auth-ui.js?v=supplier-orders-1"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=stock-popup-1"></script>
+    <script type="module" src="/applicability.js?v=supplier-order-notes-1"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>
