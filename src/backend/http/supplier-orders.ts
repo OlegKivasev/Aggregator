@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { NomenclatureError } from "../nomenclature/contract.ts";
 import type { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
-import { parseSupplierOrdersRequest } from "../purchasing/supplier-orders-contract.ts";
+import { parseSupplierOrdersRequest, supplierListCursor } from "../purchasing/supplier-orders-contract.ts";
 import { serveJson } from "./responses.ts";
 
 export async function serveSupplierOrders(request: IncomingMessage, response: ServerResponse, url: URL,
@@ -21,12 +21,11 @@ export async function serveSupplierOrders(request: IncomingMessage, response: Se
     const result = await service.loadSupplierOrders(read, controller.signal);
     if (response.destroyed || !recheckAccess()) return;
     response.setHeader("Server-Timing", `supplier-orders;dur=${(performance.now() - started).toFixed(1)}`);
-    if (result.view === "list") {
-      const last = result.orders.at(-1);
-      serveJson(response, 200, { orders: result.orders, nextCursor: result.hasMore && last ? `${last.date}.${last.id}` : null });
+    if (read.view !== "order" && result.view !== "order") {
+      serveJson(response, 200, { orders: result.orders, nextCursor: supplierListCursor(read, result) });
     } else {
-      const data = result.view === "preview" ? result.products : result.order;
-      if (data === null) serveJson(response, 404, { message: "Заказ больше недоступен в списке. Обновите заказы поставщикам." });
+      const data = result.view === "order" ? result.order : null;
+      if (!data) serveJson(response, 404, { message: "Заказ больше недоступен в списке. Обновите заказы поставщикам." });
       else serveJson(response, 200, data);
     }
   } catch (error) {

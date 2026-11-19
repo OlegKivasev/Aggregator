@@ -5,6 +5,7 @@ import { NomenclatureError } from "./contract.ts";
 import { stockPageSize, type StockPage, type StockResult } from "./stock-contract.ts";
 import { defaultStockSort, decodeStockCursor, encodeStockCursor, validateStockSortValue, type StockSort, type StockSortField } from "./stock-sort.ts";
 import { stockOptionsKey, type StockOptions } from "./stock-options.ts";
+import { validateSupplierOrdersResponse } from "../purchasing/supplier-orders-contract.ts";
 
 interface Row {
   id: string; cursor: string; query: string; status: string; expires_at: number; lease_id: string | null; result_json: string | null;
@@ -21,7 +22,8 @@ export const stockWorkerConditions = `AND (query='' OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.searchMode') IS NULL OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.inventory') IS NULL OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.incomingDetails') IS NULL OR ?=1)
-  AND (options='' OR json_extract(NULLIF(options, ''), '$.supplierOrders') IS NULL OR ?=1)`;
+  AND (options='' OR json_extract(NULLIF(options, ''), '$.supplierOrders') IS NULL OR ?=1)
+  AND (options='' OR COALESCE(json_extract(NULLIF(options, ''), '$.supplierOrders.view'), '') <> 'listPage' OR ?=1)`;
 
 const highlightsRequested = (query: string, options?: StockOptions | null): boolean =>
   !!query && options?.inventory === true && options.searchMode === "text";
@@ -154,16 +156,12 @@ export class StockRequests {
     const purchasing = options?.supplierOrders;
     const supplierOrders = data.supplierOrders;
     if (purchasing || supplierOrders) {
-      const pageAfter = purchasing?.view === "list" ? purchasing.after : null;
       if (!purchasing || data.products.length || data.hasMore || data.lastSortValue != null || data.totalCount !== undefined
         || data.priceTypes !== undefined || data.navigation !== undefined || data.incomingDetails !== undefined
-        || (data.status === "completed") !== (supplierOrders !== undefined)
-        || supplierOrders && (supplierOrders.view !== purchasing.view
-          || supplierOrders.view !== "list" && purchasing.view !== "list" && supplierOrders.id !== purchasing.id
-          || supplierOrders.view === "list" && pageAfter
-            && supplierOrders.orders.some((order) => order.date > pageAfter.date || order.id === pageAfter.id))) {
+        || (data.status === "completed") !== (supplierOrders !== undefined)) {
         throw new NomenclatureError(400, "invalid_supplier_orders", "Ответ не соответствует запросу заказов поставщикам.");
       }
+      if (supplierOrders) validateSupplierOrdersResponse(purchasing, supplierOrders);
     } else if (options?.incomingDetails) {
       const incoming = options.incomingDetails;
       if (data.products.length || data.hasMore || data.lastSortValue != null || data.totalCount !== undefined
@@ -206,4 +204,4 @@ export class StockRequests {
   }
 }
 
-export const stockWorkerFlags = (version: number): number[] => [2, 3, 4, 5, 6, 7, 8, 9].map((minimum) => Number(version >= minimum));
+export const stockWorkerFlags = (version: number): number[] => [2, 3, 4, 5, 6, 7, 8, 9, 10].map((minimum) => Number(version >= minimum));

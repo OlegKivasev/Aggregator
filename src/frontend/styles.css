@@ -782,7 +782,7 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .nomenclature-product { padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
 .nomenclature-product h3 { margin: 0 0 8px; color: var(--ink); font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
 .nomenclature-stock { position: relative; padding-block: 0 12px; }
-.nomenclature-toolbar { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 10px; }
+:is(.nomenclature-toolbar, .supplier-orders-toolbar) { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 10px; }
 .nomenclature-toolbar__actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; margin-left: auto; }
 .nomenclature-tool { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex: 0 0 40px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; cursor: pointer; }
 .nomenclature-tool:hover:enabled, .nomenclature-tool:focus-visible { color: var(--accent); border-color: var(--accent); background: #fff7f3; }
@@ -819,11 +819,11 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .nomenclature-stock-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .nomenclature-stock-heading h3 { margin: 0; font-size: 18px; font-weight: 800; }
 .nomenclature-stock > .panel__meta { margin-top: 8px; }
-.nomenclature-stock table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
-.nomenclature-stock th, .nomenclature-stock td { padding: 10px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; vertical-align: top; }
-.nomenclature-stock th { padding: 9px 12px; color: #8994a1; background: #f4f6f8; font-size: 11px; font-weight: 800; letter-spacing: .03em; white-space: normal; text-transform: uppercase; }
-.nomenclature-stock .table-sort { display: flex; width: 100%; min-height: 28px; gap: 5px; text-align: left; }
-.nomenclature-stock .table-sort > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+:is(.nomenclature-stock, .supplier-orders-frame) table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
+:is(.nomenclature-stock, .supplier-orders-frame) :is(th, td) { padding: 10px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; vertical-align: top; }
+:is(.nomenclature-stock, .supplier-orders-frame) th { padding: 9px 12px; color: #8994a1; background: #f4f6f8; font-size: 11px; font-weight: 800; letter-spacing: .03em; white-space: normal; text-transform: uppercase; }
+:is(.nomenclature-stock, .supplier-orders-frame) .table-sort { display: flex; width: 100%; min-height: 28px; gap: 5px; text-align: left; }
+:is(.nomenclature-stock, .supplier-orders-frame) .table-sort > span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .nomenclature-stock th:nth-child(3) .table-sort, .nomenclature-stock th:last-child .table-sort { justify-content: flex-end; text-align: right; }
 .nomenclature-stock thead { position: sticky; top: 0; z-index: 3; }
 .nomenclature-stock td { white-space: normal; }
@@ -891,7 +891,7 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .nomenclature-stock table { overflow-anchor: none; }
 .nomenclature-stock td.nomenclature-stock-spacer { height: 0; padding: 0; border: 0; line-height: 0; }
 @media (max-width: 600px) {
-  .nomenclature-toolbar { align-items: stretch; }
+  :is(.nomenclature-toolbar, .supplier-orders-toolbar) { align-items: stretch; }
   .nomenclature-toolbar__actions { flex: 1; width: 0; }
   .nomenclature-stock-search { width: auto; flex: 1; }
 }

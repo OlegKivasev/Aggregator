@@ -7,7 +7,7 @@ import { setupTabCloseMenu } from "./tab-close-menu.js";
 import { setupSearchHistory } from "./search-history-ui.js";
 import { bootstrapRepairs } from "./repairs-ui.js?v=repair-incoming-mobile-1";
 import { bootstrapNomenclature } from "./nomenclature-ui.js?v=synonym-highlight-8";
-import { bootstrapSupplierOrders } from "./supplier-orders-ui.js";
+import { bootstrapSupplierOrders } from "./supplier-orders-ui.js?v=supplier-orders-search-1";
 import { moveApplicabilityGroupRelative, moveApplicabilityTabIntoGroup, moveApplicabilityTabOutOfGroup, moveApplicabilityTabRelative, nextApplicabilityGroupNumber, normalizeApplicabilityGroupName, restoreApplicabilityGroups } from "./applicability-tab-groups.js";
 
 const markupFunction = document.querySelector("#markup-function");
