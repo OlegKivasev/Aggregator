@@ -138,6 +138,37 @@ test("serves the login page before authentication while protecting API routes", 
   });
 });
 
+test("pricing users share saved markup rules and invalid or unauthorized writes leave them intact", async () => {
+  await withServer(async (baseUrl) => {
+    const url = `${baseUrl}/api/ui-preferences/markup`;
+    const rules = { mode: "fixed", percent: 40, tiers: [], fallbackPercent: 35 };
+    const request = (Cookie, value) => fetch(url, {
+      headers: { ...(Cookie ? { Cookie } : {}), "Content-Type": "application/json" },
+      ...(value === undefined ? {} : { method: "PUT", body: JSON.stringify(value) }),
+    });
+    const adminCookie = await login(baseUrl, "Администратор", "admin-password-123");
+    for (const [fio, permissions] of [["Проценщик", ["markup"]], ["Механик", ["repairs"]]]) {
+      const created = await fetch(`${baseUrl}/api/users`, {
+        method: "POST", headers: { Cookie: adminCookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ fio, permissions, password: "employee-test-password" }),
+      });
+      assert.equal(created.status, 201);
+    }
+    const employeeCookie = await login(baseUrl, "Проценщик", "employee-test-password");
+    const mechanicCookie = await login(baseUrl, "Механик", "employee-test-password");
+    assert.deepEqual(await (await request(adminCookie)).json(), { rules: null });
+    for (const [Cookie, status] of [[null, 401], [mechanicCookie, 403]]) {
+      assert.equal((await request(Cookie)).status, status);
+      assert.equal((await request(Cookie, rules)).status, status);
+    }
+    assert.deepEqual(await (await request(employeeCookie, { ...rules, display: "retail" })).json(), { rules });
+    assert.equal((await request(employeeCookie, { ...rules, percent: 1001 })).status, 400);
+    const read = await request(adminCookie);
+    assert.equal(read.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await read.json(), { rules });
+  });
+});
+
 test("pricing employees can read shared supplier status while only admins manage connections", async () => {
   const sessions = [{ supplier: "autopiter", authorized: true, lastCheckedAt: null, lastAuthorizedAt: null }];
   let reads = 0;

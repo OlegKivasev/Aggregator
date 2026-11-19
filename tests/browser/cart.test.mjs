@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { SearchApplicationService } from "../../src/backend/application/search-application-service.ts";
 import { RealOrderApplicationService } from "../../src/backend/application/real-order-application-service.ts";
 import { SupplierSessionManager } from "../../src/backend/session/session-manager.ts";
+import { UserAuthService } from "../../src/backend/auth/user-auth-service.ts";
 import { chromium } from "playwright";
 import { createAggregatorServer } from "../../src/backend/http/create-server.ts";
 import { attachPurchaseReference } from "../../src/backend/purchasing/purchase-offer.ts";
@@ -123,12 +124,17 @@ async function withCartPage(check, options = {}) {
         },
       },
     };
-    server = createAggregatorServer({ application, publicDir: resolve("src/frontend") });
+    const auth = options.authenticated ? new UserAuthService(process.env.GARAGE_DB_PATH, "Администратор", "fixture-admin-password") : undefined;
+    server = createAggregatorServer({ application, publicDir: resolve("src/frontend"), auth });
     await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
     const origin = `http://127.0.0.1:${server.address().port}`;
     browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER_EXECUTABLE_PATH });
     const page = await browser.newPage({ viewport: options.viewport ?? { width: 1366, height: 850 }, reducedMotion: options.reducedMotion ?? "no-preference",
       timezoneId: options.timezoneId ?? (options.fixedTime ? "UTC" : undefined) });
+    if (auth) {
+      const login = await page.request.post(`${origin}/api/auth/login`, { data: { fio: "Администратор", password: "fixture-admin-password" } });
+      assert.equal(login.status(), 200);
+    }
     if (options.fixedTime) await page.clock.setFixedTime(new Date(options.fixedTime));
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -624,6 +630,7 @@ test("markup popup applies fixed, tiered and no markup consistently in offers, a
     await popup.locator("#markup-fixed-percent").fill("12,5");
     await popup.locator('input[value="retail"]').check();
     await popup.locator("#markup-apply").click();
+    await popup.waitFor({ state: "hidden" });
     assert.equal(await armtek.locator(".main-result-price").textContent(), "112,50 ₽");
     assert.equal(await page.locator("#results-body .main-result-purchase-price").count(), 0);
     await openOfferAnalogs(page, armtek);
@@ -646,6 +653,7 @@ test("markup popup applies fixed, tiered and no markup consistently in offers, a
     await popup.locator("#markup-show-in-cart").uncheck();
     if (process.env.TEST_CAPTURE_DIR) await popup.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "markup-tiered.png") });
     await popup.locator("#markup-apply").click();
+    await popup.waitFor({ state: "hidden" });
     assert.equal(await armtek.locator(".main-result-price").textContent(), "200,00 ₽");
     assert.equal(await page.locator("#results-body tr").first().locator('[data-column="supplier"]').textContent(), "PartKOM", "tiered prices can reverse the supplier ordering");
     assert.equal(await page.locator("#results-body tr").first().locator(".main-best-price").count(), 1);
@@ -675,6 +683,7 @@ test("markup popup applies fixed, tiered and no markup consistently in offers, a
     assert.equal(await popup.locator("#markup-display").isVisible(), false);
     if (process.env.TEST_CAPTURE_DIR) await popup.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "markup-none.png") });
     await popup.locator("#markup-apply").click();
+    await popup.waitFor({ state: "hidden" });
     assert.equal(await armtek.locator(".main-result-price").textContent(), "100,00 ₽");
     assert.equal(await armtek.locator(".main-result-purchase-price").count(), 0);
     await page.locator("#cart-toggle").click();
@@ -704,6 +713,7 @@ test("markup restores legacy values, persists applied tiers and validates the dr
     await popup.locator("[data-tier-percent]").nth(1).fill("25");
     await popup.locator("#markup-fallback-percent").fill("10");
     await popup.locator("#markup-apply").click();
+    await popup.waitFor({ state: "hidden" });
     assert.equal(await page.locator("#results-body .main-result-price").first().textContent(), "125,00 ₽");
     await page.reload();
     await page.locator("#results-body .main-result-row").first().waitFor();
@@ -720,6 +730,53 @@ test("markup restores legacy values, persists applied tiers and validates the dr
     assert.equal(await trigger.evaluate((node) => node === document.activeElement), true);
     assert.equal(await page.locator("#results-body .main-result-price").first().textContent(), "125,00 ₽");
   }, { preserveSearchState: true, legacyMarkup: 17 });
+});
+
+test("another signed-in pricing user receives the shared percentage with their own display settings", async () => {
+  await withCartPage(async (page, { origin, searchCalls }) => {
+    const employee = { fio: "Проценщик", password: "fixture-employee-password" };
+    assert.equal((await page.request.post(`${origin}/api/users`, { data: { ...employee, permissions: ["markup"] } })).status(), 201);
+    const markupPath = "/api/ui-preferences/markup";
+    const popup = page.locator("#markup-settings-dialog");
+    await page.locator('#results-table [data-markup-settings]').click();
+    await popup.locator("#markup-fixed-percent").fill("40");
+    await popup.locator('input[value="retail"]').check();
+    const saved = page.waitForResponse((response) => new URL(response.url()).pathname === markupPath && response.request().method() === "PUT");
+    await popup.locator("#markup-apply").click();
+    assert.equal((await saved).status(), 200);
+    await popup.waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#results-body .main-result-price").first().textContent(), "140,00 ₽");
+    assert.equal(await page.locator("#results-body .main-result-purchase-price").count(), 0);
+
+    const reader = await page.context().browser().newPage({ viewport: { width: 1366, height: 850 } });
+    try {
+      assert.equal((await reader.request.post(`${origin}/api/auth/login`, { data: employee })).status(), 200);
+      await reader.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+      const requests = [];
+      reader.on("request", (request) => {
+        if (new URL(request.url()).pathname === markupPath) requests.push(request.method());
+      });
+      await reader.goto(origin);
+      await reader.locator("#article-input").fill("A1");
+      await reader.locator("#submit-button").click();
+      await reader.locator("#results-body .main-result-price").filter({ hasText: /^140,00 ₽$/u }).waitFor();
+      assert.equal(await reader.locator("#results-body .main-result-purchase-price").count(), 2);
+      await reader.locator('#results-table [data-markup-settings]').click();
+      assert.equal(await reader.locator("#markup-fixed-percent").inputValue(), "40");
+      await reader.locator('#markup-settings-dialog input[value="retail"]').check();
+      await reader.locator("#markup-apply").click();
+      await reader.locator("#markup-settings-dialog").waitFor({ state: "hidden" });
+      assert.equal(await reader.locator("#results-body .main-result-purchase-price").count(), 0);
+      assert.deepEqual(requests, ["GET"]);
+      await reader.route(`**${markupPath}`, (route) => route.fulfill({ status: 503 }));
+      await reader.locator('#results-table [data-markup-settings]').click();
+      await reader.locator("#markup-fixed-percent").fill("55");
+      await reader.locator("#markup-apply").click();
+      await reader.locator("#markup-settings-error").filter({ hasText: "Не удалось сохранить общую наценку" }).waitFor();
+      assert.equal(await reader.locator("#results-body .main-result-price").first().textContent(), "140,00 ₽");
+      assert.equal(searchCalls.length, 2, "only the two explicit searches call suppliers");
+    } finally { await reader.close(); }
+  }, { authenticated: true, legacyMarkup: 40 });
 });
 
 async function resizeAndRender(page, viewport) {

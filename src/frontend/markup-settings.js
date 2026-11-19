@@ -2,11 +2,10 @@ const defaultPercent = 35;
 export const maximumMarkupTiers = 30;
 const isPercent = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1000;
 
-export const validateMarkupSettings = (value) => {
+export const validateMarkupRules = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)
     || !["none", "fixed", "tiered"].includes(value.mode) || !isPercent(value.percent)
-    || !isPercent(value.fallbackPercent) || !["both", "retail"].includes(value.display)
-    || typeof value.showPurchaseInCart !== "boolean" || !Array.isArray(value.tiers)
+    || !isPercent(value.fallbackPercent) || !Array.isArray(value.tiers)
     || value.tiers.length > maximumMarkupTiers) throw new Error("Проверьте настройки наценки.");
   const tiers = value.tiers.map((tier) => {
     if (!tier || typeof tier !== "object" || typeof tier.upTo !== "number"
@@ -18,8 +17,15 @@ export const validateMarkupSettings = (value) => {
   if (tiers.some((tier, index) => index > 0 && tier.upTo === tiers[index - 1].upTo)) {
     throw new Error("Предельные цены ступеней должны различаться.");
   }
-  return { mode: value.mode, percent: value.percent, tiers, fallbackPercent: value.fallbackPercent,
-    display: value.display, showPurchaseInCart: value.showPurchaseInCart };
+  return { mode: value.mode, percent: value.percent, tiers, fallbackPercent: value.fallbackPercent };
+};
+
+export const validateMarkupSettings = (value) => {
+  const rules = validateMarkupRules(value);
+  if (!["both", "retail"].includes(value.display) || typeof value.showPurchaseInCart !== "boolean") {
+    throw new Error("Проверьте настройки наценки.");
+  }
+  return { ...rules, display: value.display, showPurchaseInCart: value.showPurchaseInCart };
 };
 
 export const restoreMarkupSettings = (value, legacyPercent) => {

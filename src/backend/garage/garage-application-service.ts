@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 import type { NormalizedSearchResult } from "../types.ts";
 import type { GarageAvailabilityStatus, GarageGroup, GarageItem, GarageOfferLookup, GarageRepository, GarageSearchOffer, GarageVehicle, GarageVehicleDetails } from "./types.ts";
 import { getPurchaseReference, samePurchaseArticle, samePurchaseOffer } from "../purchasing/purchase-offer.ts";
+import { validateMarkupRules, type MarkupRules } from "../../frontend/markup-settings.js";
 
 const maxNameLength = 120;
 const maxCommentLength = 1_000;
 const offerLifetimeMs = 5 * 60_000;
 const tableWidthPreferenceKey = "table-column-widths-v1";
 const tablePreferenceKey = "table-column-settings-v2";
+const markupRulesPreferenceKey = "customer-markup-rules-v1";
 const tableColumns = {
   main: ["supplier", "brand", "article", "title", "deliveryDate", "quantity", "markupPrice"],
   analogs: ["supplier", "brand", "article", "title", "deliveryDate", "quantity", "markupPrice"],
@@ -303,6 +305,19 @@ export class GarageApplicationService {
       alignments: alignments === undefined ? this.getTablePreferences().alignments : normalizeTableAlignments(alignments) };
     this.repository.setUiPreference(tablePreferenceKey, JSON.stringify(preferences));
     return preferences;
+  }
+
+  getMarkupRules(): MarkupRules | null {
+    const value = this.repository.getUiPreference(markupRulesPreferenceKey);
+    return value === null ? null : validateMarkupRules(JSON.parse(value));
+  }
+
+  setMarkupRules(value: unknown): MarkupRules {
+    let rules: MarkupRules;
+    try { rules = validateMarkupRules(value); }
+    catch { throw new GarageValidationError("markup rules are invalid"); }
+    this.repository.setUiPreference(markupRulesPreferenceKey, JSON.stringify(rules));
+    return rules;
   }
 
   close(): void { this.repository.close(); }
