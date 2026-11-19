@@ -1,5 +1,6 @@
 import { RepairValidationError } from "./repair-card.ts";
 import type { RepairVisibility } from "../auth/user-position-store.ts";
+import { parseStockDetails } from "../nomenclature/stock-details.ts";
 
 function object(value: unknown, fields: string[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)
@@ -28,13 +29,16 @@ function lines<T>(value: unknown, parse: (line: unknown) => T): T[] {
 
 function parseGoods(value: unknown) {
   const row = object(value, ["name", "article", "productId", "stock", "quantity", "price", "original", "replacement",
-    "returnDays", "discountPercent", "discountAmount", "total", "seller", "awaitingDelivery"]);
+    "returnDays", "discountPercent", "discountAmount", "total", "seller", "awaitingDelivery", "stockDetails"]);
   const productId = label(row.productId, 36);
   if (productId && !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(productId)) invalid();
   if (row.awaitingDelivery !== undefined && typeof row.awaitingDelivery !== "boolean") invalid();
+  const stock = row.stock === null ? null : numeric(row.stock);
+  const stockDetails = row.stockDetails === undefined ? undefined : parseStockDetails(row.stockDetails, stock ?? invalid(), invalid);
   return {
     name: label(row.name), article: label(row.article), productId,
-    stock: row.stock === null ? null : numeric(row.stock), quantity: numeric(row.quantity), price: numeric(row.price),
+    stock, quantity: numeric(row.quantity), price: numeric(row.price),
+    ...(stockDetails === undefined ? {} : { stockDetails }),
     original: numeric(row.original), replacement: numeric(row.replacement),
     returnDays: row.returnDays === null ? null : Math.max(0, numeric(row.returnDays)),
     discountPercent: numeric(row.discountPercent), discountAmount: numeric(row.discountAmount),
@@ -82,6 +86,13 @@ export function repairDetailsForUser(details: RepairDetails, visibility?: Repair
   return {
     ...details,
     ...(visibility.hideArticle ? { hideArticles: true } : {}),
-    goods: details.goods.map((row) => repairProductForUser(row, visibility)),
+    goods: details.goods.map((row) => {
+      const product = repairProductForUser(row, visibility);
+      if (row.stockDetails) product.stockDetails = {
+        ...row.stockDetails,
+        replacements: row.stockDetails.replacements.map((line) => repairProductForUser(line, visibility)),
+      };
+      return product;
+    }),
   };
 }

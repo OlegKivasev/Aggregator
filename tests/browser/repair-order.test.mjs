@@ -67,10 +67,12 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     await page.request.post(`${origin}/api/auth/login`, { data: { fio: card.responsibleFio, password: "test-user-password" } });
     const pageErrors = [];
     const jobs = [];
+    const apiRequests = [];
     const repairRequests = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     page.on("request", (req) => {
       const path = new URL(req.url()).pathname;
+      if (path.startsWith("/api/")) apiRequests.push(path);
       if (path.startsWith("/api/repairs/refresh")) repairRequests.push(path);
       if (req.method() === "POST" && path === "/api/repairs/refresh") jobs.push(req.postDataJSON());
     });
@@ -104,8 +106,10 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       await dialog.getByRole("group", { name: "Способ оплаты" }).waitFor();
       return job.id;
     };
+    const stockDetails = { original: 5, replacements: [{ name: "Комплект-замена | Закрытый бренд", article: "PRIVATE-REPLACEMENT", quantity: 15 }] };
     const requestId = await open({ ...details,
-      goods: [...details.goods, awaitingPart, { ...awaitingPart, name: "Нет на складе", productId: randomUUID(), original: 0, awaitingDelivery: false },
+      goods: [{ ...stock, stock: 20, stockDetails }, details.goods[1], awaitingPart,
+        { ...awaitingPart, name: "Нет на складе", productId: randomUUID(), original: 0, awaitingDelivery: false },
         ...[4, 3, 2, 1, 0, -3, 6].map((returnDays) => ({ ...details.goods[1], returnDays, awaitingDelivery: returnDays === 2 }))],
       work: [...details.work, { ...details.work[0], name: "Замена фильтра", hours: 1, multiplier: 2 }],
     }, { ...card, urgentReturnDays: 0 });
@@ -134,6 +138,28 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     assert.deepEqual(await dialog.locator(".repair-order-return-urgent .repair-order-return-days").allTextContents(), ["5", "4", "3", "2", "1", "0", "0"]);
     assert.equal(await dialog.locator(".repair-order-return-urgent").first().evaluate((row) => getComputedStyle(row).outlineStyle), "solid");
     const goodsTable = dialog.getByRole("table", { name: "Товары" });
+    const stockButton = goodsTable.getByRole("button", { name: /Остаток 20/ });
+    const stockPopover = dialog.getByRole("dialog", { name: "Остаток с учётом заказов" });
+    async function checkStockPopover(width, open) {
+      const before = apiRequests.length;
+      await open();
+      await stockPopover.waitFor();
+      assert.equal(await stockPopover.getAttribute("id"), "repair-order-incoming");
+      assert.equal(await stockPopover.getByText("PRIVATE-REPLACEMENT").isVisible(), true);
+      assert.equal(await stockPopover.getByText("Всего 20").isVisible(), true);
+      assert.equal(await stockButton.getAttribute("aria-expanded"), "true");
+      assert.equal(await stockPopover.getByRole("region", { name: "Оригинал" }).locator("dd").textContent(), "5");
+      assert.equal(await stockPopover.getByRole("region", { name: "Замена" }).locator("dd").textContent(), "15");
+      const box = await stockPopover.boundingBox();
+      assert.ok(box.x >= 0 && box.x + box.width <= width);
+      assert.equal(apiRequests.length, before, "stock details use the order snapshot");
+    }
+    await checkStockPopover(1440, () => stockButton.press("Enter"));
+    await page.keyboard.press("Escape");
+    assert.equal(await stockPopover.isVisible(), false);
+    assert.equal(await stockButton.getAttribute("aria-expanded"), "false");
+    assert.equal(await stockButton.evaluate((node) => document.activeElement === node), true);
+    assert.equal(await dialog.isVisible(), true);
     const waitingRow = goodsTable.getByRole("row", { name: /Подшипник под заказ/ });
     const waitStyles = (row) => row.evaluate((node) => ({
       color: getComputedStyle(node).outlineColor,
@@ -202,6 +228,9 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       assert.equal(await goodsTable.locator("[data-incoming-side]:visible").count(), 3);
       assert.equal(await emptyOptionals.getByText("К поступлению", { exact: true }).isVisible(), false);
       assert.equal((await waitStyles(waitingRow)).color, "rgb(187, 137, 9)");
+      await checkStockPopover(width, () => stockButton.tap());
+      await stockPopover.getByRole("button", { name: "Закрыть расшифровку остатка" }).tap();
+      assert.equal(await stockPopover.isVisible(), false);
       await checkSupply(waitingRow, awaitingPart, "original", width, true);
       await checkSupply(firstRow, stock, "replacement", width, true);
       const productName = firstRow.getByRole("rowheader");
@@ -278,7 +307,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       method: "PATCH", headers: { Cookie: admin, "Content-Type": "application/json" }, body: JSON.stringify(data),
     });
     const assign = (positionId) => adminEdit("/api/users", { id: employee.id, fio: employee.fio, permissions: employee.permissions, positionId });
-    const branded = { ...stock, name: "Комплект ГРМ | Закрытый бренд | Серия", article: "PRIVATE-ARTICLE" };
+    const branded = { ...stock, name: "Комплект ГРМ | Закрытый бренд | Серия", article: "PRIVATE-ARTICLE", stock: 20, stockDetails };
     await page.setViewportSize({ width: 1440, height: 900 });
     const restrictedId = await open({ ...details, goods: [branded] }, card, async () => {
       assert.equal((await assign(position.id)).status, 200);
@@ -286,6 +315,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     const rawSnapshot = async () => (await (await page.request.get(`${origin}/api/repairs/refresh/${restrictedId}?testPlatform=false`)).json()).refresh.details;
     const restricted = await rawSnapshot();
     assert.equal(restricted.hideArticles, true);
+    assert.deepEqual(restricted.goods[0].stockDetails.replacements, [{ name: "Комплект-замена", article: "", quantity: 15 }]);
     assert.equal(restricted.goods[0].name, "Комплект ГРМ");
     assert.equal(restricted.goods[0].article, "");
     assert.equal(await goodsTable.getByRole("columnheader", { name: "Артикул" }).count(), 0);

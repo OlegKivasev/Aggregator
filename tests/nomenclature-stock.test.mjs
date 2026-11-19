@@ -40,6 +40,20 @@ test("stock validates bounded complete pages, positive quantities and unmodified
   assert.deepEqual(parseStockResult({ ...valid, status: "error", products: [] }).products, []);
 });
 
+test("inventory breakdown accepts zero rows and validates the displayed sum", () => {
+  const replacement = { name: "Деталь", article: "0000007", quantity: 7 };
+  const stockDetails = { original: 5, replacements: [replacement, { ...replacement, quantity: 0 }] };
+  const data = result({ id: randomUUID(), leaseId: randomUUID() }, [{ ...product, quantity: 12, stockDetails }]);
+  assert.deepEqual(parseStockResult(data).products[0].stockDetails, stockDetails);
+  for (const details of [
+    { ...stockDetails, original: 4 },
+    { ...stockDetails, replacements: [{ ...replacement, quantity: -7 }] },
+    { ...stockDetails, replacements: [{ ...replacement, name: "Деталь\n" }] },
+  ]) assert.throws(() => parseStockResult({ ...data, products: [{ ...data.products[0], stockDetails: details }] }));
+  const zero = { original: 0, replacements: [] };
+  assert.deepEqual(parseStockResult({ ...data, products: [{ ...product, quantity: 0, stockDetails: zero }] }, true).products[0].stockDetails, zero);
+});
+
 test("search normalizes bounded text and shares only identical search/cursor combinations", async () => {
   assert.equal(parseStockQuery("  ФИЛЬТР   00001  "), "00001 фильтр");
   assert.equal(parseStockQuery("%_[~]"), "%_[~]");

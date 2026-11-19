@@ -126,13 +126,24 @@ test("supplier orders search and sort across pages with one 1C job per action an
       const job = await claim(9, 5);
       assert.deepEqual(job.options.supplierOrders, { view: "order", id: other.id });
       assert.equal((await reply(job, { view: "order", id: other.id, order: { ...other, contract: "", market: false,
-        products: [{ ...goods, stock: 3, receipt: "Пришло 1 из 2", price: 971.5, amount: 1943, returnDays: 14, expectedDate: "2026-11-20" }],
+        products: [{ ...goods, stock: 7, stockDetails: { original: 0, replacements: [{ name: "Радиатор-замена", article: "R7", quantity: 7 }] },
+          receipt: "Пришло 1 из 2", price: 971.5, amount: 1943, returnDays: 14, expectedDate: "2026-11-20" }],
       } })).status, 200);
       await dialog.getByText("Пришло 1 из 2", { exact: true }).waitFor();
       assert.equal(await dialog.getByText(other.buyer, { exact: true }).isVisible(), true);
       assert.match(await dialog.locator("#supplier-order-total").innerText(), /1\s943,00\s*₽/);
       assert.equal(await dialog.getByText("20.11.2026", { exact: true }).isVisible(), true);
       assert.equal(await dialog.locator("#supplier-order-content").evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+      const stockButton = dialog.getByRole("button", { name: /Остаток 7/ });
+      assert.equal(await dialog.locator(".supplier-order-no-stock").count(), 0);
+      await stockButton.click();
+      const stockDetails = dialog.getByRole("dialog", { name: "Остаток с учётом заказов" });
+      assert.equal(await stockDetails.getByText("Радиатор-замена").isVisible(), true);
+      assert.equal(await stockDetails.getByText("Всего 7").isVisible(), true);
+      assert.equal(await stockDetails.getByRole("region", { name: "Оригинал" }).count(), 0);
+      assert.equal(await stockDetails.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+      await stockDetails.getByRole("button", { name: "Закрыть расшифровку остатка" }).click();
+      assert.equal(await dialog.isVisible(), true);
       if (width < 500) assert.ok((await dialog.getByRole("button", { name: "К списку" }).boundingBox()).height >= 44);
       await dialog.getByRole("button", { name: "К списку" }).click();
       await dialog.waitFor({ state: "hidden" });

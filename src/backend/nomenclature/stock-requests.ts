@@ -112,6 +112,10 @@ export class StockRequests {
           const current = this.database.prepare("SELECT * FROM nomenclature_stock_requests WHERE id=?").get(id) as unknown as Row | undefined;
           if (!current || this.now() >= current.expires_at) return finish(new NomenclatureError(504, "stock_timeout", "1С не ответила вовремя. Повторите загрузку остатков."));
           if (current.status === "completed") return finish(undefined, JSON.parse(current.result_json!) as StockPage);
+          if (current.status === "error" && current.result_json && options?.inventory) {
+            return finish(new NomenclatureError(503, "stock_failed",
+              "1С вернула ошибку при расчёте остатков. Код запроса " + id + ". Подробности в журнале регистрации 1С."));
+          }
           if (!["pending", "leased"].includes(current.status)) return finish(new NomenclatureError(503, "stock_failed", "Не удалось получить остатки из 1С. Проверьте подключение и обновление расширения."));
         };
         timer = setTimeout(() => finish(new NomenclatureError(504, "stock_timeout", "1С не ответила вовремя. Проверьте подключение и обновление расширения.")), Math.max(1, row!.expires_at - this.now()));
@@ -176,7 +180,7 @@ export class StockRequests {
       || data.products.some((item) =>
       ((options?.availability ?? "available") === "available" && item.quantity <= 0)
       || (options?.availability === "absent" && item.quantity > 0)
-      || (options?.inventory ? item.incoming === undefined || item.quantity < 0 : item.incoming !== undefined)
+      || (options?.inventory ? item.incoming === undefined || item.quantity < 0 : item.incoming !== undefined || item.stockDetails !== undefined)
       || (options?.priceType ? item.price === undefined : item.price !== undefined)
       || (item.nameMatches !== undefined && !highlightsRequested(row.query, options)))
       || options && !after && (data.totalCount === undefined || data.priceTypes === undefined
