@@ -14,5 +14,5 @@ export function articleVariantNotice(variants) {
   const validated = readArticleVariants(variants);
   if (validated.length > 1) return `Также ищем по артикулам ${validated.map(({ article }) => article).join(", ")}.`;
   const [variant] = validated;
-  return variant ? `Дополнительно ищем по ${variant.form === "short" ? "сокращённому" : "полному"} написанию артикула: ${variant.article}.` : "";
+  return variant ? `Также ищем по артикулу ${variant.article}.` : "";
 }

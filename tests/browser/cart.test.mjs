@@ -225,17 +225,20 @@ test("each new pricing search clears the table filter and restores supplier rows
   });
 });
 
-test("main pricing searches all four VAZ spellings, keeps original offers and scopes the notice to its persisted tab", async () => {
+test("main pricing searches VAZ spellings, keeps original offers and scopes the notice to its persisted tab", async () => {
   const sessions = new SupplierSessionManager();
   const adapterCalls = [];
   const spellings = { armtek: "1119-2902712-00", "part-kom": "11190-2902712-00" };
+  const fixedModelArticle = "11196-2902712-00";
   const adapters = Object.keys(spellings).map((supplier) => {
     sessions.markAuthorized(supplier);
+    const availableArticles = ["A1", spellings[supplier]];
+    if (supplier === "armtek") availableArticles.push(fixedModelArticle);
     return { id: supplier, displayName: supplier, timeoutMs: 1000,
       ensureSession: async () => sessions.getSession(supplier),
       search: async (query, _context, onResult) => {
         adapterCalls.push({ supplier, article: query.article });
-        if (query.article !== "A1" && query.article !== spellings[supplier]) return;
+        if (!availableArticles.includes(query.article)) return;
         onResult(offer(supplier, 3, supplier === "armtek" ? { supplier, keyzak: "TEST01" }
           : { supplier, makerId: "101", providerId: "202" }, { article: query.article }));
       } };
@@ -245,11 +248,11 @@ test("main pricing searches all four VAZ spellings, keeps original offers and sc
     const notice = page.locator("#article-variant-notice");
     const noticeText = notice.locator("#article-variant-notice-text");
     assert.equal(await notice.isVisible(), false);
-    const search = async (article) => {
+    const search = async (article, expectedRows = 2) => {
       await page.locator("#article-input").fill(article);
       await page.locator("#submit-button").click();
       await page.waitForFunction(() => document.querySelector("#results-panel").getAttribute("aria-busy") === "false");
-      assert.equal(await page.locator("#results-body .main-result-row").count(), 2);
+      assert.equal(await page.locator("#results-body .main-result-row").count(), expectedRows);
     };
     await search("1119-2902712");
     const firstTab = await page.locator("#search-tabs-list .active").getAttribute("data-tab-id");
@@ -279,6 +282,16 @@ test("main pricing searches all four VAZ spellings, keeps original offers and sc
     await page.reload();
     await page.locator("#results-body .main-result-row").first().waitFor();
     assert.equal(await noticeText.innerText(), firstNotice);
+    const searchCount = searchCalls.length;
+    const adapterCallCount = adapterCalls.length;
+    await search("11196-2902712", 1);
+    assert.equal(await noticeText.innerText(), `Также ищем по артикулу ${fixedModelArticle}.`);
+    assert.equal((await page.locator('#results-body [data-column="article"]').innerText()).trim(), fixedModelArticle);
+    assert.deepEqual(searchCalls.slice(searchCount).map(({ article }) => article), ["11196-2902712"]);
+    for (const supplier of Object.keys(spellings)) {
+      assert.deepEqual(adapterCalls.slice(adapterCallCount).filter((call) => call.supplier === supplier).map(({ article }) => article),
+        ["11196-2902712", fixedModelArticle]);
+    }
     await search("A1");
     assert.equal(await notice.isVisible(), false);
   }, { preserveSearchState: true, streamSearch: service.streamSearch.bind(service) });

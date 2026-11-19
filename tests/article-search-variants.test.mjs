@@ -25,7 +25,7 @@ test("VAZ article search variants preserve nonzero suffixes and reject unsupport
     ["21090620501210", "2109-6205012-10", "short"], ["2109620501210", "21090-6205012-10", "full"],
     [" 2121 1234567 01 ", "21210-1234567-01", "full"],
   ]) assert.deepEqual(additionalArticleVariants(article), [{ article: expected, form }], article);
-  for (const article of ["21093-6205012-10", "21214-1234567", "11194-1234567-10", "21213-1234567-01",
+  for (const article of ["21093-6205012-10", "11194-1234567-10", "21213-1234567-01",
     "21093-6205012-1", "21090-6205012-0", "2109-6205012-101", "2109-620501-10", "1234-6205012-10",
     "3163-6205012-10", "B2109-6205012-10", "2109/6205012/10", "A1", "", "2109-12345678"]) {
     assert.deepEqual(additionalArticleVariants(article), [], article);
@@ -56,9 +56,20 @@ const unexpandedArticles = [
   "1119-29027123",
   "11190-290271-00",
   "11190-29027123-00",
-  "11196-2902712",
-  "11196-2902712-00",
+  "11196-2902712-01",
+  "11196-290271",
+  "11196-29027123",
 ];
+
+test("a five-digit VAZ model ending in a nonzero digit expands only the zero suffix", () => {
+  for (const article of ["11196-2902712", "111962902712"]) {
+    assert.deepEqual(additionalArticleVariants(article), [{ article: "11196-2902712-00", form: "full" }]);
+  }
+  for (const article of ["11196-2902712-00", "11196290271200", "11196.2902712.00"]) {
+    assert.deepEqual(additionalArticleVariants(article), [{ article: "11196-2902712", form: "full" }]);
+  }
+  assert.deepEqual(additionalArticleVariants("21214-1234567"), [{ article: "21214-1234567-00", form: "full" }]);
+});
 
 test("search queries all applicable article forms even when the first succeeds and emits one lifecycle", async () => {
   for (const [original, expected] of [
@@ -66,6 +77,8 @@ test("search queries all applicable article forms even when the first succeeds a
     ["21090-6205012-10", ["21090-6205012-10", "2109-6205012-10"]],
     ["1119-2902712", zeroSuffixArticles],
     ["11190-2902712-00", ["11190-2902712-00", "1119-2902712-00", "11190-2902712", "1119-2902712"]],
+    ["11196-2902712", ["11196-2902712", "11196-2902712-00"]],
+    ["11196-2902712-00", ["11196-2902712-00", "11196-2902712"]],
   ]) {
     const calls = [];
     const results = [];
@@ -174,9 +187,10 @@ test("ordinary articles and selected analog or brand searches keep their existin
   }
 });
 
-test("variant notice validates cached or streamed values and describes both directions", () => {
-  assert.match(articleVariantNotice(additionalArticleVariants("2109-6205012-10")), /полному.*21090-6205012-10/);
-  assert.match(articleVariantNotice(additionalArticleVariants("21090-6205012-10")), /сокращённому.*2109-6205012-10/);
+test("variant notice validates cached or streamed values and lists the additional articles", () => {
+  assert.equal(articleVariantNotice(additionalArticleVariants("2109-6205012-10")), "Также ищем по артикулу 21090-6205012-10.");
+  assert.equal(articleVariantNotice(additionalArticleVariants("21090-6205012-10")), "Также ищем по артикулу 2109-6205012-10.");
+  assert.equal(articleVariantNotice(additionalArticleVariants("11196-2902712")), "Также ищем по артикулу 11196-2902712-00.");
   const variants = additionalArticleVariants("1119-2902712");
   assert.deepEqual(readArticleVariants(variants), variants);
   assert.equal(articleVariantNotice(variants), "Также ищем по артикулам 11190-2902712, 1119-2902712-00, 11190-2902712-00.");
@@ -197,9 +211,15 @@ test("offer refresh preserves the stored suffix and purchase matching stays stri
       (event) => events.push(event), new AbortController().signal);
     assert.equal(events[0].articleVariants.length, 1);
   }
-  assert.deepEqual(calls, zeroSuffixArticles);
+  const events = [];
+  await service.streamSearch({ article: "11196-2902712", preserveArticleSuffix: true },
+    (event) => events.push(event), new AbortController().signal);
+  assert.equal(events[0].articleVariants, undefined);
+  assert.deepEqual(calls, [...zeroSuffixArticles, "11196-2902712"]);
   assert.equal(samePurchaseArticle("1119-2902712", "11190-2902712"), true);
   assert.equal(samePurchaseArticle("1119-2902712-00", "11190-2902712-00"), true);
   assert.equal(samePurchaseArticle("1119-2902712", "11190-2902712-00"), false);
   assert.equal(samePurchaseArticle("1119-2902712-00", "11190-2902712"), false);
+  assert.equal(samePurchaseArticle("11196-2902712", "11196-2902712-00"), false);
+  assert.equal(samePurchaseArticle("11196-2902712-00", "11190-2902712-00"), false);
 });
