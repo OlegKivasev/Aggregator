@@ -1,13 +1,14 @@
 import { escapeHtml } from "./result-formatting.js";
 import { maximumMarkupTiers, validateMarkupSettings } from "./markup-settings.js";
 
-export const bootstrapMarkupSettings = ({ getSettings, applySettings }) => {
+export const bootstrapMarkupSettings = ({ getSettings, loadSettings, applySettings }) => {
   const dialog = document.createElement("dialog");
   dialog.id = "markup-settings-dialog";
   dialog.className = "markup-settings";
   dialog.setAttribute("aria-labelledby", "markup-settings-title");
   dialog.innerHTML = `<form novalidate>
     <header><h2 id="markup-settings-title">Клиентская наценка</h2><button type="button" data-markup-close aria-label="Закрыть настройки наценки">×</button></header>
+    <p>Режим и проценты общие для всех пользователей.</p>
     <div class="markup-settings__tabs" role="tablist" aria-label="Режим наценки">
       <button type="button" role="tab" data-markup-mode="none" aria-controls="markup-mode-panel">Без наценки</button>
       <button type="button" role="tab" data-markup-mode="fixed" aria-controls="markup-mode-panel">Фиксированная</button>
@@ -31,6 +32,7 @@ export const bootstrapMarkupSettings = ({ getSettings, applySettings }) => {
   </form>`;
   document.body.append(dialog);
   const form = dialog.querySelector("form");
+  const submit = dialog.querySelector("#markup-apply");
   const tabs = [...dialog.querySelectorAll("[data-markup-mode]")];
   const fixed = dialog.querySelector("#markup-fixed-percent");
   const fallback = dialog.querySelector("#markup-fallback-percent");
@@ -42,6 +44,7 @@ export const bootstrapMarkupSettings = ({ getSettings, applySettings }) => {
   const triggers = [...document.querySelectorAll("[data-markup-settings]")];
   let mode = "fixed";
   let anchor = null;
+  let opening = false;
   const position = () => {
     if (!dialog.open || !anchor) return;
     const rect = anchor.getBoundingClientRect();
@@ -87,8 +90,12 @@ export const bootstrapMarkupSettings = ({ getSettings, applySettings }) => {
       event.preventDefault(); tabs[next].click(); tabs[next].focus();
     });
   });
-  triggers.forEach((trigger) => trigger.addEventListener("click", () => {
+  triggers.forEach((trigger) => trigger.addEventListener("click", async () => {
+    if (opening || submit.disabled) return;
     if (dialog.open) { dialog.close(); return; }
+    opening = true;
+    await loadSettings();
+    opening = false;
     anchor = trigger;
     const settings = getSettings();
     fixed.value = String(settings.percent);
@@ -124,16 +131,20 @@ export const bootstrapMarkupSettings = ({ getSettings, applySettings }) => {
   });
   addTier.addEventListener("click", () => { appendTier(); tierContainer.lastElementChild?.querySelector("input").focus(); });
   display.addEventListener("change", updateCartChoice);
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (submit.disabled) return;
     try {
       const previous = getSettings();
       const settings = validateMarkupSettings({ mode, percent: mode === "fixed" ? number(fixed) : previous.percent,
         fallbackPercent: mode === "tiered" ? number(fallback) : previous.fallbackPercent,
         tiers: mode === "tiered" ? [...tierContainer.children].map((row) => ({ upTo: number(row.querySelector("[data-tier-price]")), percent: number(row.querySelector("[data-tier-percent]")) })) : previous.tiers,
         display: form.elements["markup-display"].value, showPurchaseInCart: cartChoice.checked });
-      applySettings(settings); dialog.close();
+      submit.disabled = true;
+      await applySettings(settings);
+      dialog.close();
     } catch (cause) { error.textContent = cause.message; error.hidden = false; position(); }
+    finally { submit.disabled = false; }
   });
   window.addEventListener("resize", position);
 };

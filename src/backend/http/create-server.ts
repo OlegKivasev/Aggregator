@@ -599,6 +599,20 @@ export function createAggregatorServer({
       } catch (error) { serveGarageError(response, error, reportError, "table-column-widths"); return; }
     }
 
+    if (url.pathname === "/api/ui-preferences/markup") {
+      response.setHeader("Cache-Control", "no-store");
+      try {
+        if (request.method === "GET") {
+          serveJson(response, 200, { rules: garage.getMarkupRules() });
+        } else if (request.method === "PUT") {
+          serveJson(response, 200, { rules: garage.setMarkupRules(await readJsonBody(request)) });
+        } else {
+          serveJson(response, 405, { message: "Method not allowed" });
+        }
+      } catch (error) { serveGarageError(response, error, reportError, "customer-markup"); }
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/garage/vehicles") {
       try {
         serveJson(response, 200, { vehicles: garage.listVehicles(url.searchParams.get("search") ?? "") });

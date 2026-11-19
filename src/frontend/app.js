@@ -29,7 +29,7 @@ import { isAutopiterReturnableVisible } from "./autopiter-return-settings.js";
 import { isForumAutoReturnableVisible } from "./forum-auto-return-settings.js";
 import { isArmtekReturnableVisible } from "./armtek-return-settings.js";
 import { bootstrapGarage } from "./garage-ui.js";
-import { calculateMarkupPrice, markupPercentForPrice, restoreMarkupSettings, showPurchasePrice } from "./markup-settings.js";
+import { calculateMarkupPrice, markupPercentForPrice, restoreMarkupSettings, showPurchasePrice, validateMarkupRules } from "./markup-settings.js";
 import { bootstrapMarkupSettings } from "./markup-settings-ui.js";
 import { bootstrapRosskoOrderSettings } from "./rossko-order-settings.js";
 import { setupTableColumnSettings } from "./table-column-settings-ui.js";
@@ -201,6 +201,9 @@ let tabSequence = 1;
 let results = [];
 let sortState = { key: "markupPrice", direction: "ascending" };
 let markupSettings = restoreMarkupSettings();
+let sharedMarkupRules;
+let markupRulesLoad;
+const withSharedMarkupRules = (settings) => sharedMarkupRules ? { ...settings, ...sharedMarkupRules } : settings;
 let tableSearchTerm = "";
 let mainDeliverySoon = false;
 let analogDeliverySoon = false;
@@ -1145,7 +1148,7 @@ const activateTab = (tabId) => {
   syncActiveTab();
   activeTabId = tab.id;
   results = tab.results;
-  markupSettings = tab.markupSettings;
+  markupSettings = withSharedMarkupRules(tab.markupSettings);
   articleInput.value = tab.article;
   updateArticleAlphabetNotice();
   globalStatus.textContent = tab.status;
@@ -1279,6 +1282,38 @@ const setMarkupSettings = (settings) => {
   renderAnalogRowsNow();
   cartUi.renderPrices();
   saveSearchState();
+};
+
+const markupRulesPath = "/api/ui-preferences/markup";
+const loadSharedMarkupRules = () => {
+  markupRulesLoad ??= fetch(markupRulesPath, { cache: "no-store", signal: AbortSignal.timeout(10000) }).then(async (response) => {
+    if (!response.ok) throw new Error("Не удалось загрузить общую наценку.");
+    const { rules } = await response.json();
+    sharedMarkupRules = rules === null ? null : validateMarkupRules(rules);
+    if (sharedMarkupRules && JSON.stringify(sharedMarkupRules) !== JSON.stringify(validateMarkupRules(markupSettings))) {
+      setMarkupSettings(withSharedMarkupRules(markupSettings));
+    }
+  }).catch(() => { markupRulesLoad = undefined; });
+  return markupRulesLoad;
+};
+
+const saveMarkupSettings = async (settings) => {
+  if (sharedMarkupRules === undefined) {
+    throw new Error("Не удалось загрузить общую наценку. Откройте настройки повторно.");
+  }
+  const rulesJson = JSON.stringify(validateMarkupRules(settings));
+  if (rulesJson !== JSON.stringify(sharedMarkupRules)) {
+    try {
+      const response = await fetch(markupRulesPath, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: rulesJson, signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) throw new Error();
+      sharedMarkupRules = validateMarkupRules((await response.json()).rules);
+    } catch {
+      throw new Error("Не удалось сохранить общую наценку. Повторите попытку.");
+    }
+  }
+  setMarkupSettings(withSharedMarkupRules(settings));
 };
 
 const setAnalogFiltersSidebarWidth = (value) => {
@@ -3052,7 +3087,12 @@ const garageUi = bootstrapGarage({ addToCart: cartUi.addOffers, onViewChanged: c
   if (!offer) throw new Error("Предложение устарело. Повторите поиск перед добавлением в гараж.");
   return markupPercentForPrice(offer.price, markupSettings);
 }, startSearch: startSearchForArticle });
-bootstrapMarkupSettings({ getSettings: () => markupSettings, applySettings: setMarkupSettings });
+bootstrapMarkupSettings({ getSettings: () => markupSettings, loadSettings: loadSharedMarkupRules, applySettings: saveMarkupSettings });
+const loadMarkupForUser = (user) => {
+  if (user?.isAdmin || user?.permissions?.includes("markup")) void loadSharedMarkupRules();
+};
+document.addEventListener("aggregator-auth-ready", ({ detail }) => loadMarkupForUser(detail));
+loadMarkupForUser(window.aggregatorAuthState?.user);
 bootstrapOrderHistory();
 
 const applyOfferTableColumns = () => { applyTableColumns(); applyAnalogTableColumns(); };
