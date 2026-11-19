@@ -13,7 +13,7 @@ export function createHttpGarageApplication(
       let failed = false;
       let completed = false;
       try {
-        await streamSearch({ article, suppliers: [supplier] }, (event) => {
+        await streamSearch({ article, suppliers: [supplier], preserveArticleSuffix: true }, (event) => {
           if (event.type === "result" && event.result.supplier === supplier) results.push(event.result);
           if (event.type === "supplier_status" && event.supplier === supplier) {
             completed = event.status === "completed";

@@ -39,7 +39,7 @@ export class SearchApplicationService {
         ? selectedAdapters.filter((adapter) => adapter.searchBrands)
         : selectedAdapters;
 
-    const articleVariants = "mode" in query ? [] : additionalArticleVariants(query.article);
+    const articleVariants = "mode" in query ? [] : additionalArticleVariants(query.article, query);
     emit({
       type: "search_started",
       article: query.article,
@@ -53,6 +53,7 @@ export class SearchApplicationService {
           adapter,
           sessionManager: this.sessionManager,
           query,
+          articleVariants,
           signal,
           emit,
           onAuthError: () => this.disconnectSupplier(adapter.id),

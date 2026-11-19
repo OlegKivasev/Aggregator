@@ -4,6 +4,7 @@ import type { SupplierSessionManager } from "../session/session-manager.ts";
 import { additionalArticleVariants } from "../article-search-variants.ts";
 import { getPurchaseReference } from "../purchasing/purchase-offer.ts";
 import type {
+  ArticleSearchVariant,
   SearchStreamEvent,
   SearchSupplierStatusEvent,
   SupplierSearchQuery,
@@ -14,6 +15,7 @@ interface RunSupplierSearchOptions {
   adapter: SupplierAdapter;
   sessionManager: SupplierSessionManager;
   query: SupplierSearchQuery;
+  articleVariants?: ArticleSearchVariant[];
   signal: AbortSignal;
   emit: (event: SearchStreamEvent) => void;
   onAuthError?: () => void;
@@ -78,6 +80,7 @@ export async function runSupplierSearch({
   adapter,
   sessionManager,
   query,
+  articleVariants = "mode" in query ? [] : additionalArticleVariants(query.article, query),
   signal,
   emit,
   onAuthError,
@@ -103,9 +106,9 @@ export async function runSupplierSearch({
   }, adapter.timeoutMs);
   let validResultCount = 0;
   let invalidResultCount = 0;
-  const articles = "mode" in query ? [query.article] : [query.article, ...additionalArticleVariants(query.article).map((variant) => variant.article)];
-  const articleKeys = articles.map((article) => article.replace(/[^\p{L}\p{N}]/gu, "").toUpperCase());
-  const seenOffers = new Map<string, number>();
+  const articles = [query.article, ...articleVariants.map((variant) => variant.article)];
+  const articleKeys = articleVariants.length ? articles.map((article) => article.replace(/[^\p{L}\p{N}]/gu, "").toUpperCase()) : [];
+  const seenOffers = articleKeys.length ? new Map<string, number>() : undefined;
   let articleIndex = 0;
 
   try {
@@ -125,7 +128,7 @@ export async function runSupplierSearch({
       }
       if (isValidResult(result, adapter.id)) {
         validResultCount += 1;
-        if (articles.length > 1) {
+        if (seenOffers) {
           const article = result.article.replace(/[^\p{L}\p{N}]/gu, "").toUpperCase();
           const reference = getPurchaseReference(result);
           const key = JSON.stringify([result.supplier, result.brand, articleKeys.includes(article) ? articleKeys[0] : article, result.title, result.price, result.quantity,

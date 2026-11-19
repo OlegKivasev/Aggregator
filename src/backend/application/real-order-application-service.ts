@@ -187,7 +187,7 @@ export class RealOrderApplicationService implements RealOrderGateway {
       let status: string | null = null;
       const failed = (message: string): void => { found.set(key, { offers: [], issue: { reason: "check_failed", message } }); };
       try {
-        await this.search({ article: line.result.article, suppliers: [line.reference.supplier] }, (event) => {
+        await this.search({ article: line.result.article, suppliers: [line.reference.supplier], preserveArticleSuffix: true }, (event) => {
           if (event.type === "result") {
             const reference = getPurchaseReference(event.result);
             if (reference) offers.push({ result: event.result, reference });
