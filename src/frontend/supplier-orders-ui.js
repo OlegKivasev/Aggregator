@@ -49,6 +49,84 @@ async function read(path, controller) {
   return response.json();
 }
 
+function createNoteEditor() {
+  const dialog = document.getElementById("supplier-note-dialog");
+  const form = document.getElementById("supplier-note-form");
+  const productName = document.getElementById("supplier-note-product");
+  const text = document.getElementById("supplier-note-text");
+  const status = document.getElementById("supplier-note-status");
+  const current = document.getElementById("supplier-note-current");
+  const cancel = document.getElementById("supplier-note-cancel");
+  const save = document.getElementById("supplier-note-save");
+  let editing;
+
+  function setSaving(saving) {
+    text.readOnly = save.disabled = cancel.disabled = saving;
+  }
+
+  cancel.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("cancel", (event) => {
+    if (save.disabled) event.preventDefault();
+  });
+  dialog.addEventListener("close", () => {
+    if (dialog.open) return;
+    editing = undefined;
+    text.value = current.textContent = productName.textContent = status.textContent = "";
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const state = editing;
+    if (!state || save.disabled) return;
+    const draft = text.value.trim();
+    if (draft === (state.product.note?.text ?? "")) {
+      dialog.close();
+      return;
+    }
+    setSaving(true);
+    status.textContent = "Сохраняем…";
+    try {
+      const response = await fetch(`${endpoint}/${state.orderId}/items/${state.product.noteKey}/note`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: draft, revision: state.product.note?.revision ?? null }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const result = await response.json().catch(() => null);
+      if (editing !== state || !dialog.open) return;
+      if (!result || !response.ok && response.status !== 409) {
+        status.textContent = result?.message || "Не удалось сохранить заметку. Повторите попытку.";
+        return;
+      }
+      state.product.note = result.note;
+      state.updateButton();
+      if (response.ok) {
+        dialog.close();
+      } else {
+        status.textContent = "Заметку уже изменили. Сверьте текст и сохраните снова.";
+        current.textContent = result.note?.text ?? "Заметка очищена.";
+        current.hidden = false;
+      }
+    } catch {
+      if (editing === state && dialog.open) status.textContent = "Не удалось сохранить заметку. Повторите попытку.";
+    } finally {
+      if (editing === state) setSaving(false);
+    }
+  });
+
+  return {
+    open(orderId, product, updateButton) {
+      editing = { orderId, product, updateButton };
+      productName.textContent = product.name;
+      text.value = product.note?.text ?? "";
+      status.textContent = "";
+      current.hidden = true;
+      setSaving(false);
+      dialog.showModal();
+    },
+    close() { if (dialog.open) dialog.close(); },
+  };
+}
+
 export function bootstrapSupplierOrders(section) {
   const byId = (id) => document.getElementById(id);
   const rows = byId("supplier-orders-rows");
@@ -61,6 +139,7 @@ export function bootstrapSupplierOrders(section) {
   const pagination = byId("supplier-orders-pagination");
   const dialog = byId("supplier-order-dialog");
   const stockPopover = createIncomingPopover(dialog, "supplier-order-stock-popover");
+  const noteEditor = createNoteEditor();
   const title = byId("supplier-order-title");
   const date = byId("supplier-order-date");
   const feedback = byId("supplier-order-status");
@@ -191,6 +270,28 @@ export function bootstrapSupplierOrders(section) {
         price: formatMoney(product.price, order.currency), amount: formatMoney(product.amount, order.currency),
         expectedDate: formatDate(product.expectedDate),
       };
+      if (product.noteKey) {
+        const name = document.createDocumentFragment();
+        const button = element("button", undefined, "supplier-note-button");
+        const label = element("span");
+        const preview = element("span", undefined, "supplier-note-preview");
+        button.type = "button";
+        button.append(label, preview);
+        const updateButton = () => {
+          const action = product.note ? "Заметка" : "Добавить заметку";
+          label.textContent = action;
+          button.setAttribute("aria-label", `${action}: ${product.name}`);
+          preview.textContent = product.note?.text ?? "";
+          preview.hidden = !product.note;
+        };
+        updateButton();
+        button.addEventListener("click", () => {
+          stockPopover.close();
+          noteEditor.open(order.id, product, updateButton);
+        });
+        name.append(element("span", product.name), button);
+        values.name = name;
+      }
       for (const [key, label] of titles) {
         const node = cell(row, values[key], `supplier-order-${key}`, key === "name" ? "" : label);
         if (key === "stock" && product.stock <= 0) node.classList.add("supplier-order-no-stock");
@@ -256,6 +357,7 @@ export function bootstrapSupplierOrders(section) {
     clearRows();
     orderRead?.abort();
     status.textContent = "";
+    noteEditor.close();
     if (dialog.open) dialog.close();
   }
 
@@ -296,6 +398,7 @@ export function bootstrapSupplierOrders(section) {
   byId("supplier-order-close").addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => {
     if (dialog.open) return;
+    noteEditor.close();
     stockPopover.close();
     orderRead?.abort();
     selected = orderRead = undefined;

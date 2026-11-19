@@ -55,6 +55,7 @@ import type { AuthenticatedUser, UserAuthService, UserPermission } from "../auth
 import { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
 import { serveNomenclature } from "./nomenclature.ts";
 import { serveSupplierOrders } from "./supplier-orders.ts";
+import { SupplierOrderNotes } from "../purchasing/supplier-order-notes.ts";
 
 export interface AggregatorApplication extends RosskoOrderSettingsApplication {
   testCartOrder?: TestOrder;
@@ -265,6 +266,7 @@ export function createAggregatorServer({
   const cancellations = new OrderCancellationService(new SqliteOrderCancellationRepository(getGarageDatabasePath()));
   const repairs = new SqliteRepairRepository(getGarageDatabasePath());
   const nomenclature = new NomenclatureService(getGarageDatabasePath());
+  const supplierOrderNotes = new SupplierOrderNotes(getGarageDatabasePath());
 
   const server = createServer(async (request, response) => {
     if (!request.url) {
@@ -296,7 +298,7 @@ export function createAggregatorServer({
     if (await serveNomenclature(request, response, url, nomenclature, authenticatedUser,
       () => reportError({ operation: "nomenclature", category: "internal" }))) return;
     if (url.pathname.startsWith("/api/purchasing/")) {
-      await serveSupplierOrders(request, response, url, nomenclature,
+      await serveSupplierOrders(request, response, url, nomenclature, supplierOrderNotes,
         () => !auth?.enabled || Boolean(auth.authorize(request, response, "purchasing")),
         () => reportError({ operation: "supplier-orders", category: "internal" }));
       return;
@@ -895,6 +897,8 @@ export function createAggregatorServer({
 
     serveJson(response, 405, { message: "Method not allowed" });
   });
-  server.once("close", () => { garage.close(); cart.close(); cancellations.close(); repairs.close(); nomenclature.close(); auth?.close(); });
+  server.once("close", () => {
+    garage.close(); cart.close(); cancellations.close(); repairs.close(); nomenclature.close(); supplierOrderNotes.close(); auth?.close();
+  });
   return server;
 }
