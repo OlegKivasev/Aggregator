@@ -39,8 +39,9 @@ export function getPurchaseReference(result: NormalizedSearchResult): PurchaseRe
 
 export function samePurchaseArticle(left: string, right: string): boolean {
   const key = (article: string): string => article.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase();
-  return [left, ...additionalArticleVariants(left).map((variant) => variant.article)]
-    .some((article) => key(article) === key(right));
+  const rightKey = key(right);
+  return key(left) === rightKey || additionalArticleVariants(left, { preserveArticleSuffix: true })
+    .some((variant) => key(variant.article) === rightKey);
 }
 
 export function samePurchaseOffer(

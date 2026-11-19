@@ -225,10 +225,10 @@ test("each new pricing search clears the table filter and restores supplier rows
   });
 });
 
-test("main pricing searches both VAZ spellings, keeps original offers and scopes the yellow notice to its persisted tab", async () => {
+test("main pricing searches all four VAZ spellings, keeps original offers and scopes the notice to its persisted tab", async () => {
   const sessions = new SupplierSessionManager();
   const adapterCalls = [];
-  const spellings = { armtek: "2109-6205012-10", "part-kom": "21090-6205012-10" };
+  const spellings = { armtek: "1119-2902712-00", "part-kom": "11190-2902712-00" };
   const adapters = Object.keys(spellings).map((supplier) => {
     sessions.markAuthorized(supplier);
     return { id: supplier, displayName: supplier, timeoutMs: 1000,
@@ -241,8 +241,9 @@ test("main pricing searches both VAZ spellings, keeps original offers and scopes
       } };
   });
   const service = new SearchApplicationService(adapters, sessions, (supplier) => sessions.markUnauthorized(supplier));
-  await withCartPage(async (page, { origin, orderCalls }) => {
+  await withCartPage(async (page, { origin, orderCalls, searchCalls }) => {
     const notice = page.locator("#article-variant-notice");
+    const noticeText = notice.locator("#article-variant-notice-text");
     assert.equal(await notice.isVisible(), false);
     const search = async (article) => {
       await page.locator("#article-input").fill(article);
@@ -250,29 +251,34 @@ test("main pricing searches both VAZ spellings, keeps original offers and scopes
       await page.waitForFunction(() => document.querySelector("#results-panel").getAttribute("aria-busy") === "false");
       assert.equal(await page.locator("#results-body .main-result-row").count(), 2);
     };
-    await search("2109-6205012-10");
+    await search("1119-2902712");
     const firstTab = await page.locator("#search-tabs-list .active").getAttribute("data-tab-id");
     assert.equal(await notice.isVisible(), true);
-    assert.match(await notice.innerText(), /полному.*21090-6205012-10/);
+    const firstNotice = "Также ищем по артикулам 11190-2902712, 1119-2902712-00, 11190-2902712-00.";
+    assert.equal(await noticeText.innerText(), firstNotice);
     assert.equal(await notice.evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(255, 248, 231)");
     assert.deepEqual((await page.locator('#results-body [data-column="article"]').allTextContents()).map((value) => value.trim()).sort(), Object.values(spellings).sort());
-    assert.equal(adapterCalls.length, 6, "initial ordinary query plus two sequential spellings per supplier");
-    const fullOffer = page.locator("#results-body .main-result-row").filter({ has: page.locator('[data-column="article"]', { hasText: "21090-6205012-10" }) });
+    assert.deepEqual(searchCalls.map(({ article }) => article), ["A1", "1119-2902712"]);
+    for (const supplier of Object.keys(spellings)) {
+      assert.deepEqual(adapterCalls.filter((call) => call.supplier === supplier).map(({ article }) => article),
+        ["A1", "1119-2902712", "11190-2902712", "1119-2902712-00", "11190-2902712-00"]);
+    }
+    const fullOffer = page.locator("#results-body .main-result-row").filter({ has: page.locator('[data-column="article"]', { hasText: spellings["part-kom"] }) });
     await fullOffer.locator(".cart-offer-button").click();
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
     const cart = await (await page.request.get(`${origin}/api/cart`)).json();
-    assert.equal(cart.items[0].result.article, "21090-6205012-10");
+    assert.equal(cart.items[0].result.article, spellings["part-kom"]);
     assert.equal(cart.items[0].result.supplier, "part-kom");
     assert.deepEqual(orderCalls, []);
     await page.locator("#new-tab-button").click();
     assert.equal(await notice.isVisible(), false);
-    await search("21090-6205012-10");
-    assert.match(await notice.innerText(), /сокращённому.*2109-6205012-10/);
+    await search("11190-2902712-00");
+    assert.equal(await noticeText.innerText(), "Также ищем по артикулам 1119-2902712-00, 11190-2902712, 1119-2902712.");
     await page.locator(`#search-tabs-list [data-tab-id="${firstTab}"]`).click();
-    assert.match(await notice.innerText(), /полному.*21090-6205012-10/);
+    assert.equal(await noticeText.innerText(), firstNotice);
     await page.reload();
     await page.locator("#results-body .main-result-row").first().waitFor();
-    assert.match(await notice.innerText(), /полному.*21090-6205012-10/);
+    assert.equal(await noticeText.innerText(), firstNotice);
     await search("A1");
     assert.equal(await notice.isVisible(), false);
   }, { preserveSearchState: true, streamSearch: service.streamSearch.bind(service) });
@@ -351,7 +357,7 @@ test("garage refresh updates real delivery dates and clearly flags failed or exp
     options.deliveries.armtek.deliveryDate = "2026-10-20";
     assert.equal((await refresh()).deliveryDate, "2026-10-20");
     assert.equal(await delivery.locator(".garage-delivery-warning").count(), 0);
-    assert.deepEqual(searchCalls.at(-1), { article: "A1", suppliers: ["armtek"] });
+    assert.deepEqual(searchCalls.at(-1), { article: "A1", suppliers: ["armtek"], preserveArticleSuffix: true });
     options.failedSearchSupplier = "armtek";
     assert.equal((await refresh()).availabilityStatus, "supplier_error");
     assert.match(await delivery.innerText(), /Не удалось проверить/);

@@ -10,6 +10,8 @@ export type SupplierSearchStatus =
 export interface SearchQuery {
   article: string;
   suppliers?: SupplierId[];
+  // Offer refresh uses the exact suffix stored with the supplier's offer.
+  preserveArticleSuffix?: boolean;
 }
 
 export interface AnalogSearchQuery extends SearchQuery {
