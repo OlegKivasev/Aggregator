@@ -1,3 +1,5 @@
+import { stockQuantity } from "./stock-details.js";
+
 const endpoint = "/api/purchasing/supplier-orders";
 const quantity = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const decimals = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -183,7 +185,7 @@ export function bootstrapSupplierOrders(section) {
       row.setAttribute("role", "row");
       const values = {
         ...product, article: product.article || "—", quantity: quantity.format(product.quantity),
-        stock: quantity.format(product.stock), returnDays: quantity.format(product.returnDays),
+        stock: stockQuantity(product, product.stock), returnDays: quantity.format(product.returnDays),
         price: formatMoney(product.price, order.currency), amount: formatMoney(product.amount, order.currency),
         expectedDate: formatDate(product.expectedDate),
       };

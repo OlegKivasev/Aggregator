@@ -2,12 +2,13 @@ import { NomenclatureError, objectFields, parseUuid } from "./contract.ts";
 import { parseStockNavigation, type StockNavigation } from "./stock-navigation.ts";
 import { parseIncomingDetails, type IncomingDetails } from "./incoming-contract.ts";
 import { parseSupplierOrdersResult, type SupplierOrdersResult } from "../purchasing/supplier-orders-contract.ts";
+import { parseStockDetails, type StockDetails } from "./stock-details.ts";
 
 export const stockPageSize = 100;
 export interface StockPrice { amount: number; currency: string; unit?: string }
 export interface StockPriceType { id: string; name: string }
 export interface StockIncoming { original: number; replacement: number }
-export interface StockProduct { id: string; name: string; article: string; quantity: number; incoming?: StockIncoming; price?: StockPrice | null; nameMatches?: string[] }
+export interface StockProduct { id: string; name: string; article: string; quantity: number; incoming?: StockIncoming; price?: StockPrice | null; nameMatches?: string[]; stockDetails?: StockDetails }
 export interface StockPage { products: StockProduct[]; hasMore: boolean; nextCursor: string | null; receivedAt: string; totalCount?: number; priceTypes?: StockPriceType[]; navigation?: StockNavigation; incomingDetails?: IncomingDetails; supplierOrders?: SupplierOrdersResult }
 export interface StockResult {
   requestId: string; leaseId: string; status: "completed" | "error";
@@ -45,7 +46,7 @@ export function parseStockResult(value: unknown, signed = false): StockResult {
   }
   const identities = new Set<string>();
   const products = data.products.map((value): StockProduct => {
-    const item = objectFields(value, ["id", "name", "article", "quantity", "incoming", "price", "nameMatches"]);
+    const item = objectFields(value, ["id", "name", "article", "quantity", "incoming", "price", "nameMatches", "stockDetails"]);
     const id = parseUuid(item.id);
     if (identities.has(id) || typeof item.name !== "string" || !item.name.trim() || item.name.length > 500
       || typeof item.article !== "string" || item.article.length > 50
@@ -80,7 +81,10 @@ export function parseStockResult(value: unknown, signed = false): StockResult {
       }
       nameMatches = [...new Set(matches)];
     }
+    const stockDetails = item.stockDetails === undefined ? undefined : parseStockDetails(item.stockDetails, item.quantity,
+      () => { throw new NomenclatureError(400, "invalid_stock", "Некорректная расшифровка остатка."); });
     return { id, name: item.name.trim(), article: item.article.trim(), quantity: item.quantity,
+      ...(stockDetails === undefined ? {} : { stockDetails }),
       ...(nameMatches === undefined ? {} : { nameMatches }),
       ...(incoming === undefined ? {} : { incoming }), ...(price === undefined ? {} : { price }) };
   });

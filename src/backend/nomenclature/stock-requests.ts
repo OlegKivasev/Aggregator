@@ -176,7 +176,7 @@ export class StockRequests {
       || data.products.some((item) =>
       ((options?.availability ?? "available") === "available" && item.quantity <= 0)
       || (options?.availability === "absent" && item.quantity > 0)
-      || (options?.inventory ? item.incoming === undefined || item.quantity < 0 : item.incoming !== undefined)
+      || (options?.inventory ? item.incoming === undefined || item.quantity < 0 : item.incoming !== undefined || item.stockDetails !== undefined)
       || (options?.priceType ? item.price === undefined : item.price !== undefined)
       || (item.nameMatches !== undefined && !highlightsRequested(row.query, options)))
       || options && !after && (data.totalCount === undefined || data.priceTypes === undefined

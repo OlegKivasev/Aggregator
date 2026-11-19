@@ -1,5 +1,6 @@
 import { NomenclatureError, objectFields, parseUuid } from "../nomenclature/contract.ts";
 import { validCalendarDate } from "../nomenclature/incoming-contract.ts";
+import { parseStockDetails, type StockDetails } from "../nomenclature/stock-details.ts";
 
 export const supplierOrdersPageSize = 50;
 const sortFields = ["date", "number", "supplier", "buyer", "amount"] as const;
@@ -27,6 +28,7 @@ interface Product {
   quantity: number;
 }
 interface OrderProduct extends Product {
+  stockDetails?: StockDetails;
   stock: number;
   receipt: string;
   price: number | null;
@@ -172,12 +174,14 @@ export function parseSupplierOrdersResult(value: unknown): SupplierOrdersResult 
   if (header.id !== id || typeof item.market !== "boolean") throw invalid();
   const market = item.market;
   const lines = products(item.products, (value): OrderProduct => {
-    const line = objectFields(value, [...productFields, "stock", "receipt", "price", "amount", "returnDays", "expectedDate"]);
+    const line = objectFields(value, [...productFields, "stock", "receipt", "price", "amount", "returnDays", "expectedDate", "stockDetails"]);
     const price = optionalNumber(line.price);
     const amount = optionalNumber(line.amount);
     if (market && (price !== null || amount !== null) || !Number.isSafeInteger(line.returnDays) || Number(line.returnDays) < 0
       || line.expectedDate !== null && !validCalendarDate(line.expectedDate)) throw invalid();
-    return { ...product(line), stock: number(line.stock), receipt: text(line.receipt, 100), price, amount,
+    const stock = number(line.stock);
+    return { ...product(line), stock, receipt: text(line.receipt, 100), price, amount,
+      ...(line.stockDetails === undefined ? {} : { stockDetails: parseStockDetails(line.stockDetails, stock, () => { throw invalid(); }) }),
       returnDays: Number(line.returnDays), expectedDate: line.expectedDate };
   });
   const contract = text(item.contract, 500);

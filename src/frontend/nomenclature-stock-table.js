@@ -1,4 +1,5 @@
 import { createIncomingPopover } from "./nomenclature-incoming-popover.js";
+import { stockQuantity } from "./stock-details.js";
 
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const incomingFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
@@ -87,6 +88,7 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
     paintSelection();
   };
   rows.addEventListener("click", (event) => {
+    if (event.target.closest(".stock-details-trigger")) return;
     const row = event.target.closest("tr[data-product-id]");
     if (!row) return;
     const button = event.target.closest("[data-incoming-side]");
@@ -94,7 +96,7 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
     else select(row, event);
   });
   rows.addEventListener("keydown", (event) => {
-    if (![" ", "Enter"].includes(event.key) || event.target.closest("[data-incoming-side]")) return;
+    if (![" ", "Enter"].includes(event.key) || event.target.closest("button")) return;
     const row = event.target.closest("tr[data-product-id]");
     if (row) { event.preventDefault(); select(row, event); }
   });
@@ -140,7 +142,7 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
           row.setAttribute("aria-rowindex", String(index * 100 + position + 2));
           const nameCell = document.createElement("td"); appendHighlighted(nameCell, product.name, product.nameMatches); row.append(nameCell);
           const articleCell = document.createElement("td"); appendHighlighted(articleCell, product.article); row.append(articleCell);
-          const quantityCell = document.createElement("td"); quantityCell.textContent = numberFormat.format(product.quantity); row.append(quantityCell);
+          const quantityCell = document.createElement("td"); quantityCell.append(stockQuantity(product, product.quantity)); row.append(quantityCell);
           const incoming = document.createElement("td");
           incoming.className = "nomenclature-incoming nomenclature-incoming-values";
           const pair = document.createElement("div");

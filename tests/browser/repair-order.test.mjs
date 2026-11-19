@@ -104,8 +104,10 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       await dialog.getByRole("group", { name: "Способ оплаты" }).waitFor();
       return job.id;
     };
+    const stockDetails = { original: 5, replacements: [{ name: "Комплект-замена | Закрытый бренд", article: "PRIVATE-REPLACEMENT", quantity: 15 }] };
     const requestId = await open({ ...details,
-      goods: [...details.goods, awaitingPart, { ...awaitingPart, name: "Нет на складе", productId: randomUUID(), original: 0, awaitingDelivery: false },
+      goods: [{ ...stock, stock: 20, stockDetails }, details.goods[1], awaitingPart,
+        { ...awaitingPart, name: "Нет на складе", productId: randomUUID(), original: 0, awaitingDelivery: false },
         ...[4, 3, 2, 1, 0, -3, 6].map((returnDays) => ({ ...details.goods[1], returnDays, awaitingDelivery: returnDays === 2 }))],
       work: [...details.work, { ...details.work[0], name: "Замена фильтра", hours: 1, multiplier: 2 }],
     }, { ...card, urgentReturnDays: 0 });
@@ -134,6 +136,13 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     assert.deepEqual(await dialog.locator(".repair-order-return-urgent .repair-order-return-days").allTextContents(), ["5", "4", "3", "2", "1", "0", "0"]);
     assert.equal(await dialog.locator(".repair-order-return-urgent").first().evaluate((row) => getComputedStyle(row).outlineStyle), "solid");
     const goodsTable = dialog.getByRole("table", { name: "Товары" });
+    await goodsTable.getByRole("button", { name: /Остаток 20/ }).click();
+    const breakdown = page.getByRole("dialog", { name: "Остаток с учётом заказов" });
+    assert.equal(await breakdown.getByText("PRIVATE-REPLACEMENT").isVisible(), true);
+    assert.equal(await breakdown.getByText("Всего 20").isVisible(), true);
+    await page.keyboard.press("Escape");
+    assert.equal(await dialog.isVisible(), true);
+    assert.equal(repairRequests.length, beforePreview, "stock details use the order snapshot");
     const waitingRow = goodsTable.getByRole("row", { name: /Подшипник под заказ/ });
     const waitStyles = (row) => row.evaluate((node) => ({
       color: getComputedStyle(node).outlineColor,
@@ -278,7 +287,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       method: "PATCH", headers: { Cookie: admin, "Content-Type": "application/json" }, body: JSON.stringify(data),
     });
     const assign = (positionId) => adminEdit("/api/users", { id: employee.id, fio: employee.fio, permissions: employee.permissions, positionId });
-    const branded = { ...stock, name: "Комплект ГРМ | Закрытый бренд | Серия", article: "PRIVATE-ARTICLE" };
+    const branded = { ...stock, name: "Комплект ГРМ | Закрытый бренд | Серия", article: "PRIVATE-ARTICLE", stock: 20, stockDetails };
     await page.setViewportSize({ width: 1440, height: 900 });
     const restrictedId = await open({ ...details, goods: [branded] }, card, async () => {
       assert.equal((await assign(position.id)).status, 200);
@@ -286,6 +295,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     const rawSnapshot = async () => (await (await page.request.get(`${origin}/api/repairs/refresh/${restrictedId}?testPlatform=false`)).json()).refresh.details;
     const restricted = await rawSnapshot();
     assert.equal(restricted.hideArticles, true);
+    assert.deepEqual(restricted.goods[0].stockDetails.replacements, [{ name: "Комплект-замена", article: "", quantity: 15 }]);
     assert.equal(restricted.goods[0].name, "Комплект ГРМ");
     assert.equal(restricted.goods[0].article, "");
     assert.equal(await goodsTable.getByRole("columnheader", { name: "Артикул" }).count(), 0);

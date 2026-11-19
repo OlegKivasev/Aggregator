@@ -1,4 +1,5 @@
 import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=repair-order-1";
+import { stockQuantity } from "./stock-details.js";
 
 const number = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
@@ -234,7 +235,7 @@ export function createRepairOrderView() {
     if (goods) panels[0].replaceChildren(lines([
       ["Наименование", (row) => row.name],
       ...(data.hideArticles ? [] : [["Артикул", (row) => row.article, "repair-order-article", (row) => Boolean(row.article)]]),
-      ["Остаток", (row) => row.stock === null ? missing : number.format(row.stock), "repair-order-numeric repair-order-stock"],
+      ["Остаток", (row) => stockQuantity(row, row.stock), "repair-order-numeric repair-order-stock"],
       ["Цена", (row) => tableMoney.format(row.price), "repair-order-numeric repair-order-price"],
       ["Кол-во", (row) => number.format(row.quantity), "repair-order-numeric repair-order-quantity"],
       ...(data.goods.some(hasIncoming) ? [["К поступлению", (row) => incoming(row, supplySource), "repair-order-supply", canViewIncoming]] : []),
