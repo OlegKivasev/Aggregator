@@ -91,11 +91,15 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     const products = Array.from({ length: 100 }, (_, index) => ({ id: randomUUID(),
       name: index === 0 ? '<img src=x onerror="window.stockXss=1"> Товар с длинным наименованием' : `Тестовый товар ${index + 1}`,
       article: index === 1 ? "" : `0000${index}`, quantity: index === 0 ? 1.125 : index + 1 }));
-    const interchangeable = { ...products[1], quantity: 20, stockDetails: { original: 5, replacements: [
-      { name: "Совместимая деталь", article: "00007", quantity: 7 },
-      { name: "<img src=x> Вторая деталь", article: "00008", quantity: 8 },
+    const interchangeable = { ...products[1], quantity: 6, stockDetails: { original: 2, replacements: [
+      { name: products[2].name, article: products[2].article, quantity: 3 },
+      { name: "<img src=x> Вторая деталь", article: "00008", quantity: 1 },
     ] } };
-    assert.equal((await complete(job, [products[0], interchangeable, ...products.slice(2)], true)).status, 200);
+    const otherOriginal = { ...products[2], quantity: 6, stockDetails: { original: 3, replacements: [
+      { name: products[1].name, article: products[1].article, quantity: 2 },
+      { name: "<img src=x> Вторая деталь", article: "00008", quantity: 1 },
+    ] } };
+    assert.equal((await complete(job, [products[0], interchangeable, otherOriginal, ...products.slice(3)], true)).status, 200);
     await page.waitForFunction(() => document.querySelectorAll("#nomenclature-stock-rows tr").length === 100);
     const second = await poll(20);
     assert.deepEqual(second.after, { id: products.at(-1).id, value: null });
@@ -105,18 +109,29 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.equal((await amounts.nth(1).locator("button").getAttribute("title")).replace(/\s/g, ""), "Замена:1200");
     assert.deepEqual(await page.locator("th.nomenclature-incoming .nomenclature-incoming-pair span").allTextContents(), ["О", "З"]);
     assert.equal(reads.length, 2, "one initial read and one background page ahead, without browser polling");
-    const stockButton = page.getByRole("button", { name: "Остаток 20. Тестовый товар 2" });
+    const stockButton = page.getByRole("button", { name: "Остаток 6. Тестовый товар 2" });
     await stockButton.press("Enter");
     const stockDetails = page.getByRole("dialog", { name: "Остаток с учётом заказов" });
-    assert.equal(await stockDetails.getByText("Всего 20").isVisible(), true);
-    assert.deepEqual(await stockDetails.getByRole("region", { name: "Оригинал" }).locator("dd").allTextContents(), ["5"]);
+    assert.equal(await stockDetails.getAttribute("id"), "nomenclature-incoming-popover");
+    assert.equal(await stockDetails.getByText("Всего 6").isVisible(), true);
+    const stockOriginal = stockDetails.getByRole("region", { name: "Оригинал" });
+    assert.equal(await stockOriginal.getByText(products[1].name).isVisible(), true);
+    assert.deepEqual(await stockOriginal.locator("dd").allTextContents(), ["2"]);
+    assert.deepEqual(await stockDetails.getByRole("region").evaluateAll((groups) => groups.map((group) => group.firstElementChild.textContent)),
+      ["Оригинал", "Замена"]);
     const replacements = stockDetails.getByRole("region", { name: "Замена" });
-    assert.deepEqual(await replacements.locator("dd").allTextContents(), ["7", "8"]);
+    assert.deepEqual(await replacements.locator("dd").allTextContents(), ["3", "1"]);
     assert.equal(await replacements.getByText("00008").isVisible(), true);
     assert.equal(await replacements.locator("img").count(), 0);
     await page.keyboard.press("Escape");
     assert.equal(await stockDetails.isVisible(), false);
     assert.equal(await stockButton.evaluate((node) => document.activeElement === node), true);
+    const otherStock = page.getByRole("button", { name: "Остаток 6. Тестовый товар 3" });
+    await otherStock.press("Enter");
+    assert.equal(await stockOriginal.getByText(products[2].name).isVisible(), true);
+    assert.deepEqual(await stockOriginal.locator("dd").allTextContents(), ["3"]);
+    assert.deepEqual(await replacements.locator("dd").allTextContents(), ["2", "1"]);
+    await page.keyboard.press("Escape");
     assert.equal(reads.length, 2, "stock details use the page snapshot");
     assert.match(await page.locator("#nomenclature-stock-statistics").textContent(), /Выделено: 0$/);
     assert.equal(await page.locator("#nomenclature-stock-loading").isVisible(), false, "continuation never shows the initial spinner above the rows");

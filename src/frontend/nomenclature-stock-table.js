@@ -1,5 +1,5 @@
-import { createIncomingPopover } from "./nomenclature-incoming-popover.js";
-import { stockQuantity } from "./stock-details.js";
+import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=stock-popup-1";
+import { stockQuantity } from "./stock-details.js?v=stock-popup-1";
 
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const incomingFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
@@ -142,7 +142,9 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
           row.setAttribute("aria-rowindex", String(index * 100 + position + 2));
           const nameCell = document.createElement("td"); appendHighlighted(nameCell, product.name, product.nameMatches); row.append(nameCell);
           const articleCell = document.createElement("td"); appendHighlighted(articleCell, product.article); row.append(articleCell);
-          const quantityCell = document.createElement("td"); quantityCell.append(stockQuantity(product, product.quantity)); row.append(quantityCell);
+          const quantityCell = document.createElement("td");
+          quantityCell.append(stockQuantity(product, product.quantity, incomingPopover));
+          row.append(quantityCell);
           const incoming = document.createElement("td");
           incoming.className = "nomenclature-incoming nomenclature-incoming-values";
           const pair = document.createElement("div");

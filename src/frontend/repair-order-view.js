@@ -1,5 +1,5 @@
-import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=repair-stock-1";
-import { stockQuantity } from "./stock-details.js";
+import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=stock-popup-1";
+import { stockQuantity } from "./stock-details.js?v=stock-popup-1";
 
 const number = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });

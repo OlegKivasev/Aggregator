@@ -137,11 +137,12 @@ test("supplier orders search and sort across pages with one 1C job per action an
       const stockButton = dialog.getByRole("button", { name: /Остаток 7/ });
       assert.equal(await dialog.locator(".supplier-order-no-stock").count(), 0);
       await stockButton.click();
-      const stockDetails = page.getByRole("dialog", { name: "Остаток с учётом заказов" });
+      const stockDetails = dialog.getByRole("dialog", { name: "Остаток с учётом заказов" });
       assert.equal(await stockDetails.getByText("Радиатор-замена").isVisible(), true);
       assert.equal(await stockDetails.getByText("Всего 7").isVisible(), true);
+      assert.equal(await stockDetails.getByRole("region", { name: "Оригинал" }).count(), 0);
       assert.equal(await stockDetails.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
-      await stockDetails.getByRole("button", { name: "Закрыть" }).click();
+      await stockDetails.getByRole("button", { name: "Закрыть расшифровку остатка" }).click();
       assert.equal(await dialog.isVisible(), true);
       if (width < 500) assert.ok((await dialog.getByRole("button", { name: "К списку" }).boundingBox()).height >= 44);
       await dialog.getByRole("button", { name: "К списку" }).click();

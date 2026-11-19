@@ -1,4 +1,5 @@
-import { stockQuantity } from "./stock-details.js";
+import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=stock-popup-1";
+import { stockQuantity } from "./stock-details.js?v=stock-popup-1";
 
 const endpoint = "/api/purchasing/supplier-orders";
 const quantity = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
@@ -59,6 +60,7 @@ export function bootstrapSupplierOrders(section) {
   const more = byId("supplier-orders-more");
   const pagination = byId("supplier-orders-pagination");
   const dialog = byId("supplier-order-dialog");
+  const stockPopover = createIncomingPopover(dialog, "supplier-order-stock-popover");
   const title = byId("supplier-order-title");
   const date = byId("supplier-order-date");
   const feedback = byId("supplier-order-status");
@@ -185,7 +187,7 @@ export function bootstrapSupplierOrders(section) {
       row.setAttribute("role", "row");
       const values = {
         ...product, article: product.article || "—", quantity: quantity.format(product.quantity),
-        stock: stockQuantity(product, product.stock), returnDays: quantity.format(product.returnDays),
+        stock: stockQuantity(product, product.stock, stockPopover), returnDays: quantity.format(product.returnDays),
         price: formatMoney(product.price, order.currency), amount: formatMoney(product.amount, order.currency),
         expectedDate: formatDate(product.expectedDate),
       };
@@ -220,6 +222,7 @@ export function bootstrapSupplierOrders(section) {
 
   async function show(order) {
     if (!active) return;
+    stockPopover.close();
     orderRead?.abort();
     const controller = new AbortController();
     orderRead = controller;
@@ -293,6 +296,7 @@ export function bootstrapSupplierOrders(section) {
   byId("supplier-order-close").addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => {
     if (dialog.open) return;
+    stockPopover.close();
     orderRead?.abort();
     selected = orderRead = undefined;
     facts.replaceChildren();
