@@ -5,6 +5,7 @@ import { NomenclatureError } from "./contract.ts";
 import { stockPageSize, type StockPage, type StockResult } from "./stock-contract.ts";
 import { defaultStockSort, decodeStockCursor, encodeStockCursor, validateStockSortValue, type StockSort, type StockSortField } from "./stock-sort.ts";
 import { stockOptionsKey, type StockOptions } from "./stock-options.ts";
+import { validateSupplierOrdersResponse } from "../purchasing/supplier-orders-contract.ts";
 
 interface Row {
   id: string; cursor: string; query: string; status: string; expires_at: number; lease_id: string | null; result_json: string | null;
@@ -20,7 +21,9 @@ export const stockWorkerConditions = `AND (query='' OR ?=1)
   AND (options='' OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.searchMode') IS NULL OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.inventory') IS NULL OR ?=1)
-  AND (options='' OR json_extract(NULLIF(options, ''), '$.incomingDetails') IS NULL OR ?=1)`;
+  AND (options='' OR json_extract(NULLIF(options, ''), '$.incomingDetails') IS NULL OR ?=1)
+  AND (options='' OR json_extract(NULLIF(options, ''), '$.supplierOrders') IS NULL OR ?=1)
+  AND (options='' OR COALESCE(json_extract(NULLIF(options, ''), '$.supplierOrders.view'), '') <> 'listPage' OR ?=1)`;
 
 const highlightsRequested = (query: string, options?: StockOptions | null): boolean =>
   !!query && options?.inventory === true && options.searchMode === "text";
@@ -150,8 +153,17 @@ export class StockRequests {
     if (data.status === "completed" && row.sort_field === "price" && !options?.priceType) {
       throw new NomenclatureError(400, "invalid_stock", "Для сортировки по цене выберите вид цены.");
     }
-    const incoming = options?.incomingDetails;
-    if (incoming) {
+    const purchasing = options?.supplierOrders;
+    const supplierOrders = data.supplierOrders;
+    if (purchasing || supplierOrders) {
+      if (!purchasing || data.products.length || data.hasMore || data.lastSortValue != null || data.totalCount !== undefined
+        || data.priceTypes !== undefined || data.navigation !== undefined || data.incomingDetails !== undefined
+        || (data.status === "completed") !== (supplierOrders !== undefined)) {
+        throw new NomenclatureError(400, "invalid_supplier_orders", "Ответ не соответствует запросу заказов поставщикам.");
+      }
+      if (supplierOrders) validateSupplierOrdersResponse(purchasing, supplierOrders);
+    } else if (options?.incomingDetails) {
+      const incoming = options.incomingDetails;
       if (data.products.length || data.hasMore || data.lastSortValue != null || data.totalCount !== undefined
         || data.priceTypes !== undefined || data.navigation !== undefined
         || (data.status === "completed") !== (data.incomingDetails !== undefined)
@@ -177,6 +189,7 @@ export class StockRequests {
       nextCursor: data.hasMore ? encodeStockCursor({ id: data.products.at(-1)!.id, value: lastValue }, row.query, sort, row.options) : null, receivedAt: new Date(this.now()).toISOString(),
       ...(data.navigation === undefined ? {} : { navigation: data.navigation }),
       ...(data.incomingDetails === undefined ? {} : { incomingDetails: data.incomingDetails }),
+      ...(supplierOrders === undefined ? {} : { supplierOrders }),
       ...(data.totalCount === undefined ? {} : { totalCount: data.totalCount }), ...(data.priceTypes === undefined ? {} : { priceTypes: data.priceTypes }) };
     // Keep the timestamp of an accepted result when an identical delivery is retried.
     if (row?.result_json) page.receivedAt = (JSON.parse(row.result_json) as StockPage).receivedAt;
@@ -191,4 +204,4 @@ export class StockRequests {
   }
 }
 
-export const stockWorkerFlags = (version: number): number[] => [2, 3, 4, 5, 6, 7, 8].map((minimum) => Number(version >= minimum));
+export const stockWorkerFlags = (version: number): number[] => [2, 3, 4, 5, 6, 7, 8, 9, 10].map((minimum) => Number(version >= minimum));

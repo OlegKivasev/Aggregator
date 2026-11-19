@@ -7,7 +7,7 @@ import { readJsonBody, RequestBodyError } from "../http/request-body.ts";
 import { serveJson } from "../http/responses.ts";
 import { parsePositionId, UserPositionStore, type RepairVisibility } from "./user-position-store.ts";
 
-export const userPermissions = ["markup", "applicability", "repairs", "testRepairs", "nomenclature"] as const;
+export const userPermissions = ["markup", "applicability", "repairs", "testRepairs", "nomenclature", "purchasing"] as const;
 export type UserPermission = typeof userPermissions[number];
 
 export interface AuthenticatedUser {

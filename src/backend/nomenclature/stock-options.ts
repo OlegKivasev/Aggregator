@@ -1,5 +1,6 @@
 import { NomenclatureError, parseUuid } from "./contract.ts";
 import { validCalendarDate, type IncomingRequest } from "./incoming-contract.ts";
+import type { SupplierOrdersRequest } from "../purchasing/supplier-orders-contract.ts";
 
 interface StockPeriod {
   from: string;
@@ -19,6 +20,7 @@ export interface StockOptions {
   oemPresence?: "present" | "absent";
   oemFilterBrand?: string;
   incomingDetails?: IncomingRequest;
+  supplierOrders?: SupplierOrdersRequest;
 }
 
 function parsePeriod(params: URLSearchParams, prefix: "receipt" | "sale"): StockPeriod | undefined {

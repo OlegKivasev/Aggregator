@@ -8,6 +8,7 @@ import { StockRequests, stockWorkerConditions, stockWorkerFlags } from "./stock-
 import type { StockResult } from "./stock-contract.ts";
 import { defaultStockSort, type StockSort } from "./stock-sort.ts";
 import type { StockOptions } from "./stock-options.ts";
+import type { SupplierOrdersRequest } from "../purchasing/supplier-orders-contract.ts";
 
 interface SourceRow { id: string; token_hash: string | null; last_seen: number | null }
 interface LookupRow {
@@ -128,16 +129,25 @@ export class NomenclatureService {
     const connection = this.state();
     if (!connection.configured) throw new NomenclatureError(503, "source_unconfigured", "Подключение номенклатуры ещё не настроено.");
     if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.");
-    const required = options?.incomingDetails ? 8 : options?.inventory ? 7 : options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
+    const purchase = options?.supplierOrders;
+    const required = purchase?.view === "listPage" ? 10 : purchase ? 9 : options?.incomingDetails ? 8 : options?.inventory ? 7 : options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
     const checkWorker = () => {
       const version = this.stockVersion();
       // After a restart, let the first authenticated poll identify the worker.
       if (version !== null && version < required) {
-        throw new NomenclatureError(503, "stock_unsupported", "Обработчик 1С подключён, но не поддерживает этот список номенклатуры. Обновите расширение в базе 1С и перезапустите задание поиска, затем обновите список.");
+        const list = purchase?.view === "listPage" ? "поиск и сортировку заказов поставщикам"
+          : purchase ? "заказы поставщикам" : "этот список номенклатуры";
+        throw new NomenclatureError(503, "stock_unsupported", `Обработчик 1С подключён, но не поддерживает ${list}. Обновите расширение в базе 1С и перезапустите задание поиска, затем обновите список.`);
       }
     };
     checkWorker();
     return this.stock.load(cursor, signal, () => this.changes.emit(source), query, sort, options, checkWorker);
+  }
+
+  async loadSupplierOrders(read: SupplierOrdersRequest, signal: AbortSignal) {
+    const page = await this.loadStock(null, signal, "", defaultStockSort, { availability: "all", priceType: null, supplierOrders: read });
+    if (!page.supplierOrders) throw new NomenclatureError(503, "stock_failed", "Не удалось получить заказы поставщикам из 1С.");
+    return page.supplierOrders;
   }
 
   completeStock(token: string | undefined, result: StockResult): void {
@@ -200,10 +210,10 @@ export class NomenclatureService {
     this.database.prepare("UPDATE nomenclature_lookups SET status='cancelled' WHERE id=? AND status IN ('pending','leased')").run(id);
   }
 
-  claim(token: string | undefined, includeStock = false, supportsStockSearch = false, supportsStockTerms = false, supportsStockSorting = false, supportsStockOptions = false, supportsStockNavigation = false, supportsInventory = false, supportsIncoming = false) {
+  claim(token: string | undefined, includeStock = false, supportsStockSearch = false, supportsStockTerms = false, supportsStockSorting = false, supportsStockOptions = false, supportsStockNavigation = false, supportsInventory = false, supportsIncoming = false, supportsSupplierOrders = false, supportsSupplierOrdersSearch = false) {
     this.heartbeat(token);
     const previousVersion = this.stockVersion();
-    const version = !includeStock ? 0 : supportsIncoming ? 8 : supportsInventory ? 7 : supportsStockNavigation ? 6 : supportsStockOptions ? 5 : supportsStockSorting ? 4 : supportsStockTerms ? 3 : supportsStockSearch ? 2 : 1;
+    const version = !includeStock ? 0 : supportsSupplierOrdersSearch ? 10 : supportsSupplierOrders ? 9 : supportsIncoming ? 8 : supportsInventory ? 7 : supportsStockNavigation ? 6 : supportsStockOptions ? 5 : supportsStockSorting ? 4 : supportsStockTerms ? 3 : supportsStockSearch ? 2 : 1;
     this.stockWorkers.set(version, this.now());
     const currentVersion = this.stockVersion();
     const changed = currentVersion !== previousVersion || currentVersion !== this.observedStockVersion;
