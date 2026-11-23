@@ -11,6 +11,80 @@ const first = { documentId: "12345678-abcd-1234-abcd-123456789abc", number: "Т�
   vehicleName: "Toyota Camry | А123ВС163", status: "В работе", goodsReadiness: { totalPositions: 3, availablePositions: 1 }, paymentStatus: "partially_paid", amountDue: 10_500 };
 const second = { ...first, documentId: "22345678-abcd-1234-abcd-123456789abc", vehicleName: "Ford Focus" };
 
+test("the all-open repair list shows status and performer, and refreshes 201 rows in two jobs", async (t) => {
+  const server = createAggregatorServer({ application: { streamSearch: async () => {} }, publicDir: resolve("src/frontend") });
+  const cards = Array.from({ length: 201 }, (_, index) => ({
+    ...first, documentId: `12345678-abcd-1234-abcd-${String(index + 1).padStart(12, "0")}`,
+    number: `НАРЯД-${index + 1}`, status: "На выполнении", performer: index ? undefined : "Иванов, Петров",
+  }));
+  const byId = new Map(cards.map((card) => [card.documentId, card]));
+  const jobs = new Map();
+  const listRequests = [];
+  const resultRequests = [];
+  let browser;
+  try {
+    await new Promise((resolvePromise, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolvePromise); });
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER_EXECUTABLE_PATH });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await page.route("**/*", async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (url.origin !== origin) return route.abort();
+      if (!url.pathname.startsWith("/api/")) return route.continue();
+      if (url.pathname === "/api/auth/session") return route.fulfill({ json: { enabled: true,
+        user: { id: "senior", fio: "Старший механик", isAdmin: false, permissions: ["repairs"] } } });
+      if (url.pathname === "/api/repairs") {
+        listRequests.push(url.search);
+        return route.fulfill({ json: { repairs: cards, allOpen: true } });
+      }
+      if (url.pathname === "/api/repairs/refresh" && request.method() === "POST") {
+        const id = `22345678-abcd-1234-abcd-${String(jobs.size + 1).padStart(12, "0")}`;
+        jobs.set(id, request.postDataJSON().documentIds);
+        return route.fulfill({ json: { refresh: { id, status: "pending", expiresAt: new Date(Date.now() + 60_000) } } });
+      }
+      if (url.pathname.startsWith("/api/repairs/refresh/") && request.method() === "GET") {
+        const id = url.pathname.split("/").at(-1);
+        resultRequests.push(id);
+        const ids = jobs.get(id);
+        const removedDocumentIds = ids.includes(cards.at(-1).documentId) ? [cards.at(-1).documentId] : [];
+        return route.fulfill({ json: { refresh: { id, status: "completed", removedDocumentIds,
+          repairs: ids.filter((documentId) => !removedDocumentIds.includes(documentId)).map((documentId) => byId.get(documentId)) } } });
+      }
+      return route.fulfill({ json: { articles: [], sessions: [], vehicles: [], brandCounts: [], hasMore: false } });
+    });
+    await page.goto(origin);
+    await page.waitForLoadState("networkidle");
+    const section = page.locator("#repairs-function");
+    const rows = section.locator("tbody tr");
+    await section.getByRole("columnheader", { name: "Исполнитель заказа" }).waitFor();
+    await section.getByRole("columnheader", { name: "Статус заказа" }).waitFor();
+    assert.equal(await rows.count(), 201);
+    await rows.first().getByText("Иванов, Петров", { exact: true }).waitFor();
+    await rows.first().getByText("На выполнении", { exact: true }).waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await rows.first().getByText("Исполнитель заказа", { exact: true }).waitFor();
+    assert.ok(await section.evaluate((element) => element.scrollWidth <= element.clientWidth));
+    await section.getByRole("searchbox").fill("Петров");
+    assert.equal(await rows.count(), 1);
+    await section.getByRole("searchbox").fill("");
+    const readsBefore = listRequests.length;
+    const started = performance.now();
+    await section.getByRole("button", { name: "Обновить" }).click();
+    await section.getByText("Показанные заказ-наряды обновлены.", { exact: true }).waitFor();
+    assert.deepEqual([...jobs.values()].map((ids) => ids.length), [200, 1]);
+    assert.equal(new Set([...jobs.values()].flat()).size, 201);
+    assert.deepEqual(resultRequests, [...jobs.keys()]);
+    assert.equal(listRequests.length, readsBefore);
+    assert.equal(await rows.count(), 200);
+    t.diagnostic(`201 visible orders: ${Math.round(performance.now() - started)} ms, 2 create requests and 2 result requests, simulated 1C`);
+  } finally {
+    await browser?.close();
+    server.closeAllConnections();
+    await new Promise((resolvePromise) => server.close(resolvePromise));
+  }
+});
+
 test("refresh reads only visible orders from 1C, animates, hides uncertain data through reload and recovers after a verified reply", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "repair-refresh-browser-"));
   const previousPath = process.env.GARAGE_DB_PATH, previousSecret = process.env.ONEC_REPAIRS_INTEGRATION_SECRET;

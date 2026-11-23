@@ -1,15 +1,16 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { parseRepairPaymentOptions, type GoodsReadiness, type RepairCard } from "./repair-card.ts";
-import { repairOwnerMatches, RepairRefreshService } from "./repair-refresh-service.ts";
+import { canReadRepair, parseRepairPaymentOptions, type RepairAccess, type GoodsReadiness, type RepairCard } from "./repair-card.ts";
+import { RepairRefreshService } from "./repair-refresh-service.ts";
 
 export class SqliteRepairRepository {
   readonly refreshes: RepairRefreshService;
   private readonly database: DatabaseSync;
   private readonly saveStatement: StatementSync;
-  private readonly listStatement: StatementSync;
+  private readonly listStatements: [StatementSync, StatementSync];
   private readonly testSaveStatement: StatementSync;
+  private readonly readableStatements: [StatementSync, StatementSync];
 
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -37,10 +38,13 @@ export class SqliteRepairRepository {
           if (!columns.some((column) => column.name === "counterparty_name")) {
             this.database.exec(`ALTER TABLE ${table} ADD COLUMN counterparty_name TEXT`);
           }
-          for (const name of ["contact_name", "contact_phone"]) {
+          for (const name of ["contact_name", "contact_phone", "performer"]) {
             if (!columns.some((column) => column.name === name)) {
               this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} TEXT`);
             }
+          }
+          if (!columns.some((column) => column.name === "unposted")) {
+            this.database.exec(`ALTER TABLE ${table} ADD COLUMN unposted INTEGER NOT NULL DEFAULT 0 CHECK (unposted IN (0, 1))`);
           }
           if (!columns.some((column) => column.name === "responsible_fio")) {
             this.database.exec(`ALTER TABLE ${table} ADD COLUMN responsible_fio TEXT`);
@@ -90,6 +94,8 @@ export class SqliteRepairRepository {
               ALTER TABLE ${table} DROP COLUMN available_positions;
             `);
           }
+          this.database.exec(`CREATE INDEX IF NOT EXISTS ${table}_in_progress
+            ON ${table} (date DESC, document_id) WHERE status = 'В работе' AND unposted = 0`);
         }
         this.database.exec("COMMIT");
       } catch (error) {
@@ -97,44 +103,44 @@ export class SqliteRepairRepository {
         throw error;
       }
       this.saveStatement = this.database.prepare(`
-        INSERT INTO repair_cards (document_id, number, date, vehicle_name, status, responsible_fio, counterparty_name, contact_name, contact_phone, goods_total_positions, goods_available_positions, payment_status, amount_due_minor, card_amount_due_minor, cash_amount_due_minor, cash_discount_hundredths, urgent_return_days) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO repair_cards (document_id, number, date, vehicle_name, status, responsible_fio, counterparty_name, contact_name, contact_phone, goods_total_positions, goods_available_positions, payment_status, amount_due_minor, card_amount_due_minor, cash_amount_due_minor, cash_discount_hundredths, urgent_return_days, performer, unposted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
           number = excluded.number, date = excluded.date,
           vehicle_name = excluded.vehicle_name, status = excluded.status, responsible_fio = excluded.responsible_fio, counterparty_name = excluded.counterparty_name,
           contact_name = excluded.contact_name, contact_phone = excluded.contact_phone,
           goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions, payment_status = excluded.payment_status, amount_due_minor = excluded.amount_due_minor,
           card_amount_due_minor = excluded.card_amount_due_minor, cash_amount_due_minor = excluded.cash_amount_due_minor, cash_discount_hundredths = excluded.cash_discount_hundredths,
-          urgent_return_days = excluded.urgent_return_days
+          urgent_return_days = excluded.urgent_return_days, performer = excluded.performer, unposted = excluded.unposted
       `);
       this.testSaveStatement = this.database.prepare(`
-        INSERT INTO test_repair_cards (document_id, number, date, vehicle_name, status, responsible_fio, counterparty_name, contact_name, contact_phone, goods_total_positions, goods_available_positions, payment_status, amount_due_minor, card_amount_due_minor, cash_amount_due_minor, cash_discount_hundredths, urgent_return_days) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO test_repair_cards (document_id, number, date, vehicle_name, status, responsible_fio, counterparty_name, contact_name, contact_phone, goods_total_positions, goods_available_positions, payment_status, amount_due_minor, card_amount_due_minor, cash_amount_due_minor, cash_discount_hundredths, urgent_return_days, performer, unposted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(document_id) DO UPDATE SET
           number = excluded.number, date = excluded.date,
           vehicle_name = excluded.vehicle_name, status = excluded.status, responsible_fio = excluded.responsible_fio, counterparty_name = excluded.counterparty_name,
           contact_name = excluded.contact_name, contact_phone = excluded.contact_phone,
           goods_total_positions = excluded.goods_total_positions, goods_available_positions = excluded.goods_available_positions, payment_status = excluded.payment_status, amount_due_minor = excluded.amount_due_minor,
           card_amount_due_minor = excluded.card_amount_due_minor, cash_amount_due_minor = excluded.cash_amount_due_minor, cash_discount_hundredths = excluded.cash_discount_hundredths,
-          urgent_return_days = excluded.urgent_return_days
+          urgent_return_days = excluded.urgent_return_days, performer = excluded.performer, unposted = excluded.unposted
       `);
+      const selectReadable = (table: string) => this.database.prepare(
+        `SELECT document_id, status, responsible_fio, unposted FROM ${table} WHERE document_id IN (SELECT value FROM json_each(?))`);
+      this.readableStatements = [selectReadable("repair_cards"), selectReadable("test_repair_cards")];
       this.refreshes = new RepairRefreshService(this.database, () => this.list(true), (id, test) => {
         const table = test ? "test_repair_cards" : "repair_cards";
         return JSON.stringify(this.database.prepare(`SELECT * FROM ${table} WHERE document_id=?`).get(id) ?? null);
       }, (result, test) => {
         for (const card of result.repairs) this.save(card);
         for (const id of result.removedDocumentIds) this.remove(id, test);
-      }, Date.now, (id, test, fio) => {
-        const table = test ? "test_repair_cards" : "repair_cards";
-        const row = this.database.prepare(`SELECT responsible_fio FROM ${table} WHERE document_id=? AND status='В работе'`).get(id);
-        return row !== undefined && repairOwnerMatches({ responsibleFio: typeof row.responsible_fio === "string" ? row.responsible_fio : undefined }, fio);
-      });
-      this.listStatement = this.database.prepare(`
-        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, contact_name AS contactName, contact_phone AS contactPhone, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, urgent_return_days AS urgentReturnDays, 0 AS testPlatform
-        FROM repair_cards WHERE status = 'В работе' OR ? = 1
+      }, Date.now, (ids, test, access, allowInactive) => this.readableIds(ids, test, access, allowInactive));
+      const prepareList = (inProgressFilter: string) => this.database.prepare(`
+        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, contact_name AS contactName, contact_phone AS contactPhone, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, urgent_return_days AS urgentReturnDays, performer, unposted, 0 AS testPlatform
+        FROM repair_cards WHERE (:test IS NULL OR :test = 0) ${inProgressFilter}
         UNION ALL
-        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, contact_name AS contactName, contact_phone AS contactPhone, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, urgent_return_days AS urgentReturnDays, 1 AS testPlatform
-        FROM test_repair_cards WHERE status = 'В работе' OR ? = 1
+        SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, contact_name AS contactName, contact_phone AS contactPhone, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, urgent_return_days AS urgentReturnDays, performer, unposted, 1 AS testPlatform
+        FROM test_repair_cards WHERE (:test IS NULL OR :test = 1) ${inProgressFilter}
         ORDER BY date DESC, documentId ASC, testPlatform ASC
       `);
+      this.listStatements = [prepareList("AND status = 'В работе' AND unposted = 0"), prepareList("")];
     } catch (error) {
       this.database.close();
       throw error;
@@ -148,12 +154,25 @@ export class SqliteRepairRepository {
       card.paymentOptions !== undefined ? Math.round(card.paymentOptions.cardAmountDue * 100) : null,
       card.paymentOptions?.cashAmountDue != null ? Math.round(card.paymentOptions.cashAmountDue * 100) : null,
       card.paymentOptions?.cashDiscountPercent != null ? Math.round(card.paymentOptions.cashDiscountPercent * 100) : null,
-      card.urgentReturnDays ?? null);
+      card.urgentReturnDays ?? null, card.performer ?? null, Number(card.unposted === true));
   }
 
-  list(includeInactive = false): RepairCard[] {
-    return this.listStatement.all(Number(includeInactive), Number(includeInactive)).map((row) => {
-      const { documentId, number, date, vehicleName, status, responsibleFio, counterpartyName, contactName, contactPhone, paymentStatus } = row;
+  readableIds(ids: string[], test: boolean, access: RepairAccess, allowInactive = false): Set<string> {
+    const readable = new Set<string>();
+    for (const row of this.readableStatements[Number(test)].iterate(JSON.stringify(ids))) {
+      if (canReadRepair(row.status as string, (row.responsible_fio as string | null) ?? undefined, access, row.unposted === 1, allowInactive)) {
+        readable.add(row.document_id as string);
+      }
+    }
+    return readable;
+  }
+
+  list(includeInactive = false, test?: boolean, access: RepairAccess = {}): RepairCard[] {
+    const repairs: RepairCard[] = [];
+    const statement = this.listStatements[includeInactive || access.allOpen ? 1 : 0];
+    for (const row of statement.iterate({ test: test === undefined ? null : Number(test) })) {
+      const { documentId, number, date, vehicleName, status, responsibleFio, counterpartyName, contactName, contactPhone, paymentStatus, performer, unposted } = row;
+      if (!includeInactive && !canReadRepair(status as string, (responsibleFio as string | null) ?? undefined, access, unposted === 1)) continue;
       if (typeof documentId !== "string" || typeof number !== "string" || typeof date !== "string"
         || typeof vehicleName !== "string" || typeof status !== "string") {
         throw new Error("Invalid SQLite repair card");
@@ -190,8 +209,11 @@ export class SqliteRepairRepository {
         }
         goodsReadiness = { totalPositions: total, availablePositions: available };
       }
-      return { documentId, number, date, vehicleName, status,
+      if (performer !== null && typeof performer !== "string") throw new Error("Invalid SQLite repair performer");
+      repairs.push({ documentId, number, date, vehicleName, status,
         ...(responsibleFio !== null ? { responsibleFio } : {}),
+        ...(performer !== null && (includeInactive || access.allOpen) ? { performer } : {}),
+        ...(unposted === 1 ? { unposted: true } : {}),
         ...(row.testPlatform === 1 ? { testPlatform: true } : {}),
         ...(counterpartyName !== null ? { counterpartyName } : {}),
         ...(contactName !== null ? { contactName } : {}),
@@ -201,8 +223,9 @@ export class SqliteRepairRepository {
         ...(paymentStatus !== null ? { paymentStatus } : {}),
         ...(typeof due === "number" ? { amountDue: due / 100 } : {}),
         ...(paymentOptions !== undefined ? { paymentOptions } : {}),
-      };
-    });
+      });
+    }
+    return repairs;
   }
 
   counts(): { production: number; test: number } {

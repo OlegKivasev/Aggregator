@@ -98,8 +98,13 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
     await positions.getByText("Артикул скрыт · Бренд скрыт").waitFor();
     await positions.getByRole("button", { name: "Изменить должность Механик" }).click();
     await positions.getByRole("textbox", { name: "Название" }).fill("Мастер цеха");
+    const allOpen = positions.getByRole("checkbox", { name: "Показывать все незавершённые заказ-наряды" });
+    assert.equal(await allOpen.isChecked(), false);
+    await allOpen.check();
     await positions.getByRole("button", { name: "Сохранить" }).click();
-    await positions.getByText("Мастер цеха", { exact: true }).waitFor();
+    await positions.getByText("Все незавершённые заказ-наряды · Артикул скрыт · Бренд скрыт").waitFor();
+    await positions.getByRole("button", { name: "Изменить должность Мастер цеха" }).click();
+    assert.equal(await allOpen.isChecked(), true);
     await positions.getByRole("button", { name: "Закрыть должности" }).click();
     const createRequests = [];
     page.on("request", (request) => {
@@ -236,7 +241,7 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
       await page.setViewportSize({ width: 1440, height: 1000 });
       assert.equal(await page.locator(".function-layout").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length), 1);
       if (section.includes("repairs")) {
-        await page.locator(`#${section}-rows`).getByText(section === "repairs" ? "Заказ-нарядов в работе нет." : "Тестовых заказ-нарядов в работе нет.", { exact: true }).waitFor();
+        await page.locator(`#${section}-rows`).getByText("Незавершённых заказ-нарядов нет.", { exact: true }).waitFor();
         assert.equal(await page.locator(`#${section}-function`).isVisible(), true);
       }
       await page.reload();

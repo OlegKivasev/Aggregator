@@ -17,6 +17,7 @@ export function setupUserPositions(messageFor) {
   const name = form.elements.namedItem("name");
   const hideArticle = form.elements.namedItem("hideArticle");
   const hideBrand = form.elements.namedItem("hideBrand");
+  const showAllOpenRepairs = form.elements.namedItem("showAllOpenRepairs");
   let positions = [];
   let editing;
   let saving = false;
@@ -56,6 +57,7 @@ export function setupUserPositions(messageFor) {
     name.value = item?.name ?? "";
     hideArticle.checked = item?.hideArticle ?? false;
     hideBrand.checked = item?.hideBrand ?? false;
+    showAllOpenRepairs.checked = item?.showAllOpenRepairs ?? false;
     remove.hidden = !item;
     name.focus();
   }
@@ -74,7 +76,8 @@ export function setupUserPositions(messageFor) {
       title.textContent = item.name;
       const flags = document.createElement("span");
       flags.className = "panel__meta";
-      flags.textContent = [item.hideArticle && "Артикул скрыт", item.hideBrand && "Бренд скрыт"].filter(Boolean).join(" · ") || "Все поля видны";
+      flags.textContent = [item.showAllOpenRepairs && "Все незавершённые заказ-наряды", item.hideArticle && "Артикул скрыт",
+        item.hideBrand && "Бренд скрыт"].filter(Boolean).join(" · ") || "Все поля видны";
       info.append(title, flags);
       const edit = document.createElement("button");
       edit.type = "button";
@@ -140,6 +143,7 @@ export function setupUserPositions(messageFor) {
     event.preventDefault();
     void savePosition(editing ? "PATCH" : "POST", {
       id: editing?.id, name: name.value, hideArticle: hideArticle.checked, hideBrand: hideBrand.checked,
+      showAllOpenRepairs: showAllOpenRepairs.checked,
     });
   });
 

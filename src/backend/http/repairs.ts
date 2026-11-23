@@ -1,6 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { parseRepairCard, parseRepairRemoval, RepairValidationError } from "../repairs/repair-card.ts";
+import { normalizeRepairOwner, parseRepairCard, parseRepairRemoval, RepairValidationError } from "../repairs/repair-card.ts";
 import { repairDetailsForUser, repairProductForUser } from "../repairs/repair-details.ts";
 import type { AuthenticatedUser } from "../auth/user-auth-service.ts";
 import type { SqliteRepairRepository } from "../repairs/sqlite-repair-repository.ts";
@@ -13,6 +13,11 @@ import { parseProductCardRequest, productCardForRepair } from "../nomenclature/p
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
 import { serveJson } from "./responses.ts";
 
+const repairAccess = (user?: AuthenticatedUser) => ({
+  allOpen: user?.showAllOpenRepairs === true,
+  responsibleFio: user && !user.isAdmin && !user.showAllOpenRepairs ? normalizeRepairOwner(user.fio) : undefined,
+});
+
 export async function serveRepairs(
   request: IncomingMessage,
   response: ServerResponse,
@@ -21,8 +26,7 @@ export async function serveRepairs(
   nomenclature: NomenclatureService,
   secret: string | null,
   reportError: () => void,
-  responsibleFio?: string,
-  ownerId = "shared",
+  user?: AuthenticatedUser,
   readCurrentUser?: () => AuthenticatedUser | null,
 ): Promise<boolean> {
   const importCard = url.pathname === "/api/integration/1c/repairs";
@@ -88,15 +92,26 @@ export async function serveRepairs(
       return true;
     }
   }
+  const access = repairAccess(user);
+  const ownerId = user?.id ?? "shared";
   // 1C may answer after an administrator has changed this user's position or access.
   const currentVisibility = () => {
     if (!readCurrentUser) return undefined;
-    const user = readCurrentUser();
-    if (!user || user.id !== ownerId || (!user.isAdmin && (
-      !user.permissions.includes(testPlatformFilter ? "testRepairs" : "repairs")
-      || user.fio.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU") !== responsibleFio
-    ))) throw new RepairRefreshError(403, "Доступ к заказ-наряду изменился.");
-    return user.repairVisibility;
+    const current = readCurrentUser();
+    const currentAccess = repairAccess(current ?? undefined);
+    if (!current || current.id !== ownerId
+      || !current.isAdmin && !current.permissions.includes(testPlatformFilter ? "testRepairs" : "repairs")
+      || currentAccess.allOpen !== access.allOpen || currentAccess.responsibleFio !== access.responsibleFio) {
+      throw new RepairRefreshError(403, "Доступ к заказ-наряду изменился.");
+    }
+    return current.repairVisibility;
+  };
+  const visibleOrderDuringRequest = (documentId: string) => {
+    const visibility = currentVisibility();
+    if (!repository.readableIds([documentId], testPlatformFilter!, access).has(documentId)) {
+      throw new RepairRefreshError(404, "Заказ-наряд больше недоступен.");
+    }
+    return visibility;
   };
   const productGrant = (refreshId: string, id: string) => createHmac("sha256", secret!)
     .update(JSON.stringify(["repair-product", refreshId, ownerId, testPlatformFilter, id])).digest("base64url");
@@ -132,14 +147,14 @@ export async function serveRepairs(
       const grant = params.get("grant");
       params.delete("grant");
       const card = parseProductCardRequest(productRoute[2], params, testPlatformFilter);
-      const refresh = repository.refreshes.get(productRoute[1], testPlatformFilter!, ownerId, responsibleFio);
+      const refresh = repository.refreshes.get(productRoute[1], testPlatformFilter!, ownerId, access);
       const granted = hasProductGrant(productRoute[1], card.id, grant);
       if (!refresh.details || !granted && !refresh.details.goods.some((row) => row.productId === card.id
         || row.stockDetails?.replacements.some((item) => item.id === card.id && item.quantity > 0))) {
         throw new RepairRefreshError(404, "Товар недоступен в этом заказ-наряде.");
       }
       await serveProductCard(response, nomenclature, card, (result) => {
-        const visibility = currentVisibility();
+        const visibility = visibleOrderDuringRequest(refresh.repairs![0].documentId);
         const projected = visibility ? productCardForRepair(result, visibility) : result;
         if ((projected.view !== "card" && projected.view !== "preview") || !projected.data) return projected;
         const withGrant = <T extends { id?: string }>(item: T) =>
@@ -156,13 +171,13 @@ export async function serveRepairs(
       const grant = params.get("grant");
       params.delete("grant");
       const incoming = parseIncomingRequest(params);
-      const refresh = repository.refreshes.get(incomingRoute[1], testPlatformFilter!, ownerId, responsibleFio);
+      const refresh = repository.refreshes.get(incomingRoute[1], testPlatformFilter!, ownerId, access);
       if (!refresh.details || !hasProductGrant(incomingRoute[1], incoming.productId, grant)
         && !refresh.details.goods.some((row) => row.productId === incoming.productId && row[incoming.side] > 0)) {
         throw new RepairRefreshError(404, "Поставки недоступны. Откройте заказ-наряд заново.");
       }
       await serveIncoming(response, nomenclature, { ...incoming, testPlatform: testPlatformFilter }, (details) => {
-        const visibility = currentVisibility();
+        const visibility = visibleOrderDuringRequest(refresh.repairs![0].documentId);
         return { ...details, orders: details.orders.map((row) => {
           const projected = visibility ? repairProductForUser(row, visibility) : row;
           return secret && row.productId !== incoming.productId
@@ -175,7 +190,10 @@ export async function serveRepairs(
       if (!id) {
         if (request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") throw new RepairRefreshError(415);
         const payload = await readJsonBody(request, 16 * 1024);
-        if (!response.destroyed) serveJson(response, 202, { refresh: repository.refreshes.create(payload, testPlatformFilter!, ownerId, responsibleFio) });
+        if (!response.destroyed) {
+          currentVisibility();
+          serveJson(response, 202, { refresh: repository.refreshes.create(payload, testPlatformFilter!, ownerId, access) });
+        }
       } else if (request.method === "DELETE") {
         repository.refreshes.cancel(id, testPlatformFilter!, ownerId);
         serveJson(response, 200, { cancelled: true });
@@ -184,10 +202,13 @@ export async function serveRepairs(
         const stop = () => abort.abort();
         response.once("close", stop);
         try {
-          const refresh = await repository.refreshes.getWhenReady(id, testPlatformFilter!, ownerId, responsibleFio, abort.signal, resultWaitSeconds * 1000);
-          if (!response.destroyed) serveJson(response, 200, { refresh: refresh.details
-            ? { ...refresh, details: repairDetailsForUser(refresh.details, currentVisibility()) }
-            : refresh });
+          const refresh = await repository.refreshes.getWhenReady(id, testPlatformFilter!, ownerId, access, abort.signal, resultWaitSeconds * 1000);
+          if (!response.destroyed) {
+            const visibility = currentVisibility();
+            serveJson(response, 200, { refresh: refresh.details
+              ? { ...refresh, details: repairDetailsForUser(refresh.details, visibility) }
+              : refresh });
+          }
         } finally { response.removeListener("close", stop); }
       }
     } else if (deleteCard) {
@@ -216,13 +237,13 @@ export async function serveRepairs(
     } else if (checkStatus) {
       serveJson(response, 200, { ready: true, cards: repository.counts() });
     } else {
-      const repairs = repository.list().filter((repair) => (testPlatformFilter === undefined || (repair.testPlatform === true) === testPlatformFilter)
-        && (responsibleFio === undefined
-        || (repair.responsibleFio !== undefined && repair.responsibleFio.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU") === responsibleFio)));
-      const unverified = [false, true].flatMap((test) => repository.refreshes.unverified(
-        repairs.filter((card) => (card.testPlatform === true) === test).map((card) => card.documentId), test)
-        .map((documentId) => ({ documentId, testPlatform: test })));
-      serveJson(response, 200, { repairs, ...(unverified.length ? { unverified } : {}) });
+      const repairs = repository.list(false, testPlatformFilter, access);
+      const idsByPlatform: [string[], string[]] = [[], []];
+      for (const card of repairs) idsByPlatform[card.testPlatform ? 1 : 0].push(card.documentId);
+      const unverified = idsByPlatform.flatMap((ids, platform) => ids.length
+        ? repository.refreshes.unverified(ids, platform === 1).map((documentId) => ({ documentId, testPlatform: platform === 1 }))
+        : []);
+      serveJson(response, 200, { repairs, ...(unverified.length ? { unverified } : {}), ...(access.allOpen ? { allOpen: true } : {}) });
     }
   } catch (error) {
     if (!response.destroyed) {
