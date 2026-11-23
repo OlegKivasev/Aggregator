@@ -116,7 +116,83 @@ test("the all-open position expands list and refresh access without exposing com
     const noLongerVisible = (await (await get(job, senior)).json()).refresh;
     assert.deepEqual(noLongerVisible.repairs, []);
     assert.deepEqual(noLongerVisible.removedDocumentIds, [open.documentId]);
-    assert.deepEqual(await listed(senior), { repairs: [] });
+    assert.deepEqual(await listed(senior), { repairs: [], repairView: { showStatus: false, showAssignee: false } });
+  }, true);
+});
+
+test("positions use the published 1C status catalog, filter repairs and configure columns independently", async () => {
+  await withServer(async ({ request, send, poll, create, result, get, path }) => {
+    const password = "test-admin-password";
+    const login = async (fio) => {
+      const response = await request("/api/auth/login", { method: "POST", ...json({ fio, password }) });
+      assert.equal(response.status, 200);
+      return { Cookie: response.headers.get("set-cookie").split(";")[0] };
+    };
+    const admin = await login("Администратор");
+    const configure = async (method, data) => {
+      const response = await request("/api/users/positions", { method, ...json(data, admin) });
+      assert.equal(response.status, method === "POST" ? 201 : 200);
+      return (await response.json()).position;
+    };
+    const position = await configure("POST", { name: "Смена", hideArticle: false, hideBrand: false });
+    const employee = await request("/api/users", { method: "POST", ...json({
+      fio: first.responsibleFio, password, positionId: position.id, permissions: ["repairs"],
+    }, admin) });
+    assert.equal(employee.status, 201);
+    const worker = await login(first.responsibleFio);
+    const list = async () => {
+      const response = await request("/api/repairs?testPlatform=false", { headers: worker });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const review = { ...second, status: "Готов к проверке" };
+    const other = { ...first, documentId: "32345678-abcd-1234-abcd-123456789abc",
+      status: "Отложен до согласования", responsibleFio: "Другой сотрудник" };
+    const completed = { ...first, documentId: "42345678-abcd-1234-abcd-123456789abc", status: "Завершён" };
+    for (const card of [first, review, other, completed]) assert.equal((await send(card)).status, 200);
+    assert.deepEqual(await list(), { repairs: [first, review], repairView: { showStatus: false, showAssignee: false } });
+
+    const catalogPath = "/api/integration/1c/repairs/statuses";
+    const catalog = { testPlatform: false, statuses: [first.status, review.status, completed.status, "Обратить внимание", first.status] };
+    const publish = (data, headers) => request(catalogPath, { method: "PUT", ...json(data, headers) });
+    const bearer = { Authorization: `Bearer ${secret}` };
+    assert.equal((await publish(catalog)).status, 401);
+    assert.equal((await publish({ ...catalog, statuses: [""] }, bearer)).status, 400);
+    assert.deepEqual(await (await publish(catalog, bearer)).json(), { accepted: true });
+    assert.equal((await publish({ testPlatform: true, statuses: [review.status, other.status] }, bearer)).status, 200);
+    assert.equal((await request("/api/repairs/statuses", { headers: worker })).status, 403);
+    assert.deepEqual(await (await request("/api/repairs/statuses", { headers: admin })).json(), {
+      statuses: ["В работе", "Готов к проверке", "Обратить внимание", "Отложен до согласования"],
+    });
+
+    const repairSettings = { statuses: [review.status], showStatus: false, showAssignee: true };
+    await configure("PATCH", { ...position, showAllOpenRepairs: true, repairSettings });
+    assert.deepEqual(await list(), { repairs: [review], allOpen: true, repairView: { showStatus: false, showAssignee: true } });
+    await poll();
+    assert.equal((await create([first.documentId], false, worker.Cookie)).status, 404);
+    assert.equal((await create([review.documentId], false, worker.Cookie)).status, 202);
+    const job = await poll();
+    assert.equal((await result(job, [{ ...review, status: "Обратить внимание" }])).status, 200);
+    const updated = (await (await get(job, worker.Cookie)).json()).refresh;
+    assert.deepEqual(updated.repairs, []);
+    assert.deepEqual(updated.removedDocumentIds, [review.documentId]);
+    assert.deepEqual((await list()).repairs, []);
+
+    await configure("PATCH", { ...position, showAllOpenRepairs: false,
+      repairSettings: { statuses: [], showStatus: true, showAssignee: false } });
+    assert.deepEqual(await list(), { repairs: [first, { ...review, status: "Обратить внимание" }],
+      repairView: { showStatus: true, showAssignee: false } });
+
+    const database = new DatabaseSync(path);
+    try {
+      for (const table of ["repair_cards", "test_repair_cards"]) {
+        const plan = database.prepare(`EXPLAIN QUERY PLAN SELECT document_id FROM ${table}
+          WHERE status IN (SELECT value FROM json_each(?))`).all(JSON.stringify([review.status]));
+        assert.ok(plan.some(({ detail }) => detail.includes(`${table}_status_idx`)));
+      }
+    } finally {
+      database.close();
+    }
   }, true);
 });
 

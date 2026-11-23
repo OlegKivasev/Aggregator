@@ -39,6 +39,7 @@ const fields = ["documentId", "number", "date", "vehicleName", "status", "respon
 export interface RepairAccess {
   responsibleFio?: string;
   allOpen?: boolean;
+  statuses?: ReadonlySet<string>;
 }
 
 export const isOpenRepair = (status: string) => !/^заверш[её]н$/iu.test(status.trim());
@@ -47,9 +48,17 @@ export const normalizeRepairOwner = (fio: string) => fio.replace(/\s+/g, " ").tr
 
 export function canReadRepair(status: string, responsibleFio: string | undefined, access: RepairAccess,
   unposted = false, allowInactive = false) {
-  if (access.allOpen) return isOpenRepair(status);
-  return !unposted && (allowInactive || status === "В работе") && (access.responsibleFio === undefined
+  const openStatuses = access.statuses !== undefined || access.allOpen;
+  if (openStatuses && (!isOpenRepair(status) || (access.statuses?.size && !access.statuses.has(status)))) return false;
+  if (access.allOpen) return true;
+  return !unposted && (openStatuses || allowInactive || status === "В работе") && (access.responsibleFio === undefined
     || responsibleFio !== undefined && normalizeRepairOwner(responsibleFio) === access.responsibleFio);
+}
+
+export function parseRepairStatuses(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 250) throw new RepairValidationError("Требуется список статусов заказ-нарядов.");
+  const statuses = value.map((status: unknown) => cardText({ status }, "status", 200));
+  return [...new Set(statuses)].sort();
 }
 
 function validAmount(value: unknown, maximum = 9_999_999_999_999.99): value is number {

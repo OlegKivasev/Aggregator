@@ -11,17 +11,20 @@ const first = { documentId: "12345678-abcd-1234-abcd-123456789abc", number: "Т�
   vehicleName: "Toyota Camry | А123ВС163", status: "В работе", goodsReadiness: { totalPositions: 3, availablePositions: 1 }, paymentStatus: "partially_paid", amountDue: 10_500 };
 const second = { ...first, documentId: "22345678-abcd-1234-abcd-123456789abc", vehicleName: "Ford Focus" };
 
-test("the all-open repair list shows status and performer, and refreshes 201 rows in two jobs", async (t) => {
+test("the all-open repair list has independent columns and status highlights, and refreshes 201 rows in two jobs", async (t) => {
   const server = createAggregatorServer({ application: { streamSearch: async () => {} }, publicDir: resolve("src/frontend") });
   const cards = Array.from({ length: 201 }, (_, index) => ({
     ...first, documentId: `12345678-abcd-1234-abcd-${String(index + 1).padStart(12, "0")}`,
-    number: `НАРЯД-${index + 1}`, status: "На выполнении", responsibleFio: index ? undefined : "Иванов Иван",
+    number: `НАРЯД-${index + 1}`, status: ["Готов к проверке", "Обратить внимание"][index] ?? "В работе",
+    vehicleName: index < 3 ? ["Сигнал Toyota Camry | А123ВС163", "Сигнал Ford Focus | К621РМ163", "Сигнал Lada Vesta | М371АЕ163"][index] : first.vehicleName,
+    responsibleFio: index ? undefined : "Иванов Иван",
     performer: index ? undefined : "Исполнитель из строки работ",
   }));
   const byId = new Map(cards.map((card) => [card.documentId, card]));
   const jobs = new Map();
   const listRequests = [];
   const resultRequests = [];
+  let repairView;
   let browser;
   try {
     await new Promise((resolvePromise, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolvePromise); });
@@ -37,7 +40,7 @@ test("the all-open repair list shows status and performer, and refreshes 201 row
         user: { id: "senior", fio: "Старший механик", isAdmin: false, permissions: ["repairs"] } } });
       if (url.pathname === "/api/repairs") {
         listRequests.push(url.search);
-        return route.fulfill({ json: { repairs: cards, allOpen: true } });
+        return route.fulfill({ json: { repairs: cards, allOpen: true, repairView } });
       }
       if (url.pathname === "/api/repairs/refresh" && request.method() === "POST") {
         const id = `22345678-abcd-1234-abcd-${String(jobs.size + 1).padStart(12, "0")}`;
@@ -63,10 +66,29 @@ test("the all-open repair list shows status and performer, and refreshes 201 row
     assert.equal(await rows.count(), 201);
     await rows.first().getByText("Иванов Иван", { exact: true }).waitFor();
     assert.doesNotMatch(await rows.first().innerText(), /Исполнитель из строки работ/);
-    await rows.first().getByText("На выполнении", { exact: true }).waitFor();
+    await rows.first().getByText("Готов к проверке", { exact: true }).waitFor();
+    assert.equal(await rows.nth(0).getAttribute("data-repair-signal"), "review");
+    assert.equal(await rows.nth(1).getAttribute("data-repair-signal"), "attention");
+    assert.equal(await rows.nth(2).getAttribute("data-repair-signal"), null);
+    for (const [index, color] of [[0, "rgb(255, 251, 238)"], [1, "rgb(255, 244, 243)"]]) {
+      assert.equal(await rows.nth(index).locator("td").first().evaluate((cell) => getComputedStyle(cell).backgroundColor), color);
+    }
+    if (process.env.REPAIR_STATUS_SCREENSHOT_DIR) {
+      await section.getByRole("searchbox").fill("Сигнал");
+      await section.screenshot({ path: join(process.env.REPAIR_STATUS_SCREENSHOT_DIR, "repair-status-desktop.png") });
+    }
     await page.setViewportSize({ width: 390, height: 844 });
     await rows.first().getByText("Исполнитель заказа", { exact: true }).waitFor();
     assert.ok(await section.evaluate((element) => element.scrollWidth <= element.clientWidth));
+    for (let index = 0; index < 2; index += 1) {
+      const style = await rows.nth(index).evaluate((row) => ({ shadow: getComputedStyle(row).boxShadow, animation: getComputedStyle(row).animationName }));
+      assert.notEqual(style.shadow, "none");
+      assert.equal(style.animation, "none");
+    }
+    if (process.env.REPAIR_STATUS_SCREENSHOT_DIR) {
+      await section.getByRole("searchbox").fill("Сигнал");
+      await section.screenshot({ path: join(process.env.REPAIR_STATUS_SCREENSHOT_DIR, "repair-status-mobile.png") });
+    }
     await section.getByRole("searchbox").fill("Иванов");
     assert.equal(await rows.count(), 1);
     await section.getByRole("searchbox").fill("");
@@ -80,6 +102,17 @@ test("the all-open repair list shows status and performer, and refreshes 201 row
     assert.equal(listRequests.length, readsBefore);
     assert.equal(await rows.count(), 200);
     t.diagnostic(`201 visible orders: ${Math.round(performance.now() - started)} ms, 2 create requests and 2 result requests, simulated 1C`);
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    for (const [showStatus, showAssignee] of [[true, false], [false, true], [false, false]]) {
+      repairView = { showStatus, showAssignee };
+      await page.reload();
+      await rows.first().locator(".repairs-vehicle-name").waitFor();
+      assert.equal(await section.getByRole("columnheader", { name: "Статус заказа" }).count(), Number(showStatus));
+      assert.equal(await section.getByRole("columnheader", { name: "Исполнитель заказа" }).count(), Number(showAssignee));
+      assert.equal(await rows.first().locator("td").count(), 3 + Number(showStatus) + Number(showAssignee));
+      assert.equal(await rows.first().getAttribute("data-repair-signal"), "review");
+    }
   } finally {
     await browser?.close();
     server.closeAllConnections();

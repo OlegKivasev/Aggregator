@@ -3,12 +3,13 @@ const plateLetters = { а: "a", в: "b", е: "e", к: "k", м: "m", н: "h", о:
 const normalize = (value) => value.normalize("NFKC").toLocaleLowerCase("ru-RU").replace(/ё/gu, "е")
   .replace(/[авекмнорстух]/gu, (letter) => plateLetters[letter]).replace(/[^\p{L}\p{N}]/gu, "");
 
-export function filterRepairCards(cards, query, includeOrderMeta = false) {
+export function filterRepairCards(cards, query, { showStatus = false, showAssignee = false } = {}) {
   const terms = query.trim().split(/\s+/u).map(normalize).filter(Boolean);
   if (!terms.length) return cards;
   return cards.filter((card) => {
     const fields = [card.vehicleName, card.counterpartyName ?? "", card.number];
-    if (includeOrderMeta) fields.push(card.status, card.responsibleFio ?? "");
+    if (showStatus) fields.push(card.status);
+    if (showAssignee) fields.push(card.responsibleFio ?? "");
     const searchFields = fields.map(normalize);
     return terms.every((term) => searchFields.some((field) => field.includes(term)));
   });

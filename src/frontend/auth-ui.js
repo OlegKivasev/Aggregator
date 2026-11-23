@@ -1,5 +1,5 @@
 import { setupUserListOrder } from "./user-list-order.js";
-import { setupUserPositions } from "./user-positions-ui.js?v=senior-mechanic-repairs-1";
+import { setupUserPositions } from "./user-positions-ui.js?v=repair-statuses-1";
 
 const authScreen = document.querySelector("#auth-screen");
 const loginForm = document.querySelector("#auth-login-form");
@@ -189,6 +189,7 @@ const renderUsers = (users) => {
         user.positionId = payload.user.positionId;
         user.repairVisibility = payload.user.repairVisibility;
         user.showAllOpenRepairs = payload.user.showAllOpenRepairs;
+        user.repairSettings = payload.user.repairSettings;
         fio.textContent = user.fio;
         handle.setAttribute("aria-label", `Переместить пользователя ${user.fio}`);
         fioInput.value = user.fio;

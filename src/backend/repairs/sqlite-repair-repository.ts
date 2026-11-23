@@ -1,14 +1,16 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { canReadRepair, parseRepairPaymentOptions, type RepairAccess, type GoodsReadiness, type RepairCard } from "./repair-card.ts";
+import { canReadRepair, isOpenRepair, parseRepairPaymentOptions, type RepairAccess, type GoodsReadiness, type RepairCard } from "./repair-card.ts";
 import { RepairRefreshService } from "./repair-refresh-service.ts";
 
 export class SqliteRepairRepository {
   readonly refreshes: RepairRefreshService;
   private readonly database: DatabaseSync;
   private readonly saveStatement: StatementSync;
-  private readonly listStatements: [StatementSync, StatementSync];
+  private readonly inProgressStatement: StatementSync;
+  private readonly allStatusesStatement: StatementSync;
+  private readonly selectedStatusesStatement: StatementSync;
   private readonly testSaveStatement: StatementSync;
   private readonly readableStatements: [StatementSync, StatementSync];
 
@@ -28,6 +30,10 @@ export class SqliteRepairRepository {
           document_id TEXT PRIMARY KEY NOT NULL,
           number TEXT NOT NULL, date TEXT NOT NULL,
           vehicle_name TEXT NOT NULL, status TEXT NOT NULL, responsible_fio TEXT, counterparty_name TEXT, goods_total_positions INTEGER, goods_available_positions INTEGER
+        ) STRICT;
+        CREATE TABLE IF NOT EXISTS repair_status_catalog (
+          test_platform INTEGER PRIMARY KEY CHECK (test_platform IN (0, 1)),
+          statuses TEXT NOT NULL
         ) STRICT;
       `);
       // Existing installations retain both repair tables and every stored card.
@@ -96,6 +102,7 @@ export class SqliteRepairRepository {
           }
           this.database.exec(`CREATE INDEX IF NOT EXISTS ${table}_in_progress
             ON ${table} (date DESC, document_id) WHERE status = 'В работе' AND unposted = 0`);
+          this.database.exec(`CREATE INDEX IF NOT EXISTS ${table}_status_idx ON ${table} (status)`);
         }
         this.database.exec("COMMIT");
       } catch (error) {
@@ -132,15 +139,17 @@ export class SqliteRepairRepository {
         for (const card of result.repairs) this.save(card);
         for (const id of result.removedDocumentIds) this.remove(id, test);
       }, Date.now, (ids, test, access, allowInactive) => this.readableIds(ids, test, access, allowInactive));
-      const prepareList = (inProgressFilter: string) => this.database.prepare(`
+      const prepareList = (statusFilter: string) => this.database.prepare(`
         SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, contact_name AS contactName, contact_phone AS contactPhone, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, urgent_return_days AS urgentReturnDays, unposted, 0 AS testPlatform
-        FROM repair_cards WHERE (:test IS NULL OR :test = 0) ${inProgressFilter}
+        FROM repair_cards WHERE (:test IS NULL OR :test = 0) ${statusFilter}
         UNION ALL
         SELECT document_id AS documentId, number, date, vehicle_name AS vehicleName, status, responsible_fio AS responsibleFio, counterparty_name AS counterpartyName, contact_name AS contactName, contact_phone AS contactPhone, goods_total_positions AS goodsTotalPositions, goods_available_positions AS goodsAvailablePositions, payment_status AS paymentStatus, amount_due_minor AS amountDueMinor, card_amount_due_minor AS cardAmountDueMinor, cash_amount_due_minor AS cashAmountDueMinor, cash_discount_hundredths AS cashDiscountHundredths, urgent_return_days AS urgentReturnDays, unposted, 1 AS testPlatform
-        FROM test_repair_cards WHERE (:test IS NULL OR :test = 1) ${inProgressFilter}
+        FROM test_repair_cards WHERE (:test IS NULL OR :test = 1) ${statusFilter}
         ORDER BY date DESC, documentId ASC, testPlatform ASC
       `);
-      this.listStatements = [prepareList("AND status = 'В работе' AND unposted = 0"), prepareList("")];
+      this.inProgressStatement = prepareList("AND status = 'В работе' AND unposted = 0");
+      this.allStatusesStatement = prepareList("");
+      this.selectedStatusesStatement = prepareList("AND status IN (SELECT value FROM json_each(:statuses))");
     } catch (error) {
       this.database.close();
       throw error;
@@ -169,8 +178,12 @@ export class SqliteRepairRepository {
 
   list(includeInactive = false, test?: boolean, access: RepairAccess = {}): RepairCard[] {
     const repairs: RepairCard[] = [];
-    const statement = this.listStatements[includeInactive || access.allOpen ? 1 : 0];
-    for (const row of statement.iterate({ test: test === undefined ? null : Number(test) })) {
+    const platform = test === undefined ? null : Number(test);
+    const rows = !includeInactive && access.statuses?.size
+      ? this.selectedStatusesStatement.iterate({ test: platform, statuses: JSON.stringify([...access.statuses]) })
+      : (includeInactive || access.allOpen || access.statuses !== undefined ? this.allStatusesStatement : this.inProgressStatement)
+        .iterate({ test: platform });
+    for (const row of rows) {
       const { documentId, number, date, vehicleName, status, responsibleFio, counterpartyName, contactName, contactPhone, paymentStatus, unposted } = row;
       if (!includeInactive && !canReadRepair(status as string, (responsibleFio as string | null) ?? undefined, access, unposted === 1)) continue;
       if (typeof documentId !== "string" || typeof number !== "string" || typeof date !== "string"
@@ -224,6 +237,18 @@ export class SqliteRepairRepository {
       });
     }
     return repairs;
+  }
+
+  saveStatuses(testPlatform: boolean, statuses: string[]): void {
+    this.database.prepare(`INSERT INTO repair_status_catalog (test_platform, statuses) VALUES (?, ?)
+      ON CONFLICT(test_platform) DO UPDATE SET statuses=excluded.statuses
+      WHERE repair_status_catalog.statuses <> excluded.statuses`).run(Number(testPlatform), JSON.stringify(statuses));
+  }
+
+  statuses(): string[] {
+    const statuses = this.database.prepare("SELECT statuses FROM repair_status_catalog").all()
+      .flatMap((row) => JSON.parse(row.statuses as string) as string[]);
+    return [...new Set(statuses.filter(isOpenRepair))].sort((a, b) => a.localeCompare(b, "ru-RU"));
   }
 
   counts(): { production: number; test: number } {

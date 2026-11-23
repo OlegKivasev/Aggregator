@@ -11,7 +11,9 @@ import { createAggregatorServer } from "../../src/backend/http/create-server.ts"
 test("user settings edit accounts, preserve passwords, and hide navigation for a single assigned form", async () => {
   const directory = await mkdtemp(join(tmpdir(), "aggregator-user-settings-"));
   const previousPath = process.env.GARAGE_DB_PATH;
+  const previousSecret = process.env.ONEC_REPAIRS_INTEGRATION_SECRET;
   process.env.GARAGE_DB_PATH = join(directory, "garage.sqlite");
+  const repairSecret = process.env.ONEC_REPAIRS_INTEGRATION_SECRET = "isolated-user-settings-repair-secret";
   const auth = new UserAuthService(process.env.GARAGE_DB_PATH, "Администратор", "test-admin-password");
   const server = createAggregatorServer({
     application: { streamSearch: async () => {}, listSupplierSessions: () => [] },
@@ -21,6 +23,10 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
   try {
     await new Promise((resolvePromise, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolvePromise); });
     const origin = `http://127.0.0.1:${server.address().port}`;
+    const sourceStatuses = await fetch(`${origin}/api/integration/1c/repairs/statuses`, { method: "PUT",
+      headers: { Authorization: `Bearer ${repairSecret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ testPlatform: false, statuses: ["В работе", "Готов к проверке", "Обратить внимание", "Отложен до согласования"] }) });
+    assert.equal(sourceStatuses.status, 200);
     browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER_EXECUTABLE_PATH });
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();
@@ -98,13 +104,21 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
     await positions.getByText("Артикул скрыт · Бренд скрыт").waitFor();
     await positions.getByRole("button", { name: "Изменить должность Механик" }).click();
     await positions.getByRole("textbox", { name: "Название" }).fill("Мастер цеха");
-    const allOpen = positions.getByRole("checkbox", { name: "Показывать все незавершённые заказ-наряды" });
+    const allOpen = positions.getByRole("checkbox", { name: "Показывать наряды всех ответственных" });
+    const showStatus = positions.getByRole("checkbox", { name: "Показывать статус" });
+    const showAssignee = positions.getByRole("checkbox", { name: "Показывать исполнителя" });
+    const draftStatus = positions.getByRole("checkbox", { name: "Отложен до согласования" });
     assert.equal(await allOpen.isChecked(), false);
     await allOpen.check();
+    await showAssignee.check();
+    await draftStatus.check();
     await positions.getByRole("button", { name: "Сохранить" }).click();
-    await positions.getByText("Все незавершённые заказ-наряды · Артикул скрыт · Бренд скрыт").waitFor();
+    await positions.getByText("Все ответственные · Отложен до согласования · Артикул скрыт · Бренд скрыт").waitFor();
     await positions.getByRole("button", { name: "Изменить должность Мастер цеха" }).click();
     assert.equal(await allOpen.isChecked(), true);
+    assert.equal(await showStatus.isChecked(), false);
+    assert.equal(await showAssignee.isChecked(), true);
+    assert.equal(await draftStatus.isChecked(), true);
     await positions.getByRole("button", { name: "Закрыть должности" }).click();
     const createRequests = [];
     page.on("request", (request) => {
@@ -241,7 +255,7 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
       await page.setViewportSize({ width: 1440, height: 1000 });
       assert.equal(await page.locator(".function-layout").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length), 1);
       if (section.includes("repairs")) {
-        await page.locator(`#${section}-rows`).getByText("Незавершённых заказ-нарядов нет.", { exact: true }).waitFor();
+        await page.locator(`#${section}-rows`).getByText("По текущему отбору заказ-нарядов нет.", { exact: true }).waitFor();
         assert.equal(await page.locator(`#${section}-function`).isVisible(), true);
       }
       await page.reload();
@@ -282,6 +296,8 @@ test("user settings edit accounts, preserve passwords, and hide navigation for a
     await new Promise((resolvePromise) => server.close(resolvePromise));
     if (previousPath === undefined) delete process.env.GARAGE_DB_PATH;
     else process.env.GARAGE_DB_PATH = previousPath;
+    if (previousSecret === undefined) delete process.env.ONEC_REPAIRS_INTEGRATION_SECRET;
+    else process.env.ONEC_REPAIRS_INTEGRATION_SECRET = previousSecret;
     await rm(directory, { recursive: true, force: true });
   }
 });

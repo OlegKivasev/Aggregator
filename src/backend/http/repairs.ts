@@ -1,6 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { normalizeRepairOwner, parseRepairCard, parseRepairRemoval, RepairValidationError } from "../repairs/repair-card.ts";
+import { normalizeRepairOwner, parseRepairCard, parseRepairRemoval, parseRepairStatuses, RepairValidationError } from "../repairs/repair-card.ts";
 import { repairDetailsForUser, repairProductForUser } from "../repairs/repair-details.ts";
 import type { AuthenticatedUser } from "../auth/user-auth-service.ts";
 import type { SqliteRepairRepository } from "../repairs/sqlite-repair-repository.ts";
@@ -13,9 +13,12 @@ import { parseProductCardRequest, productCardForRepair } from "../nomenclature/p
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
 import { serveJson } from "./responses.ts";
 
-const repairAccess = (user?: AuthenticatedUser) => ({
+const positionRepairStatuses = (user?: AuthenticatedUser) => user?.repairSettings?.statuses ?? (user?.positionId ? [] : undefined);
+
+const repairAccess = (user?: AuthenticatedUser, statuses = positionRepairStatuses(user)) => ({
   allOpen: user?.showAllOpenRepairs === true,
   responsibleFio: user && !user.isAdmin && !user.showAllOpenRepairs ? normalizeRepairOwner(user.fio) : undefined,
+  statuses: statuses === undefined ? undefined : new Set(statuses),
 });
 
 const canReadProductCards = (user?: AuthenticatedUser) => !user || user.isAdmin || user.permissions.includes("nomenclature");
@@ -33,6 +36,8 @@ export async function serveRepairs(
 ): Promise<boolean> {
   const importCard = url.pathname === "/api/integration/1c/repairs";
   const checkStatus = url.pathname === "/api/integration/1c/repairs/status";
+  const saveStatuses = url.pathname === "/api/integration/1c/repairs/statuses";
+  const listStatuses = url.pathname === "/api/repairs/statuses";
   const clearTest = url.pathname === "/api/integration/1c/repairs/test";
   const clearProduction = url.pathname === "/api/integration/1c/repairs/production";
   const deleteCard = importCard && request.method === "DELETE";
@@ -41,11 +46,15 @@ export async function serveRepairs(
   const refreshRoute = /^\/api\/repairs\/refresh(?:\/([a-f0-9-]{36}))?$/.exec(url.pathname);
   const incomingRoute = /^\/api\/repairs\/refresh\/([a-f0-9-]{36})\/incoming$/.exec(url.pathname);
   const productRoute = /^\/api\/repairs\/refresh\/([a-f0-9-]{36})\/products\/([a-f0-9-]{36})$/.exec(url.pathname);
-  const integration = importCard || checkStatus || clearTest || clearProduction || workerRequests || workerResults;
-  if (!integration && !refreshRoute && !incomingRoute && !productRoute && url.pathname !== "/api/repairs") return false;
+  const integration = importCard || checkStatus || saveStatuses || clearTest || clearProduction || workerRequests || workerResults;
+  if (!integration && !listStatuses && !refreshRoute && !incomingRoute && !productRoute && url.pathname !== "/api/repairs") return false;
   response.setHeader("Cache-Control", "no-store");
   let testPlatformFilter: boolean | undefined;
   let resultWaitSeconds = 0;
+  if (listStatuses && url.search) {
+    serveJson(response, 400, { message: "Параметры URL не поддерживаются." });
+    return true;
+  }
   if (!integration) {
     const searchKeys = [...url.searchParams.keys()];
     const supportsWait = Boolean(refreshRoute?.[1]) && request.method === "GET";
@@ -64,7 +73,8 @@ export async function serveRepairs(
     resultWaitSeconds = Number(url.searchParams.get("waitSeconds") ?? "0");
     if ((refreshRoute || incomingRoute || productRoute) && testPlatformFilter === undefined) { serveJson(response, 400, { message: "Укажите режим заказ-нарядов." }); return true; }
   }
-  const method = deleteCard || clearTest || clearProduction ? "DELETE" : importCard || workerResults || refreshRoute && !refreshRoute[1] ? "POST" : "GET";
+  const method = saveStatuses ? "PUT" : deleteCard || clearTest || clearProduction ? "DELETE"
+    : importCard || workerResults || refreshRoute && !refreshRoute[1] ? "POST" : "GET";
   const methods = refreshRoute?.[1] ? ["GET", "DELETE"] : [method];
   if (!methods.includes(request.method ?? "")) {
     response.setHeader("Allow", importCard ? "POST, DELETE" : methods.join(", "));
@@ -94,8 +104,10 @@ export async function serveRepairs(
       return true;
     }
   }
-  const access = repairAccess(user);
+  const statuses = positionRepairStatuses(user);
+  const access = repairAccess(user, statuses);
   const ownerId = user?.id ?? "shared";
+  const filterKey = JSON.stringify(statuses);
   // 1C may answer after an administrator has changed this user's position or access.
   const currentOrderUser = () => {
     if (!readCurrentUser) return user;
@@ -103,7 +115,8 @@ export async function serveRepairs(
     const currentAccess = repairAccess(current ?? undefined);
     if (!current || current.id !== ownerId
       || !current.isAdmin && !current.permissions.includes(testPlatformFilter ? "testRepairs" : "repairs")
-      || currentAccess.allOpen !== access.allOpen || currentAccess.responsibleFio !== access.responsibleFio) {
+      || currentAccess.allOpen !== access.allOpen || currentAccess.responsibleFio !== access.responsibleFio
+      || JSON.stringify(positionRepairStatuses(current)) !== filterKey) {
       throw new RepairRefreshError(403, "Доступ к заказ-наряду изменился.");
     }
     return current;
@@ -124,7 +137,19 @@ export async function serveRepairs(
     secret && grant !== null && /^[A-Za-z0-9_-]{43}$/.test(grant) &&
     timingSafeEqual(Buffer.from(grant), Buffer.from(productGrant(refreshId, id)));
   try {
-    if (workerRequests) {
+    if (saveStatuses) {
+      const payload = await readJsonBody(request, 128 * 1024) as Record<string, unknown> | null;
+      if (!payload || typeof payload.testPlatform !== "boolean" || Object.keys(payload).length !== 2) {
+        throw new RequestBodyError(400, "Укажите список статусов и режим заказ-нарядов.");
+      }
+      const statuses = parseRepairStatuses(payload.statuses);
+      if (!response.destroyed) {
+        repository.saveStatuses(payload.testPlatform, statuses);
+        serveJson(response, 200, { accepted: true });
+      }
+    } else if (listStatuses) {
+      serveJson(response, 200, { statuses: repository.statuses() });
+    } else if (workerRequests) {
       if ([...url.searchParams.keys()].some((key) => !["testPlatform", "waitSeconds"].includes(key))
         || url.searchParams.getAll("testPlatform").length !== 1 || !["true", "false"].includes(url.searchParams.get("testPlatform") ?? "")
         || url.searchParams.getAll("waitSeconds").length > 1 || !/^(?:\d|1\d|20)$/.test(url.searchParams.get("waitSeconds") ?? "20")) {
@@ -254,7 +279,11 @@ export async function serveRepairs(
       const unverified = idsByPlatform.flatMap((ids, platform) => ids.length
         ? repository.refreshes.unverified(ids, platform === 1).map((documentId) => ({ documentId, testPlatform: platform === 1 }))
         : []);
-      serveJson(response, 200, { repairs, ...(unverified.length ? { unverified } : {}), ...(access.allOpen ? { allOpen: true } : {}) });
+      const settings = user?.repairSettings;
+      const repairView = settings ? { showStatus: settings.showStatus, showAssignee: settings.showAssignee }
+        : statuses !== undefined && !access.allOpen ? { showStatus: false, showAssignee: false } : undefined;
+      serveJson(response, 200, { repairs, ...(unverified.length ? { unverified } : {}), ...(access.allOpen ? { allOpen: true } : {}),
+        ...(repairView ? { repairView } : {}) });
     }
   } catch (error) {
     if (!response.destroyed) {

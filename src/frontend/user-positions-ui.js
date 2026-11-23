@@ -18,9 +18,17 @@ export function setupUserPositions(messageFor) {
   const hideArticle = form.elements.namedItem("hideArticle");
   const hideBrand = form.elements.namedItem("hideBrand");
   const showAllOpenRepairs = form.elements.namedItem("showAllOpenRepairs");
+  const showStatus = form.elements.namedItem("showStatus");
+  const showAssignee = form.elements.namedItem("showAssignee");
+  const statusChoices = form.querySelector("#user-position-statuses");
+  const statusNote = form.querySelector("#user-position-status-note");
   let positions = [];
   let editing;
   let saving = false;
+  let statuses = [];
+  let selectedStatuses = new Set();
+  let statusMessage = "";
+  let statusRequest;
 
   function fillSelect(select, selected = select.value) {
     select.replaceChildren(new Option("Без должности", ""), ...positions.map((item) => new Option(item.name, item.id)));
@@ -58,8 +66,49 @@ export function setupUserPositions(messageFor) {
     hideArticle.checked = item?.hideArticle ?? false;
     hideBrand.checked = item?.hideBrand ?? false;
     showAllOpenRepairs.checked = item?.showAllOpenRepairs ?? false;
+    showStatus.checked = item?.repairSettings?.showStatus ?? showAllOpenRepairs.checked;
+    showAssignee.checked = item?.repairSettings?.showAssignee ?? showAllOpenRepairs.checked;
+    selectedStatuses = new Set(item?.repairSettings?.statuses);
+    renderStatuses();
     remove.hidden = !item;
     name.focus();
+  }
+
+  function renderStatuses() {
+    statusNote.textContent = statusMessage || "Снимите все отметки, чтобы показать все незавершённые наряды.";
+    statusChoices.replaceChildren(...[...new Set([...statuses, ...selectedStatuses])].sort(nameOrder.compare).map((status) => {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = selectedStatuses.has(status);
+      input.addEventListener("change", () => {
+        if (input.checked) selectedStatuses.add(status);
+        else selectedStatuses.delete(status);
+      });
+      label.append(input, document.createTextNode(status));
+      return label;
+    }));
+  }
+
+  async function loadStatuses() {
+    statusRequest?.abort();
+    const request = new AbortController();
+    statusRequest = request;
+    statusMessage = "Загружаем статусы из 1С…";
+    try {
+      const signal = AbortSignal.any([request.signal, AbortSignal.timeout(10_000)]);
+      const response = await fetch("/api/repairs/statuses", { cache: "no-store", signal });
+      if (!response.ok) throw new Error("Status directory unavailable");
+      const payload = await response.json();
+      if (!Array.isArray(payload.statuses) || payload.statuses.some((status) => typeof status !== "string")) throw new Error("Invalid directory");
+      if (statusRequest !== request) return;
+      statuses = payload.statuses;
+      statusMessage = statuses.length ? "" : "1С ещё не передала список статусов.";
+    } catch {
+      if (statusRequest !== request || request.signal.aborted) return;
+      statusMessage = "Не удалось загрузить статусы. Откройте «Должности» повторно.";
+    }
+    if (!form.hidden) renderStatuses();
   }
 
   function setPositions(items) {
@@ -76,7 +125,8 @@ export function setupUserPositions(messageFor) {
       title.textContent = item.name;
       const flags = document.createElement("span");
       flags.className = "panel__meta";
-      flags.textContent = [item.showAllOpenRepairs && "Все незавершённые заказ-наряды", item.hideArticle && "Артикул скрыт",
+      flags.textContent = [item.showAllOpenRepairs && "Все ответственные",
+        item.repairSettings?.statuses.length && item.repairSettings.statuses.join(", "), item.hideArticle && "Артикул скрыт",
         item.hideBrand && "Бренд скрыт"].filter(Boolean).join(" · ") || "Все поля видны";
       info.append(title, flags);
       const edit = document.createElement("button");
@@ -125,6 +175,7 @@ export function setupUserPositions(messageFor) {
     setFeedback();
     dialog.showModal();
     showDirectory();
+    void loadStatuses();
   });
   close.addEventListener("click", () => { if (!saving) dialog.close(); });
   dialog.addEventListener("cancel", (event) => {
@@ -133,7 +184,7 @@ export function setupUserPositions(messageFor) {
   dialog.addEventListener("keydown", (event) => {
     if (event.key === "Escape" || event.key === "Tab") event.stopPropagation();
   });
-  dialog.addEventListener("close", () => { open.focus({ preventScroll: true }); });
+  dialog.addEventListener("close", () => { statusRequest?.abort(); open.focus({ preventScroll: true }); });
   add.addEventListener("click", () => showEditor());
   back.addEventListener("click", () => { setFeedback(); showDirectory(editing?.id); });
   remove.addEventListener("click", () => {
@@ -144,6 +195,7 @@ export function setupUserPositions(messageFor) {
     void savePosition(editing ? "PATCH" : "POST", {
       id: editing?.id, name: name.value, hideArticle: hideArticle.checked, hideBrand: hideBrand.checked,
       showAllOpenRepairs: showAllOpenRepairs.checked,
+      repairSettings: { statuses: [...selectedStatuses], showStatus: showStatus.checked, showAssignee: showAssignee.checked },
     });
   });
 

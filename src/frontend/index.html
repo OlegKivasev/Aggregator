@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=senior-mechanic-repairs-1" />
+    <link rel="stylesheet" href="/styles.css?v=repair-statuses-1" />
     <link rel="stylesheet" href="/product-card.css?v=product-card-2" />
     <link rel="stylesheet" href="/order-notifications.css" />
     <link rel="stylesheet" href="/repair-order.css?v=repair-incoming-mobile-1" />
@@ -572,14 +572,13 @@
             <span class="panel__meta results-count" id="repairs-count" aria-label="Количество заказ-нарядов" hidden></span>
           </div>
           <div class="results-panel__controls">
-            <label class="table-search-control repairs-search" for="repairs-search"><span class="visually-hidden">Поиск по данным автомобиля</span><input id="repairs-search" type="search" placeholder="Марка, модель или госномер" autocomplete="off" aria-controls="repairs-rows"></label>
+            <label class="table-search-control repairs-search" for="repairs-search"><input id="repairs-search" type="search" placeholder="Марка, модель или госномер" aria-label="Поиск по заказ-нарядам" autocomplete="off" aria-controls="repairs-rows"></label>
             <button type="button" class="btn btn-primary garage-inline-action" id="repairs-refresh">Обновить</button>
           </div>
         </header>
         <p class="repairs-feedback panel__meta" id="repairs-feedback" role="status" aria-live="polite"></p>
         <div class="results-table repairs-table">
           <table class="table table-hover align-middle mb-0 results-data-table">
-            <caption class="visually-hidden">Заказ-наряды из 1С со статусом «В работе», сначала новые. Для юрлиц автомобиль указан из договора, организация — строкой ниже.</caption>
             <colgroup><col class="repairs-name-column"><col class="repairs-readiness-column"><col class="repairs-payment-column"></colgroup>
             <thead><tr><th scope="col">Наименование</th><th scope="col">Готовность товаров</th><th scope="col">Оплата</th></tr></thead>
             <tbody id="repairs-rows"></tbody>
@@ -593,14 +592,13 @@
             <span class="panel__meta results-count" id="test-repairs-count" aria-label="Количество тестовых заказ-нарядов" hidden></span>
           </div>
           <div class="results-panel__controls">
-            <label class="table-search-control repairs-search" for="test-repairs-search"><span class="visually-hidden">Поиск по данным автомобиля в тестовых заказ-нарядах</span><input id="test-repairs-search" type="search" placeholder="Марка, модель или госномер" autocomplete="off" aria-controls="test-repairs-rows"></label>
+            <label class="table-search-control repairs-search" for="test-repairs-search"><input id="test-repairs-search" type="search" placeholder="Марка, модель или госномер" aria-label="Поиск по тестовым заказ-нарядам" autocomplete="off" aria-controls="test-repairs-rows"></label>
             <button type="button" class="btn btn-primary garage-inline-action" id="test-repairs-refresh">Обновить</button>
           </div>
         </header>
         <p class="repairs-feedback panel__meta" id="test-repairs-feedback" role="status" aria-live="polite"></p>
         <div class="results-table repairs-table">
           <table class="table table-hover align-middle mb-0 results-data-table">
-            <caption class="visually-hidden">Тестовые заказ-наряды из 1С со статусом «В работе», сначала новые. Для юрлиц автомобиль указан из договора, организация — строкой ниже.</caption>
             <colgroup><col class="repairs-name-column"><col class="repairs-readiness-column"><col class="repairs-payment-column"></colgroup>
             <thead><tr><th scope="col">Наименование</th><th scope="col">Готовность товаров</th><th scope="col">Оплата</th></tr></thead>
             <tbody id="test-repairs-rows"></tbody>
@@ -1099,7 +1097,14 @@
         <label class="field"><span>Название</span><input name="name" type="text" maxlength="100" autocomplete="off" required></label>
         <fieldset class="supplier-options__list">
           <legend>Список заказ-нарядов</legend>
-          <label><input name="showAllOpenRepairs" type="checkbox"><span>Показывать все незавершённые заказ-наряды</span></label>
+          <label><input name="showAllOpenRepairs" type="checkbox"><span>Показывать наряды всех ответственных</span></label>
+          <label><input name="showStatus" type="checkbox"><span>Показывать статус</span></label>
+          <label><input name="showAssignee" type="checkbox"><span>Показывать исполнителя</span></label>
+        </fieldset>
+        <fieldset class="supplier-options__list">
+          <legend>Статусы заказ-нарядов</legend>
+          <p class="panel__meta" id="user-position-status-note" role="status"></p>
+          <div class="user-position-statuses" id="user-position-statuses"></div>
         </fieldset>
         <fieldset class="supplier-options__list">
           <legend>Товары в заказ-нарядах</legend>
@@ -1461,9 +1466,9 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
       </div>
     </aside>
 
-    <script type="module" src="/auth-ui.js?v=senior-mechanic-repairs-1"></script>
+    <script type="module" src="/auth-ui.js?v=repair-statuses-1"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=senior-mechanic-access-1"></script>
+    <script type="module" src="/applicability.js?v=repair-statuses-1"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>

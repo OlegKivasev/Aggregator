@@ -118,6 +118,7 @@ export interface OperationalErrorEvent {
 function requiredPermission(url: URL): UserPermission | "admin" | null {
   const { pathname } = url;
   if (pathname === "/api/suppliers/sessions") return "markup";
+  if (pathname === "/api/repairs/statuses") return "admin";
   if (pathname === "/api/users" || pathname.startsWith("/api/vk-notifications") || pathname.startsWith("/api/notifications/vk")
     || pathname.startsWith("/api/suppliers/") && !pathname.endsWith("/sessions/validate")) return "admin";
   if (pathname === "/api/repairs" || pathname.startsWith("/api/repairs/refresh")) {
