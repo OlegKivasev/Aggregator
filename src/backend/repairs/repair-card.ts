@@ -18,6 +18,9 @@ export interface RepairCard {
   vehicleName: string;
   status: string;
   responsibleFio?: string;
+  // Accepted in replies from earlier 1C workers.
+  performer?: string;
+  unposted?: true;
   testPlatform?: boolean;
   counterpartyName?: string;
   contactName?: string;
@@ -31,7 +34,32 @@ export interface RepairCard {
 
 export class RepairValidationError extends Error {}
 
-const fields = ["documentId", "number", "date", "vehicleName", "status", "responsibleFio", "testPlatform", "counterpartyName", "contactName", "contactPhone", "goodsReadiness", "urgentReturnDays", "paymentStatus", "amountDue", "paymentOptions"];
+const fields = ["documentId", "number", "date", "vehicleName", "status", "responsibleFio", "performer", "unposted", "testPlatform", "counterpartyName", "contactName", "contactPhone", "goodsReadiness", "urgentReturnDays", "paymentStatus", "amountDue", "paymentOptions"];
+
+export interface RepairAccess {
+  responsibleFio?: string;
+  allOpen?: boolean;
+  statuses?: ReadonlySet<string>;
+}
+
+export const isOpenRepair = (status: string) => !/^заверш[её]н$/iu.test(status.trim());
+
+export const normalizeRepairOwner = (fio: string) => fio.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU");
+
+export function canReadRepair(status: string, responsibleFio: string | undefined, access: RepairAccess,
+  unposted = false, allowInactive = false) {
+  const openStatuses = access.statuses !== undefined || access.allOpen;
+  if (openStatuses && (!isOpenRepair(status) || (access.statuses?.size && !access.statuses.has(status)))) return false;
+  if (access.allOpen) return true;
+  return !unposted && (openStatuses || allowInactive || status === "В работе") && (access.responsibleFio === undefined
+    || responsibleFio !== undefined && normalizeRepairOwner(responsibleFio) === access.responsibleFio);
+}
+
+export function parseRepairStatuses(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 250) throw new RepairValidationError("Требуется список статусов заказ-нарядов.");
+  const statuses = value.map((status: unknown) => cardText({ status }, "status", 200));
+  return [...new Set(statuses)].sort();
+}
 
 function validAmount(value: unknown, maximum = 9_999_999_999_999.99): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= maximum
@@ -132,6 +160,10 @@ export function parseRepairCard(value: unknown): RepairCard {
   const contactName = payload.contactName === undefined ? undefined : cardText(payload, "contactName", 500);
   const contactPhone = payload.contactPhone === undefined ? undefined : cardText(payload, "contactPhone", 200);
   const responsibleFio = payload.responsibleFio === undefined ? undefined : cardText(payload, "responsibleFio", 256);
+  const performer = payload.performer === undefined ? undefined : cardText(payload, "performer", 2000);
+  if (payload.unposted !== undefined && payload.unposted !== true) {
+    throw new RepairValidationError("unposted: требуется true для непроведённого заказ-наряда.");
+  }
   const documentId = parseDocumentId(payload);
   const date = cardText(payload, "date", 19);
   const timestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(date) ? Date.parse(`${date}Z`) : NaN;
@@ -145,6 +177,8 @@ export function parseRepairCard(value: unknown): RepairCard {
     vehicleName: cardText(payload, "vehicleName", 500, counterpartyName !== undefined),
     status: cardText(payload, "status", 200),
     ...(responsibleFio !== undefined ? { responsibleFio } : {}),
+    ...(performer !== undefined ? { performer } : {}),
+    ...(payload.unposted === true ? { unposted: true } : {}),
     ...(payload.testPlatform === true ? { testPlatform: true } : {}),
     ...(counterpartyName !== undefined ? { counterpartyName } : {}),
     ...(contactName !== undefined ? { contactName } : {}),

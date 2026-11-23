@@ -118,6 +118,7 @@ export interface OperationalErrorEvent {
 function requiredPermission(url: URL): UserPermission | "admin" | null {
   const { pathname } = url;
   if (pathname === "/api/suppliers/sessions") return "markup";
+  if (pathname === "/api/repairs/statuses") return "admin";
   if (pathname === "/api/users" || pathname.startsWith("/api/vk-notifications") || pathname.startsWith("/api/notifications/vk")
     || pathname.startsWith("/api/suppliers/") && !pathname.endsWith("/sessions/validate")) return "admin";
   if (pathname === "/api/repairs" || pathname.startsWith("/api/repairs/refresh")) {
@@ -289,12 +290,9 @@ export function createAggregatorServer({
       }
     }
 
-    const repairFio = authenticatedUser && !authenticatedUser.isAdmin
-      ? authenticatedUser.fio.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU")
-      : undefined;
     const readCurrentUser = auth && authenticatedUser ? () => auth.currentUser(request) : undefined;
     if (await serveRepairs(request, response, url, repairs, nomenclature, repairIntegrationSecret,
-      () => reportError({ operation: "repairs", category: "internal" }), repairFio, authenticatedUser?.id, readCurrentUser)) return;
+      () => reportError({ operation: "repairs", category: "internal" }), authenticatedUser ?? undefined, readCurrentUser)) return;
     if (await serveNomenclature(request, response, url, nomenclature, authenticatedUser,
       () => reportError({ operation: "nomenclature", category: "internal" }), readCurrentUser)) return;
     if (url.pathname.startsWith("/api/purchasing/")) {

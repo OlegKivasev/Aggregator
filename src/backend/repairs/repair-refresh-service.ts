@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { DatabaseSync } from "node:sqlite";
-import { parseRepairCard, type RepairCard } from "./repair-card.ts";
+import { canReadRepair, isOpenRepair, parseRepairCard, type RepairAccess, type RepairCard } from "./repair-card.ts";
 import { parseRepairDetails, type RepairDetails } from "./repair-details.ts";
 
 export const refreshFailure = "Произошёл сбой обновления заказ-нарядов. Достоверность данных не подтверждена. Обратитесь в магазин.";
@@ -11,8 +11,6 @@ export class RepairRefreshError extends Error {
 }
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const validId = (value: unknown): value is string => typeof value === "string" && uuid.test(value) && value !== "00000000-0000-0000-0000-000000000000";
-export const repairOwnerMatches = (card: Pick<RepairCard, "responsibleFio">, fio?: string) => fio === undefined
-  || card.responsibleFio?.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru-RU") === fio;
 interface Job {
   id: string; owner_id: string; test_platform: number; ids_json: string; versions_json: string;
   status: string; expires_at: number; lease_id: string | null; lease_until: number | null; result_json: string | null;
@@ -20,6 +18,8 @@ interface Job {
 }
 interface Result { repairs: RepairCard[]; removedDocumentIds: string[]; details?: RepairDetails }
 const replyFields = ["requestId", "leaseId", "testPlatform", "status", "repairs", "removedDocumentIds", "details"];
+
+const withoutLegacyPerformer = ({ performer, ...card }: RepairCard): RepairCard => card;
 
 function parseResult(data: Record<string, unknown>, job: Job): Result {
   if (Object.keys(data).some((key) => !replyFields.includes(key))
@@ -43,13 +43,13 @@ export class RepairRefreshService {
   private readonly version: (id: string, test: boolean) => string;
   private readonly apply: (result: Result, test: boolean) => void;
   private readonly now: () => number;
-  private readonly canReadDetail: (id: string, test: boolean, fio?: string) => boolean;
+  private readonly readableIds: (ids: string[], test: boolean, access: RepairAccess, allowInactive?: boolean) => Set<string>;
   constructor(db: DatabaseSync, list: () => RepairCard[], version: (id: string, test: boolean) => string,
     apply: (result: Result, test: boolean) => void, now: () => number = Date.now,
-    canReadDetail = (id: string, test: boolean, fio?: string) => list().some((card) => card.documentId === id
-      && (card.testPlatform === true) === test && repairOwnerMatches(card, fio))) {
+    readableIds = (ids: string[], test: boolean, access: RepairAccess, allowInactive?: boolean) => new Set(list().filter((card) => ids.includes(card.documentId)
+      && (card.testPlatform === true) === test && canReadRepair(card.status, card.responsibleFio, access, card.unposted, allowInactive)).map((card) => card.documentId))) {
     this.db = db; this.list = list; this.version = version; this.apply = apply; this.now = now;
-    this.canReadDetail = canReadDetail;
+    this.readableIds = readableIds;
     this.changes.setMaxListeners(104); // At most four 1C polls and 100 browser waits.
     db.exec(`CREATE TABLE IF NOT EXISTS repair_refresh_sources (test_platform INTEGER PRIMARY KEY, last_seen INTEGER) STRICT;
       CREATE TABLE IF NOT EXISTS repair_refresh_requests (
@@ -75,7 +75,7 @@ export class RepairRefreshService {
     this.db.prepare(`DELETE FROM repair_refresh_requests WHERE expires_at<?
       OR (include_details=1 AND status='completed' AND expires_at<=?)`).run(this.now() - 86_400_000, this.now() - 900_000);
   }
-  create(value: unknown, test: boolean, owner: string, fio?: string) {
+  create(value: unknown, test: boolean, owner: string, access: RepairAccess = {}) {
     if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !["documentIds", "includeDetails"].includes(key))
       || !("documentIds" in value) || !Array.isArray(value.documentIds) || !value.documentIds.length
       || value.documentIds.length > 200 || value.documentIds.some((id: unknown) => !validId(id))
@@ -86,12 +86,8 @@ export class RepairRefreshService {
     const details = "includeDetails" in value;
     if (new Set(ids).size !== ids.length) throw new RepairRefreshError(400);
     this.clean();
-    if (details) {
-      if (!this.canReadDetail(ids[0], test, fio)) throw new RepairRefreshError(404);
-    } else {
-      const allowed = new Set(this.list().filter((card) => (card.testPlatform === true) === test && repairOwnerMatches(card, fio)).map((card) => card.documentId));
-      if (ids.some((id) => !allowed.has(id))) throw new RepairRefreshError(404);
-    }
+    // A legacy list can still request confirmation that a formerly visible order has closed.
+    if (this.readableIds(ids, test, access, !details).size !== ids.length) throw new RepairRefreshError(404);
     // Persist uncertainty so reloading the page cannot turn old counters into verified values.
     if (!details) {
       const invalidate = this.db.prepare("INSERT OR IGNORE INTO repair_refresh_unverified VALUES (?,?)");
@@ -111,9 +107,9 @@ export class RepairRefreshService {
     this.db.prepare(`INSERT INTO repair_refresh_requests (id, owner_id, test_platform, ids_json, versions_json, status, expires_at, include_details)
       VALUES (?,?,?,?,?,'pending',?,?)`).run(id, owner, Number(test), JSON.stringify(ids), JSON.stringify(versions), this.now() + 60_000, Number(details));
     this.changes.emit("change");
-    return this.get(id, test, owner, fio);
+    return this.get(id, test, owner, access);
   }
-  get(id: string, test: boolean, owner: string, fio?: string) {
+  get(id: string, test: boolean, owner: string, access: RepairAccess = {}) {
     this.clean();
     const job = this.db.prepare("SELECT * FROM repair_refresh_requests WHERE id=? AND test_platform=? AND owner_id=?")
       .get(id, Number(test), owner) as unknown as Job | undefined;
@@ -130,12 +126,11 @@ export class RepairRefreshService {
         return { id: job.id, status: "error", expiresAt: new Date(job.expires_at).toISOString(), message: refreshFailure };
       }
       const stored = JSON.parse(job.result_json!) as Result;
-      const current = job.include_details ? undefined : new Set(this.list().filter((card) =>
-        (card.testPlatform === true) === test && repairOwnerMatches(card, fio)).map((card) => card.documentId));
-      // An order may have changed its responsible employee while 1C was reading it.
+      const current = this.readableIds(stored.repairs.map((card) => card.documentId), test, access);
+      // Access can change when 1C updates the status or responsible employee.
       const repairs = [], hidden = [];
       for (const card of stored.repairs) {
-        if (repairOwnerMatches(card, fio) && (current ? current.has(card.documentId) : this.canReadDetail(card.documentId, test, fio))) repairs.push(card);
+        if (current.has(card.documentId)) repairs.push(withoutLegacyPerformer(card));
         else hidden.push(card.documentId);
       }
       result = { repairs, removedDocumentIds: [...stored.removedDocumentIds, ...hidden],
@@ -150,8 +145,8 @@ export class RepairRefreshService {
     this.db.prepare("UPDATE repair_refresh_requests SET status='cancelled' WHERE id=? AND status IN ('pending','leased')").run(id);
     this.changes.emit("change");
   }
-  async getWhenReady(id: string, test: boolean, owner: string, fio: string | undefined, signal: AbortSignal, duration: number) {
-    let result = this.get(id, test, owner, fio);
+  async getWhenReady(id: string, test: boolean, owner: string, access: RepairAccess, signal: AbortSignal, duration: number) {
+    let result = this.get(id, test, owner, access);
     if (result.status !== "pending" || duration <= 0) return result;
     if (this.resultPolls >= 100) throw new RepairRefreshError(429);
     this.resultPolls += 1;
@@ -161,7 +156,7 @@ export class RepairRefreshService {
         const remaining = Math.min(deadline - Date.now(), Date.parse(result.expiresAt) - this.now());
         if (remaining <= 0) break;
         await this.wait(signal, remaining);
-        if (!this.closed) result = this.get(id, test, owner, fio);
+        if (!this.closed) result = this.get(id, test, owner, access);
       }
       return result;
     } finally { this.resultPolls -= 1; }
@@ -204,7 +199,7 @@ export class RepairRefreshService {
         const { repairs } = parsed;
         const ids = JSON.parse(job.ids_json) as string[];
         if (repairs.length + parsed.removedDocumentIds.length !== ids.length) throw new Error("Incomplete reply");
-        if (repairs.some((card) => !card.goodsReadiness || card.status !== "В работе" || (card.testPlatform === true) !== data.testPlatform)
+        if (repairs.some((card) => !card.goodsReadiness || !isOpenRepair(card.status) || (card.testPlatform === true) !== data.testPlatform)
           || parsed.removedDocumentIds.some((id) => !validId(id))) throw new Error("Invalid cards");
         const removedDocumentIds = parsed.removedDocumentIds.map((id) => id.toLowerCase());
         const covered = [...repairs.map((card) => card.documentId), ...removedDocumentIds];
@@ -214,7 +209,7 @@ export class RepairRefreshService {
         if (changedIds.length) {
           const current = new Map(this.list().filter((card) => (card.testPlatform === true) === data.testPlatform)
             .map((card) => [card.documentId, JSON.stringify(parseRepairCard(card))]));
-          const incoming = new Map(repairs.map((card) => [card.documentId, JSON.stringify(card)]));
+          const incoming = new Map(repairs.map((card) => [card.documentId, JSON.stringify(withoutLegacyPerformer(card))]));
           // The independent scheduled sender may have delivered this exact 1C snapshot
           // first. Confirm matching values/removals, but never overwrite a different update.
           if (changedIds.some((id) => current.get(id) !== incoming.get(id))) throw new Error("Concurrent update");

@@ -641,6 +641,8 @@ input {
 .user-positions-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
 .user-positions-list li > div { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
 .user-positions-list .panel__meta { display: block; margin-top: 2px; }
+.user-position-statuses { display: grid; gap: 6px; max-height: 11rem; overflow: auto; }
+#user-position-status-note { margin: 0; }
 .user-positions-delete { margin-right: auto; color: #a32f27; }
 #user-positions-feedback:not(:empty) { margin-top: 12px; }
 #user-positions-feedback[data-state="success"] { color: #18794e; }
@@ -966,6 +968,49 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .repairs-name-column { width: 46%; }
 .repairs-readiness-column { width: 30%; }
 .repairs-payment-column { width: 24%; }
+.repairs-order-meta-label { display: none; }
+.repairs-with-details .repairs-name-column { width: auto; }
+.repairs-status-column { width: 13%; }
+.repairs-performer-column { width: 17%; }
+.repairs-with-details .repairs-readiness-column { width: 22%; }
+.repairs-with-details .repairs-payment-column { width: 19%; }
+.repairs-table tr[data-repair-signal="review"] {
+  --repair-signal-wash: #fffbee;
+  --repair-signal-pill: #fff0bd;
+  --repair-signal-edge: #eac46a;
+  --repair-signal-accent: #d6a222;
+  --repair-signal-halo: rgb(235 179 43 / .36);
+  --repair-signal-ink: #694800;
+}
+.repairs-table tr[data-repair-signal="attention"] {
+  --repair-signal-wash: #fff4f3;
+  --repair-signal-pill: #ffdfdb;
+  --repair-signal-edge: #e7a29b;
+  --repair-signal-accent: #cd635b;
+  --repair-signal-halo: rgb(218 99 91 / .35);
+  --repair-signal-ink: #852f2d;
+}
+.repairs-status-highlight {
+  display: inline-block;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--repair-signal-edge);
+  border-radius: 8px;
+  color: var(--repair-signal-ink);
+  background: var(--repair-signal-pill);
+  box-shadow: 0 0 11px var(--repair-signal-halo), inset 0 1px rgb(255 255 255 / .7);
+  font-weight: 700;
+  line-height: 1.35;
+}
+@media (min-width: 801px) {
+  .repairs-table tr[data-repair-signal] > td {
+    background: var(--repair-signal-wash);
+    border-color: var(--repair-signal-edge);
+  }
+  .repairs-table tr[data-repair-signal] > td:first-child {
+    box-shadow: inset 3px 0 var(--repair-signal-accent), inset 18px 0 20px -18px var(--repair-signal-halo);
+  }
+}
 .repairs-readiness, .repairs-payment { display: inline-block; max-width: 100%; padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: #f5f7fa; color: #526174; font-size: 12px; font-weight: 700; line-height: 1.4; white-space: normal; }
 .repairs-payment[data-status="payment_required"], .repairs-payment[data-status="partially_paid"] { border-color: #efbab6; background: #fff0ee; color: #a32f27; }
 .repairs-payment[data-status="paid"] { color: #21663c; }
@@ -4106,6 +4151,12 @@ th[aria-sort="descending"] .analogs-sort span::after {
   .repairs-table tr { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
   .repairs-table .results-data-table td { display: block; width: auto; min-width: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
   .repairs-table .results-data-table td + td { padding-top: 12px; border-top: 1px solid var(--line); }
+  .repairs-table tr[data-repair-signal] {
+    border-color: var(--repair-signal-edge);
+    background: linear-gradient(130deg, var(--repair-signal-wash), var(--surface) 82%);
+    box-shadow: 0 0 16px -3px var(--repair-signal-halo), inset 2px 0 var(--repair-signal-accent);
+  }
+  .repairs-order-meta-label { display: block; }
 
   .applicability-workspace { flex: 0 0 auto; grid-template-columns: minmax(0, 1fr); }
   .applicability-workspace > .applicability-oem-control,

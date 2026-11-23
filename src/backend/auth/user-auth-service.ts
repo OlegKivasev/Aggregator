@@ -5,7 +5,7 @@ import { dirname } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readJsonBody, RequestBodyError } from "../http/request-body.ts";
 import { serveJson } from "../http/responses.ts";
-import { parsePositionId, UserPositionStore, type RepairVisibility } from "./user-position-store.ts";
+import { parsePositionId, storedRepairSettings, UserPositionStore, type RepairPositionSettings, type RepairVisibility } from "./user-position-store.ts";
 
 export const userPermissions = ["markup", "applicability", "repairs", "testRepairs", "nomenclature", "purchasing"] as const;
 export type UserPermission = typeof userPermissions[number];
@@ -17,6 +17,8 @@ export interface AuthenticatedUser {
   permissions: UserPermission[];
   positionId?: string;
   repairVisibility?: RepairVisibility;
+  showAllOpenRepairs?: true;
+  repairSettings?: RepairPositionSettings;
 }
 export interface UserInput {
   fio: string;
@@ -128,6 +130,8 @@ function storedUser(row: Record<string, unknown>): StoredUser {
     ...(typeof row.position_id === "string" ? {
       positionId: row.position_id,
       repairVisibility: { hideArticle: row.hide_article === 1, hideBrand: row.hide_brand === 1 },
+      ...(row.all_open_repairs === 1 ? { showAllOpenRepairs: true } : {}),
+      ...storedRepairSettings(row.repair_settings),
     } : {}),
     passwordHash: row.password_hash,
     passwordSalt: row.password_salt,
@@ -182,7 +186,7 @@ export class UserAuthService {
     `);
     this.positions = new UserPositionStore(this.database);
     const selectUser = `SELECT u.id, u.fio, u.password_hash, u.password_salt, u.is_admin, u.permissions,
-      u.position_id, p.hide_article, p.hide_brand
+      u.position_id, p.hide_article, p.hide_brand, p.all_open_repairs, p.repair_settings
       FROM aggregator_users u LEFT JOIN aggregator_user_positions p ON p.id = u.position_id`;
     this.findByIdStatement = this.database.prepare(`${selectUser} WHERE u.id = ?`);
     this.findByFioStatement = this.database.prepare(`${selectUser} WHERE u.fio_key = ?`);

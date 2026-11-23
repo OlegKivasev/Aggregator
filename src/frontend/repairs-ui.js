@@ -1,6 +1,12 @@
 import { splitRepairVehicleName } from "./repair-vehicle-presentation.js";
-import { filterRepairCards } from "./repair-search.js";
-import { createRepairOrderView } from "./repair-order-view.js?v=product-card-3";
+import { filterRepairCards } from "./repair-search.js?v=repair-statuses-1";
+import { createRepairOrderView } from "./repair-order-view.js?v=senior-mechanic-access-1";
+
+const orderMetaColumns = [
+  ["status", "Статус заказа", "repairs-status-column", "showStatus"],
+  ["responsibleFio", "Исполнитель заказа", "repairs-performer-column", "showAssignee"],
+];
+const orderSignals = new Map([["готов к проверке", "review"], ["обратить внимание", "attention"]]);
 
 export function bootstrapRepairs({ onActiveEmpty } = {}) {
   const views = [false, true].map((testPlatform) => {
@@ -12,7 +18,8 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     const refreshButton = document.querySelector(`#${prefix}-refresh`);
     const tab = document.querySelector(`#${prefix}-function-tab`);
     const search = document.querySelector(`#${prefix}-search`);
-    return { testPlatform, prefix, section, rows, feedback, count, refreshButton, tab, search, repairs: null, failed: false, unverified: new Set() };
+    return { testPlatform, prefix, section, rows, feedback, count, refreshButton, tab, search,
+      extendedStatuses: false, showStatus: false, showAssignee: false, repairs: null, failed: false, unverified: new Set() };
   });
   let activeView;
   let loading = false;
@@ -61,10 +68,49 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     const row = document.createElement("tr");
     row.className = "results-table__empty";
     const cell = document.createElement("td");
-    cell.colSpan = 3;
+    cell.colSpan = rows.parentElement.tHead.rows[0].cells.length;
     cell.textContent = message;
     row.append(cell);
     rows.replaceChildren(row);
+  };
+
+  const setScope = (view, { extendedStatuses = false, showStatus = false, showAssignee = false } = {}) => {
+    view.extendedStatuses = extendedStatuses;
+    if (view.showStatus === showStatus && view.showAssignee === showAssignee) return;
+    view.showStatus = showStatus;
+    view.showAssignee = showAssignee;
+    const searchFields = [showStatus && "статус", showAssignee && "исполнитель"].filter(Boolean);
+    view.search.placeholder = searchFields.length ? ["Автомобиль", ...searchFields].join(", ") : "Марка, модель или госномер";
+    view.section.classList.toggle("repairs-with-details", showStatus || showAssignee);
+    for (const element of view.section.querySelectorAll("[data-repair-meta]")) element.remove();
+    const columns = view.section.querySelector("colgroup");
+    const headers = view.section.querySelector("thead tr");
+    const readinessColumn = columns.children[1];
+    const readinessHeader = headers.children[1];
+    for (const [, label, className, flag] of orderMetaColumns) {
+      if (!view[flag]) continue;
+      const column = document.createElement("col");
+      column.className = className;
+      column.dataset.repairMeta = "";
+      columns.insertBefore(column, readinessColumn);
+      const header = document.createElement("th");
+      header.scope = "col";
+      header.textContent = label;
+      header.dataset.repairMeta = "";
+      headers.insertBefore(header, readinessHeader);
+    }
+  };
+
+  const orderMetaCell = (label, value, highlight) => {
+    const cell = document.createElement("td");
+    const title = document.createElement("span");
+    title.className = "repairs-order-meta-label panel__meta";
+    title.textContent = label;
+    const text = document.createElement("span");
+    if (highlight) text.className = "repairs-status-highlight";
+    text.textContent = value ?? "—";
+    cell.append(title, text);
+    return cell;
   };
 
   const validReadiness = (value) => value === undefined || (value && typeof value === "object" && !Array.isArray(value)
@@ -164,6 +210,8 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       || ["documentId", "number", "date", "vehicleName", "status"].some((key) => typeof card[key] !== "string")
       || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(card.documentId)
       || (card.counterpartyName !== undefined && (typeof card.counterpartyName !== "string" || !card.counterpartyName.trim()))
+      || card.responsibleFio !== undefined && (typeof card.responsibleFio !== "string" || !card.responsibleFio.trim() || card.responsibleFio.length > 256)
+      || card.unposted !== undefined && card.unposted !== true
       || ["contactName", "contactPhone"].some((field) => card[field] !== undefined
         && (typeof card[field] !== "string" || !card[field].trim() || card[field].length > (field === "contactName" ? 500 : 200)
           || /[\u0000-\u001f\u007f-\u009f]/u.test(card[field])))
@@ -182,17 +230,22 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     const repairs = parseRepairs(payload);
     if (payload.unverified !== undefined && (!Array.isArray(payload.unverified) || payload.unverified.some((item) => !item
       || typeof item.documentId !== "string" || typeof item.testPlatform !== "boolean"))) throw new Error("Invalid verification state");
-    return { repairs, unverified: payload.unverified ?? [] };
+    const allOpen = payload.allOpen === true;
+    return { repairs, unverified: payload.unverified ?? [], extendedStatuses: allOpen || Boolean(payload.repairView),
+      showStatus: payload.repairView?.showStatus ?? allOpen, showAssignee: payload.repairView?.showAssignee ?? allOpen };
   };
 
   const renderRows = (view) => {
     const { rows, count, testPlatform, search, repairs } = view;
-    const visible = filterRepairCards(repairs, search.value);
+    const visible = filterRepairCards(repairs, search.value, view);
     if (visible.some((card) => view.unverified.has(card.documentId))) { invalidateView(view, []); return; }
     view.failed = false;
     const fragment = document.createDocumentFragment();
+    const metaColumns = orderMetaColumns.filter(([, , , flag]) => view[flag]);
     for (const card of visible) {
       const row = document.createElement("tr");
+      const signal = orderSignals.get(card.status.toLocaleLowerCase("ru-RU"));
+      if (signal) row.dataset.repairSignal = signal;
       const vehicleCell = document.createElement("td");
       const vehicle = document.createElement("span");
       vehicle.className = "repairs-vehicle-name";
@@ -225,11 +278,14 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
         contact.textContent = card[field];
         vehicleCell.append(contact);
       }
-      row.append(vehicleCell, readinessCell(card.goodsReadiness, card.urgentReturnDays), paymentCell(card));
+      row.append(vehicleCell);
+      for (const [field, label] of metaColumns) row.append(orderMetaCell(label, card[field], signal && field === "status"));
+      row.append(readinessCell(card.goodsReadiness, card.urgentReturnDays), paymentCell(card));
       fragment.append(row);
     }
     rows.replaceChildren(fragment);
-    if (!repairs.length) showMessage(rows, testPlatform ? "Тестовых заказ-нарядов в работе нет." : "Заказ-нарядов в работе нет.");
+    if (!repairs.length) showMessage(rows, view.extendedStatuses ? "По текущему отбору заказ-нарядов нет."
+      : testPlatform ? "Тестовых заказ-нарядов в работе нет." : "Заказ-нарядов в работе нет.");
     else if (!visible.length) showMessage(rows, "По вашему запросу заказ-наряды не найдены.");
     count.textContent = search.value.trim() ? `${visible.length} из ${repairs.length}` : String(repairs.length);
     count.hidden = false;
@@ -282,6 +338,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
           cache: "no-store", signal: AbortSignal.timeout(15_000),
         }));
         if (generation !== liveGeneration) return;
+        setScope(view, payload);
         view.repairs = payload.repairs;
         restoreVerification(view, payload.repairs);
         for (const item of payload.unverified) if (item.testPlatform === view.testPlatform) view.unverified.add(item.documentId);
@@ -294,7 +351,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       paintBusy(view, false);
     }
     // Freeze the visible subset. An order outside the current search is never requested.
-    const visible = filterRepairCards(view.repairs ?? [], view.search.value);
+    const visible = filterRepairCards(view.repairs ?? [], view.search.value, view);
     const ids = visible.map((card) => card.documentId);
     if (!ids.length) {
       view.feedback.textContent = view.failed ? failureMessage : "Нет показанных заказ-нарядов для обновления.";
@@ -305,7 +362,6 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     clearRefreshTimer();
     const attempt = ++liveGeneration;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 65_000);
     liveController = controller;
     const current = () => attempt === liveGeneration;
     const route = `/api/repairs/refresh?testPlatform=${view.testPlatform}`;
@@ -317,34 +373,60 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     view.feedback.textContent = "Обновляем данные из 1С…";
     showMessage(view.rows, "Проверяем показанные заказ-наряды…");
     try {
-      const created = await fetch(route, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ documentIds: ids }), signal: controller.signal });
-      if (!created.ok) throw new Error("Refresh failed");
-      let result = (await created.json()).refresh;
-      const requestId = result?.id;
-      if (typeof requestId !== "string" || !/^[a-f0-9-]{36}$/i.test(requestId)) throw new Error("Invalid refresh ID");
-      const requestRoute = `/api/repairs/refresh/${requestId}?testPlatform=${view.testPlatform}`;
-      if (!current()) { void fetch(requestRoute, { method: "DELETE", keepalive: true }).catch(() => {}); return; }
-      liveRequest = requestRoute;
-      const deadline = Math.min(Date.parse(result.expiresAt), Date.now() + 60_000);
-      if (!Number.isFinite(deadline)) throw new Error("Invalid refresh deadline");
-      while (result.status === "pending") {
-        if (Date.now() >= deadline) throw new Error("Refresh timeout");
-        // The server replies as soon as 1C commits the result, without a polling delay.
-        const response = await fetch(`${requestRoute}&waitSeconds=20`, { cache: "no-store", signal: controller.signal });
-        if (!response.ok) throw new Error("Refresh poll failed");
-        result = (await response.json()).refresh;
-        if (!current()) return;
-        if (result?.id !== requestId) throw new Error("Unrelated refresh");
+      const fresh = new Map();
+      const createBatch = (documentIds, signal) => fetch(route, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ documentIds }), signal });
+      // 1C leases at most 200 orders per job. Keep one job in flight per user.
+      for (let offset = 0; offset < ids.length; offset += 200) {
+        let batch = ids.slice(offset, offset + 200);
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(65_000)]);
+        let created = await createBatch(batch, signal);
+        if (created.status === 404) {
+          // The background sender may have already removed a closed order.
+          const latest = await readRepairs(await fetch(`/api/repairs?testPlatform=${view.testPlatform}`, { cache: "no-store", signal }));
+          if (!current()) return;
+          if (latest.extendedStatuses !== view.extendedStatuses) throw new Error("Repair scope changed");
+          const stillVisible = new Set(latest.repairs.map((card) => card.documentId));
+          const remaining = batch.filter((id) => stillVisible.has(id));
+          if (remaining.length === batch.length) throw new Error("Refresh failed");
+          if (!remaining.length) continue;
+          batch = remaining;
+          created = await createBatch(batch, signal);
+        }
+        if (!created.ok) throw new Error("Refresh failed");
+        let result = (await created.json()).refresh;
+        const requestId = result?.id;
+        if (typeof requestId !== "string" || !/^[a-f0-9-]{36}$/i.test(requestId)) throw new Error("Invalid refresh ID");
+        const requestRoute = `/api/repairs/refresh/${requestId}?testPlatform=${view.testPlatform}`;
+        if (!current()) { void fetch(requestRoute, { method: "DELETE", keepalive: true }).catch(() => {}); return; }
+        liveRequest = requestRoute;
+        const deadline = Math.min(Date.parse(result.expiresAt), Date.now() + 60_000);
+        if (!Number.isFinite(deadline)) throw new Error("Invalid refresh deadline");
+        while (result.status === "pending") {
+          if (Date.now() >= deadline) throw new Error("Refresh timeout");
+          // The server replies as soon as 1C commits the result, without a polling delay.
+          const response = await fetch(`${requestRoute}&waitSeconds=20`, { cache: "no-store", signal });
+          if (!response.ok) throw new Error("Refresh poll failed");
+          result = (await response.json()).refresh;
+          if (!current()) return;
+          if (result?.id !== requestId) throw new Error("Unrelated refresh");
+        }
+        if (result.status !== "completed" || !Array.isArray(result.removedDocumentIds)) throw new Error("Refresh not confirmed");
+        const cards = parseRepairs(result, true);
+        const covered = [...cards.map((card) => card.documentId), ...result.removedDocumentIds];
+        const requested = new Set(batch);
+        if (covered.length !== batch.length || new Set(covered).size !== batch.length || covered.some((id) => !requested.has(id))
+          || cards.some((card) => (card.testPlatform === true) !== view.testPlatform
+            || (view.extendedStatuses ? /^заверш[её]н$/iu.test(card.status.trim()) : card.status !== "В работе"))) throw new Error("Incomplete refresh");
+        for (const card of cards) fresh.set(card.documentId, card);
+        liveRequest = undefined;
       }
-      if (result.status !== "completed" || !Array.isArray(result.removedDocumentIds)) throw new Error("Refresh not confirmed");
-      const cards = parseRepairs(result, true);
-      const covered = [...cards.map((card) => card.documentId), ...result.removedDocumentIds];
-      if (covered.length !== ids.length || new Set(covered).size !== ids.length || covered.some((id) => !ids.includes(id))
-        || cards.some((card) => (card.testPlatform === true) !== view.testPlatform || card.status !== "В работе")) throw new Error("Incomplete refresh");
-      const fresh = new Map(cards.map((card) => [card.documentId, card]));
-      const repairs = view.repairs.flatMap((card) => ids.includes(card.documentId) ? (fresh.has(card.documentId) ? [fresh.get(card.documentId)] : []) : [card]);
-      liveRequest = undefined;
+      const requested = new Set(ids);
+      const repairs = [];
+      for (const card of view.repairs) {
+        if (!requested.has(card.documentId)) repairs.push(card);
+        else if (fresh.has(card.documentId)) repairs.push(fresh.get(card.documentId));
+      }
       for (const id of ids) view.unverified.delete(id);
       rememberVerification(view);
       renderView(view, repairs);
@@ -356,7 +438,6 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     } catch {
       if (current()) invalidateView(view, ids);
     } finally {
-      clearTimeout(timeout);
       if (current()) {
         if (liveRequest) void fetch(liveRequest, { method: "DELETE", keepalive: true }).catch(() => {});
         liveRequest = undefined;
@@ -410,6 +491,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       for (const [index, currentView] of requestedViews.entries()) {
         // A cache read cannot repair a failed request to 1C or restore unconfirmed values.
         const payload = combined ? payloads[0] : payloads[index];
+        setScope(currentView, payload);
         const repairs = payload.repairs
           .filter((card) => (card.testPlatform === true) === currentView.testPlatform);
         restoreVerification(currentView, repairs);
@@ -454,6 +536,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     loading = false;
     loaded = false;
     for (const view of views) {
+      setScope(view);
       view.failed = false; view.repairs = null; view.unverified.clear(); view.rows.replaceChildren(); paintBusy(view, false);
     }
     authReady = true;
