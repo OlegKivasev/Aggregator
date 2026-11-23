@@ -45,7 +45,7 @@ export async function serveRepairs(
     const supportsWait = Boolean(refreshRoute?.[1]) && request.method === "GET";
     if (searchKeys.some((key) => key !== "testPlatform" && !(supportsWait && key === "waitSeconds")
       && !(incomingRoute && ["product", "side", "after"].includes(key))
-      && !(productRoute && ["from", "to"].includes(key)))
+      && !(productRoute && ["from", "to", "details"].includes(key)))
       || url.searchParams.getAll("testPlatform").length > 1
       || url.searchParams.has("testPlatform") && !["true", "false"].includes(url.searchParams.get("testPlatform") ?? "")
       || url.searchParams.getAll("waitSeconds").length > 1

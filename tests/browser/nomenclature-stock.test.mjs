@@ -25,7 +25,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     const token = (await (await request("/api/nomenclature/connection", { method: "POST", ...json({}) })).json()).token;
     const headers = { Authorization: `Bearer ${token}` };
     const poll = async (wait = 0, capability = 8) => {
-      const version = capability === 11 ? "11&testPlatform=false" : capability;
+      const version = capability >= 11 ? `${capability}&testPlatform=false` : capability;
       const response = await request(`/api/integration/1c/nomenclature/requests?waitSeconds=${wait}&stock=${version}`, { headers });
       assert.equal(response.status, 200);
       return (await response.json()).request;
@@ -810,6 +810,65 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.equal(withoutSalesCount.sortField, "id");
     assert.equal((await complete(withoutSalesCount, [exactArticle])).status, 200);
     assert.equal(await salesHeader.isVisible(), false);
+
+    await poll(0, 12);
+    const priceTypesForCard = ["Закупочная", "Розничная", "Безналичная", "Оптовая", "Акционная"]
+      .map((name) => ({ id: randomUUID(), name }));
+    const defaultPriceTypes = priceTypesForCard.slice(0, 3).map(({ id }) => id);
+    const fullCard = productCardFixture(product, {
+      prices: priceTypesForCard.map(({ id: typeId, name }, index) =>
+        ({ typeId, name, characteristic: "", unit: "шт", currency: "RUB", amount: 100 + index, primary: true })),
+      priceTypes: priceTypesForCard, defaultPriceTypes, oem: [], applicability: [], replacements: [],
+    });
+    const { image, incoming: cardIncoming, monthlySales, average, ...summary } = fullCard;
+    const preview = { ...summary, image: null, incoming: null, monthlySales: null, average: null, recommendation: null, detailsPending: true };
+    const start = performance.now();
+    await page.getByRole("button", { name: product.name, exact: true }).click();
+    assert.equal(await poll(0, 11), null, "old handlers cannot take the new preview job");
+    const previewJob = await poll(20, 12);
+    assert.equal(previewJob.options.productCard.view, "preview");
+    assert.equal((await publish(previewJob, preview)).status, 200);
+    const baseTable = productDialog.getByRole("region", { name: "Основные цены" });
+    await baseTable.waitFor();
+    const previewMs = performance.now() - start;
+    assert.deepEqual(await baseTable.locator("tbody tr td:first-child").allTextContents(), priceTypesForCard.slice(0, 3).map(({ name }) => name));
+    assert.equal(await productDialog.getByText("Загружаются показатели…").isVisible(), true);
+    for (const title of ["OEM-артикулы", "Применяемость", "Взаимозаменяемые товары", "Рекомендованная закупка"]) {
+      assert.equal(await productDialog.getByRole("heading", { name: title, exact: true }).count(), 0);
+    }
+    assert.equal(await productDialog.getByRole("img").count(), 0);
+    const detailsJob = await poll(20, 12);
+    assert.equal(detailsJob.options.productCard.view, "details");
+    const readsBeforeSettings = cardReads.length;
+    await productDialog.getByRole("button", { name: "Все цены" }).click();
+    assert.equal(await productDialog.getByRole("region", { name: "Все цены" }).locator("tbody tr").count(), 5);
+    await productDialog.getByRole("button", { name: "К карточке товара" }).click();
+    await productDialog.getByRole("button", { name: "Настройки цен" }).click();
+    await productDialog.getByLabel("Первая цена").selectOption(priceTypesForCard[4].id);
+    await productDialog.getByLabel("Вторая цена").selectOption(priceTypesForCard[4].id);
+    await productDialog.getByRole("button", { name: "Сохранить" }).click();
+    assert.equal(await productDialog.getByRole("alert").textContent(), "Для каждой строки выберите свой вид цены.");
+    await productDialog.getByLabel("Вторая цена").selectOption(priceTypesForCard[3].id);
+    assert.equal(cardReads.length, readsBeforeSettings, "viewing all prices and editing preferences reuse the preview data");
+    if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "product-price-settings.png") });
+    await delay(900);
+    assert.equal((await publish(detailsJob, { image, incoming: cardIncoming, monthlySales, average, recommendation: 0 })).status, 200);
+    assert.equal(await productDialog.getByRole("heading", { name: "Настройки цен карточки" }).isVisible(), true, "details do not reset a price edit");
+    await productDialog.getByRole("button", { name: "Сохранить" }).click();
+    await productDialog.getByText("В среднем за месяц").waitFor();
+    assert.equal(await productDialog.getByText("Рекомендованная закупка", { exact: true }).count(), 0);
+    assert.deepEqual(await baseTable.locator("tbody tr td:first-child").allTextContents(), ["Акционная", "Оптовая", "Безналичная"]);
+    const fullMs = performance.now() - start;
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: product.name, exact: true }).click();
+    assert.equal((await publish(await poll(20, 12), preview)).status, 200);
+    await baseTable.waitFor();
+    assert.deepEqual(await baseTable.locator("tbody tr td:first-child").allTextContents(), ["Акционная", "Оптовая", "Безналичная"]);
+    assert.equal((await publish(await poll(20, 12), { image, incoming: cardIncoming, monthlySales, average, recommendation: 1 })).status, 200);
+    const recommendation = productDialog.getByText("Рекомендованная закупка", { exact: true });
+    await recommendation.waitFor();
+    assert.equal(await recommendation.evaluate((node) => getComputedStyle(node).color), "rgb(180, 45, 22)");
+    console.log(`Product preview: prices visible at ${previewMs.toFixed(0)} ms; details deliberately withheld, visible at ${fullMs.toFixed(0)} ms (simulated worker).`);
     assert.deepEqual(errors, []);
     console.log("Stock browser: search/debounce/cancellation, 1200 items in 12 batches, <=300 DOM rows; price sort, keyboard, cancellation and sorted continuation, one HTTP per action.");
   } finally {

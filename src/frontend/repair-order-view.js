@@ -1,6 +1,6 @@
 import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=stock-popup-1";
 import { stockQuantity } from "./stock-details.js?v=product-card-1";
-import { productCardButton } from "./product-card.js?v=product-card-1";
+import { productCardButton } from "./product-card.js?v=product-card-2";
 
 const number = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });

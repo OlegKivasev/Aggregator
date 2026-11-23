@@ -28,11 +28,14 @@ export async function serveProductCard(response: ServerResponse, service: Nomenc
   response.once("close", abort);
   try {
     const started = performance.now();
+    if (productCard.view === "card" && (service.stockVersion(productCard.testPlatform) ?? 0) >= 12) {
+      productCard = { ...productCard, view: "preview" };
+    }
     const page = await service.loadStock(null, controller.signal, "", undefined, { availability: "all", priceType: null, productCard });
     if (response.destroyed) return;
     const result = page.productCard && (project ? project(page.productCard) : page.productCard);
     if (!result?.data) throw new NomenclatureError(404, "product_not_found", "Данные товара недоступны в 1С.");
-    response.setHeader("Server-Timing", `product-card;dur=${(performance.now() - started).toFixed(1)}`);
+    response.setHeader("Server-Timing", `product-card;dur=${(performance.now() - started).toFixed(1)};desc="${productCard.view}"`);
     serveJson(response, 200, result.data);
   } finally { response.removeListener("close", abort); }
 }
@@ -80,9 +83,9 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         const platform = url.searchParams.get("testPlatform");
         const stock = url.searchParams.get("stock");
         if ([...url.searchParams.keys()].some((key) => !["waitSeconds", "stock", "testPlatform"].includes(key)) || url.searchParams.getAll("waitSeconds").length > 1
-          || url.searchParams.getAll("stock").length > 1 || stock !== null && !/^(?:[1-9]|10|11)$/.test(stock)
+          || url.searchParams.getAll("stock").length > 1 || stock !== null && !/^(?:[1-9]|1[0-2])$/.test(stock)
           || url.searchParams.getAll("testPlatform").length > 1
-          || (stock === "11" ? platform !== "true" && platform !== "false" : platform !== null)
+          || (stock === "11" || stock === "12" ? platform !== "true" && platform !== "false" : platform !== null)
           || !/^(?:\d|1\d|20)$/.test(wait)) throw new NomenclatureError(400, "wait", "Ожидание должно быть от 0 до 20 секунд.");
         const release = service.beginPoll();
         const controller = new AbortController();

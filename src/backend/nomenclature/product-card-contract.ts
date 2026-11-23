@@ -5,7 +5,7 @@ import { repairProductForUser } from "../repairs/repair-details.ts";
 
 type Period = { from: string; to: string };
 export type ProductCardRequest = { id: string; testPlatform?: boolean } & (
-  { view: "card" } | { view: "history"; period: Period });
+  { view: "card" | "preview" | "details" } | { view: "history"; period: Period });
 
 const invalid = (): never => { throw new NomenclatureError(400, "invalid_product_card", "Некорректные данные карточки товара."); };
 const label = (value: unknown, max = 500) => {
@@ -28,6 +28,7 @@ function period(from: unknown, to: unknown): Period {
 export function parseProductCardRequest(id: string, params: URLSearchParams, testPlatform?: boolean): ProductCardRequest {
   const scope = { id: parseUuid(id), ...(testPlatform === undefined ? {} : { testPlatform }) };
   if (!params.size) return { ...scope, view: "card" };
+  if (params.size === 1 && params.get("details") === "1") return { ...scope, view: "details" };
   if (params.size !== 2 || !params.has("from") || !params.has("to")) return invalid();
   return { ...scope, view: "history", period: period(params.get("from"), params.get("to")) };
 }
@@ -43,16 +44,11 @@ function photo(value: unknown) {
   return type ? `data:image/${type};base64,${value}` : null;
 }
 
-function parseCard(value: unknown) {
-  const fields = objectFields(value, ["name", "article", "brand", "category", "unit", "image", "stock", "stockDetails",
-    "incoming", "monthlySales", "average", "recommendation", "period", "prices", "oem", "applicability", "replacements"]);
-  const stock = number(fields.stock, 0);
-  const dates = objectFields(fields.period, ["from", "to"]);
+const detailFields = ["image", "incoming", "monthlySales", "average", "recommendation"];
+function parseDetails(fields: Record<string, unknown>) {
   const incoming = fields.incoming === null ? null : objectFields(fields.incoming, ["original", "replacement"]);
   return {
-    name: label(fields.name), article: label(fields.article, 100), brand: label(fields.brand, 150), category: label(fields.category, 150),
-    unit: label(fields.unit, 100), image: photo(fields.image), stock,
-    stockDetails: parseStockDetails(fields.stockDetails, stock, invalid),
+    image: photo(fields.image),
     incoming: incoming && { original: number(incoming.original, 0), replacement: number(incoming.replacement, 0) },
     monthlySales: fields.monthlySales === null ? null : rows(fields.monthlySales, 5, (value) => {
       const { month, quantity } = objectFields(value, ["month", "quantity"]);
@@ -61,12 +57,32 @@ function parseCard(value: unknown) {
     }),
     average: fields.average === null ? null : number(fields.average),
     recommendation: fields.recommendation === null ? null : number(fields.recommendation, 0),
+  };
+}
+
+function parseCard(value: unknown) {
+  const fields = objectFields(value, ["name", "article", "brand", "category", "unit", "stock", "stockDetails",
+    ...detailFields, "period", "prices", "oem", "applicability", "replacements", "detailsPending", "priceTypes", "defaultPriceTypes"]);
+  const stock = number(fields.stock, 0);
+  const dates = objectFields(fields.period, ["from", "to"]);
+  if (fields.detailsPending !== undefined && typeof fields.detailsPending !== "boolean") return invalid();
+  return {
+    name: label(fields.name), article: label(fields.article, 100), brand: label(fields.brand, 150), category: label(fields.category, 150),
+    unit: label(fields.unit, 100), stock, stockDetails: parseStockDetails(fields.stockDetails, stock, invalid),
+    ...parseDetails(fields),
+    ...(fields.detailsPending === undefined ? {} : { detailsPending: fields.detailsPending }),
+    ...(fields.priceTypes === undefined ? {} : { priceTypes: rows(fields.priceTypes, 1000, (value) => {
+      const row = objectFields(value, ["id", "name"]);
+      return { id: parseUuid(row.id), name: label(row.name, 150) };
+    }) }),
+    ...(fields.defaultPriceTypes === undefined ? {} : { defaultPriceTypes: rows(fields.defaultPriceTypes, 3, parseUuid) }),
     period: period(dates.from, dates.to),
     prices: rows(fields.prices, 5000, (value) => {
-      const row = objectFields(value, ["name", "characteristic", "unit", "amount", "currency", "primary"]);
+      const row = objectFields(value, ["typeId", "name", "characteristic", "unit", "amount", "currency", "primary"]);
       const currency = label(row.currency, 3);
       if (!/^[A-Z]{3}$/.test(currency) || typeof row.primary !== "boolean") return invalid();
-      return { name: label(row.name, 150), characteristic: label(row.characteristic, 150), unit: label(row.unit, 100),
+      return { ...(row.typeId === undefined ? {} : { typeId: parseUuid(row.typeId) }),
+        name: label(row.name, 150), characteristic: label(row.characteristic, 150), unit: label(row.unit, 100),
         amount: number(row.amount, 0, 1e12), currency, primary: row.primary };
     }),
     oem: rows(fields.oem, 10000, (value) => {
@@ -99,7 +115,8 @@ function parseHistory(value: unknown) {
 
 export function parseProductCardResult(value: unknown) {
   const { id, view, data } = objectFields(value, ["id", "view", "data"]);
-  if (view === "card") return { id: parseUuid(id), view, data: data === null ? null : parseCard(data) } as const;
+  if (view === "card" || view === "preview") return { id: parseUuid(id), view, data: data === null ? null : parseCard(data) } as const;
+  if (view === "details") return { id: parseUuid(id), view, data: data === null ? null : parseDetails(objectFields(data, detailFields)) } as const;
   if (view === "history") return { id: parseUuid(id), view, data: data === null ? null : parseHistory(data) } as const;
   return invalid();
 }
@@ -107,7 +124,8 @@ export function parseProductCardResult(value: unknown) {
 export type ProductCardResult = ReturnType<typeof parseProductCardResult>;
 
 export function productCardForRepair(result: ProductCardResult, visibility: { hideArticle: boolean; hideBrand: boolean }) {
-  if (result.view !== "card" || !result.data || !(visibility.hideArticle || visibility.hideBrand)) return result;
+  if (!result.data || !(visibility.hideArticle || visibility.hideBrand) || result.view === "history") return result;
+  if (result.view === "details") return { ...result, data: { ...result.data, image: null } };
   const card = result.data;
   return { ...result, data: {
     ...repairProductForUser(card, visibility), brand: visibility.hideBrand ? "" : card.brand,

@@ -29,6 +29,7 @@
   box-shadow: 0 15px 55px #17202a38;
 }
 .product-card::backdrop { background: #17202a70; }
+.product-card:has(.product-card-price-form) { width: min(520px, calc(100% - 1rem)); }
 .product-card-header {
   position: sticky;
   z-index: 1;
@@ -45,6 +46,7 @@
 .product-card-content { padding: 1rem 1.25rem; }
 .product-card-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 1.5rem; }
 .product-card-column { min-width: 0; }
+.product-card-photo:empty { display: none; }
 .product-card-section { margin-top: 1.1rem; border-top: 1px solid var(--line); padding-top: .65rem; }
 .product-card-section h3 { margin: 0 0 .65rem; font-size: 1rem; font-weight: 800; }
 .product-card-image {
@@ -70,6 +72,22 @@
   font-weight: 700;
 }
 .product-card-action:hover { border-color: #94a3b3; }
+.product-card-price-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.product-card-price-settings { width: 36px; padding-inline: 0; font-size: 1.2rem; line-height: 1; }
+.product-card-recommendation { color: #b42d16; }
+.product-card-price-form { display: grid; max-width: 420px; gap: .75rem; }
+.product-card-price-form label { display: grid; gap: .25rem; min-width: 0; }
+.product-card-price-form select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #a7b1bd;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  padding-inline: .45rem;
+}
+.product-card-price-form > button { justify-self: start; }
 .product-card-table { overflow-x: auto; margin: 0 0 .65rem; }
 .product-card-table table { width: 100%; min-width: 0; border-collapse: collapse; font-size: .875rem; }
 .product-card-table :is(th, td) { padding: .4rem .55rem; border-bottom: 1px solid var(--line); text-align: left; }
@@ -99,9 +117,12 @@
   .product-card-header, .product-card-content { padding: .75rem; }
   .product-card-grid { grid-template-columns: minmax(0, 1fr); gap: .7rem; }
   .product-card-column { display: contents; }
-  .product-card-image { order: -1; height: 9rem; }
+  .product-card-photo { order: -1; }
+  .product-card-image { height: 9rem; }
   .product-card-grid > .product-card-column > .product-card-facts { order: -2; }
 }
 @media (pointer: coarse) {
   .product-card-action, .product-card-period input, .product-card-link { min-height: 44px; }
+  .product-card-price-settings { width: 44px; }
+  .product-card-price-form select { min-height: 44px; }
 }

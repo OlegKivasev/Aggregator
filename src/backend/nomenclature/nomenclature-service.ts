@@ -30,7 +30,7 @@ export class NomenclatureService {
   private closed = false;
   private readonly now: () => number;
   private readonly stock: StockRequests;
-  private readonly stockWorkers = new Map<number, number>();
+  private readonly stockWorkers = new Map<string, { version: number; testPlatform: boolean | null; seen: number }>();
   private observedStockVersion: number | null = null;
 
   constructor(path: string, now: () => number = Date.now) {
@@ -115,11 +115,12 @@ export class NomenclatureService {
     this.stock.notify();
   }
 
-  stockVersion(): number | null {
+  stockVersion(testPlatform?: boolean): number | null {
     let version: number | null = null;
-    for (const [candidate, seen] of this.stockWorkers) {
-      if (this.now() - seen >= onlineMs) this.stockWorkers.delete(candidate);
-      else version = Math.max(version ?? 0, candidate);
+    const now = this.now();
+    for (const [key, worker] of this.stockWorkers) {
+      if (now - worker.seen >= onlineMs) this.stockWorkers.delete(key);
+      else if (testPlatform === undefined || testPlatform === worker.testPlatform) version = Math.max(version ?? 0, worker.version);
     }
     return version;
   }
@@ -130,10 +131,11 @@ export class NomenclatureService {
     if (!connection.configured) throw new NomenclatureError(503, "source_unconfigured", "Подключение номенклатуры ещё не настроено.");
     if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.");
     const purchase = options?.supplierOrders;
-    const required = options?.productCard || options?.salesCount ? 11
+    const view = options?.productCard?.view;
+    const required = view === "preview" || view === "details" ? 12 : options?.productCard || options?.salesCount ? 11
       : purchase?.view === "listPage" ? 10 : purchase ? 9 : options?.incomingDetails ? 8 : options?.inventory ? 7 : options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
     const checkWorker = () => {
-      const version = this.stockVersion();
+      const version = this.stockVersion(options?.productCard?.testPlatform);
       // After a restart, let the first authenticated poll identify the worker.
       if (version !== null && version < required) {
         const list = purchase?.view === "listPage" ? "поиск и сортировку заказов поставщикам"
@@ -220,11 +222,12 @@ export class NomenclatureService {
   claimForWorker(token: string | undefined, version: number, testPlatform: boolean | null = null) {
     this.heartbeat(token);
     const previousVersion = this.stockVersion();
-    this.stockWorkers.set(version, this.now());
+    const previousPlatformVersion = this.stockVersion(testPlatform ?? undefined);
+    this.stockWorkers.set(JSON.stringify([version, testPlatform]), { version, testPlatform, seen: this.now() });
     const currentVersion = this.stockVersion();
     const changed = currentVersion !== previousVersion || currentVersion !== this.observedStockVersion;
     this.observedStockVersion = currentVersion;
-    if (changed) this.stock.notify();
+    if (changed || previousPlatformVersion !== this.stockVersion(testPlatform ?? undefined)) this.stock.notify();
     this.cleanup();
     const now = this.now();
     if (version > 0) {
