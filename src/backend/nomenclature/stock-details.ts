@@ -1,4 +1,7 @@
+import { parseUuid } from "./contract.ts";
+
 export interface StockDetailLine {
+  id?: string;
   name: string;
   article: string;
   quantity: number;
@@ -26,10 +29,12 @@ export function parseStockDetails(value: unknown, total: number, invalid: () => 
   const { original, replacements } = fields(value, ["original", "replacements"]);
   if (!Array.isArray(replacements)) invalid();
   const lines = replacements.map((input) => {
-    const line = fields(input, ["name", "article", "quantity"]);
+    const line = fields(input, ["id", "name", "article", "quantity"]);
     const name = label(line.name, 500);
     if (!name) invalid();
-    return { name, article: label(line.article, 100), quantity: quantity(line.quantity) };
+    let id: string | undefined;
+    try { if (line.id !== undefined) id = parseUuid(line.id); } catch { invalid(); }
+    return { ...(id === undefined ? {} : { id }), name, article: label(line.article, 100), quantity: quantity(line.quantity) };
   });
   const originalQuantity = quantity(original);
   const sum = lines.reduce((count, line) => count + line.quantity, originalQuantity);

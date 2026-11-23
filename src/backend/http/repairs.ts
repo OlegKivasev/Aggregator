@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { parseRepairCard, parseRepairRemoval, RepairValidationError } from "../repairs/repair-card.ts";
 import { repairDetailsForUser, repairProductForUser } from "../repairs/repair-details.ts";
@@ -44,8 +44,9 @@ export async function serveRepairs(
     const searchKeys = [...url.searchParams.keys()];
     const supportsWait = Boolean(refreshRoute?.[1]) && request.method === "GET";
     if (searchKeys.some((key) => key !== "testPlatform" && !(supportsWait && key === "waitSeconds")
-      && !(incomingRoute && ["product", "side", "after"].includes(key))
-      && !(productRoute && ["from", "to", "details"].includes(key)))
+      && !(incomingRoute && ["product", "side", "after", "grant"].includes(key))
+      && !(productRoute && ["from", "to", "details", "grant"].includes(key)))
+      || url.searchParams.getAll("grant").length > 1
       || url.searchParams.getAll("testPlatform").length > 1
       || url.searchParams.has("testPlatform") && !["true", "false"].includes(url.searchParams.get("testPlatform") ?? "")
       || url.searchParams.getAll("waitSeconds").length > 1
@@ -97,6 +98,11 @@ export async function serveRepairs(
     ))) throw new RepairRefreshError(403, "Доступ к заказ-наряду изменился.");
     return user.repairVisibility;
   };
+  const productGrant = (refreshId: string, id: string) => createHmac("sha256", secret!)
+    .update(JSON.stringify(["repair-product", refreshId, ownerId, testPlatformFilter, id])).digest("base64url");
+  const hasProductGrant = (refreshId: string, id: string, grant: string | null) =>
+    secret && grant !== null && /^[A-Za-z0-9_-]{43}$/.test(grant) &&
+    timingSafeEqual(Buffer.from(grant), Buffer.from(productGrant(refreshId, id)));
   try {
     if (workerRequests) {
       if ([...url.searchParams.keys()].some((key) => !["testPlatform", "waitSeconds"].includes(key))
@@ -120,29 +126,48 @@ export async function serveRepairs(
       const result = repository.refreshes.complete(await readJsonBody(request, 512 * 1024));
       if (!response.destroyed) serveJson(response, 200, result);
     } else if (productRoute) {
+      if (!secret) throw new RepairRefreshError(503);
       const params = new URLSearchParams(url.searchParams);
       params.delete("testPlatform");
+      const grant = params.get("grant");
+      params.delete("grant");
       const card = parseProductCardRequest(productRoute[2], params, testPlatformFilter);
       const refresh = repository.refreshes.get(productRoute[1], testPlatformFilter!, ownerId, responsibleFio);
-      if (!refresh.details?.goods.some((row) => row.productId === card.id)) {
+      const granted = hasProductGrant(productRoute[1], card.id, grant);
+      if (!refresh.details || !granted && !refresh.details.goods.some((row) => row.productId === card.id
+        || row.stockDetails?.replacements.some((item) => item.id === card.id && item.quantity > 0))) {
         throw new RepairRefreshError(404, "Товар недоступен в этом заказ-наряде.");
       }
       await serveProductCard(response, nomenclature, card, (result) => {
         const visibility = currentVisibility();
-        return visibility ? productCardForRepair(result, visibility) : result;
+        const projected = visibility ? productCardForRepair(result, visibility) : result;
+        if ((projected.view !== "card" && projected.view !== "preview") || !projected.data) return projected;
+        const withGrant = <T extends { id?: string }>(item: T) =>
+          item.id ? { ...item, cardProof: productGrant(productRoute[1], item.id) } : item;
+        return { ...projected, data: {
+          ...projected.data, incomingProof: productGrant(productRoute[1], card.id),
+          stockDetails: { ...projected.data.stockDetails, replacements: projected.data.stockDetails.replacements.map(withGrant) },
+          replacements: projected.data.replacements.map(withGrant),
+        } };
       });
     } else if (incomingRoute) {
       const params = new URLSearchParams(url.searchParams);
       params.delete("testPlatform");
+      const grant = params.get("grant");
+      params.delete("grant");
       const incoming = parseIncomingRequest(params);
       const refresh = repository.refreshes.get(incomingRoute[1], testPlatformFilter!, ownerId, responsibleFio);
-      if (!refresh.details?.goods.some((row) => row.productId === incoming.productId && row[incoming.side] > 0)) {
+      if (!refresh.details || !hasProductGrant(incomingRoute[1], incoming.productId, grant)
+        && !refresh.details.goods.some((row) => row.productId === incoming.productId && row[incoming.side] > 0)) {
         throw new RepairRefreshError(404, "Поставки недоступны. Откройте заказ-наряд заново.");
       }
-      await serveIncoming(response, nomenclature, incoming, (details) => {
+      await serveIncoming(response, nomenclature, { ...incoming, testPlatform: testPlatformFilter }, (details) => {
         const visibility = currentVisibility();
-        if (!visibility || (!visibility.hideArticle && !visibility.hideBrand)) return details;
-        return { ...details, orders: details.orders.map((row) => repairProductForUser(row, visibility)) };
+        return { ...details, orders: details.orders.map((row) => {
+          const projected = visibility ? repairProductForUser(row, visibility) : row;
+          return secret && row.productId !== incoming.productId
+            ? { ...projected, cardProof: productGrant(incomingRoute[1], row.productId) } : projected;
+        }) };
       });
     } else if (refreshRoute) {
       if (!secret) throw new RepairRefreshError(503);

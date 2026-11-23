@@ -1,10 +1,12 @@
-import { renderStockGroups } from "./stock-details.js?v=product-card-1";
+import { renderStockGroups } from "./stock-details.js?v=product-card-3";
+import { openSearchStream } from "./search-stream.js";
+import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=product-card-3";
 
 const quantity = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const month = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric", timeZone: "UTC" });
 const date = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "UTC" });
 const currencies = new Map();
-const catalogueUrl = (id) => `/api/nomenclature/products/${encodeURIComponent(id)}`;
+export const catalogueUrl = (product) => product.id ? `/api/nomenclature/products/${encodeURIComponent(product.id)}` : null;
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -24,7 +26,9 @@ function facts(entries) {
   const list = element("dl", undefined, "product-card-facts");
   for (const [label, value] of entries) {
     const row = element("div");
-    row.append(element("dt", label), element("dd", value || "—"));
+    const detail = element("dd");
+    detail.append(value || "—");
+    row.append(element("dt", label), detail);
     list.append(row);
   }
   return list;
@@ -132,6 +136,7 @@ function createView() {
   header.append(heading, close);
   const content = element("div", undefined, "product-card-content");
   dialog.append(header, content);
+  const incomingPopover = createIncomingPopover(dialog, "product-card-incoming", productCardButton);
   document.body.append(dialog);
   let current;
   let openingTrigger;
@@ -242,13 +247,27 @@ function createView() {
     const identity = facts([["Категория", card.category], ["Бренд", card.brand], ["Артикул", card.article]]);
     const stock = element("div", undefined, "stock-detail-groups");
     stock.id = "product-card-stock";
-    renderStockGroups(stock, card, card.stockDetails);
+    const renderProduct = (row) => {
+      const url = row.currentProduct ? page.url : page.related(row);
+      return url ? productCardButton(row, url) : row.name;
+    };
+    renderStockGroups(stock, { name: card.name, article: card.article, currentProduct: true }, card.stockDetails, renderProduct);
     const unit = (count) => [quantity.format(count), card.unit].filter(Boolean).join(" ");
     const availability = section("Остатки", element("p", unit(card.stock), "product-card-stock-total"), stock);
     const incomingContent = element("div");
     availability.append(incomingContent);
+    const productUrl = new URL(page.url, location.origin);
+    const product = { id: productUrl.pathname.split("/").at(-1), name: card.name };
+    let incomingUrl;
+    if (page.url.startsWith("/api/nomenclature/")) incomingUrl = "/api/nomenclature/incoming";
+    else if (card.incomingProof) {
+      productUrl.pathname = productUrl.pathname.replace(/\/products\/[^/]+$/, "/incoming");
+      productUrl.searchParams.set("grant", card.incomingProof);
+      incomingUrl = productUrl.pathname + productUrl.search;
+    }
     const salesContent = element("div");
-    const sales = section("Продажи и закупка", salesContent,
+    const recommendationContent = element("div");
+    const sales = section("Продажи и закупка", salesContent, recommendationContent,
       button("История продаж", (event) => showHistory(page, event.currentTarget)));
     offers.append(identity, availability, sales);
 
@@ -287,14 +306,25 @@ function createView() {
       ["Код двигателя", (row) => row.engineCode], ["Уточнение", (row) => row.note],
     ], card.applicability)));
     if (card.replacements.length) main.append(section("Взаимозаменяемые товары", table("Взаимозаменяемые товары", [
-      ["Наименование", (row) => page.related ? productCardButton(row, page.related(row.id)) : row.name],
+      ["Наименование", renderProduct],
       ["Артикул", (row) => row.article], ["Бренд", (row) => row.brand],
     ], card.replacements)));
     page.paintDetails = (details) => {
       incomingContent.replaceChildren();
       const incoming = Object.entries(details.incoming ?? {}).filter(([, value]) => value > 0);
-      if (incoming.length) incomingContent.append(facts(incoming.map(([side, value]) =>
-        [side === "original" ? "К поступлению · оригинал" : "К поступлению · замены", unit(value)])));
+      if (incoming.length) incomingContent.append(facts(incoming.map(([side, value]) => {
+        const label = side === "original" ? "К поступлению · оригинал" : "К поступлению · замены";
+        if (!incomingUrl) return [label, unit(value)];
+        const trigger = button(unit(value), (event) =>
+          incomingPopover.open(trigger, product, event, incomingUrl, (row) => row.id === product.id ? page.url : page.related(row)),
+        "nomenclature-incoming-button");
+        trigger.dataset.incomingSide = side;
+        trigger.setAttribute("aria-label", `${label}, ${unit(value)}`);
+        trigger.setAttribute("aria-haspopup", "dialog");
+        trigger.setAttribute("aria-controls", incomingPopover.id);
+        trigger.setAttribute("aria-expanded", "false");
+        return [label, trigger];
+      })));
       salesContent.replaceChildren();
       if (details.monthlySales?.length) salesContent.append(facts(details.monthlySales.map((row) => {
         const title = month.format(new Date(row.month + "-01T00:00:00Z"));
@@ -303,11 +333,6 @@ function createView() {
       if (details.average !== null) salesContent.append(facts([
         ["В среднем за месяц", unit(Math.sign(details.average) * Math.ceil(Math.abs(details.average)))],
       ]));
-      if (details.recommendation > 0) {
-        const recommendation = facts([["Рекомендованная закупка", unit(details.recommendation)]]);
-        recommendation.classList.add("product-card-recommendation");
-        salesContent.append(recommendation);
-      }
       if (details.image) {
         const image = element("img", undefined, "product-card-image");
         image.alt = card.name;
@@ -318,7 +343,17 @@ function createView() {
       }
     };
     page.detailsStatus = salesContent;
+    page.recommendationStatus = recommendationContent;
+    page.paintRecommendation = (amount) => {
+      recommendationContent.replaceChildren();
+      if (amount > 0) {
+        const row = facts([["Рекомендованная закупка", unit(amount)]]);
+        row.classList.add("product-card-recommendation");
+        recommendationContent.append(row);
+      }
+    };
     page.paintDetails(card);
+    page.paintRecommendation(card.recommendation);
     page.main = main;
     changeContent(main);
   }
@@ -329,7 +364,10 @@ function createView() {
     page.detailsStatus.replaceChildren(status("Загружаются показатели…"));
     try {
       const details = await read(url, page.controller.signal);
-      if (current === page && !page.controller.signal.aborted) page.paintDetails(details);
+      if (current === page && !page.controller.signal.aborted) {
+        page.paintDetails(details);
+        page.paintRecommendation(details.recommendation);
+      }
     } catch (error) {
       if (current === page && !page.controller.signal.aborted) {
         page.detailsStatus.replaceChildren(status("Не удалось загрузить показатели и фото.", true),
@@ -338,13 +376,46 @@ function createView() {
     }
   }
 
+  function loadProgressiveDetails(page) {
+    const url = new URL(page.url, location.origin);
+    url.searchParams.set("details", "stream");
+    page.detailsStatus.replaceChildren(status("Загружаются показатели…"));
+    page.recommendationStatus.replaceChildren();
+    const stream = openSearchStream(url);
+    page.detailsStream = stream;
+    let receivedDetails = false;
+    const fail = () => {
+      stream.close();
+      if (current !== page || page.controller.signal.aborted) return;
+      const target = receivedDetails ? page.recommendationStatus : page.detailsStatus;
+      target.replaceChildren(status(receivedDetails ? "Не удалось завершить расчёт закупки." : "Не удалось загрузить показатели и фото.", true),
+        button("Повторить загрузку", () => loadProgressiveDetails(page)));
+    };
+    stream.onerror = fail;
+    stream.onmessage = ({ data }) => {
+      if (current !== page || page.controller.signal.aborted) { stream.close(); return; }
+      const event = JSON.parse(data);
+      if (event.kind === "details") {
+        page.paintDetails(event.data);
+        receivedDetails = true;
+        page.recommendationStatus.replaceChildren(status("Рассчитывается закупка…"));
+      } else if (event.kind === "recommendation") {
+        page.paintRecommendation(event.data.recommendation);
+        stream.close();
+      } else if (event.kind === "error") fail();
+    };
+  }
+
   async function load(page) {
     changeContent(status("Загружается карточка товара…"));
     try {
       const card = await read(page.url, page.controller.signal);
       if (current !== page || page.controller.signal.aborted) return;
       render(page, card);
-      if (card.detailsPending) void loadDetails(page);
+      if (card.detailsPending) {
+        if (card.progressiveDetails) loadProgressiveDetails(page);
+        else void loadDetails(page);
+      }
     } catch (error) {
       if (current === page && !page.controller.signal.aborted) {
         changeContent(status(error.name === "TimeoutError" ? "1С не ответила вовремя." : error.message, true),
@@ -352,7 +423,7 @@ function createView() {
       }
     }
   }
-  const stop = () => { current?.controller.abort(); };
+  const stop = () => { incomingPopover.close(); current?.detailsStream?.close(); current?.controller.abort(); };
   dialog.addEventListener("close", () => {
     if (dialog.open) return;
     stop();
@@ -362,8 +433,16 @@ function createView() {
     openingTrigger = undefined;
   });
   return {
-    open(product, trigger, url, related) {
+    open(product, trigger, url) {
+      if (dialog.open && current?.url === url) { dialog.scrollTop = 0; close.focus(); return; }
       stop();
+      const related = url.startsWith("/api/nomenclature/") ? catalogueUrl : (row) => {
+        if (!row.id || !row.cardProof) return null;
+        const link = new URL(url, location.origin);
+        link.pathname = link.pathname.replace(/[^/]+$/, encodeURIComponent(row.id));
+        link.searchParams.set("grant", row.cardProof);
+        return link.pathname + link.search;
+      };
       current = { url, related, controller: new AbortController() };
       heading.textContent = product.name;
       if (!dialog.open) { openingTrigger = trigger; dialog.showModal(); }
@@ -373,10 +452,10 @@ function createView() {
   };
 }
 
-export function productCardButton(product, url = catalogueUrl(product.id)) {
+export function productCardButton(product, url = catalogueUrl(product), beforeOpen) {
   const node = button(product.name, () => {
     view ??= createView();
-    view.open(product, node, url, url.startsWith("/api/nomenclature/") ? catalogueUrl : undefined);
+    view.open(product, beforeOpen?.() ?? node, url);
   }, "product-card-link");
   node.setAttribute("aria-haspopup", "dialog");
   return node;

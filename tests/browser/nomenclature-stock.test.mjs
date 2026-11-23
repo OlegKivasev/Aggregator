@@ -771,7 +771,7 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     assert.deepEqual(productJob.options.productCard, { id: product.id, view: "card" });
     const publish = (job, data) => request("/api/integration/1c/nomenclature/stock-results", { method: "POST",
       ...json({ requestId: job.id, leaseId: job.leaseId, status: "completed", hasMore: false, products: [],
-        productCard: { id: product.id, view: job.options.productCard.view, data } }, headers) });
+        productCard: { id: job.options.productCard.id, view: job.options.productCard.view, data } }, headers) });
     assert.equal((await publish(productJob, productCardFixture(product, { replacements: [
       { id: products[1].id, name: "Аналог фильтра", article: "A-7", brand: "Другой бренд" },
     ] }))).status, 200);
@@ -808,7 +808,9 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     const withoutSalesCount = await poll(20, 11);
     assert.equal(withoutSalesCount.options.salesCount, undefined);
     assert.equal(withoutSalesCount.sortField, "id");
-    assert.equal((await complete(withoutSalesCount, [exactArticle])).status, 200);
+    const alternate = { id: products[1].id, name: "Взаимозаменяемый фильтр", article: "A-7", quantity: 2 };
+    const withStockLinks = { ...exactArticle, quantity: 3, stockDetails: { original: 1, replacements: [alternate] } };
+    assert.equal((await complete(withoutSalesCount, [withStockLinks])).status, 200);
     assert.equal(await salesHeader.isVisible(), false);
 
     await poll(0, 12);
@@ -869,6 +871,67 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     await recommendation.waitFor();
     assert.equal(await recommendation.evaluate((node) => getComputedStyle(node).color), "rgb(180, 45, 22)");
     console.log(`Product preview: prices visible at ${previewMs.toFixed(0)} ms; details deliberately withheld, visible at ${fullMs.toFixed(0)} ms (simulated worker).`);
+    await page.keyboard.press("Escape");
+
+    await poll(0, 13);
+    const balance = page.getByRole("button", { name: "Остаток 3. " + product.name, exact: true });
+    const balanceReads = cardReads.length;
+    await balance.click();
+    const balancePopup = page.getByRole("dialog", { name: "Остаток с учётом заказов" });
+    assert.equal(await balancePopup.getByRole("button", { name: alternate.name }).isVisible(), true);
+    assert.equal(cardReads.length, balanceReads, "displaying related products inside the existing stock snapshot requires no new HTTP request");
+    await balancePopup.getByRole("button", { name: product.name, exact: true }).click();
+    const linkedPreview = await poll(20, 13);
+    assert.deepEqual(linkedPreview.options.productCard, { id: product.id, view: "preview" });
+    assert.equal((await publish(linkedPreview, {
+      ...preview, stock: 3, stockDetails: withStockLinks.stockDetails,
+      replacements: [{ id: alternate.id, name: alternate.name, article: alternate.article, brand: "" }],
+    })).status, 200);
+    await baseTable.waitFor();
+    const progressiveJob = await poll(20, 13);
+    assert.equal(progressiveJob.options.productCard.view, "progressive");
+    assert.equal(await poll(0, 13), null, "the card requests one follow-up job");
+    const stagedDetails = { image, incoming: cardIncoming, monthlySales, average, recommendation: null };
+    const detailsStarted = performance.now();
+    const stage = await request("/api/integration/1c/nomenclature/stock-progress", {
+      method: "POST", ...json({ requestId: progressiveJob.id, leaseId: progressiveJob.leaseId,
+        productCard: { view: "details", id: product.id, data: stagedDetails } }, headers),
+    });
+    assert.equal(stage.status, 200);
+    await productDialog.getByRole("img").evaluate((node) => node.decode());
+    await productDialog.getByText("В среднем за месяц").waitFor();
+    assert.equal(await productDialog.getByText("Рассчитывается закупка…").isVisible(), true);
+    assert.equal(await recommendation.count(), 0, "photo and sales render before the final forecast");
+    const detailsMs = performance.now() - detailsStarted;
+    await delay(700);
+    const beforeForecast = cardReads.length;
+    assert.equal((await publish(progressiveJob, { recommendation: 2 })).status, 200);
+    await recommendation.waitFor();
+    console.log(`Progressive details: photo and sales rendered at ${detailsMs.toFixed(0)} ms, forecast at ${(performance.now() - detailsStarted).toFixed(0)} ms with a simulated delay.`);
+    assert.equal(cardReads.length, beforeForecast, "the forecast uses the same browser request and worker job");
+    const cardStock = productDialog.getByRole("region", { name: "Оригинал" });
+    await cardStock.getByRole("button", { name: product.name, exact: true }).click();
+    assert.equal(cardReads.length, beforeForecast, "the current original card is already open");
+
+    const incomingTrigger = productDialog.getByRole("button", { name: /К поступлению · замены/ });
+    await incomingTrigger.click();
+    const supply = await poll(20, 13);
+    assert.deepEqual(supply.options.incomingDetails, { productId: product.id, side: "replacement" });
+    assert.equal((await request("/api/integration/1c/nomenclature/stock-results", {
+      method: "POST", ...json({ requestId: supply.id, leaseId: supply.leaseId, status: "completed", hasMore: false, products: [],
+        incomingDetails: { orders: [{ orderId: randomUUID(), productId: alternate.id, supplier: "Тестовый поставщик", number: "7",
+          name: alternate.name, article: alternate.article, quantity: 2, ordered: 2, expectedDate: null }], hasMore: false } }, headers),
+    })).status, 200);
+    const supplyPopup = productDialog.getByRole("dialog", { name: "Поставки замен" });
+    await supplyPopup.getByRole("button", { name: alternate.name, exact: true }).click();
+    const alternatePreview = await poll(20, 13);
+    assert.deepEqual(alternatePreview.options.productCard, { id: alternate.id, view: "preview" });
+    assert.equal((await publish(alternatePreview, { ...preview, name: alternate.name, article: alternate.article, detailsPending: false })).status, 200);
+    const alternateDialog = page.getByRole("dialog", { name: alternate.name, exact: true });
+    await alternateDialog.locator(".product-card-facts").first().getByText(alternate.article, { exact: true }).waitFor();
+    await alternateDialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+    await page.waitForFunction((label) => document.activeElement?.getAttribute("aria-label") === label, "Остаток 3. " + product.name);
+    assert.equal(await balance.evaluate((node) => document.activeElement === node), true);
     assert.deepEqual(errors, []);
     console.log("Stock browser: search/debounce/cancellation, 1200 items in 12 batches, <=300 DOM rows; price sort, keyboard, cancellation and sorted continuation, one HTTP per action.");
   } finally {

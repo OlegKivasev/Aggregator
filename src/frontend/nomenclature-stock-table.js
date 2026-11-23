@@ -1,13 +1,13 @@
-import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=stock-popup-1";
-import { stockQuantity } from "./stock-details.js?v=product-card-1";
-import { productCardButton } from "./product-card.js?v=product-card-2";
+import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=product-card-3";
+import { stockQuantity } from "./stock-details.js?v=product-card-3";
+import { catalogueUrl, productCardButton } from "./product-card.js?v=product-card-3";
 
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const incomingFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 
 // Keep three batches in the DOM. Measured spacers preserve access to earlier rows.
 export function createStockTable(rows, before, after, selectionChanged = () => {}) {
-  const incomingPopover = createIncomingPopover();
+  const incomingPopover = createIncomingPopover(document.body, "nomenclature-incoming-popover", productCardButton, catalogueUrl);
   const selected = new Set();
   const productsById = new Map();
   let selectionAnchor;

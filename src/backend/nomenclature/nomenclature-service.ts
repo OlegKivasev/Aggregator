@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { NomenclatureError, type LookupResult } from "./contract.ts";
 import { StockRequests, stockWorkerConditions, stockWorkerFlags } from "./stock-requests.ts";
+import type { ProductCardProgress } from "./product-card-contract.ts";
 import type { StockResult } from "./stock-contract.ts";
 import { defaultStockSort, type StockSort } from "./stock-sort.ts";
 import type { StockOptions } from "./stock-options.ts";
@@ -125,27 +126,29 @@ export class NomenclatureService {
     return version;
   }
 
-  loadStock(cursor: string | null, signal: AbortSignal, query = "", sort: StockSort = defaultStockSort, options?: StockOptions) {
+  loadStock(cursor: string | null, signal: AbortSignal, query = "", sort: StockSort = defaultStockSort, options?: StockOptions,
+    onProgress?: (result: ProductCardProgress) => void) {
     if (this.closed) throw new NomenclatureError(503, "stopping", "Соединение закрывается.");
     const connection = this.state();
     if (!connection.configured) throw new NomenclatureError(503, "source_unconfigured", "Подключение номенклатуры ещё не настроено.");
     if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.");
     const purchase = options?.supplierOrders;
     const view = options?.productCard?.view;
-    const required = view === "preview" || view === "details" ? 12 : options?.productCard || options?.salesCount ? 11
+    const testPlatform = options?.productCard?.testPlatform ?? options?.incomingDetails?.testPlatform;
+    const required = view === "progressive" ? 13 : view === "preview" || view === "details" ? 12 : options?.productCard || options?.salesCount || testPlatform !== undefined ? 11
       : purchase?.view === "listPage" ? 10 : purchase ? 9 : options?.incomingDetails ? 8 : options?.inventory ? 7 : options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
     const checkWorker = () => {
-      const version = this.stockVersion(options?.productCard?.testPlatform);
+      const version = this.stockVersion(testPlatform);
       // After a restart, let the first authenticated poll identify the worker.
       if (version !== null && version < required) {
         const list = purchase?.view === "listPage" ? "поиск и сортировку заказов поставщикам"
           : purchase ? "заказы поставщикам" : options?.productCard ? "карточку товара"
-            : options?.salesCount ? "количество продаж" : "этот список номенклатуры";
+            : options?.salesCount ? "количество продаж" : options?.incomingDetails ? "расшифровку поставок" : "этот список номенклатуры";
         throw new NomenclatureError(503, "stock_unsupported", `Обработчик 1С подключён, но не поддерживает ${list}. Обновите расширение в базе 1С и перезапустите задание поиска, затем обновите список.`);
       }
     };
     checkWorker();
-    return this.stock.load(cursor, signal, () => this.changes.emit(source), query, sort, options, checkWorker);
+    return this.stock.load(cursor, signal, () => this.changes.emit(source), query, sort, options, checkWorker, onProgress);
   }
 
   async loadSupplierOrders(read: SupplierOrdersRequest, signal: AbortSignal) {
@@ -157,6 +160,11 @@ export class NomenclatureService {
   completeStock(token: string | undefined, result: StockResult): void {
     this.heartbeat(token);
     this.stock.complete(result);
+  }
+
+  publishProductProgress(token: string | undefined, id: string, leaseId: string, result: ProductCardProgress): void {
+    this.heartbeat(token);
+    this.stock.publishProgress(id, leaseId, result);
   }
 
   authenticate(token: string | undefined): void {

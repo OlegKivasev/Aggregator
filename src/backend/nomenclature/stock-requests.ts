@@ -6,6 +6,7 @@ import { stockPageSize, type StockPage, type StockResult } from "./stock-contrac
 import { defaultStockSort, decodeStockCursor, encodeStockCursor, validateStockSortValue, type StockSort, type StockSortField } from "./stock-sort.ts";
 import { stockOptionsKey, type StockOptions } from "./stock-options.ts";
 import { validateSupplierOrdersResponse } from "../purchasing/supplier-orders-contract.ts";
+import type { ProductCardProgress } from "./product-card-contract.ts";
 
 interface Row {
   id: string; cursor: string; query: string; status: string; expires_at: number; lease_id: string | null; result_json: string | null;
@@ -27,8 +28,9 @@ export const stockWorkerConditions = `AND (query='' OR ?=1)
   AND (options='' OR (json_extract(NULLIF(options, ''), '$.salesCount') IS NULL
     AND json_extract(NULLIF(options, ''), '$.productCard') IS NULL) OR ?=1)
   AND (options='' OR COALESCE(json_extract(NULLIF(options, ''), '$.productCard.view'), '') NOT IN ('preview','details') OR ?=1)
-  AND (options='' OR json_extract(NULLIF(options, ''), '$.productCard.testPlatform') IS NULL
-    OR json_extract(NULLIF(options, ''), '$.productCard.testPlatform') = ?)`;
+  AND (options='' OR COALESCE(json_extract(NULLIF(options, ''), '$.productCard.view'), '') <> 'progressive' OR ?=1)
+  AND COALESCE(json_extract(NULLIF(options, ''), '$.productCard.testPlatform'),
+    json_extract(NULLIF(options, ''), '$.incomingDetails.testPlatform'), -1) IN (-1, ?)`;
 
 const highlightsRequested = (query: string, options?: StockOptions | null): boolean =>
   !!query && options?.inventory === true && options.searchMode === "text";
@@ -37,6 +39,7 @@ const highlightsRequested = (query: string, options?: StockOptions | null): bool
 export class StockRequests {
   private readonly changes = new EventEmitter();
   private readonly readers = new Map<string, number>();
+  private readonly progress = new Map<string, ProductCardProgress>();
   private count = 0;
   private closed = false;
   private readonly database: DatabaseSync;
@@ -74,12 +77,14 @@ export class StockRequests {
     this.database.prepare("DELETE FROM nomenclature_stock_requests WHERE expires_at<?").run(this.now() - 60_000);
   }
   invalidate(): void {
+    this.progress.clear();
     this.database.exec("UPDATE nomenclature_stock_requests SET status='error', result_json=NULL WHERE status IN ('pending','leased')");
   }
   notify(): void { this.changes.emit("change"); }
   close(): void { this.closed = true; this.notify(); }
 
-  async load(cursor: string | null, signal: AbortSignal, notifyWorker: () => void, query = "", sort: StockSort = defaultStockSort, options?: StockOptions, checkWorker?: () => void): Promise<StockPage> {
+  async load(cursor: string | null, signal: AbortSignal, notifyWorker: () => void, query = "", sort: StockSort = defaultStockSort,
+    options?: StockOptions, checkWorker?: () => void, onProgress?: (result: ProductCardProgress) => void): Promise<StockPage> {
     if (signal.aborted) throw signal.reason;
     if (this.closed) throw new NomenclatureError(503, "stopping", "Соединение закрывается.");
     if (this.count >= 100) throw new NomenclatureError(429, "stock_busy", "Слишком много запросов остатков. Повторите позже.");
@@ -102,13 +107,21 @@ export class StockRequests {
     try {
       return await new Promise<StockPage>((resolve, reject) => {
         let timer: ReturnType<typeof setTimeout>;
+        let finished = false;
         const finish = (error?: unknown, page?: StockPage) => {
+          if (finished) return;
+          finished = true;
           clearTimeout(timer);
           signal.removeEventListener("abort", abort);
           this.changes.removeListener("change", check);
+          if (onProgress) this.changes.removeListener("progress", publish);
           if (error) reject(error); else resolve(page!);
         };
         const abort = () => finish(signal.reason);
+        const publish = (requestId: string, result: ProductCardProgress) => {
+          if (requestId !== id) return;
+          try { onProgress?.(result); } catch (error) { finish(error); }
+        };
         const check = (completedId?: string, completedPage?: StockPage) => {
           if (this.closed) return finish(new NomenclatureError(503, "stopping", "Соединение закрывается."));
           if (completedId && completedId !== id) return;
@@ -128,6 +141,11 @@ export class StockRequests {
         signal.addEventListener("abort", abort, { once: true });
         this.changes.on("change", check);
         check();
+        if (onProgress && !finished) {
+          this.changes.on("progress", publish);
+          const previous = this.progress.get(id);
+          if (previous) publish(id, previous);
+        }
       });
     } finally {
       this.count -= 1;
@@ -135,9 +153,26 @@ export class StockRequests {
       if (remaining) this.readers.set(id, remaining);
       else {
         this.readers.delete(id);
+        this.progress.delete(id);
         if (!this.closed) this.database.prepare("UPDATE nomenclature_stock_requests SET status='cancelled' WHERE id=? AND status IN ('pending','leased')").run(id);
       }
     }
+  }
+  publishProgress(id: string, leaseId: string, result: ProductCardProgress): void {
+    const row = this.database.prepare("SELECT status, lease_id, expires_at, options FROM nomenclature_stock_requests WHERE id=?")
+      .get(id) as Pick<Row, "status" | "lease_id" | "expires_at" | "options"> | undefined;
+    if (!row || row.lease_id !== leaseId || row.status !== "leased" || row.expires_at <= this.now() || !this.readers.has(id)) {
+      throw new NomenclatureError(409, "lease_mismatch", "Запрос карточки завершён или отменён.");
+    }
+    const request = (JSON.parse(row.options || "{}") as StockOptions).productCard;
+    if (request?.view !== "progressive" || request.id !== result.id || !result.data || result.data.recommendation !== null) {
+      throw new NomenclatureError(400, "invalid_product_card", "Промежуточный ответ не соответствует запросу карточки.");
+    }
+    if (this.progress.has(id)) return;
+    // The worker has responded and is doing the final calculation under this lease.
+    this.database.prepare("UPDATE nomenclature_stock_requests SET lease_until=expires_at WHERE id=?").run(id);
+    this.progress.set(id, result);
+    this.changes.emit("progress", id, result);
   }
   claim(version: number, testPlatform: boolean | null) {
     this.cleanup();
@@ -172,6 +207,7 @@ export class StockRequests {
         || data.totalCount !== undefined || data.priceTypes !== undefined || data.navigation !== undefined
         || data.incomingDetails !== undefined || supplierOrders !== undefined
         || (data.status === "completed") !== (actual !== undefined)
+        || actual?.view === "progressive" && actual.data && !this.progress.has(row.id) && row.status === "leased"
         || actual && (actual.id !== expected.id || actual.view !== expected.view)) {
         throw new NomenclatureError(400, "invalid_product_card", "Ответ не соответствует запросу карточки товара.");
       }
@@ -227,5 +263,5 @@ export class StockRequests {
 }
 
 export const stockWorkerFlags = (version: number, testPlatform: boolean | null): (number | null)[] =>
-  [...[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((minimum) => Number(version >= minimum)),
-    testPlatform === null ? null : Number(testPlatform)];
+  [...[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((minimum) => Number(version >= minimum)),
+    testPlatform === null || version < 11 ? null : Number(testPlatform)];

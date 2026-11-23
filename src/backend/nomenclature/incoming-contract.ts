@@ -3,6 +3,7 @@ import { NomenclatureError, objectFields, parseUuid } from "./contract.ts";
 export interface IncomingRequest {
   productId: string;
   side: "original" | "replacement";
+  testPlatform?: boolean;
   after?: { orderId: string; productId: string };
 }
 export interface IncomingOrder {

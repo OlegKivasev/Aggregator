@@ -177,3 +177,31 @@ test("sales-count sorting uses signed counts and binds continuation to the selec
     assert.deepEqual((await second).products, [unsold]);
   });
 });
+
+test("concurrent card readers share published details until the forecast is ready", async () => {
+  await fixture(async ({ service, token }) => {
+    const id = randomUUID();
+    const options = { availability: "all", priceType: null, productCard: { id, view: "progressive", testPlatform: false } };
+    service.claimForWorker(token, 13, false);
+    const abort = new AbortController();
+    const firstEvents = [];
+    const first = service.loadStock(null, abort.signal, "", defaultStockSort, options, (details) => firstEvents.push(details));
+    const job = service.claimForWorker(token, 13, false);
+    const partial = { id, view: "details", data: { image: null, incoming: null, monthlySales: [], average: 0, recommendation: null } };
+    assert.throws(() => service.publishProductProgress(token, job.id, randomUUID(), partial), { statusCode: 409 });
+    service.publishProductProgress(token, job.id, job.leaseId, partial);
+    service.publishProductProgress(token, job.id, job.leaseId, partial);
+    assert.deepEqual(firstEvents, [partial]);
+
+    const lateEvents = [];
+    const late = service.loadStock(null, new AbortController().signal, "", defaultStockSort, options, (details) => lateEvents.push(details));
+    assert.deepEqual(lateEvents, [partial]);
+    assert.equal(service.claimForWorker(token, 13, false), null);
+    abort.abort();
+    await assert.rejects(first, { name: "AbortError" });
+    const final = { id, view: "progressive", data: { recommendation: 4 } };
+    service.completeStock(token, result(job, [], { productCard: final }));
+    assert.deepEqual((await late).productCard, final);
+    assert.throws(() => service.publishProductProgress(token, job.id, job.leaseId, partial), { statusCode: 409 });
+  });
+});

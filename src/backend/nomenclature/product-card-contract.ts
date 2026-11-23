@@ -5,7 +5,7 @@ import { repairProductForUser } from "../repairs/repair-details.ts";
 
 type Period = { from: string; to: string };
 export type ProductCardRequest = { id: string; testPlatform?: boolean } & (
-  { view: "card" | "preview" | "details" } | { view: "history"; period: Period });
+  { view: "card" | "preview" | "details" | "progressive" } | { view: "history"; period: Period });
 
 const invalid = (): never => { throw new NomenclatureError(400, "invalid_product_card", "Некорректные данные карточки товара."); };
 const label = (value: unknown, max = 500) => {
@@ -29,6 +29,7 @@ export function parseProductCardRequest(id: string, params: URLSearchParams, tes
   const scope = { id: parseUuid(id), ...(testPlatform === undefined ? {} : { testPlatform }) };
   if (!params.size) return { ...scope, view: "card" };
   if (params.size === 1 && params.get("details") === "1") return { ...scope, view: "details" };
+  if (params.size === 1 && params.get("details") === "stream") return { ...scope, view: "progressive" };
   if (params.size !== 2 || !params.has("from") || !params.has("to")) return invalid();
   return { ...scope, view: "history", period: period(params.get("from"), params.get("to")) };
 }
@@ -117,14 +118,20 @@ export function parseProductCardResult(value: unknown) {
   const { id, view, data } = objectFields(value, ["id", "view", "data"]);
   if (view === "card" || view === "preview") return { id: parseUuid(id), view, data: data === null ? null : parseCard(data) } as const;
   if (view === "details") return { id: parseUuid(id), view, data: data === null ? null : parseDetails(objectFields(data, detailFields)) } as const;
+  if (view === "progressive") {
+    if (data === null) return { id: parseUuid(id), view, data: null } as const;
+    const { recommendation } = objectFields(data, ["recommendation"]);
+    return { id: parseUuid(id), view, data: { recommendation: recommendation === null ? null : number(recommendation, 0) } } as const;
+  }
   if (view === "history") return { id: parseUuid(id), view, data: data === null ? null : parseHistory(data) } as const;
   return invalid();
 }
 
 export type ProductCardResult = ReturnType<typeof parseProductCardResult>;
+export type ProductCardProgress = Extract<ProductCardResult, { view: "details" }>;
 
 export function productCardForRepair(result: ProductCardResult, visibility: { hideArticle: boolean; hideBrand: boolean }) {
-  if (!result.data || !(visibility.hideArticle || visibility.hideBrand) || result.view === "history") return result;
+  if (!result.data || !(visibility.hideArticle || visibility.hideBrand) || result.view === "history" || result.view === "progressive") return result;
   if (result.view === "details") return { ...result, data: { ...result.data, image: null } };
   const card = result.data;
   return { ...result, data: {

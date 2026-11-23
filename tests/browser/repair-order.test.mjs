@@ -215,7 +215,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       const before = repairRequests.length;
       await button[mobile ? "tap" : "click"]();
       const job = await claim("stock", 5);
-      assert.deepEqual(job.options.incomingDetails, { productId: product.productId, side });
+      assert.deepEqual(job.options.incomingDetails, { productId: product.productId, side, testPlatform: false });
       assert.equal((await post("/api/integration/1c/nomenclature/stock-results", {
         requestId: job.id, leaseId: job.leaseId, status: "completed", products: [], hasMore: false,
         incomingDetails: { orders: [{ orderId: randomUUID(), productId: side === "original" ? product.productId : randomUUID(),
@@ -344,10 +344,9 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     assert.equal(await goodsTable.getByRole("columnheader", { name: "Артикул" }).count(), 0);
     assert.equal(await goodsTable.getByRole("rowheader", { name: "Комплект ГРМ", exact: true }).isVisible(), true);
     assert.equal((await fetch(cardUrl(restrictedId, branded.productId), { headers: { Cookie: other } })).status, 404);
+    const related = { id: randomUUID(), name: "Комплект-замена | Закрытый бренд", article: "PRIVATE-REPLACEMENT", brand: "Закрытый бренд" };
     const limitedProduct = await openProduct("Комплект ГРМ", branded, {
-      brand: "Закрытый бренд", stock: 20, stockDetails, replacements: [
-        { id: randomUUID(), name: "Комплект-замена | Закрытый бренд", article: "PRIVATE-REPLACEMENT", brand: "Закрытый бренд" },
-      ],
+      brand: "Закрытый бренд", stock: 20, stockDetails, replacements: [related],
     });
     assert.equal(limitedProduct.name, "Комплект ГРМ");
     assert.equal(limitedProduct.article, "");
@@ -355,7 +354,19 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     assert.equal(limitedProduct.image, null);
     assert.deepEqual(limitedProduct.oem, []);
     assert.doesNotMatch(JSON.stringify(limitedProduct), /Закрытый бренд|PRIVATE-ARTICLE|PRIVATE-REPLACEMENT/);
-    await page.getByRole("dialog", { name: "Комплект ГРМ", exact: true }).getByRole("button", { name: "Закрыть", exact: true }).click();
+    const signedRelated = limitedProduct.replacements[0];
+    assert.equal((await page.request.get(cardUrl(restrictedId, related.id))).status(), 404, "unseen UUID is not granted");
+    assert.equal((await page.request.get(cardUrl(restrictedId, randomUUID()) + "&grant=" + signedRelated.cardProof)).status(), 404, "grant cannot open a different product");
+    assert.equal((await fetch(cardUrl(restrictedId, related.id) + "&grant=" + signedRelated.cardProof, { headers: { Cookie: other } })).status, 404);
+    const limitedDialog = page.getByRole("dialog", { name: "Комплект ГРМ", exact: true });
+    await limitedDialog.getByRole("region", { name: "Взаимозаменяемые товары" }).getByRole("button", { name: "Комплект-замена", exact: true }).click();
+    const linked = await claim("stock", 5);
+    assert.deepEqual(linked.options.productCard, { id: related.id, testPlatform: false, view: "card" });
+    assert.equal((await publishCard(linked, { ...related, productId: related.id }, { brand: related.brand })).status, 200);
+    const relatedDialog = page.getByRole("dialog", { name: "Комплект-замена", exact: true });
+    await relatedDialog.getByText("Рекомендованная закупка").waitFor();
+    assert.doesNotMatch(await relatedDialog.innerText(), /Закрытый бренд|PRIVATE-REPLACEMENT/);
+    await relatedDialog.getByRole("button", { name: "Закрыть", exact: true }).click();
     await claim("stock", 0, false, 12);
     const detailsUrl = cardUrl(restrictedId, branded.productId) + "&details=1";
     assert.equal((await fetch(detailsUrl, { headers: { Cookie: other } })).status, 404);

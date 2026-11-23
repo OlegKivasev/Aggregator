@@ -6,9 +6,9 @@ import { parseIncomingRequest, type IncomingDetails, type IncomingRequest } from
 import { decodeStockCursor, parseStockSort } from "../nomenclature/stock-sort.ts";
 import { inventoryParameters, parseStockOptions, stockOptionsKey } from "../nomenclature/stock-options.ts";
 import type { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
-import { parseProductCardRequest, type ProductCardRequest, type ProductCardResult } from "../nomenclature/product-card-contract.ts";
+import { parseProductCardRequest, parseProductCardResult, type ProductCardRequest, type ProductCardResult } from "../nomenclature/product-card-contract.ts";
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
-import { serveJson } from "./responses.ts";
+import { securityHeaders, serveJson, writeSseEvent } from "./responses.ts";
 
 export async function serveIncoming(response: ServerResponse, service: NomenclatureService, incomingDetails: IncomingRequest,
   project?: (details: IncomingDetails) => IncomingDetails) {
@@ -26,17 +26,42 @@ export async function serveProductCard(response: ServerResponse, service: Nomenc
   const controller = new AbortController();
   const abort = () => controller.abort();
   response.once("close", abort);
+  const started = performance.now();
+  const write = (kind: string, data: unknown) => {
+    if (!response.headersSent) {
+      response.setHeader("Server-Timing", `product-card;dur=${(performance.now() - started).toFixed(1)};desc="${productCard.view}"`);
+      response.writeHead(200, { ...securityHeaders, "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no" });
+    }
+    writeSseEvent(response, { kind, data });
+  };
   try {
-    const started = performance.now();
-    if (productCard.view === "card" && (service.stockVersion(productCard.testPlatform) ?? 0) >= 12) {
+    const version = service.stockVersion(productCard.testPlatform) ?? 0;
+    if (productCard.view === "card" && version >= 12) {
       productCard = { ...productCard, view: "preview" };
     }
-    const page = await service.loadStock(null, controller.signal, "", undefined, { availability: "all", priceType: null, productCard });
+    const progressive = productCard.view === "progressive";
+    const page = await service.loadStock(null, controller.signal, "", undefined, { availability: "all", priceType: null, productCard },
+      progressive ? (partial) => {
+        const result = project ? project(partial) : partial;
+        if (!response.destroyed) write("details", result.data);
+      } : undefined);
     if (response.destroyed) return;
     const result = page.productCard && (project ? project(page.productCard) : page.productCard);
     if (!result?.data) throw new NomenclatureError(404, "product_not_found", "Данные товара недоступны в 1С.");
-    response.setHeader("Server-Timing", `product-card;dur=${(performance.now() - started).toFixed(1)};desc="${productCard.view}"`);
-    serveJson(response, 200, result.data);
+    if (progressive) {
+      write("recommendation", result.data);
+      response.end();
+    } else {
+      response.setHeader("Server-Timing", `product-card;dur=${(performance.now() - started).toFixed(1)};desc="${productCard.view}"`);
+      serveJson(response, 200, result.view === "preview" && version >= 13 ? { ...result.data, progressiveDetails: true } : result.data);
+    }
+  } catch (error) {
+    if (!response.headersSent) throw error;
+    if (!response.destroyed) {
+      write("error", "Не удалось завершить расчёт закупки.");
+      response.end();
+    }
   } finally { response.removeListener("close", abort); }
 }
 
@@ -59,7 +84,7 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
   };
   try {
     if (integration) {
-      const match = /^\/api\/integration\/1c\/nomenclature\/(requests|results|stock-results|status)$/.exec(url.pathname);
+      const match = /^\/api\/integration\/1c\/nomenclature\/(requests|results|stock-results|stock-progress|status)$/.exec(url.pathname);
       if (!match) throw new NomenclatureError(404, "not_found", "Маршрут не найден.");
       const token = /^Bearer ([A-Za-z0-9_-]{32,256})$/.exec(request.headers.authorization ?? "")?.[1];
       service.authenticate(token);
@@ -71,6 +96,15 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         const stockVersion = service.stockVersion();
         serveJson(response, 200, { ready: true, workerOnline: state.online, lastSeenAt: state.lastSeenAt,
           stockVersion, stockReady: state.online && stockVersion !== null && stockVersion >= 7 });
+      } else if (match[1] === "stock-progress") {
+        onlyMethod("POST");
+        if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
+        const payload = objectFields(await jsonBody(3 * 1024 * 1024), ["requestId", "leaseId", "productCard"]);
+        const result = parseProductCardResult(payload.productCard);
+        if (result.view !== "details") throw new NomenclatureError(400, "invalid_product_card", "Некорректный промежуточный ответ карточки.");
+        const requestId = parseUuid(payload.requestId);
+        service.publishProductProgress(token, requestId, parseUuid(payload.leaseId), result);
+        serveJson(response, 200, { accepted: true, requestId });
       } else if (match[1] === "results" || match[1] === "stock-results") {
         onlyMethod("POST");
         if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
@@ -83,9 +117,9 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         const platform = url.searchParams.get("testPlatform");
         const stock = url.searchParams.get("stock");
         if ([...url.searchParams.keys()].some((key) => !["waitSeconds", "stock", "testPlatform"].includes(key)) || url.searchParams.getAll("waitSeconds").length > 1
-          || url.searchParams.getAll("stock").length > 1 || stock !== null && !/^(?:[1-9]|1[0-2])$/.test(stock)
+          || url.searchParams.getAll("stock").length > 1 || stock !== null && !/^(?:[1-9]|1[0-3])$/.test(stock)
           || url.searchParams.getAll("testPlatform").length > 1
-          || (stock === "11" || stock === "12" ? platform !== "true" && platform !== "false" : platform !== null)
+          || (Number(stock) >= 11 ? platform !== "true" && platform !== "false" : platform !== null)
           || !/^(?:\d|1\d|20)$/.test(wait)) throw new NomenclatureError(400, "wait", "Ожидание должно быть от 0 до 20 секунд.");
         const release = service.beginPoll();
         const controller = new AbortController();
