@@ -28,6 +28,7 @@ interface Product {
   quantity: number;
 }
 interface OrderProduct extends Product {
+  productId?: string;
   stockDetails?: StockDetails;
   stock: number;
   receipt: string;
@@ -174,13 +175,14 @@ export function parseSupplierOrdersResult(value: unknown): SupplierOrdersResult 
   if (header.id !== id || typeof item.market !== "boolean") throw invalid();
   const market = item.market;
   const lines = products(item.products, (value): OrderProduct => {
-    const line = objectFields(value, [...productFields, "stock", "receipt", "price", "amount", "returnDays", "expectedDate", "stockDetails"]);
+    const line = objectFields(value, [...productFields, "productId", "stock", "receipt", "price", "amount", "returnDays", "expectedDate", "stockDetails"]);
     const price = optionalNumber(line.price);
     const amount = optionalNumber(line.amount);
     if (market && (price !== null || amount !== null) || !Number.isSafeInteger(line.returnDays) || Number(line.returnDays) < 0
       || line.expectedDate !== null && !validCalendarDate(line.expectedDate)) throw invalid();
     const stock = number(line.stock);
     return { ...product(line), stock, receipt: text(line.receipt, 100), price, amount,
+      ...(line.productId === undefined ? {} : { productId: parseUuid(line.productId) }),
       ...(line.stockDetails === undefined ? {} : { stockDetails: parseStockDetails(line.stockDetails, stock, () => { throw invalid(); }) }),
       returnDays: Number(line.returnDays), expectedDate: line.expectedDate };
   });

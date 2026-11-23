@@ -8,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { createAggregatorServer } from "../../src/backend/http/create-server.ts";
+import { productCardFixture } from "../fixtures/product-card.mjs";
 
 const json = (value, headers = {}) => ({ headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(value) });
 
@@ -24,7 +25,8 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     const token = (await (await request("/api/nomenclature/connection", { method: "POST", ...json({}) })).json()).token;
     const headers = { Authorization: `Bearer ${token}` };
     const poll = async (wait = 0, capability = 8) => {
-      const response = await request(`/api/integration/1c/nomenclature/requests?waitSeconds=${wait}&stock=${capability}`, { headers });
+      const version = capability >= 11 ? `${capability}&testPlatform=false` : capability;
+      const response = await request(`/api/integration/1c/nomenclature/requests?waitSeconds=${wait}&stock=${version}`, { headers });
       assert.equal(response.status, 200);
       return (await response.json()).request;
     };
@@ -742,6 +744,194 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
       });
       await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-panel-final.png"), fullPage: false });
     }
+    await poll(0, 11);
+    const salesCount = page.getByRole("checkbox", { name: "Количество продаж", exact: true });
+    const salesHeader = page.locator("#nomenclature-sales-count-heading");
+    await salesCount.check();
+    const salesJob = await poll(20, 11);
+    assert.deepEqual(salesJob.options.salesCount, { from: "2026-11-12", to: "2026-11-18" });
+    assert.equal(salesJob.options.sales, undefined);
+    const sold = [{ ...exactArticle, salesCount: 0 }, { ...products[1], salesCount: -2, price: prices[1].price }];
+    assert.equal((await complete(salesJob, sold)).status, 200);
+    await page.locator("[data-sales-count]").last().waitFor();
+    assert.deepEqual(await page.locator("[data-sales-count]").allTextContents(), ["0", "-2"]);
+    await salesHeader.getByRole("button").click();
+    const sortSales = await poll(20, 11);
+    assert.equal(sortSales.sortField, "salesCount");
+    assert.equal(sortSales.sortDirection, "asc");
+    assert.equal((await complete(sortSales, [...sold].reverse())).status, 200);
+    await page.locator("[data-sales-count]").last().waitFor();
+    assert.deepEqual(await page.locator("[data-sales-count]").allTextContents(), ["-2", "0"]);
+    const cardReads = [];
+    page.on("request", (req) => { if (new URL(req.url()).pathname.startsWith("/api/nomenclature/products/")) cardReads.push(req.url()); });
+    const product = sold[0];
+    await page.getByRole("button", { name: product.name, exact: true }).click();
+    assert.equal(await poll(0, 10), null, "a worker without product-card support cannot claim the read");
+    const productJob = await poll(20, 11);
+    assert.deepEqual(productJob.options.productCard, { id: product.id, view: "card" });
+    const publish = (job, data) => request("/api/integration/1c/nomenclature/stock-results", { method: "POST",
+      ...json({ requestId: job.id, leaseId: job.leaseId, status: "completed", hasMore: false, products: [],
+        productCard: { id: job.options.productCard.id, view: job.options.productCard.view, data } }, headers) });
+    assert.equal((await publish(productJob, productCardFixture(product, { replacements: [
+      { id: products[1].id, name: "Аналог фильтра", article: "A-7", brand: "Другой бренд" },
+    ] }))).status, 200);
+    const productDialog = page.getByRole("dialog", { name: product.name, exact: true });
+    await productDialog.getByText("Рекомендованная закупка").waitFor();
+    assert.equal(await productDialog.getByText("OEM-123").isVisible(), true);
+    assert.equal(await productDialog.getByText("Corolla").isVisible(), true);
+    assert.equal(await productDialog.getByText("Аналог фильтра").isVisible(), true);
+    await productDialog.getByRole("img").evaluate((image) => image.decode());
+    assert.equal(await productDialog.getByText("Без остатка").count(), 0);
+    assert.equal(await productDialog.getByRole("region", { name: "Оригинал", exact: true }).count(), 0);
+    assert.equal(cardReads.length, 1, "opening the card uses one request including its photo");
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(await productDialog.evaluate((dialog) => dialog.scrollWidth === dialog.clientWidth));
+      if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, `product-card-${width}.png`) });
+    }
+    await productDialog.getByRole("button", { name: "Все цены" }).click();
+    assert.equal(await productDialog.getByText("Цена комплекта").isVisible(), true);
+    await productDialog.getByRole("button", { name: "К карточке товара" }).click();
+    assert.equal(cardReads.length, 1, "the price form reuses the card data");
+    await productDialog.getByRole("button", { name: "История продаж" }).click();
+    const history = await poll(20, 11);
+    assert.deepEqual(history.options.productCard, { id: product.id, view: "history", period: { from: "2026-11-01", to: "2026-11-18" } });
+    assert.equal((await publish(history, { hasMore: false, rows: [
+      { date: "2026-11-10T13:30:00", operation: "Продажа", document: "Чек № 123", quantity: 2 },
+    ] })).status, 200);
+    await productDialog.getByText("Чек № 123").waitFor();
+    assert.equal(cardReads.length, 2, "history is loaded once on demand");
+    await page.keyboard.press("Escape");
+    assert.equal(await productDialog.isVisible(), false);
+    assert.equal(await page.getByRole("button", { name: product.name, exact: true }).evaluate((node) => node === document.activeElement), true);
+    await salesCount.uncheck();
+    const withoutSalesCount = await poll(20, 11);
+    assert.equal(withoutSalesCount.options.salesCount, undefined);
+    assert.equal(withoutSalesCount.sortField, "id");
+    const alternate = { id: products[1].id, name: "Взаимозаменяемый фильтр", article: "A-7", quantity: 2 };
+    const withStockLinks = { ...exactArticle, quantity: 3, stockDetails: { original: 1, replacements: [alternate] } };
+    assert.equal((await complete(withoutSalesCount, [withStockLinks])).status, 200);
+    assert.equal(await salesHeader.isVisible(), false);
+
+    await poll(0, 12);
+    const priceTypesForCard = ["Закупочная", "Розничная", "Безналичная", "Оптовая", "Акционная"]
+      .map((name) => ({ id: randomUUID(), name }));
+    const defaultPriceTypes = priceTypesForCard.slice(0, 3).map(({ id }) => id);
+    const fullCard = productCardFixture(product, {
+      prices: priceTypesForCard.map(({ id: typeId, name }, index) =>
+        ({ typeId, name, characteristic: "", unit: "шт", currency: "RUB", amount: 100 + index, primary: true })),
+      priceTypes: priceTypesForCard, defaultPriceTypes, oem: [], applicability: [], replacements: [],
+    });
+    const { image, incoming: cardIncoming, monthlySales, average, ...summary } = fullCard;
+    const preview = { ...summary, image: null, incoming: null, monthlySales: null, average: null, recommendation: null, detailsPending: true };
+    const start = performance.now();
+    await page.getByRole("button", { name: product.name, exact: true }).click();
+    assert.equal(await poll(0, 11), null, "old handlers cannot take the new preview job");
+    const previewJob = await poll(20, 12);
+    assert.equal(previewJob.options.productCard.view, "preview");
+    assert.equal((await publish(previewJob, preview)).status, 200);
+    const baseTable = productDialog.getByRole("region", { name: "Основные цены" });
+    await baseTable.waitFor();
+    const previewMs = performance.now() - start;
+    assert.deepEqual(await baseTable.locator("tbody tr td:first-child").allTextContents(), priceTypesForCard.slice(0, 3).map(({ name }) => name));
+    assert.equal(await productDialog.getByText("Загружаются показатели…").isVisible(), true);
+    for (const title of ["OEM-артикулы", "Применяемость", "Взаимозаменяемые товары", "Рекомендованная закупка"]) {
+      assert.equal(await productDialog.getByRole("heading", { name: title, exact: true }).count(), 0);
+    }
+    assert.equal(await productDialog.getByRole("img").count(), 0);
+    const detailsJob = await poll(20, 12);
+    assert.equal(detailsJob.options.productCard.view, "details");
+    const readsBeforeSettings = cardReads.length;
+    await productDialog.getByRole("button", { name: "Все цены" }).click();
+    assert.equal(await productDialog.getByRole("region", { name: "Все цены" }).locator("tbody tr").count(), 5);
+    await productDialog.getByRole("button", { name: "К карточке товара" }).click();
+    await productDialog.getByRole("button", { name: "Настройки цен" }).click();
+    await productDialog.getByLabel("Первая цена").selectOption(priceTypesForCard[4].id);
+    await productDialog.getByLabel("Вторая цена").selectOption(priceTypesForCard[4].id);
+    await productDialog.getByRole("button", { name: "Сохранить" }).click();
+    assert.equal(await productDialog.getByRole("alert").textContent(), "Для каждой строки выберите свой вид цены.");
+    await productDialog.getByLabel("Вторая цена").selectOption(priceTypesForCard[3].id);
+    assert.equal(cardReads.length, readsBeforeSettings, "viewing all prices and editing preferences reuse the preview data");
+    if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "product-price-settings.png") });
+    await delay(900);
+    assert.equal((await publish(detailsJob, { image, incoming: cardIncoming, monthlySales, average, recommendation: 0 })).status, 200);
+    assert.equal(await productDialog.getByRole("heading", { name: "Настройки цен карточки" }).isVisible(), true, "details do not reset a price edit");
+    await productDialog.getByRole("button", { name: "Сохранить" }).click();
+    await productDialog.getByText("В среднем за месяц").waitFor();
+    assert.equal(await productDialog.getByText("Рекомендованная закупка", { exact: true }).count(), 0);
+    assert.deepEqual(await baseTable.locator("tbody tr td:first-child").allTextContents(), ["Акционная", "Оптовая", "Безналичная"]);
+    const fullMs = performance.now() - start;
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: product.name, exact: true }).click();
+    assert.equal((await publish(await poll(20, 12), preview)).status, 200);
+    await baseTable.waitFor();
+    assert.deepEqual(await baseTable.locator("tbody tr td:first-child").allTextContents(), ["Акционная", "Оптовая", "Безналичная"]);
+    assert.equal((await publish(await poll(20, 12), { image, incoming: cardIncoming, monthlySales, average, recommendation: 1 })).status, 200);
+    const recommendation = productDialog.getByText("Рекомендованная закупка", { exact: true });
+    await recommendation.waitFor();
+    assert.equal(await recommendation.evaluate((node) => getComputedStyle(node).color), "rgb(180, 45, 22)");
+    console.log(`Product preview: prices visible at ${previewMs.toFixed(0)} ms; details deliberately withheld, visible at ${fullMs.toFixed(0)} ms (simulated worker).`);
+    await page.keyboard.press("Escape");
+
+    await poll(0, 13);
+    const balance = page.getByRole("button", { name: "Остаток 3. " + product.name, exact: true });
+    const balanceReads = cardReads.length;
+    await balance.click();
+    const balancePopup = page.getByRole("dialog", { name: "Остаток с учётом заказов" });
+    assert.equal(await balancePopup.getByRole("button", { name: alternate.name }).isVisible(), true);
+    assert.equal(cardReads.length, balanceReads, "displaying related products inside the existing stock snapshot requires no new HTTP request");
+    await balancePopup.getByRole("button", { name: product.name, exact: true }).click();
+    const linkedPreview = await poll(20, 13);
+    assert.deepEqual(linkedPreview.options.productCard, { id: product.id, view: "preview" });
+    assert.equal((await publish(linkedPreview, {
+      ...preview, stock: 3, stockDetails: withStockLinks.stockDetails,
+      replacements: [{ id: alternate.id, name: alternate.name, article: alternate.article, brand: "" }],
+    })).status, 200);
+    await baseTable.waitFor();
+    const progressiveJob = await poll(20, 13);
+    assert.equal(progressiveJob.options.productCard.view, "progressive");
+    assert.equal(await poll(0, 13), null, "the card requests one follow-up job");
+    const stagedDetails = { image, incoming: cardIncoming, monthlySales, average, recommendation: null };
+    const detailsStarted = performance.now();
+    const stage = await request("/api/integration/1c/nomenclature/stock-progress", {
+      method: "POST", ...json({ requestId: progressiveJob.id, leaseId: progressiveJob.leaseId,
+        productCard: { view: "details", id: product.id, data: stagedDetails } }, headers),
+    });
+    assert.equal(stage.status, 200);
+    await productDialog.getByRole("img").evaluate((node) => node.decode());
+    await productDialog.getByText("В среднем за месяц").waitFor();
+    assert.equal(await productDialog.getByText("Рассчитывается закупка…").isVisible(), true);
+    assert.equal(await recommendation.count(), 0, "photo and sales render before the final forecast");
+    const detailsMs = performance.now() - detailsStarted;
+    await delay(700);
+    const beforeForecast = cardReads.length;
+    assert.equal((await publish(progressiveJob, { recommendation: 2 })).status, 200);
+    await recommendation.waitFor();
+    console.log(`Progressive details: photo and sales rendered at ${detailsMs.toFixed(0)} ms, forecast at ${(performance.now() - detailsStarted).toFixed(0)} ms with a simulated delay.`);
+    assert.equal(cardReads.length, beforeForecast, "the forecast uses the same browser request and worker job");
+    const cardStock = productDialog.getByRole("region", { name: "Оригинал" });
+    await cardStock.getByRole("button", { name: product.name, exact: true }).click();
+    assert.equal(cardReads.length, beforeForecast, "the current original card is already open");
+
+    const incomingTrigger = productDialog.getByRole("button", { name: /К поступлению · замены/ });
+    await incomingTrigger.click();
+    const supply = await poll(20, 13);
+    assert.deepEqual(supply.options.incomingDetails, { productId: product.id, side: "replacement" });
+    assert.equal((await request("/api/integration/1c/nomenclature/stock-results", {
+      method: "POST", ...json({ requestId: supply.id, leaseId: supply.leaseId, status: "completed", hasMore: false, products: [],
+        incomingDetails: { orders: [{ orderId: randomUUID(), productId: alternate.id, supplier: "Тестовый поставщик", number: "7",
+          name: alternate.name, article: alternate.article, quantity: 2, ordered: 2, expectedDate: null }], hasMore: false } }, headers),
+    })).status, 200);
+    const supplyPopup = productDialog.getByRole("dialog", { name: "Поставки замен" });
+    await supplyPopup.getByRole("button", { name: alternate.name, exact: true }).click();
+    const alternatePreview = await poll(20, 13);
+    assert.deepEqual(alternatePreview.options.productCard, { id: alternate.id, view: "preview" });
+    assert.equal((await publish(alternatePreview, { ...preview, name: alternate.name, article: alternate.article, detailsPending: false })).status, 200);
+    const alternateDialog = page.getByRole("dialog", { name: alternate.name, exact: true });
+    await alternateDialog.locator(".product-card-facts").first().getByText(alternate.article, { exact: true }).waitFor();
+    await alternateDialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+    await page.waitForFunction((label) => document.activeElement?.getAttribute("aria-label") === label, "Остаток 3. " + product.name);
+    assert.equal(await balance.evaluate((node) => document.activeElement === node), true);
     assert.deepEqual(errors, []);
     console.log("Stock browser: search/debounce/cancellation, 1200 items in 12 batches, <=300 DOM rows; price sort, keyboard, cancellation and sorted continuation, one HTTP per action.");
   } finally {

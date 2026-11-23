@@ -835,7 +835,9 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 .nomenclature-quantity-short { display: none; }
 .nomenclature-stock table.has-price th:nth-child(2) { width: 20%; }
 .nomenclature-stock table.has-price th:nth-child(3) { width: 14%; }
-.nomenclature-stock table.has-price th:last-child { width: 20%; }
+.nomenclature-stock table.has-price #nomenclature-stock-price-heading { width: 20%; }
+.nomenclature-stock #nomenclature-sales-count-heading { width: 7rem; }
+.nomenclature-stock td[data-sales-count] { text-align: right; font-variant-numeric: tabular-nums; }
 .nomenclature-stock-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .nomenclature-stock-heading h3 { margin: 0; font-size: 18px; font-weight: 800; }
 .nomenclature-stock > .panel__meta { margin-top: 8px; }
@@ -844,7 +846,7 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
 :is(.nomenclature-stock, .supplier-orders-frame) th { padding: 9px 12px; color: #8994a1; background: #f4f6f8; font-size: 11px; font-weight: 800; letter-spacing: .03em; white-space: normal; text-transform: uppercase; }
 :is(.nomenclature-stock, .supplier-orders-frame) .table-sort { display: flex; width: 100%; min-height: 28px; gap: 5px; text-align: left; }
 :is(.nomenclature-stock, .supplier-orders-frame) .table-sort > span:first-child { min-width: 0; overflow-wrap: anywhere; }
-.nomenclature-stock th:nth-child(3) .table-sort, .nomenclature-stock th:last-child .table-sort { justify-content: flex-end; text-align: right; }
+.nomenclature-stock :is(th:nth-child(3), #nomenclature-stock-price-heading, #nomenclature-sales-count-heading) .table-sort { justify-content: flex-end; text-align: right; }
 .nomenclature-stock thead { position: sticky; top: 0; z-index: 3; }
 .nomenclature-stock td { white-space: normal; }
 .nomenclature-stock th:nth-child(2) { width: 24%; }
@@ -901,11 +903,16 @@ body:has(.nomenclature-preview[open]) { overflow: hidden; }
   .nomenclature-incoming-title { text-transform: none; }
   .nomenclature-stock table.has-price th:nth-child(2) { width: 17%; }
   .nomenclature-stock table.has-price th:nth-child(3) { width: 16%; }
-  .nomenclature-stock table.has-price th:last-child { width: 20%; }
+  .nomenclature-stock table.has-price #nomenclature-stock-price-heading { width: 20%; }
+  .nomenclature-stock table.has-sales-count th { padding-inline: 4px; font-size: 10px; letter-spacing: 0; }
+  .nomenclature-stock table.has-sales-count th:nth-child(2) { width: 16%; }
+  .nomenclature-stock table.has-sales-count th:nth-child(3) { width: 12%; }
+  .nomenclature-stock table.has-sales-count .nomenclature-incoming { width: 19%; }
+  .nomenclature-stock table.has-sales-count #nomenclature-stock-price-heading { width: 15%; }
+  .nomenclature-stock table.has-sales-count #nomenclature-sales-count-heading { width: 14%; }
 }
 .nomenclature-stock td strong { color: #198754; font-weight: 800; }
-.nomenclature-stock table.has-price th:last-child .table-sort { white-space: normal; }
-.nomenclature-stock table.has-price th:last-child .table-sort > span:first-child { text-align: right; }
+.nomenclature-stock table.has-price #nomenclature-stock-price-heading .table-sort { white-space: normal; }
 .nomenclature-stock .table-sort__icon { flex: 0 0 auto; }
 .nomenclature-stock-sentinel { min-height: 44px; padding-top: 12px; }
 .nomenclature-stock table { overflow-anchor: none; }
@@ -4194,8 +4201,13 @@ th[aria-sort="descending"] .analogs-sort span::after {
 .nomenclature-search-settings { position: relative; }
 .nomenclature-tool img { width: 24px; height: 24px; object-fit: contain; }
 .nomenclature-search-menu { position: absolute; top: calc(100% + 6px); right: 0; min-width: 240px; padding: 6px; z-index: 10; border: 1px solid var(--line); box-shadow: 0 8px 24px #172b4d20; }
-.nomenclature-stock-search:has(select:not([hidden])) { display: flex; gap: 6px; }
+.nomenclature-stock-search:has(select:not([hidden])) {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) minmax(0, 40%);
+  gap: 6px;
+}
 #nomenclature-oem-brand { min-width: 0; max-width: 45%; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.nomenclature-stock-search #nomenclature-oem-brand:not([hidden]) { max-width: 100%; }
 .nomenclature-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .nomenclature-main .nomenclature-stock-search { flex: 0 1 auto; }
 .nomenclature-stock-search input { color: #000; }

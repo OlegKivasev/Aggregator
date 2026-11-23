@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { chromium } from "playwright";
 import { UserAuthService } from "../../src/backend/auth/user-auth-service.ts";
 import { createAggregatorServer } from "../../src/backend/http/create-server.ts";
+import { productCardFixture } from "../fixtures/product-card.mjs";
 
 const secret = "isolated-repair-form-browser-secret";
 const workerHeader = { Authorization: `Bearer ${secret}` };
@@ -50,9 +51,9 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     const other = (await post("/api/auth/login", { fio: "Другой мастер", password: "test-user-password" })).headers.get("set-cookie").split(";", 1)[0];
     const token = (await (await post("/api/nomenclature/connection", {}, { Cookie: admin })).json()).token;
     const nomenclatureHeader = { Authorization: `Bearer ${token}` };
-    const claim = async (kind, waitSeconds) => {
+    const claim = async (kind, waitSeconds, testPlatform = false, version = 11) => {
       const repairs = kind === "repair";
-      const path = repairs ? "/api/integration/1c/repairs/refresh/requests?testPlatform=false" : "/api/integration/1c/nomenclature/requests?stock=8";
+      const path = repairs ? "/api/integration/1c/repairs/refresh/requests?testPlatform=false" : `/api/integration/1c/nomenclature/requests?stock=${version}&testPlatform=${testPlatform}`;
       const response = await fetch(`${origin}${path}&waitSeconds=${waitSeconds}`, { headers: repairs ? workerHeader : nomenclatureHeader });
       assert.equal(response.status, 200);
       return (await response.json()).request;
@@ -160,6 +161,27 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     assert.equal(await stockButton.getAttribute("aria-expanded"), "false");
     assert.equal(await stockButton.evaluate((node) => document.activeElement === node), true);
     assert.equal(await dialog.isVisible(), true);
+    const cardUrl = (id, productId) => `${origin}/api/repairs/refresh/${id}/products/${productId}?testPlatform=false`;
+    assert.equal((await page.request.get(cardUrl(requestId, randomUUID()))).status(), 404);
+    const publishCard = (job, product, overrides) => post("/api/integration/1c/nomenclature/stock-results", {
+      requestId: job.id, leaseId: job.leaseId, status: "completed", products: [], hasMore: false,
+      productCard: { id: product.productId, view: "card", data: productCardFixture(product, overrides) },
+    }, nomenclatureHeader);
+    const openProduct = async (name, product, overrides) => {
+      const response = page.waitForResponse((reply) => new URL(reply.url()).pathname.endsWith(`/products/${product.productId}`));
+      await goodsTable.getByRole("button", { name, exact: true }).click();
+      assert.equal(await claim("stock", 0, true), null, "test workers cannot claim a production repair's product");
+      const job = await claim("stock", 5);
+      assert.deepEqual(job.options.productCard, { id: product.productId, testPlatform: false, view: "card" });
+      assert.equal((await publishCard(job, product, overrides)).status, 200);
+      return (await response).json();
+    };
+    const unrestrictedProduct = await openProduct(stock.name, stock);
+    assert.equal(unrestrictedProduct.article, stock.article);
+    const productDialog = page.getByRole("dialog", { name: stock.name, exact: true });
+    await productDialog.getByText("Рекомендованная закупка").waitFor();
+    await productDialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+    assert.equal(await dialog.isVisible(), true);
     const waitingRow = goodsTable.getByRole("row", { name: /Подшипник под заказ/ });
     const waitStyles = (row) => row.evaluate((node) => ({
       color: getComputedStyle(node).outlineColor,
@@ -193,7 +215,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       const before = repairRequests.length;
       await button[mobile ? "tap" : "click"]();
       const job = await claim("stock", 5);
-      assert.deepEqual(job.options.incomingDetails, { productId: product.productId, side });
+      assert.deepEqual(job.options.incomingDetails, { productId: product.productId, side, testPlatform: false });
       assert.equal((await post("/api/integration/1c/nomenclature/stock-results", {
         requestId: job.id, leaseId: job.leaseId, status: "completed", products: [], hasMore: false,
         incomingDetails: { orders: [{ orderId: randomUUID(), productId: side === "original" ? product.productId : randomUUID(),
@@ -235,8 +257,9 @@ test("employee opens a single fresh repair order and its allowed supplier orders
       await checkSupply(firstRow, stock, "replacement", width, true);
       const productName = firstRow.getByRole("rowheader");
       assert.equal(await productName.evaluate((node) => getComputedStyle(node).webkitTapHighlightColor), "rgba(0, 0, 0, 0)");
-      await productName.tap();
-      assert.equal(await productName.evaluate((node) => getComputedStyle(node).outlineStyle), "none");
+      const product = await openProduct(stock.name, stock);
+      assert.equal(product.article, stock.article);
+      await productDialog.getByRole("button", { name: "Закрыть", exact: true }).tap();
     }
     await dialog.getByRole("tab", { name: "Работы (2)" }).click();
     assert.equal(await dialog.getByText("Тестовый механик").first().isVisible(), true);
@@ -320,6 +343,44 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     assert.equal(restricted.goods[0].article, "");
     assert.equal(await goodsTable.getByRole("columnheader", { name: "Артикул" }).count(), 0);
     assert.equal(await goodsTable.getByRole("rowheader", { name: "Комплект ГРМ", exact: true }).isVisible(), true);
+    assert.equal((await fetch(cardUrl(restrictedId, branded.productId), { headers: { Cookie: other } })).status, 404);
+    const related = { id: randomUUID(), name: "Комплект-замена | Закрытый бренд", article: "PRIVATE-REPLACEMENT", brand: "Закрытый бренд" };
+    const limitedProduct = await openProduct("Комплект ГРМ", branded, {
+      brand: "Закрытый бренд", stock: 20, stockDetails, replacements: [related],
+    });
+    assert.equal(limitedProduct.name, "Комплект ГРМ");
+    assert.equal(limitedProduct.article, "");
+    assert.equal(limitedProduct.brand, "");
+    assert.equal(limitedProduct.image, null);
+    assert.deepEqual(limitedProduct.oem, []);
+    assert.doesNotMatch(JSON.stringify(limitedProduct), /Закрытый бренд|PRIVATE-ARTICLE|PRIVATE-REPLACEMENT/);
+    const signedRelated = limitedProduct.replacements[0];
+    assert.equal((await page.request.get(cardUrl(restrictedId, related.id))).status(), 404, "unseen UUID is not granted");
+    assert.equal((await page.request.get(cardUrl(restrictedId, randomUUID()) + "&grant=" + signedRelated.cardProof)).status(), 404, "grant cannot open a different product");
+    assert.equal((await fetch(cardUrl(restrictedId, related.id) + "&grant=" + signedRelated.cardProof, { headers: { Cookie: other } })).status, 404);
+    const limitedDialog = page.getByRole("dialog", { name: "Комплект ГРМ", exact: true });
+    await limitedDialog.getByRole("region", { name: "Взаимозаменяемые товары" }).getByRole("button", { name: "Комплект-замена", exact: true }).click();
+    const linked = await claim("stock", 5);
+    assert.deepEqual(linked.options.productCard, { id: related.id, testPlatform: false, view: "card" });
+    assert.equal((await publishCard(linked, { ...related, productId: related.id }, { brand: related.brand })).status, 200);
+    const relatedDialog = page.getByRole("dialog", { name: "Комплект-замена", exact: true });
+    await relatedDialog.getByText("Рекомендованная закупка").waitFor();
+    assert.doesNotMatch(await relatedDialog.innerText(), /Закрытый бренд|PRIVATE-REPLACEMENT/);
+    await relatedDialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+    await claim("stock", 0, false, 12);
+    const detailsUrl = cardUrl(restrictedId, branded.productId) + "&details=1";
+    assert.equal((await fetch(detailsUrl, { headers: { Cookie: other } })).status, 404);
+    const productDetailsResponse = page.request.get(detailsUrl);
+    const productDetailsJob = await claim("stock", 5, false, 12);
+    assert.deepEqual(productDetailsJob.options.productCard, { id: branded.productId, testPlatform: false, view: "details" });
+    const { image, incoming, monthlySales, average, recommendation } = productCardFixture(branded);
+    assert.equal((await post("/api/integration/1c/nomenclature/stock-results", {
+      requestId: productDetailsJob.id, leaseId: productDetailsJob.leaseId, status: "completed", hasMore: false, products: [],
+      productCard: { id: branded.productId, view: "details", data: { image, incoming, monthlySales, average, recommendation } },
+    }, nomenclatureHeader)).status, 200);
+    const restrictedDetails = await (await productDetailsResponse).json();
+    assert.equal(restrictedDetails.image, null);
+    assert.equal(restrictedDetails.recommendation, recommendation);
 
     const receipt = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith(`/refresh/${restrictedId}/incoming`));
     await dialog.getByRole("button", { name: /Поставки оригинала/ }).click();

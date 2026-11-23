@@ -1,6 +1,6 @@
 import { NomenclatureError, objectFields, parseUuid } from "./contract.ts";
 
-export type StockSortField = "id" | "name" | "article" | "quantity" | "price";
+export type StockSortField = "id" | "name" | "article" | "quantity" | "price" | "salesCount";
 export interface StockSort { field: StockSortField; direction: "asc" | "desc" }
 export interface StockPosition { id: string; value: string | null }
 export const defaultStockSort: StockSort = { field: "id", direction: "asc" };
@@ -8,7 +8,7 @@ const invalid = () => new NomenclatureError(400, "invalid_stock_sort", "Неко
 
 export function parseStockSort(field: string | null, direction: string | null): StockSort {
   const sort = { field: field ?? "id", direction: direction ?? "asc" };
-  if (!["id", "name", "article", "quantity", "price"].includes(sort.field) || !["asc", "desc"].includes(sort.direction)
+  if (!["id", "name", "article", "quantity", "price", "salesCount"].includes(sort.field) || !["asc", "desc"].includes(sort.direction)
     || sort.field === "id" && sort.direction !== "asc") throw invalid();
   return sort as StockSort;
 }
@@ -16,10 +16,10 @@ export function parseStockSort(field: string | null, direction: string | null): 
 export function validateStockSortValue(value: unknown, field: StockSortField, signed = false): string | null {
   if (field === "id") { if (value !== null) throw invalid(); return null; }
   if (typeof value !== "string") throw invalid();
-  if (field === "quantity") {
+  if (field === "quantity" || field === "salesCount") {
     // Keep 1C's exact decimal text, even above Number's exact fractional range.
     if (value.length > 64 || !/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value)
-      || !Number.isFinite(Number(value)) || (!signed && Number(value) <= 0) || Math.abs(Number(value)) > 1e15) throw invalid();
+      || !Number.isFinite(Number(value)) || (field === "quantity" && !signed && Number(value) <= 0) || Math.abs(Number(value)) > 1e15) throw invalid();
   } else if (field === "price") {
     if (value.length > 160) throw invalid();
     try {

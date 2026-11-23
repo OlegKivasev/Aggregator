@@ -1,6 +1,7 @@
 import { NomenclatureError, parseUuid } from "./contract.ts";
 import { validCalendarDate, type IncomingRequest } from "./incoming-contract.ts";
 import type { SupplierOrdersRequest } from "../purchasing/supplier-orders-contract.ts";
+import type { ProductCardRequest } from "./product-card-contract.ts";
 
 interface StockPeriod {
   from: string;
@@ -9,7 +10,7 @@ interface StockPeriod {
 }
 
 export const inventoryParameters = ["inventory", "receiptFrom", "receiptTo", "receiptSource",
-  "saleFrom", "saleTo", "saleSource", "oemPresence", "oemFilterBrand"];
+  "saleFrom", "saleTo", "saleSource", "salesCountFrom", "salesCountTo", "oemPresence", "oemFilterBrand"];
 
 export interface StockOptions {
   availability: "available" | "all" | "absent"; priceType: string | null;
@@ -17,10 +18,12 @@ export interface StockOptions {
   inventory?: true;
   receipts?: StockPeriod;
   sales?: StockPeriod;
+  salesCount?: { from: string; to: string };
   oemPresence?: "present" | "absent";
   oemFilterBrand?: string;
   incomingDetails?: IncomingRequest;
   supplierOrders?: SupplierOrdersRequest;
+  productCard?: ProductCardRequest;
 }
 
 function parsePeriod(params: URLSearchParams, prefix: "receipt" | "sale"): StockPeriod | undefined {
@@ -59,6 +62,14 @@ export function parseStockOptions(availability: string | null, priceType: string
     const sales = parsePeriod(search, "sale");
     if (receipts) options.receipts = receipts;
     if (sales) options.sales = sales;
+    const countFrom = search.get("salesCountFrom");
+    const countTo = search.get("salesCountTo");
+    if (countFrom !== null || countTo !== null) {
+      if (!validCalendarDate(countFrom) || !validCalendarDate(countTo) || countFrom > countTo) {
+        throw new NomenclatureError(400, "invalid_stock_filter", "Укажите корректный период количества продаж.");
+      }
+      options.salesCount = { from: countFrom, to: countTo };
+    }
     if (presence) options.oemPresence = presence;
     if (brand !== null) options.oemFilterBrand = parseUuid(brand);
   }

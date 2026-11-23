@@ -6,8 +6,9 @@ import { parseIncomingRequest, type IncomingDetails, type IncomingRequest } from
 import { decodeStockCursor, parseStockSort } from "../nomenclature/stock-sort.ts";
 import { inventoryParameters, parseStockOptions, stockOptionsKey } from "../nomenclature/stock-options.ts";
 import type { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
+import { parseProductCardRequest, parseProductCardResult, type ProductCardRequest, type ProductCardResult } from "../nomenclature/product-card-contract.ts";
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
-import { serveJson } from "./responses.ts";
+import { securityHeaders, serveJson, writeSseEvent } from "./responses.ts";
 
 export async function serveIncoming(response: ServerResponse, service: NomenclatureService, incomingDetails: IncomingRequest,
   project?: (details: IncomingDetails) => IncomingDetails) {
@@ -20,8 +21,53 @@ export async function serveIncoming(response: ServerResponse, service: Nomenclat
   } finally { response.removeListener("close", abort); }
 }
 
+export async function serveProductCard(response: ServerResponse, service: NomenclatureService, productCard: ProductCardRequest,
+  project?: (result: ProductCardResult) => ProductCardResult) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  response.once("close", abort);
+  const started = performance.now();
+  const write = (kind: string, data: unknown) => {
+    if (!response.headersSent) {
+      response.setHeader("Server-Timing", `product-card;dur=${(performance.now() - started).toFixed(1)};desc="${productCard.view}"`);
+      response.writeHead(200, { ...securityHeaders, "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no" });
+    }
+    writeSseEvent(response, { kind, data });
+  };
+  try {
+    const version = service.stockVersion(productCard.testPlatform) ?? 0;
+    if (productCard.view === "card" && version >= 12) {
+      productCard = { ...productCard, view: "preview" };
+    }
+    const progressive = productCard.view === "progressive";
+    const page = await service.loadStock(null, controller.signal, "", undefined, { availability: "all", priceType: null, productCard },
+      progressive ? (partial) => {
+        const result = project ? project(partial) : partial;
+        if (!response.destroyed) write("details", result.data);
+      } : undefined);
+    if (response.destroyed) return;
+    const result = page.productCard && (project ? project(page.productCard) : page.productCard);
+    if (!result?.data) throw new NomenclatureError(404, "product_not_found", "Данные товара недоступны в 1С.");
+    if (progressive) {
+      write("recommendation", result.data);
+      response.end();
+    } else {
+      response.setHeader("Server-Timing", `product-card;dur=${(performance.now() - started).toFixed(1)};desc="${productCard.view}"`);
+      serveJson(response, 200, result.view === "preview" && version >= 13 ? { ...result.data, progressiveDetails: true } : result.data);
+    }
+  } catch (error) {
+    if (!response.headersSent) throw error;
+    if (!response.destroyed) {
+      write("error", "Не удалось завершить расчёт закупки.");
+      response.end();
+    }
+  } finally { response.removeListener("close", abort); }
+}
+
 export async function serveNomenclature(request: IncomingMessage, response: ServerResponse, url: URL,
-  service: NomenclatureService, user: AuthenticatedUser | null, reportError: () => void): Promise<boolean> {
+  service: NomenclatureService, user: AuthenticatedUser | null, reportError: () => void,
+  readCurrentUser?: () => AuthenticatedUser | null): Promise<boolean> {
   const integration = url.pathname.startsWith("/api/integration/1c/nomenclature/");
   if (!integration && !url.pathname.startsWith("/api/nomenclature/")) return false;
   response.setHeader("Cache-Control", "no-store");
@@ -38,7 +84,7 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
   };
   try {
     if (integration) {
-      const match = /^\/api\/integration\/1c\/nomenclature\/(requests|results|stock-results|status)$/.exec(url.pathname);
+      const match = /^\/api\/integration\/1c\/nomenclature\/(requests|results|stock-results|stock-progress|status)$/.exec(url.pathname);
       if (!match) throw new NomenclatureError(404, "not_found", "Маршрут не найден.");
       const token = /^Bearer ([A-Za-z0-9_-]{32,256})$/.exec(request.headers.authorization ?? "")?.[1];
       service.authenticate(token);
@@ -50,6 +96,15 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         const stockVersion = service.stockVersion();
         serveJson(response, 200, { ready: true, workerOnline: state.online, lastSeenAt: state.lastSeenAt,
           stockVersion, stockReady: state.online && stockVersion !== null && stockVersion >= 7 });
+      } else if (match[1] === "stock-progress") {
+        onlyMethod("POST");
+        if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
+        const payload = objectFields(await jsonBody(3 * 1024 * 1024), ["requestId", "leaseId", "productCard"]);
+        const result = parseProductCardResult(payload.productCard);
+        if (result.view !== "details") throw new NomenclatureError(400, "invalid_product_card", "Некорректный промежуточный ответ карточки.");
+        const requestId = parseUuid(payload.requestId);
+        service.publishProductProgress(token, requestId, parseUuid(payload.leaseId), result);
+        serveJson(response, 200, { accepted: true, requestId });
       } else if (match[1] === "results" || match[1] === "stock-results") {
         onlyMethod("POST");
         if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
@@ -59,8 +114,12 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
       } else {
         onlyMethod("GET");
         const wait = url.searchParams.get("waitSeconds") ?? "20";
-        if ([...url.searchParams.keys()].some((key) => !["waitSeconds", "stock"].includes(key)) || url.searchParams.getAll("waitSeconds").length > 1
-          || url.searchParams.getAll("stock").length > 1 || url.searchParams.has("stock") && !/^(?:[1-9]|10)$/.test(url.searchParams.get("stock")!)
+        const platform = url.searchParams.get("testPlatform");
+        const stock = url.searchParams.get("stock");
+        if ([...url.searchParams.keys()].some((key) => !["waitSeconds", "stock", "testPlatform"].includes(key)) || url.searchParams.getAll("waitSeconds").length > 1
+          || url.searchParams.getAll("stock").length > 1 || stock !== null && !/^(?:[1-9]|1[0-3])$/.test(stock)
+          || url.searchParams.getAll("testPlatform").length > 1
+          || (Number(stock) >= 11 ? platform !== "true" && platform !== "false" : platform !== null)
           || !/^(?:\d|1\d|20)$/.test(wait)) throw new NomenclatureError(400, "wait", "Ожидание должно быть от 0 до 20 секунд.");
         const release = service.beginPoll();
         const controller = new AbortController();
@@ -69,8 +128,7 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         try {
           const deadline = Date.now() + Number(wait) * 1000;
           while (!controller.signal.aborted) {
-            const version = Number(url.searchParams.get("stock") ?? "0");
-            const job = service.claim(token, version >= 1, version >= 2, version >= 3, version >= 4, version >= 5, version >= 6, version >= 7, version >= 8, version >= 9, version >= 10);
+            const job = service.claimForWorker(token, Number(stock ?? "0"), platform === null ? null : platform === "true");
             if (job || Date.now() >= deadline) { serveJson(response, 200, { request: job }); break; }
             await service.wait(controller.signal, deadline - Date.now());
           }
@@ -79,6 +137,20 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
       return true;
     }
 
+    const productRoute = /^\/api\/nomenclature\/products\/([^/]+)$/.exec(url.pathname);
+    if (productRoute) {
+      onlyMethod("GET");
+      await serveProductCard(response, service, parseProductCardRequest(productRoute[1], url.searchParams), (result) => {
+        if (readCurrentUser) {
+          const current = readCurrentUser();
+          if (!current || current.id !== owner || !current.isAdmin && !current.permissions.includes("nomenclature")) {
+            throw new NomenclatureError(403, "forbidden", "Доступ к номенклатуре изменился.");
+          }
+        }
+        return result;
+      });
+      return true;
+    }
     if (url.pathname === "/api/nomenclature/incoming") {
       onlyMethod("GET");
       await serveIncoming(response, service, parseIncomingRequest(url.searchParams));
@@ -96,6 +168,9 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         throw new NomenclatureError(400, "invalid_stock_filter", "Некорректный отбор номенклатуры.");
       }
       const options = url.searchParams.has("details") ? parseStockOptions(url.searchParams.get("availability"), url.searchParams.get("priceType"), url.searchParams) : undefined;
+      if (sort.field === "salesCount" && !options?.salesCount) {
+        throw new NomenclatureError(400, "invalid_stock_sort", "Включите количество продаж и укажите период.");
+      }
       const query = parseStockQuery(url.searchParams.get("q") ?? "", !!(options?.searchMode || options?.inventory));
       const cursor = url.searchParams.get("after");
       decodeStockCursor(cursor, query, sort, stockOptionsKey(options));

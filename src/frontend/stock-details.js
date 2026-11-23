@@ -1,11 +1,12 @@
 const quantity = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 
-export function renderStockGroups(container, product, details) {
+export function renderStockGroups(container, product, details, renderName = (line) => line.name) {
   const groups = [];
   if (details.original > 0) {
-    groups.push(["original", "Оригинал", [{ name: product.name, article: product.article, quantity: details.original }]]);
+    groups.push(["original", "Оригинал", [{ ...product, id: product.id ?? product.productId, quantity: details.original }]]);
   }
-  if (details.replacements.length) groups.push(["replacements", "Замена", details.replacements]);
+  const availableReplacements = details.replacements.filter((line) => line.quantity > 0);
+  if (availableReplacements.length) groups.push(["replacements", "Замена", availableReplacements]);
   if (!groups.length) {
     const empty = document.createElement("p");
     empty.textContent = "Свободного остатка нет";
@@ -25,7 +26,7 @@ export function renderStockGroups(container, product, details) {
       const row = document.createElement("div");
       const name = document.createElement("dt");
       const count = document.createElement("dd");
-      name.textContent = line.name;
+      name.append(renderName(line));
       if (line.article) {
         const article = document.createElement("small");
         article.textContent = line.article;
@@ -40,10 +41,10 @@ export function renderStockGroups(container, product, details) {
   }));
 }
 
-export function stockQuantity(product, total, popover) {
+export function stockQuantity(product, total, popover, cardUrl) {
   if (total == null) return "—";
   const text = quantity.format(total);
-  if (!product.stockDetails) return text;
+  if (total <= 0 || !product.stockDetails) return text;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "stock-details-trigger";
@@ -52,6 +53,6 @@ export function stockQuantity(product, total, popover) {
   button.setAttribute("aria-haspopup", "dialog");
   button.setAttribute("aria-expanded", "false");
   button.setAttribute("aria-controls", popover.id);
-  button.addEventListener("click", (event) => popover.openStock(button, product, total, event));
+  button.addEventListener("click", (event) => popover.openStock(button, product, total, event, cardUrl));
   return button;
 }

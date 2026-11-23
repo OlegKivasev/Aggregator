@@ -1,16 +1,18 @@
-import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=stock-popup-1";
-import { stockQuantity } from "./stock-details.js?v=stock-popup-1";
+import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=product-card-3";
+import { stockQuantity } from "./stock-details.js?v=product-card-3";
+import { catalogueUrl, productCardButton } from "./product-card.js?v=product-card-3";
 
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const incomingFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 
 // Keep three batches in the DOM. Measured spacers preserve access to earlier rows.
 export function createStockTable(rows, before, after, selectionChanged = () => {}) {
-  const incomingPopover = createIncomingPopover();
+  const incomingPopover = createIncomingPopover(document.body, "nomenclature-incoming-popover", productCardButton, catalogueUrl);
   const selected = new Set();
   const productsById = new Map();
   let selectionAnchor;
   let showPrice = false;
+  let showSalesCount = false;
   let highlightTerms = [];
   const currencyFormats = new Map();
   const priceText = (price) => {
@@ -88,7 +90,7 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
     paintSelection();
   };
   rows.addEventListener("click", (event) => {
-    if (event.target.closest(".stock-details-trigger")) return;
+    if (event.target.closest(".stock-details-trigger, .product-card-link")) return;
     const row = event.target.closest("tr[data-product-id]");
     if (!row) return;
     const button = event.target.closest("[data-incoming-side]");
@@ -140,7 +142,11 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
           row.tabIndex = 0;
           row.setAttribute("aria-selected", String(selected.has(product.id)));
           row.setAttribute("aria-rowindex", String(index * 100 + position + 2));
-          const nameCell = document.createElement("td"); appendHighlighted(nameCell, product.name, product.nameMatches); row.append(nameCell);
+          const nameCell = document.createElement("td");
+          const name = productCardButton(product);
+          appendHighlighted(name, product.name, product.nameMatches);
+          nameCell.append(name);
+          row.append(nameCell);
           const articleCell = document.createElement("td"); appendHighlighted(articleCell, product.article); row.append(articleCell);
           const quantityCell = document.createElement("td");
           quantityCell.append(stockQuantity(product, product.quantity, incomingPopover));
@@ -171,6 +177,11 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
           incoming.append(pair);
           row.append(incoming);
           if (showPrice) { const cell = document.createElement("td"); cell.dataset.stockPrice = ""; cell.textContent = priceText(product.price); row.append(cell); }
+          if (showSalesCount) {
+            const cell = row.insertCell();
+            cell.dataset.salesCount = "";
+            cell.textContent = numberFormat.format(product.salesCount);
+          }
           return row;
         }));
       }
@@ -203,7 +214,7 @@ export function createStockTable(rows, before, after, selectionChanged = () => {
     rebuildOffsets(); render(true);
   }).observe(rows.closest("table"));
   return {
-    reset(price = false, query = "") { incomingPopover.close(); showPrice = price; highlightTerms = query.split(/\s+/).filter(Boolean); chunks = []; offsets = [0]; rendered.clear(); productsById.clear(); selected.clear(); selectionAnchor = undefined; range = ""; rows.replaceChildren(); spacer(before, 0); spacer(after, 0); selectionChanged(0); },
+    reset(price = false, query = "", salesCount = false) { incomingPopover.close(); showPrice = price; showSalesCount = salesCount; highlightTerms = query.split(/\s+/).filter(Boolean); chunks = []; offsets = [0]; rendered.clear(); productsById.clear(); selected.clear(); selectionAnchor = undefined; range = ""; rows.replaceChildren(); spacer(before, 0); spacer(after, 0); selectionChanged(0); },
     append(products) {
       if (!products.length) return;
       for (const product of products) productsById.set(product.id, product);

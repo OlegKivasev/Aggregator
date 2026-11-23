@@ -144,3 +144,64 @@ test("inventory periods validate calendar dates and scope leases, counts and cur
     console.log(`Inventory periods: 100 reads, 2 distinct filter sets, 2 jobs, ${(performance.now() - started).toFixed(1)} ms in local SQLite.`);
   });
 });
+
+test("sales-count sorting uses signed counts and binds continuation to the selected dates", async () => {
+  const optionsFor = (to) => parseStockOptions("all", null, new URLSearchParams({
+    inventory: "1", salesCountFrom: "2026-11-12", salesCountTo: to,
+  }));
+  for (const date of ["", "2026-11-11", "2026-11-31"]) assert.throws(() => optionsFor(date), { statusCode: 400 });
+  const options = optionsFor("2026-11-18");
+  await fixture(async ({ service, token }) => {
+    const sort = { field: "salesCount", direction: "asc" };
+    const signal = new AbortController().signal;
+    const claim = (version) => service.claimForWorker(token, version, false);
+    claim(10);
+    assert.throws(() => service.loadStock(null, signal, "", sort, options), { code: "stock_unsupported" });
+    claim(11);
+    const first = service.loadStock(null, signal, "", sort, options);
+    assert.equal(claim(10), null);
+    const job = claim(11);
+    const product = (salesCount) => ({ ...item(0), salesCount, incoming: { original: 0, replacement: 0 } });
+    const products = Array.from({ length: 100 }, () => product(-2.125));
+    const metadata = { lastSortValue: "-2.125", hasMore: true, totalCount: 101, priceTypes: [] };
+    assert.throws(() => service.completeStock(token, result(job, [{ ...products[0], salesCount: undefined }, ...products.slice(1)], metadata)),
+      { code: "invalid_stock" });
+    service.completeStock(token, parseStockResult(result(job, products, metadata), true));
+    const page = await first;
+    assert.throws(() => decodeStockCursor(page.nextCursor, "", sort, stockOptionsKey(optionsFor("2026-11-19"))));
+    const second = service.loadStock(page.nextCursor, signal, "", sort, options);
+    const next = claim(11);
+    assert.deepEqual(next.after, { id: products.at(-1).id, value: "-2.125" });
+    const unsold = product(0);
+    service.completeStock(token, parseStockResult(result(next, [unsold]), true));
+    assert.deepEqual((await second).products, [unsold]);
+  });
+});
+
+test("concurrent card readers share published details until the forecast is ready", async () => {
+  await fixture(async ({ service, token }) => {
+    const id = randomUUID();
+    const options = { availability: "all", priceType: null, productCard: { id, view: "progressive", testPlatform: false } };
+    service.claimForWorker(token, 13, false);
+    const abort = new AbortController();
+    const firstEvents = [];
+    const first = service.loadStock(null, abort.signal, "", defaultStockSort, options, (details) => firstEvents.push(details));
+    const job = service.claimForWorker(token, 13, false);
+    const partial = { id, view: "details", data: { image: null, incoming: null, monthlySales: [], average: 0, recommendation: null } };
+    assert.throws(() => service.publishProductProgress(token, job.id, randomUUID(), partial), { statusCode: 409 });
+    service.publishProductProgress(token, job.id, job.leaseId, partial);
+    service.publishProductProgress(token, job.id, job.leaseId, partial);
+    assert.deepEqual(firstEvents, [partial]);
+
+    const lateEvents = [];
+    const late = service.loadStock(null, new AbortController().signal, "", defaultStockSort, options, (details) => lateEvents.push(details));
+    assert.deepEqual(lateEvents, [partial]);
+    assert.equal(service.claimForWorker(token, 13, false), null);
+    abort.abort();
+    await assert.rejects(first, { name: "AbortError" });
+    const final = { id, view: "progressive", data: { recommendation: 4 } };
+    service.completeStock(token, result(job, [], { productCard: final }));
+    assert.deepEqual((await late).productCard, final);
+    assert.throws(() => service.publishProductProgress(token, job.id, job.leaseId, partial), { statusCode: 409 });
+  });
+});

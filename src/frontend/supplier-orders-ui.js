@@ -1,5 +1,6 @@
-import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=stock-popup-1";
-import { stockQuantity } from "./stock-details.js?v=stock-popup-1";
+import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=product-card-3";
+import { stockQuantity } from "./stock-details.js?v=product-card-3";
+import { catalogueUrl, productCardButton } from "./product-card.js?v=product-card-3";
 
 const endpoint = "/api/purchasing/supplier-orders";
 const quantity = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
@@ -138,7 +139,10 @@ export function bootstrapSupplierOrders(section) {
   const more = byId("supplier-orders-more");
   const pagination = byId("supplier-orders-pagination");
   const dialog = byId("supplier-order-dialog");
-  const stockPopover = createIncomingPopover(dialog, "supplier-order-stock-popover");
+  const stockPopover = createIncomingPopover(dialog, "supplier-order-stock-popover", productCardButton, (row) => {
+    const user = window.aggregatorAuthState?.user;
+    return !user || user.isAdmin || user.permissions?.includes("nomenclature") ? catalogueUrl(row) : null;
+  });
   const noteEditor = createNoteEditor();
   const title = byId("supplier-order-title");
   const date = byId("supplier-order-date");

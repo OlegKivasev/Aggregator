@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { NomenclatureError, type LookupResult } from "./contract.ts";
 import { StockRequests, stockWorkerConditions, stockWorkerFlags } from "./stock-requests.ts";
+import type { ProductCardProgress } from "./product-card-contract.ts";
 import type { StockResult } from "./stock-contract.ts";
 import { defaultStockSort, type StockSort } from "./stock-sort.ts";
 import type { StockOptions } from "./stock-options.ts";
@@ -30,7 +31,7 @@ export class NomenclatureService {
   private closed = false;
   private readonly now: () => number;
   private readonly stock: StockRequests;
-  private readonly stockWorkers = new Map<number, number>();
+  private readonly stockWorkers = new Map<string, { version: number; testPlatform: boolean | null; seen: number }>();
   private observedStockVersion: number | null = null;
 
   constructor(path: string, now: () => number = Date.now) {
@@ -115,33 +116,39 @@ export class NomenclatureService {
     this.stock.notify();
   }
 
-  stockVersion(): number | null {
+  stockVersion(testPlatform?: boolean): number | null {
     let version: number | null = null;
-    for (const [candidate, seen] of this.stockWorkers) {
-      if (this.now() - seen >= onlineMs) this.stockWorkers.delete(candidate);
-      else version = Math.max(version ?? 0, candidate);
+    const now = this.now();
+    for (const [key, worker] of this.stockWorkers) {
+      if (now - worker.seen >= onlineMs) this.stockWorkers.delete(key);
+      else if (testPlatform === undefined || testPlatform === worker.testPlatform) version = Math.max(version ?? 0, worker.version);
     }
     return version;
   }
 
-  loadStock(cursor: string | null, signal: AbortSignal, query = "", sort: StockSort = defaultStockSort, options?: StockOptions) {
+  loadStock(cursor: string | null, signal: AbortSignal, query = "", sort: StockSort = defaultStockSort, options?: StockOptions,
+    onProgress?: (result: ProductCardProgress) => void) {
     if (this.closed) throw new NomenclatureError(503, "stopping", "Соединение закрывается.");
     const connection = this.state();
     if (!connection.configured) throw new NomenclatureError(503, "source_unconfigured", "Подключение номенклатуры ещё не настроено.");
     if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.");
     const purchase = options?.supplierOrders;
-    const required = purchase?.view === "listPage" ? 10 : purchase ? 9 : options?.incomingDetails ? 8 : options?.inventory ? 7 : options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
+    const view = options?.productCard?.view;
+    const testPlatform = options?.productCard?.testPlatform ?? options?.incomingDetails?.testPlatform;
+    const required = view === "progressive" ? 13 : view === "preview" || view === "details" ? 12 : options?.productCard || options?.salesCount || testPlatform !== undefined ? 11
+      : purchase?.view === "listPage" ? 10 : purchase ? 9 : options?.incomingDetails ? 8 : options?.inventory ? 7 : options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
     const checkWorker = () => {
-      const version = this.stockVersion();
+      const version = this.stockVersion(testPlatform);
       // After a restart, let the first authenticated poll identify the worker.
       if (version !== null && version < required) {
         const list = purchase?.view === "listPage" ? "поиск и сортировку заказов поставщикам"
-          : purchase ? "заказы поставщикам" : "этот список номенклатуры";
+          : purchase ? "заказы поставщикам" : options?.productCard ? "карточку товара"
+            : options?.salesCount ? "количество продаж" : options?.incomingDetails ? "расшифровку поставок" : "этот список номенклатуры";
         throw new NomenclatureError(503, "stock_unsupported", `Обработчик 1С подключён, но не поддерживает ${list}. Обновите расширение в базе 1С и перезапустите задание поиска, затем обновите список.`);
       }
     };
     checkWorker();
-    return this.stock.load(cursor, signal, () => this.changes.emit(source), query, sort, options, checkWorker);
+    return this.stock.load(cursor, signal, () => this.changes.emit(source), query, sort, options, checkWorker, onProgress);
   }
 
   async loadSupplierOrders(read: SupplierOrdersRequest, signal: AbortSignal) {
@@ -153,6 +160,11 @@ export class NomenclatureService {
   completeStock(token: string | undefined, result: StockResult): void {
     this.heartbeat(token);
     this.stock.complete(result);
+  }
+
+  publishProductProgress(token: string | undefined, id: string, leaseId: string, result: ProductCardProgress): void {
+    this.heartbeat(token);
+    this.stock.publishProgress(id, leaseId, result);
   }
 
   authenticate(token: string | undefined): void {
@@ -211,17 +223,22 @@ export class NomenclatureService {
   }
 
   claim(token: string | undefined, includeStock = false, supportsStockSearch = false, supportsStockTerms = false, supportsStockSorting = false, supportsStockOptions = false, supportsStockNavigation = false, supportsInventory = false, supportsIncoming = false, supportsSupplierOrders = false, supportsSupplierOrdersSearch = false) {
+    const version = !includeStock ? 0 : supportsSupplierOrdersSearch ? 10 : supportsSupplierOrders ? 9 : supportsIncoming ? 8 : supportsInventory ? 7 : supportsStockNavigation ? 6 : supportsStockOptions ? 5 : supportsStockSorting ? 4 : supportsStockTerms ? 3 : supportsStockSearch ? 2 : 1;
+    return this.claimForWorker(token, version);
+  }
+
+  claimForWorker(token: string | undefined, version: number, testPlatform: boolean | null = null) {
     this.heartbeat(token);
     const previousVersion = this.stockVersion();
-    const version = !includeStock ? 0 : supportsSupplierOrdersSearch ? 10 : supportsSupplierOrders ? 9 : supportsIncoming ? 8 : supportsInventory ? 7 : supportsStockNavigation ? 6 : supportsStockOptions ? 5 : supportsStockSorting ? 4 : supportsStockTerms ? 3 : supportsStockSearch ? 2 : 1;
-    this.stockWorkers.set(version, this.now());
+    const previousPlatformVersion = this.stockVersion(testPlatform ?? undefined);
+    this.stockWorkers.set(JSON.stringify([version, testPlatform]), { version, testPlatform, seen: this.now() });
     const currentVersion = this.stockVersion();
     const changed = currentVersion !== previousVersion || currentVersion !== this.observedStockVersion;
     this.observedStockVersion = currentVersion;
-    if (changed) this.stock.notify();
+    if (changed || previousPlatformVersion !== this.stockVersion(testPlatform ?? undefined)) this.stock.notify();
     this.cleanup();
     const now = this.now();
-    if (includeStock) {
+    if (version > 0) {
       // Preserve FIFO across scans and stock pages; neither stream can starve the other.
       const oldest = this.database.prepare(`SELECT kind FROM (
         SELECT 'lookup' AS kind, id, created_at FROM nomenclature_lookups
@@ -230,14 +247,14 @@ export class NomenclatureService {
         SELECT 'stock' AS kind, id, created_at FROM nomenclature_stock_requests
           WHERE expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
           ${stockWorkerConditions}
-        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now, ...stockWorkerFlags(version));
-      if (oldest?.kind === "stock") return this.stock.claim(version);
+        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now, ...stockWorkerFlags(version, testPlatform));
+      if (oldest?.kind === "stock") return this.stock.claim(version, testPlatform);
     }
     const row = this.database.prepare(`UPDATE nomenclature_lookups SET status='leased', lease_id=?, lease_until=? WHERE id=(
       SELECT id FROM nomenclature_lookups WHERE source_id=? AND expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
       ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, source, now, now) as unknown as LookupRow | undefined;
     return row ? { id: row.id, leaseId: row.lease_id!, barcode: row.barcode, expiresAt: new Date(row.expires_at).toISOString() }
-      : includeStock ? this.stock.claim(version) : null;
+      : version > 0 ? this.stock.claim(version, testPlatform) : null;
   }
 
   complete(token: string | undefined, data: LookupResult & { requestId: string; leaseId: string }): void {

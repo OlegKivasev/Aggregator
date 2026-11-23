@@ -1,16 +1,17 @@
-import { renderStockGroups } from "./stock-details.js?v=stock-popup-1";
+import { renderStockGroups } from "./stock-details.js?v=product-card-3";
 
 const amount = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const date = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
-function renderOrder(order) {
+function renderOrder(order, renderName) {
   const item = document.createElement("li");
   item.className = "nomenclature-incoming-order";
   const supplier = document.createElement("div");
   supplier.className = "nomenclature-incoming-supplier";
   supplier.textContent = [order.supplier || "Поставщик не указан", order.number && `№ ${order.number}`].filter(Boolean).join(" · ");
   const product = document.createElement("strong");
-  product.textContent = order.article ? `${order.name} · ${order.article}` : order.name;
+  product.append(renderName({ ...order, id: order.productId }));
+  if (order.article) product.append(` · ${order.article}`);
   const facts = document.createElement("dl");
   for (const [label, value] of [
     ["Заказано", order.ordered === null ? "—" : amount.format(order.ordered)],
@@ -27,7 +28,7 @@ function renderOrder(order) {
   return item;
 }
 
-export function createIncomingPopover(container = document.body, id = "nomenclature-incoming-popover") {
+export function createIncomingPopover(container, id, renderButton, productUrl) {
   const panel = document.createElement("section");
   panel.id = id;
   panel.className = "nomenclature-incoming-popover";
@@ -61,6 +62,7 @@ export function createIncomingPopover(container = document.body, id = "nomenclat
   let request;
   let params;
   let endpoint;
+  let cardUrl;
   let frame;
 
   const close = (restoreFocus = false) => {
@@ -73,6 +75,15 @@ export function createIncomingPopover(container = document.body, id = "nomenclat
     panel.hidden = true;
     stockGroups.replaceChildren();
     if (restoreFocus && previousAnchor.isConnected) previousAnchor.focus({ preventScroll: true });
+  };
+  const renderProduct = (product) => {
+    const url = cardUrl?.(product);
+    if (!url) return product.name;
+    return renderButton(product, url, () => {
+      const returnTo = anchor;
+      close();
+      return returnTo;
+    });
   };
   const reposition = () => {
     if (!anchor || frame !== undefined) return;
@@ -109,7 +120,7 @@ export function createIncomingPopover(container = document.body, id = "nomenclat
       if (!Array.isArray(data.orders) || typeof data.hasMore !== "boolean" || data.hasMore && data.orders.length === 0) {
         throw new Error("Получен неполный список заказов.");
       }
-      list.append(...data.orders.map(renderOrder));
+      list.append(...data.orders.map((order) => renderOrder(order, renderProduct)));
       status.textContent = list.childElementCount ? "" : "Открытых поставок больше нет.";
       if (data.hasMore) {
         const last = data.orders.at(-1);
@@ -158,9 +169,10 @@ export function createIncomingPopover(container = document.body, id = "nomenclat
   window.addEventListener("resize", reposition);
   return {
     id,
-    open(button, product, event, source = "/api/nomenclature/incoming") {
+    open(button, product, event, source = "/api/nomenclature/incoming", link = productUrl) {
       if (!begin(button, event)) return;
       endpoint = source;
+      cardUrl = link;
       const side = button.dataset.incomingSide;
       params = new URLSearchParams({ product: product.id, side });
       title.textContent = side === "original" ? "Поставки оригинала" : "Поставки замен";
@@ -172,14 +184,15 @@ export function createIncomingPopover(container = document.body, id = "nomenclat
       show();
       void load();
     },
-    openStock(button, product, total, event) {
+    openStock(button, product, total, event, link = productUrl) {
       if (!begin(button, event)) return;
       title.textContent = "Остаток с учётом заказов";
       subtitle.textContent = "Всего " + amount.format(total);
       closeButton.setAttribute("aria-label", "Закрыть расшифровку остатка");
       list.hidden = status.hidden = more.hidden = true;
       stockGroups.hidden = false;
-      renderStockGroups(stockGroups, product, product.stockDetails);
+      cardUrl = link;
+      renderStockGroups(stockGroups, product, product.stockDetails, renderProduct);
       show();
     },
     close,

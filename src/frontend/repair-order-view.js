@@ -1,5 +1,6 @@
-import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=stock-popup-1";
-import { stockQuantity } from "./stock-details.js?v=stock-popup-1";
+import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=product-card-3";
+import { stockQuantity } from "./stock-details.js?v=product-card-3";
+import { productCardButton } from "./product-card.js?v=product-card-3";
 
 const number = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
@@ -120,7 +121,7 @@ export function createRepairOrderView() {
       <dl aria-live="polite" aria-atomic="true"></dl>
     </footer>`;
   document.body.append(dialog);
-  const popover = createIncomingPopover(dialog, "repair-order-incoming");
+  const popover = createIncomingPopover(dialog, "repair-order-incoming", productCardButton);
   const back = dialog.querySelector(".repair-order-back");
   const status = dialog.querySelector("[role=status]");
   const retry = dialog.querySelector(".repair-order-retry");
@@ -162,7 +163,7 @@ export function createRepairOrderView() {
     dialog.querySelector(".repair-order-number").textContent = `№ ${fullNumber}`;
   };
 
-  const incoming = (row, source) => {
+  const incoming = (row, source, cardUrl) => {
     if (!canViewIncoming(row)) return missing;
     const group = element("span", undefined, "repair-order-incoming");
     for (const [side, count, letter, label] of [
@@ -177,7 +178,7 @@ export function createRepairOrderView() {
       button.setAttribute("aria-haspopup", "dialog");
       button.setAttribute("aria-expanded", "false");
       button.setAttribute("aria-controls", "repair-order-incoming");
-      button.addEventListener("click", (event) => popover.open(button, { id: row.productId, name: row.name }, event, source));
+      button.addEventListener("click", (event) => popover.open(button, { id: row.productId, name: row.name }, event, source, cardUrl));
       group.append(button);
     }
     return group;
@@ -204,7 +205,10 @@ export function createRepairOrderView() {
   };
   for (const button of paymentButtons) button.addEventListener("click", () => previewPayment?.(button.dataset.payment));
 
-  const render = (card, data, supplySource) => {
+  const render = (card, data, requestId, query) => {
+    const source = `/api/repairs/refresh/${requestId}`;
+    const supplySource = `${source}/incoming?${query}`;
+    const cardUrl = (row) => row.id ? `${source}/products/${row.id}?${query}${row.cardProof ? "&grant=" + row.cardProof : ""}` : null;
     showHeading(card);
     facts(summary, [
       ["Покупатель", data.customer || card.counterpartyName || card.vehicleName || missing],
@@ -233,12 +237,13 @@ export function createRepairOrderView() {
       }
     }
     if (goods) panels[0].replaceChildren(lines([
-      ["Наименование", (row) => row.name],
+      ["Наименование", (row) => row.productId
+        ? productCardButton(row, `${source}/products/${row.productId}?${query}`) : row.name],
       ...(data.hideArticles ? [] : [["Артикул", (row) => row.article, "repair-order-article", (row) => Boolean(row.article)]]),
-      ["Остаток", (row) => stockQuantity(row, row.stock, popover), "repair-order-numeric repair-order-stock"],
+      ["Остаток", (row) => stockQuantity(row, row.stock, popover, cardUrl), "repair-order-numeric repair-order-stock"],
       ["Цена", (row) => tableMoney.format(row.price), "repair-order-numeric repair-order-price"],
       ["Кол-во", (row) => number.format(row.quantity), "repair-order-numeric repair-order-quantity"],
-      ...(data.goods.some(hasIncoming) ? [["К поступлению", (row) => incoming(row, supplySource), "repair-order-supply", canViewIncoming]] : []),
+      ...(data.goods.some(hasIncoming) ? [["К поступлению", (row) => incoming(row, supplySource, cardUrl), "repair-order-supply", canViewIncoming]] : []),
       ...(data.goods.some((row) => row.returnDays !== null) ? [
         ["Возврат, дн.", (row) => {
           if (row.returnDays === null) return missing;
@@ -301,7 +306,7 @@ export function createRepairOrderView() {
         && (repair.testPlatform === true) === view.testPlatform);
       if (!card) throw new Error("Заказ-наряд больше недоступен.");
       if (!refresh.details) throw new Error("Для открытия формы требуется обновить расширение 1С.");
-      render(card, refresh.details, `/api/repairs/refresh/${requestId}/incoming?${query}`);
+      render(card, refresh.details, requestId, query);
     } catch (error) {
       if (current !== view) return;
       cancel(view.route);

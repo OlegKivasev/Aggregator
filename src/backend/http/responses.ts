@@ -1,5 +1,4 @@
 import type { ServerResponse } from "node:http";
-import type { SearchStreamEvent } from "../types.ts";
 
 export const securityHeaders = {
   "Referrer-Policy": "no-referrer",
@@ -7,7 +6,7 @@ export const securityHeaders = {
   "X-Frame-Options": "DENY",
 };
 
-export function writeSseEvent(response: ServerResponse, event: SearchStreamEvent): void {
+export function writeSseEvent(response: ServerResponse, event: unknown): void {
   response.write(`data: ${JSON.stringify(event)}\n\n`);
 }
 
