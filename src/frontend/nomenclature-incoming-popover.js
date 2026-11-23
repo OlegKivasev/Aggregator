@@ -1,4 +1,4 @@
-import { renderStockGroups } from "./stock-details.js?v=stock-popup-1";
+import { renderStockGroups } from "./stock-details.js?v=product-card-1";
 
 const amount = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const date = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });

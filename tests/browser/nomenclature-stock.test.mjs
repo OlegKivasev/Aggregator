@@ -8,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { createAggregatorServer } from "../../src/backend/http/create-server.ts";
+import { productCardFixture } from "../fixtures/product-card.mjs";
 
 const json = (value, headers = {}) => ({ headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(value) });
 
@@ -24,7 +25,8 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
     const token = (await (await request("/api/nomenclature/connection", { method: "POST", ...json({}) })).json()).token;
     const headers = { Authorization: `Bearer ${token}` };
     const poll = async (wait = 0, capability = 8) => {
-      const response = await request(`/api/integration/1c/nomenclature/requests?waitSeconds=${wait}&stock=${capability}`, { headers });
+      const version = capability === 11 ? "11&testPlatform=false" : capability;
+      const response = await request(`/api/integration/1c/nomenclature/requests?waitSeconds=${wait}&stock=${version}`, { headers });
       assert.equal(response.status, 200);
       return (await response.json()).request;
     };
@@ -742,6 +744,72 @@ test("stock searches all inventory, loads on scroll and bounds DOM while retaini
       });
       await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, "nomenclature-panel-final.png"), fullPage: false });
     }
+    await poll(0, 11);
+    const salesCount = page.getByRole("checkbox", { name: "Количество продаж", exact: true });
+    const salesHeader = page.locator("#nomenclature-sales-count-heading");
+    await salesCount.check();
+    const salesJob = await poll(20, 11);
+    assert.deepEqual(salesJob.options.salesCount, { from: "2026-11-12", to: "2026-11-18" });
+    assert.equal(salesJob.options.sales, undefined);
+    const sold = [{ ...exactArticle, salesCount: 0 }, { ...products[1], salesCount: -2, price: prices[1].price }];
+    assert.equal((await complete(salesJob, sold)).status, 200);
+    await page.locator("[data-sales-count]").last().waitFor();
+    assert.deepEqual(await page.locator("[data-sales-count]").allTextContents(), ["0", "-2"]);
+    await salesHeader.getByRole("button").click();
+    const sortSales = await poll(20, 11);
+    assert.equal(sortSales.sortField, "salesCount");
+    assert.equal(sortSales.sortDirection, "asc");
+    assert.equal((await complete(sortSales, [...sold].reverse())).status, 200);
+    await page.locator("[data-sales-count]").last().waitFor();
+    assert.deepEqual(await page.locator("[data-sales-count]").allTextContents(), ["-2", "0"]);
+    const cardReads = [];
+    page.on("request", (req) => { if (new URL(req.url()).pathname.startsWith("/api/nomenclature/products/")) cardReads.push(req.url()); });
+    const product = sold[0];
+    await page.getByRole("button", { name: product.name, exact: true }).click();
+    assert.equal(await poll(0, 10), null, "a worker without product-card support cannot claim the read");
+    const productJob = await poll(20, 11);
+    assert.deepEqual(productJob.options.productCard, { id: product.id, view: "card" });
+    const publish = (job, data) => request("/api/integration/1c/nomenclature/stock-results", { method: "POST",
+      ...json({ requestId: job.id, leaseId: job.leaseId, status: "completed", hasMore: false, products: [],
+        productCard: { id: product.id, view: job.options.productCard.view, data } }, headers) });
+    assert.equal((await publish(productJob, productCardFixture(product, { replacements: [
+      { id: products[1].id, name: "Аналог фильтра", article: "A-7", brand: "Другой бренд" },
+    ] }))).status, 200);
+    const productDialog = page.getByRole("dialog", { name: product.name, exact: true });
+    await productDialog.getByText("Рекомендованная закупка").waitFor();
+    assert.equal(await productDialog.getByText("OEM-123").isVisible(), true);
+    assert.equal(await productDialog.getByText("Corolla").isVisible(), true);
+    assert.equal(await productDialog.getByText("Аналог фильтра").isVisible(), true);
+    await productDialog.getByRole("img").evaluate((image) => image.decode());
+    assert.equal(await productDialog.getByText("Без остатка").count(), 0);
+    assert.equal(await productDialog.getByRole("region", { name: "Оригинал", exact: true }).count(), 0);
+    assert.equal(cardReads.length, 1, "opening the card uses one request including its photo");
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(await productDialog.evaluate((dialog) => dialog.scrollWidth === dialog.clientWidth));
+      if (process.env.NOMENCLATURE_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.NOMENCLATURE_SCREENSHOT_DIR, `product-card-${width}.png`) });
+    }
+    await productDialog.getByRole("button", { name: "Все цены" }).click();
+    assert.equal(await productDialog.getByText("Цена комплекта").isVisible(), true);
+    await productDialog.getByRole("button", { name: "К карточке товара" }).click();
+    assert.equal(cardReads.length, 1, "the price form reuses the card data");
+    await productDialog.getByRole("button", { name: "История продаж" }).click();
+    const history = await poll(20, 11);
+    assert.deepEqual(history.options.productCard, { id: product.id, view: "history", period: { from: "2026-11-01", to: "2026-11-18" } });
+    assert.equal((await publish(history, { hasMore: false, rows: [
+      { date: "2026-11-10T13:30:00", operation: "Продажа", document: "Чек № 123", quantity: 2 },
+    ] })).status, 200);
+    await productDialog.getByText("Чек № 123").waitFor();
+    assert.equal(cardReads.length, 2, "history is loaded once on demand");
+    await page.keyboard.press("Escape");
+    assert.equal(await productDialog.isVisible(), false);
+    assert.equal(await page.getByRole("button", { name: product.name, exact: true }).evaluate((node) => node === document.activeElement), true);
+    await salesCount.uncheck();
+    const withoutSalesCount = await poll(20, 11);
+    assert.equal(withoutSalesCount.options.salesCount, undefined);
+    assert.equal(withoutSalesCount.sortField, "id");
+    assert.equal((await complete(withoutSalesCount, [exactArticle])).status, 200);
+    assert.equal(await salesHeader.isVisible(), false);
     assert.deepEqual(errors, []);
     console.log("Stock browser: search/debounce/cancellation, 1200 items in 12 batches, <=300 DOM rows; price sort, keyboard, cancellation and sorted continuation, one HTTP per action.");
   } finally {

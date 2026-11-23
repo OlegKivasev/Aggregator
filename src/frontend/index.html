@@ -14,7 +14,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=stock-popup-1" />
+    <link rel="stylesheet" href="/styles.css?v=product-card-1" />
+    <link rel="stylesheet" href="/product-card.css" />
     <link rel="stylesheet" href="/order-notifications.css" />
     <link rel="stylesheet" href="/repair-order.css?v=repair-incoming-mobile-1" />
     <link rel="stylesheet" href="/supplier-orders.css?v=supplier-order-notes-1" />
@@ -424,6 +425,14 @@
               </div>
             </div>
             <div class="nomenclature-filter nomenclature-inventory-filter">
+              <label><input id="nomenclature-sales-count-enabled" type="checkbox"> Количество продаж</label>
+              <div class="nomenclature-filter-values" id="nomenclature-sales-count-values" hidden>
+                <input id="nomenclature-sales-count-from" type="date" aria-label="Количество продаж с">
+                <input id="nomenclature-sales-count-to" type="date" aria-label="Количество продаж по">
+              </div>
+              <p id="nomenclature-sales-count-error" class="nomenclature-feedback" role="status" hidden>Укажите обе даты. Дата «С» должна быть не позже даты «По».</p>
+            </div>
+            <div class="nomenclature-filter nomenclature-inventory-filter">
               <label><input id="nomenclature-oem-enabled" type="checkbox"> OEM-артикулы</label>
               <div class="nomenclature-filter-values" id="nomenclature-oem-values" hidden>
                 <select id="nomenclature-oem-presence" aria-label="Наличие OEM-артикулов"><option value="absent">Отсутствуют</option><option value="present">Есть</option></select>
@@ -490,6 +499,7 @@
                 <th scope="col" aria-sort="none"><button type="button" class="table-sort" data-nomenclature-sort="quantity" aria-label="Сортировать по остатку"><span class="nomenclature-quantity-label">Остаток</span><span class="nomenclature-quantity-short" aria-hidden="true">Ост.</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
                 <th scope="col" class="nomenclature-incoming" title="К поступлению: оригинал и замена" aria-label="К поступлению: оригинал и замена"><span class="nomenclature-incoming-title">К поступлению</span><div class="nomenclature-incoming-pair" aria-hidden="true"><span>О</span><span>З</span></div></th>
                 <th scope="col" id="nomenclature-stock-price-heading" aria-sort="none" hidden><button type="button" class="table-sort" data-nomenclature-sort="price"><span id="nomenclature-stock-price-label">Цена</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
+                <th scope="col" id="nomenclature-sales-count-heading" aria-sort="none" hidden><button type="button" class="table-sort" data-nomenclature-sort="salesCount" aria-label="Сортировать по количеству продаж"><span>Количество продаж</span><span class="table-sort__icon" aria-hidden="true"></span></button></th>
               </tr></thead>
               <tbody id="nomenclature-stock-loading-row"><tr><td class="nomenclature-stock-loading-cell" colspan="4"><div class="search-loading nomenclature-loading" id="nomenclature-stock-loading" role="status" aria-live="polite" hidden><div class="search-loading__content"><span class="search-loading__spinner" aria-hidden="true"></span><div><strong>Выполняется поиск</strong></div></div></div></td></tr></tbody>
               <tbody aria-hidden="true"><tr><td class="nomenclature-stock-spacer" id="nomenclature-stock-before" colspan="4"></td></tr></tbody>
@@ -1449,7 +1459,7 @@ OEM-артикул: 09117557 | Chevrolet</pre></div>
 
     <script type="module" src="/auth-ui.js?v=supplier-orders-1"></script>
     <script type="module" src="/app.js"></script>
-    <script type="module" src="/applicability.js?v=supplier-order-notes-1"></script>
+    <script type="module" src="/applicability.js?v=product-card-1"></script>
     <script type="module" src="/applicability-proxy-settings.js"></script>
     <script type="module" src="/vk-notifications-settings.js"></script>
     <script type="module" src="/order-notifications-ui.js"></script>

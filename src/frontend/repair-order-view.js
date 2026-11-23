@@ -1,5 +1,6 @@
 import { createIncomingPopover } from "./nomenclature-incoming-popover.js?v=stock-popup-1";
-import { stockQuantity } from "./stock-details.js?v=stock-popup-1";
+import { stockQuantity } from "./stock-details.js?v=product-card-1";
+import { productCardButton } from "./product-card.js?v=product-card-1";
 
 const number = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" });
@@ -204,7 +205,9 @@ export function createRepairOrderView() {
   };
   for (const button of paymentButtons) button.addEventListener("click", () => previewPayment?.(button.dataset.payment));
 
-  const render = (card, data, supplySource) => {
+  const render = (card, data, requestId, query) => {
+    const source = `/api/repairs/refresh/${requestId}`;
+    const supplySource = `${source}/incoming?${query}`;
     showHeading(card);
     facts(summary, [
       ["Покупатель", data.customer || card.counterpartyName || card.vehicleName || missing],
@@ -233,7 +236,8 @@ export function createRepairOrderView() {
       }
     }
     if (goods) panels[0].replaceChildren(lines([
-      ["Наименование", (row) => row.name],
+      ["Наименование", (row) => row.productId
+        ? productCardButton(row, `${source}/products/${row.productId}?${query}`) : row.name],
       ...(data.hideArticles ? [] : [["Артикул", (row) => row.article, "repair-order-article", (row) => Boolean(row.article)]]),
       ["Остаток", (row) => stockQuantity(row, row.stock, popover), "repair-order-numeric repair-order-stock"],
       ["Цена", (row) => tableMoney.format(row.price), "repair-order-numeric repair-order-price"],
@@ -301,7 +305,7 @@ export function createRepairOrderView() {
         && (repair.testPlatform === true) === view.testPlatform);
       if (!card) throw new Error("Заказ-наряд больше недоступен.");
       if (!refresh.details) throw new Error("Для открытия формы требуется обновить расширение 1С.");
-      render(card, refresh.details, `/api/repairs/refresh/${requestId}/incoming?${query}`);
+      render(card, refresh.details, requestId, query);
     } catch (error) {
       if (current !== view) return;
       cancel(view.route);

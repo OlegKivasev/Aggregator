@@ -130,13 +130,15 @@ export class NomenclatureService {
     if (!connection.configured) throw new NomenclatureError(503, "source_unconfigured", "Подключение номенклатуры ещё не настроено.");
     if (!connection.online) throw new NomenclatureError(503, "source_offline", "Нет связи с сервером 1С. Проверьте подключение и серверное задание поиска.");
     const purchase = options?.supplierOrders;
-    const required = purchase?.view === "listPage" ? 10 : purchase ? 9 : options?.incomingDetails ? 8 : options?.inventory ? 7 : options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
+    const required = options?.productCard || options?.salesCount ? 11
+      : purchase?.view === "listPage" ? 10 : purchase ? 9 : options?.incomingDetails ? 8 : options?.inventory ? 7 : options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
     const checkWorker = () => {
       const version = this.stockVersion();
       // After a restart, let the first authenticated poll identify the worker.
       if (version !== null && version < required) {
         const list = purchase?.view === "listPage" ? "поиск и сортировку заказов поставщикам"
-          : purchase ? "заказы поставщикам" : "этот список номенклатуры";
+          : purchase ? "заказы поставщикам" : options?.productCard ? "карточку товара"
+            : options?.salesCount ? "количество продаж" : "этот список номенклатуры";
         throw new NomenclatureError(503, "stock_unsupported", `Обработчик 1С подключён, но не поддерживает ${list}. Обновите расширение в базе 1С и перезапустите задание поиска, затем обновите список.`);
       }
     };
@@ -211,9 +213,13 @@ export class NomenclatureService {
   }
 
   claim(token: string | undefined, includeStock = false, supportsStockSearch = false, supportsStockTerms = false, supportsStockSorting = false, supportsStockOptions = false, supportsStockNavigation = false, supportsInventory = false, supportsIncoming = false, supportsSupplierOrders = false, supportsSupplierOrdersSearch = false) {
+    const version = !includeStock ? 0 : supportsSupplierOrdersSearch ? 10 : supportsSupplierOrders ? 9 : supportsIncoming ? 8 : supportsInventory ? 7 : supportsStockNavigation ? 6 : supportsStockOptions ? 5 : supportsStockSorting ? 4 : supportsStockTerms ? 3 : supportsStockSearch ? 2 : 1;
+    return this.claimForWorker(token, version);
+  }
+
+  claimForWorker(token: string | undefined, version: number, testPlatform: boolean | null = null) {
     this.heartbeat(token);
     const previousVersion = this.stockVersion();
-    const version = !includeStock ? 0 : supportsSupplierOrdersSearch ? 10 : supportsSupplierOrders ? 9 : supportsIncoming ? 8 : supportsInventory ? 7 : supportsStockNavigation ? 6 : supportsStockOptions ? 5 : supportsStockSorting ? 4 : supportsStockTerms ? 3 : supportsStockSearch ? 2 : 1;
     this.stockWorkers.set(version, this.now());
     const currentVersion = this.stockVersion();
     const changed = currentVersion !== previousVersion || currentVersion !== this.observedStockVersion;
@@ -221,7 +227,7 @@ export class NomenclatureService {
     if (changed) this.stock.notify();
     this.cleanup();
     const now = this.now();
-    if (includeStock) {
+    if (version > 0) {
       // Preserve FIFO across scans and stock pages; neither stream can starve the other.
       const oldest = this.database.prepare(`SELECT kind FROM (
         SELECT 'lookup' AS kind, id, created_at FROM nomenclature_lookups
@@ -230,14 +236,14 @@ export class NomenclatureService {
         SELECT 'stock' AS kind, id, created_at FROM nomenclature_stock_requests
           WHERE expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
           ${stockWorkerConditions}
-        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now, ...stockWorkerFlags(version));
-      if (oldest?.kind === "stock") return this.stock.claim(version);
+        ) ORDER BY created_at,id LIMIT 1`).get(source, now, now, now, now, ...stockWorkerFlags(version, testPlatform));
+      if (oldest?.kind === "stock") return this.stock.claim(version, testPlatform);
     }
     const row = this.database.prepare(`UPDATE nomenclature_lookups SET status='leased', lease_id=?, lease_until=? WHERE id=(
       SELECT id FROM nomenclature_lookups WHERE source_id=? AND expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
       ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, source, now, now) as unknown as LookupRow | undefined;
     return row ? { id: row.id, leaseId: row.lease_id!, barcode: row.barcode, expiresAt: new Date(row.expires_at).toISOString() }
-      : includeStock ? this.stock.claim(version) : null;
+      : version > 0 ? this.stock.claim(version, testPlatform) : null;
   }
 
   complete(token: string | undefined, data: LookupResult & { requestId: string; leaseId: string }): void {

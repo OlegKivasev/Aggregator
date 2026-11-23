@@ -23,7 +23,11 @@ export const stockWorkerConditions = `AND (query='' OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.inventory') IS NULL OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.incomingDetails') IS NULL OR ?=1)
   AND (options='' OR json_extract(NULLIF(options, ''), '$.supplierOrders') IS NULL OR ?=1)
-  AND (options='' OR COALESCE(json_extract(NULLIF(options, ''), '$.supplierOrders.view'), '') <> 'listPage' OR ?=1)`;
+  AND (options='' OR COALESCE(json_extract(NULLIF(options, ''), '$.supplierOrders.view'), '') <> 'listPage' OR ?=1)
+  AND (options='' OR (json_extract(NULLIF(options, ''), '$.salesCount') IS NULL
+    AND json_extract(NULLIF(options, ''), '$.productCard') IS NULL) OR ?=1)
+  AND (options='' OR json_extract(NULLIF(options, ''), '$.productCard.testPlatform') IS NULL
+    OR json_extract(NULLIF(options, ''), '$.productCard.testPlatform') = ?)`;
 
 const highlightsRequested = (query: string, options?: StockOptions | null): boolean =>
   !!query && options?.inventory === true && options.searchMode === "text";
@@ -112,9 +116,10 @@ export class StockRequests {
           const current = this.database.prepare("SELECT * FROM nomenclature_stock_requests WHERE id=?").get(id) as unknown as Row | undefined;
           if (!current || this.now() >= current.expires_at) return finish(new NomenclatureError(504, "stock_timeout", "1С не ответила вовремя. Повторите загрузку остатков."));
           if (current.status === "completed") return finish(undefined, JSON.parse(current.result_json!) as StockPage);
-          if (current.status === "error" && current.result_json && options?.inventory) {
+          if (current.status === "error" && current.result_json && (options?.inventory || options?.productCard)) {
             return finish(new NomenclatureError(503, "stock_failed",
-              "1С вернула ошибку при расчёте остатков. Код запроса " + id + ". Подробности в журнале регистрации 1С."));
+              (options.productCard ? "1С вернула ошибку при чтении карточки." : "1С вернула ошибку при расчёте остатков.")
+              + " Код запроса " + id + ". Подробности в журнале регистрации 1С."));
           }
           if (!["pending", "leased"].includes(current.status)) return finish(new NomenclatureError(503, "stock_failed", "Не удалось получить остатки из 1С. Проверьте подключение и обновление расширения."));
         };
@@ -133,13 +138,13 @@ export class StockRequests {
       }
     }
   }
-  claim(version: number) {
+  claim(version: number, testPlatform: boolean | null) {
     this.cleanup();
     const now = this.now();
     const row = this.database.prepare(`UPDATE nomenclature_stock_requests SET status='leased',lease_id=?,lease_until=? WHERE id=(
       SELECT id FROM nomenclature_stock_requests WHERE expires_at>? AND (status='pending' OR status='leased' AND lease_until<=?)
       ${stockWorkerConditions}
-      ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now, ...stockWorkerFlags(version)) as unknown as Row | undefined;
+      ORDER BY created_at,id LIMIT 1) RETURNING *`).get(randomUUID(), now + 10_000, now, now, ...stockWorkerFlags(version, testPlatform)) as unknown as Row | undefined;
     const options = row?.options ? JSON.parse(row.options) as StockOptions : null;
     return row ? { kind: "stock" as const, id: row.id, leaseId: row.lease_id!,
       after: version >= 4 ? decodeStockCursor(row.cursor || null, row.query, { field: row.sort_field, direction: row.sort_direction }, row.options) : row.cursor || null,
@@ -159,7 +164,17 @@ export class StockRequests {
     }
     const purchasing = options?.supplierOrders;
     const supplierOrders = data.supplierOrders;
-    if (purchasing || supplierOrders) {
+    if (options?.productCard || data.productCard) {
+      const expected = options?.productCard;
+      const actual = data.productCard;
+      if (!expected || data.products.length || data.hasMore || data.lastSortValue != null
+        || data.totalCount !== undefined || data.priceTypes !== undefined || data.navigation !== undefined
+        || data.incomingDetails !== undefined || supplierOrders !== undefined
+        || (data.status === "completed") !== (actual !== undefined)
+        || actual && (actual.id !== expected.id || actual.view !== expected.view)) {
+        throw new NomenclatureError(400, "invalid_product_card", "Ответ не соответствует запросу карточки товара.");
+      }
+    } else if (purchasing || supplierOrders) {
       if (!purchasing || data.products.length || data.hasMore || data.lastSortValue != null || data.totalCount !== undefined
         || data.priceTypes !== undefined || data.navigation !== undefined || data.incomingDetails !== undefined
         || (data.status === "completed") !== (supplierOrders !== undefined)) {
@@ -182,6 +197,7 @@ export class StockRequests {
       || (options?.availability === "absent" && item.quantity > 0)
       || (options?.inventory ? item.incoming === undefined || item.quantity < 0 : item.incoming !== undefined || item.stockDetails !== undefined)
       || (options?.priceType ? item.price === undefined : item.price !== undefined)
+      || (!!options?.salesCount !== (item.salesCount !== undefined))
       || (item.nameMatches !== undefined && !highlightsRequested(row.query, options)))
       || options && !after && (data.totalCount === undefined || data.priceTypes === undefined
         || (data.hasMore ? data.totalCount <= data.products.length : data.totalCount !== data.products.length))
@@ -194,6 +210,7 @@ export class StockRequests {
       ...(data.navigation === undefined ? {} : { navigation: data.navigation }),
       ...(data.incomingDetails === undefined ? {} : { incomingDetails: data.incomingDetails }),
       ...(supplierOrders === undefined ? {} : { supplierOrders }),
+      ...(data.productCard === undefined ? {} : { productCard: data.productCard }),
       ...(data.totalCount === undefined ? {} : { totalCount: data.totalCount }), ...(data.priceTypes === undefined ? {} : { priceTypes: data.priceTypes }) };
     // Keep the timestamp of an accepted result when an identical delivery is retried.
     if (row?.result_json) page.receivedAt = (JSON.parse(row.result_json) as StockPage).receivedAt;
@@ -208,4 +225,6 @@ export class StockRequests {
   }
 }
 
-export const stockWorkerFlags = (version: number): number[] => [2, 3, 4, 5, 6, 7, 8, 9, 10].map((minimum) => Number(version >= minimum));
+export const stockWorkerFlags = (version: number, testPlatform: boolean | null): (number | null)[] =>
+  [...[2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((minimum) => Number(version >= minimum)),
+    testPlatform === null ? null : Number(testPlatform)];

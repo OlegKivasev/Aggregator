@@ -5,7 +5,8 @@ export function renderStockGroups(container, product, details) {
   if (details.original > 0) {
     groups.push(["original", "Оригинал", [{ name: product.name, article: product.article, quantity: details.original }]]);
   }
-  if (details.replacements.length) groups.push(["replacements", "Замена", details.replacements]);
+  const availableReplacements = details.replacements.filter((line) => line.quantity > 0);
+  if (availableReplacements.length) groups.push(["replacements", "Замена", availableReplacements]);
   if (!groups.length) {
     const empty = document.createElement("p");
     empty.textContent = "Свободного остатка нет";
@@ -43,7 +44,7 @@ export function renderStockGroups(container, product, details) {
 export function stockQuantity(product, total, popover) {
   if (total == null) return "—";
   const text = quantity.format(total);
-  if (!product.stockDetails) return text;
+  if (total <= 0 || !product.stockDetails) return text;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "stock-details-trigger";

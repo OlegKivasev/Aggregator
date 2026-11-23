@@ -1,5 +1,5 @@
 import { createNomenclatureNavigation } from "./nomenclature-navigation.js?v=panel-8";
-import { createStockTable } from "./nomenclature-stock-table.js?v=stock-popup-1";
+import { createStockTable } from "./nomenclature-stock-table.js?v=product-card-1";
 
 const stockDay = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Samara", year: "numeric", month: "2-digit", day: "2-digit" });
 const readPeriod = (prefix) => Object.fromEntries(["enabled", "values", "from", "to", "source"].map(
@@ -22,6 +22,9 @@ export function bootstrapNomenclatureStock() {
   const availability = document.querySelector("#nomenclature-availability");
   const receipts = readPeriod("receipt");
   const sales = readPeriod("sale");
+  const salesCount = readPeriod("sales-count");
+  const salesCountHeading = document.querySelector("#nomenclature-sales-count-heading");
+  const salesCountError = document.querySelector("#nomenclature-sales-count-error");
   const oemEnabled = document.querySelector("#nomenclature-oem-enabled");
   const oemValues = document.querySelector("#nomenclature-oem-values");
   const oemPresence = document.querySelector("#nomenclature-oem-presence");
@@ -67,6 +70,8 @@ export function bootstrapNomenclatureStock() {
   const stop = () => { generation += 1; clearTimeout(timer); timer = undefined; controller?.abort(); controller = undefined; bufferedPage = undefined; busy = false; loading.hidden = true; moreLoading.hidden = true; retry.hidden = true; table.removeAttribute("aria-busy"); };
   const selectedPrice = () => priceEnabled.checked ? priceType.value : "";
   const selectedAvailability = () => availabilityEnabled.checked ? availability.value : "all";
+  const showSalesCount = () => salesCount.enabled.checked && salesCount.from.value !== "" && salesCount.to.value !== ""
+    && salesCount.from.value <= salesCount.to.value;
   const syncSortHeaders = () => {
     for (const item of sortButtons) {
       const selected = item.dataset.nomenclatureSort === sortField && (sortField !== "price" || !!selectedPrice());
@@ -78,7 +83,7 @@ export function bootstrapNomenclatureStock() {
   const nearEnd = () => sentinel.getBoundingClientRect().top < window.innerHeight + preloadDistance;
   const load = async (first = false) => {
     if (!active || document.hidden || busy || blocked || (!first && !nextCursor)) return;
-    if (!first && (sales.enabled.checked || query && searchMode === "text") && !nearEnd()) return;
+    if (!first && (sales.enabled.checked || showSalesCount() || query && searchMode === "text") && !nearEnd()) return;
     // Keep one completed page ahead without downloading the entire catalogue.
     if (bufferedPage && !nearEnd()) return;
     const prepared = bufferedPage;
@@ -98,6 +103,10 @@ export function bootstrapNomenclatureStock() {
         parameters.set(prefix + "From", period.from.value);
         parameters.set(prefix + "To", period.to.value);
         parameters.set(prefix + "Source", period.source.value);
+      }
+      if (showSalesCount()) {
+        parameters.set("salesCountFrom", salesCount.from.value);
+        parameters.set("salesCountTo", salesCount.to.value);
       }
       if (oemEnabled.checked) {
         parameters.set("oemPresence", oemPresence.value);
@@ -133,6 +142,7 @@ export function bootstrapNomenclatureStock() {
         || value.products.some((item) => !item || typeof item.id !== "string" || identities.has(item.id)
           || typeof item.name !== "string" || typeof item.article !== "string"
           || typeof item.quantity !== "number" || !Number.isFinite(item.quantity)
+          || showSalesCount() && !Number.isFinite(item.salesCount)
           || !item.incoming || ![item.incoming.original, item.incoming.replacement].every((count) => Number.isFinite(count) && count >= 0)
           || selectedAvailability() === "available" && item.quantity <= 0 || selectedAvailability() === "absent" && item.quantity > 0
           || selectedPrice() && (item.price === undefined || item.price !== null && (typeof item.price.amount !== "number" || !Number.isFinite(item.price.amount)
@@ -210,11 +220,12 @@ export function bootstrapNomenclatureStock() {
       selectedAvailability() === "available" ? "В наличии" : selectedAvailability() === "absent" ? "Отсутствуют" : "Все остатки",
       receipts.enabled.checked ? "Поступления" : "",
       sales.enabled.checked ? "Продажи" : "",
+      showSalesCount() ? "Количество продаж" : "",
       oemEnabled.checked ? "OEM" : "",
       selectedPrice() ? priceType.selectedOptions[0]?.textContent : "",
     ].filter(Boolean).join(" · ");
     requestNavigation = !navigationLoaded;
-    stop(); totalCount = undefined; renderer.reset(!!selectedPrice(), query); identities.clear(); cursors.clear();
+    stop(); totalCount = undefined; renderer.reset(!!selectedPrice(), query, showSalesCount()); identities.clear(); cursors.clear();
     total = 0; nextCursor = null; blocked = false; table.hidden = !active;
     progress.textContent = "";
     priceHeading.hidden = !selectedPrice();
@@ -222,8 +233,14 @@ export function bootstrapNomenclatureStock() {
     priceHeading.title = priceLabel.textContent;
     document.querySelector("#nomenclature-stock-title").textContent = selectedAvailability() === "available" ? "Товары в наличии" : "Номенклатура";
     table.querySelector("table").classList.toggle("has-price", !!selectedPrice());
-    for (const spacer of table.querySelectorAll(".nomenclature-stock-spacer")) spacer.colSpan = selectedPrice() ? 5 : 4;
-    loadingCell.colSpan = selectedPrice() ? 5 : 4;
+    table.querySelector("table").classList.toggle("has-sales-count", showSalesCount());
+    salesCountHeading.hidden = !showSalesCount();
+    salesCountError.hidden = !salesCount.enabled.checked || showSalesCount();
+    if (!showSalesCount() && sortField === "salesCount") { sortField = "id"; sortDirection = "asc"; }
+    syncSortHeaders();
+    const columnCount = 4 + Number(!!selectedPrice()) + Number(showSalesCount());
+    for (const spacer of table.querySelectorAll(".nomenclature-stock-spacer")) spacer.colSpan = columnCount;
+    loadingCell.colSpan = columnCount;
     if (!active) return;
     if ([receipts, sales].some(({ enabled, from, to }) => enabled.checked && (!from.value || !to.value || from.value > to.value))) {
       status.textContent = "Укажите начало и конец периода.";
@@ -233,7 +250,7 @@ export function bootstrapNomenclatureStock() {
   const search = () => {
     const nextQuery = normalize(input.value);
     if (nextQuery === query && !timer) return;
-    stop(); totalCount = undefined; renderer.reset(!!selectedPrice(), nextQuery); identities.clear(); cursors.clear(); total = 0; nextCursor = null;
+    stop(); totalCount = undefined; renderer.reset(!!selectedPrice(), nextQuery, showSalesCount()); identities.clear(); cursors.clear(); total = 0; nextCursor = null;
     table.hidden = false; blocked = true;
     status.textContent = ""; progress.textContent = "";
     timer = setTimeout(() => { query = nextQuery; restart(); }, nextQuery ? 300 : 0);
@@ -266,6 +283,11 @@ export function bootstrapNomenclatureStock() {
   brand.addEventListener("change", () => { query = normalize(input.value); restart(); });
   retry.addEventListener("click", () => { if (!active || busy) return; blocked = false; void load(); });
   const filterChanged = (event) => {
+    if (event.target === salesCount.enabled && salesCount.enabled.checked) {
+      const now = Date.now();
+      salesCount.from.value ||= stockDay.format(new Date(now - 6 * 86_400_000));
+      salesCount.to.value ||= stockDay.format(new Date(now));
+    }
     if (event.target === sales.enabled) {
       if (sales.enabled.checked) {
         previousStockFilter = [availabilityEnabled.checked, availability.value];
@@ -274,17 +296,16 @@ export function bootstrapNomenclatureStock() {
         [availabilityEnabled.checked, availability.value] = previousStockFilter;
       }
     }
-    for (const period of [receipts, sales]) period.values.hidden = !period.enabled.checked;
+    for (const period of [receipts, sales, salesCount]) period.values.hidden = !period.enabled.checked;
     oemValues.hidden = !oemEnabled.checked;
     availability.disabled = !availabilityEnabled.checked;
     priceType.disabled = !priceEnabled.checked;
     if (priceEnabled.checked && !priceType.value) { priceEnabled.checked = false; priceType.disabled = true; return; }
     if (!selectedPrice() && sortField === "price") { sortField = "id"; sortDirection = "asc"; }
-    syncSortHeaders();
     query = normalize(input.value); restart();
   };
   for (const control of [availabilityEnabled, availability, priceEnabled, priceType, oemEnabled, oemPresence, oemFilterBrand,
-    ...[receipts, sales].flatMap(({ enabled, from, to, source }) => [enabled, from, to, source])]) {
+    ...[receipts, sales, salesCount].flatMap(({ enabled, from, to, source }) => [enabled, from, to, ...(source ? [source] : [])])]) {
     control.addEventListener("change", filterChanged);
   }
   for (const button of sortButtons) button.addEventListener("click", () => {

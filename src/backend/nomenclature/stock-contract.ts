@@ -3,13 +3,14 @@ import { parseStockNavigation, type StockNavigation } from "./stock-navigation.t
 import { parseIncomingDetails, type IncomingDetails } from "./incoming-contract.ts";
 import { parseSupplierOrdersResult, type SupplierOrdersResult } from "../purchasing/supplier-orders-contract.ts";
 import { parseStockDetails, type StockDetails } from "./stock-details.ts";
+import { parseProductCardResult, type ProductCardResult } from "./product-card-contract.ts";
 
 export const stockPageSize = 100;
 export interface StockPrice { amount: number; currency: string; unit?: string }
 export interface StockPriceType { id: string; name: string }
 export interface StockIncoming { original: number; replacement: number }
-export interface StockProduct { id: string; name: string; article: string; quantity: number; incoming?: StockIncoming; price?: StockPrice | null; nameMatches?: string[]; stockDetails?: StockDetails }
-export interface StockPage { products: StockProduct[]; hasMore: boolean; nextCursor: string | null; receivedAt: string; totalCount?: number; priceTypes?: StockPriceType[]; navigation?: StockNavigation; incomingDetails?: IncomingDetails; supplierOrders?: SupplierOrdersResult }
+export interface StockProduct { id: string; name: string; article: string; quantity: number; incoming?: StockIncoming; price?: StockPrice | null; salesCount?: number; nameMatches?: string[]; stockDetails?: StockDetails }
+export interface StockPage { products: StockProduct[]; hasMore: boolean; nextCursor: string | null; receivedAt: string; totalCount?: number; priceTypes?: StockPriceType[]; navigation?: StockNavigation; incomingDetails?: IncomingDetails; supplierOrders?: SupplierOrdersResult; productCard?: ProductCardResult }
 export interface StockResult {
   requestId: string; leaseId: string; status: "completed" | "error";
   products: StockProduct[]; hasMore: boolean;
@@ -19,6 +20,7 @@ export interface StockResult {
   navigation?: StockNavigation;
   incomingDetails?: IncomingDetails;
   supplierOrders?: SupplierOrdersResult;
+  productCard?: ProductCardResult;
 }
 
 export function parseStockQuery(value: unknown, preserveOrder = false): string {
@@ -33,7 +35,7 @@ export function parseStockQuery(value: unknown, preserveOrder = false): string {
 }
 
 export function parseStockResult(value: unknown, signed = false): StockResult {
-  const data = objectFields(value, ["requestId", "leaseId", "status", "products", "hasMore", "lastSortValue", "totalCount", "priceTypes", "navigation", "incomingDetails", "supplierOrders"]);
+  const data = objectFields(value, ["requestId", "leaseId", "status", "products", "hasMore", "lastSortValue", "totalCount", "priceTypes", "navigation", "incomingDetails", "supplierOrders", "productCard"]);
   if (!["completed", "error"].includes(data.status as string) || !Array.isArray(data.products)
     || data.products.length > stockPageSize || typeof data.hasMore !== "boolean"
     || data.status === "error" && (data.products.length !== 0 || data.hasMore)
@@ -46,7 +48,7 @@ export function parseStockResult(value: unknown, signed = false): StockResult {
   }
   const identities = new Set<string>();
   const products = data.products.map((value): StockProduct => {
-    const item = objectFields(value, ["id", "name", "article", "quantity", "incoming", "price", "nameMatches", "stockDetails"]);
+    const item = objectFields(value, ["id", "name", "article", "quantity", "incoming", "price", "salesCount", "nameMatches", "stockDetails"]);
     const id = parseUuid(item.id);
     if (identities.has(id) || typeof item.name !== "string" || !item.name.trim() || item.name.length > 500
       || typeof item.article !== "string" || item.article.length > 50
@@ -55,6 +57,10 @@ export function parseStockResult(value: unknown, signed = false): StockResult {
       throw new NomenclatureError(400, "invalid_stock", "Некорректный товар или остаток.");
     }
     identities.add(id);
+    const salesCount = item.salesCount;
+    if (salesCount !== undefined && (typeof salesCount !== "number" || !Number.isFinite(salesCount) || Math.abs(salesCount) > 1e15)) {
+      throw new NomenclatureError(400, "invalid_stock", "Некорректное количество продаж.");
+    }
     let price: StockPrice | null | undefined;
     if (item.price === null) price = null;
     else if (item.price !== undefined) {
@@ -84,6 +90,7 @@ export function parseStockResult(value: unknown, signed = false): StockResult {
     const stockDetails = item.stockDetails === undefined ? undefined : parseStockDetails(item.stockDetails, item.quantity,
       () => { throw new NomenclatureError(400, "invalid_stock", "Некорректная расшифровка остатка."); });
     return { id, name: item.name.trim(), article: item.article.trim(), quantity: item.quantity,
+      ...(salesCount === undefined ? {} : { salesCount }),
       ...(stockDetails === undefined ? {} : { stockDetails }),
       ...(nameMatches === undefined ? {} : { nameMatches }),
       ...(incoming === undefined ? {} : { incoming }), ...(price === undefined ? {} : { price }) };
@@ -107,5 +114,6 @@ export function parseStockResult(value: unknown, signed = false): StockResult {
     products, hasMore: data.hasMore, ...(data.navigation === undefined ? {} : { navigation: parseStockNavigation(data.navigation) }), ...(data.lastSortValue === undefined ? {} : { lastSortValue: data.lastSortValue as string | null }),
     ...(data.incomingDetails === undefined ? {} : { incomingDetails: parseIncomingDetails(data.incomingDetails) }),
     ...(data.supplierOrders === undefined ? {} : { supplierOrders: parseSupplierOrdersResult(data.supplierOrders) }),
+    ...(data.productCard === undefined ? {} : { productCard: parseProductCardResult(data.productCard) }),
     ...(data.totalCount === undefined ? {} : { totalCount: data.totalCount as number }), ...(priceTypes === undefined ? {} : { priceTypes }) };
 }
