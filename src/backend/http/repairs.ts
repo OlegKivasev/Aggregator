@@ -18,6 +18,8 @@ const repairAccess = (user?: AuthenticatedUser) => ({
   responsibleFio: user && !user.isAdmin && !user.showAllOpenRepairs ? normalizeRepairOwner(user.fio) : undefined,
 });
 
+const canReadProductCards = (user?: AuthenticatedUser) => !user || user.isAdmin || user.permissions.includes("nomenclature");
+
 export async function serveRepairs(
   request: IncomingMessage,
   response: ServerResponse,
@@ -95,8 +97,8 @@ export async function serveRepairs(
   const access = repairAccess(user);
   const ownerId = user?.id ?? "shared";
   // 1C may answer after an administrator has changed this user's position or access.
-  const currentVisibility = () => {
-    if (!readCurrentUser) return undefined;
+  const currentOrderUser = () => {
+    if (!readCurrentUser) return user;
     const current = readCurrentUser();
     const currentAccess = repairAccess(current ?? undefined);
     if (!current || current.id !== ownerId
@@ -104,14 +106,17 @@ export async function serveRepairs(
       || currentAccess.allOpen !== access.allOpen || currentAccess.responsibleFio !== access.responsibleFio) {
       throw new RepairRefreshError(403, "Доступ к заказ-наряду изменился.");
     }
-    return current.repairVisibility;
+    return current;
   };
-  const visibleOrderDuringRequest = (documentId: string) => {
-    const visibility = currentVisibility();
+  const userForVisibleOrder = (documentId: string) => {
+    const current = currentOrderUser();
     if (!repository.readableIds([documentId], testPlatformFilter!, access).has(documentId)) {
       throw new RepairRefreshError(404, "Заказ-наряд больше недоступен.");
     }
-    return visibility;
+    return current;
+  };
+  const requireProductAccess = (current?: AuthenticatedUser) => {
+    if (!canReadProductCards(current)) throw new RepairRefreshError(403, "Для карточки товара нужен доступ к разделу «Номенклатура».");
   };
   const productGrant = (refreshId: string, id: string) => createHmac("sha256", secret!)
     .update(JSON.stringify(["repair-product", refreshId, ownerId, testPlatformFilter, id])).digest("base64url");
@@ -141,6 +146,7 @@ export async function serveRepairs(
       const result = repository.refreshes.complete(await readJsonBody(request, 512 * 1024));
       if (!response.destroyed) serveJson(response, 200, result);
     } else if (productRoute) {
+      requireProductAccess(user);
       if (!secret) throw new RepairRefreshError(503);
       const params = new URLSearchParams(url.searchParams);
       params.delete("testPlatform");
@@ -154,7 +160,9 @@ export async function serveRepairs(
         throw new RepairRefreshError(404, "Товар недоступен в этом заказ-наряде.");
       }
       await serveProductCard(response, nomenclature, card, (result) => {
-        const visibility = visibleOrderDuringRequest(refresh.repairs![0].documentId);
+        const current = userForVisibleOrder(refresh.repairs![0].documentId);
+        requireProductAccess(current);
+        const visibility = current?.repairVisibility;
         const projected = visibility ? productCardForRepair(result, visibility) : result;
         if ((projected.view !== "card" && projected.view !== "preview") || !projected.data) return projected;
         const withGrant = <T extends { id?: string }>(item: T) =>
@@ -172,15 +180,18 @@ export async function serveRepairs(
       params.delete("grant");
       const incoming = parseIncomingRequest(params);
       const refresh = repository.refreshes.get(incomingRoute[1], testPlatformFilter!, ownerId, access);
-      if (!refresh.details || !hasProductGrant(incomingRoute[1], incoming.productId, grant)
-        && !refresh.details.goods.some((row) => row.productId === incoming.productId && row[incoming.side] > 0)) {
+      const inOrder = refresh.details?.goods.some((row) => row.productId === incoming.productId && row[incoming.side] > 0);
+      if (!refresh.details || !inOrder && !(canReadProductCards(user) && hasProductGrant(incomingRoute[1], incoming.productId, grant))) {
         throw new RepairRefreshError(404, "Поставки недоступны. Откройте заказ-наряд заново.");
       }
       await serveIncoming(response, nomenclature, { ...incoming, testPlatform: testPlatformFilter }, (details) => {
-        const visibility = visibleOrderDuringRequest(refresh.repairs![0].documentId);
+        const current = userForVisibleOrder(refresh.repairs![0].documentId);
+        if (!inOrder) requireProductAccess(current);
+        const visibility = current?.repairVisibility;
+        const canGrant = Boolean(secret) && canReadProductCards(current);
         return { ...details, orders: details.orders.map((row) => {
           const projected = visibility ? repairProductForUser(row, visibility) : row;
-          return secret && row.productId !== incoming.productId
+          return canGrant && row.productId !== incoming.productId
             ? { ...projected, cardProof: productGrant(incomingRoute[1], row.productId) } : projected;
         }) };
       });
@@ -191,7 +202,7 @@ export async function serveRepairs(
         if (request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") throw new RepairRefreshError(415);
         const payload = await readJsonBody(request, 16 * 1024);
         if (!response.destroyed) {
-          currentVisibility();
+          currentOrderUser();
           serveJson(response, 202, { refresh: repository.refreshes.create(payload, testPlatformFilter!, ownerId, access) });
         }
       } else if (request.method === "DELETE") {
@@ -204,9 +215,9 @@ export async function serveRepairs(
         try {
           const refresh = await repository.refreshes.getWhenReady(id, testPlatformFilter!, ownerId, access, abort.signal, resultWaitSeconds * 1000);
           if (!response.destroyed) {
-            const visibility = currentVisibility();
+            const current = currentOrderUser();
             serveJson(response, 200, { refresh: refresh.details
-              ? { ...refresh, details: repairDetailsForUser(refresh.details, visibility) }
+              ? { ...refresh, details: repairDetailsForUser(refresh.details, current?.repairVisibility), canOpenProductCards: canReadProductCards(current) }
               : refresh });
           }
         } finally { response.removeListener("close", stop); }

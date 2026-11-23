@@ -15,7 +15,8 @@ test("the all-open repair list shows status and performer, and refreshes 201 row
   const server = createAggregatorServer({ application: { streamSearch: async () => {} }, publicDir: resolve("src/frontend") });
   const cards = Array.from({ length: 201 }, (_, index) => ({
     ...first, documentId: `12345678-abcd-1234-abcd-${String(index + 1).padStart(12, "0")}`,
-    number: `НАРЯД-${index + 1}`, status: "На выполнении", performer: index ? undefined : "Иванов, Петров",
+    number: `НАРЯД-${index + 1}`, status: "На выполнении", responsibleFio: index ? undefined : "Иванов Иван",
+    performer: index ? undefined : "Исполнитель из строки работ",
   }));
   const byId = new Map(cards.map((card) => [card.documentId, card]));
   const jobs = new Map();
@@ -60,12 +61,13 @@ test("the all-open repair list shows status and performer, and refreshes 201 row
     await section.getByRole("columnheader", { name: "Исполнитель заказа" }).waitFor();
     await section.getByRole("columnheader", { name: "Статус заказа" }).waitFor();
     assert.equal(await rows.count(), 201);
-    await rows.first().getByText("Иванов, Петров", { exact: true }).waitFor();
+    await rows.first().getByText("Иванов Иван", { exact: true }).waitFor();
+    assert.doesNotMatch(await rows.first().innerText(), /Исполнитель из строки работ/);
     await rows.first().getByText("На выполнении", { exact: true }).waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     await rows.first().getByText("Исполнитель заказа", { exact: true }).waitFor();
     assert.ok(await section.evaluate((element) => element.scrollWidth <= element.clientWidth));
-    await section.getByRole("searchbox").fill("Петров");
+    await section.getByRole("searchbox").fill("Иванов");
     assert.equal(await rows.count(), 1);
     await section.getByRole("searchbox").fill("");
     const readsBefore = listRequests.length;

@@ -1,8 +1,11 @@
 import { splitRepairVehicleName } from "./repair-vehicle-presentation.js";
-import { filterRepairCards } from "./repair-search.js";
-import { createRepairOrderView } from "./repair-order-view.js?v=product-card-3";
+import { filterRepairCards } from "./repair-search.js?v=senior-mechanic-access-1";
+import { createRepairOrderView } from "./repair-order-view.js?v=senior-mechanic-access-1";
 
-const orderMetaColumns = [["status", "Статус заказа"], ["performer", "Исполнитель заказа"]];
+const orderMetaColumns = [
+  ["status", "Статус заказа", "repairs-status-column"],
+  ["responsibleFio", "Исполнитель заказа", "repairs-performer-column"],
+];
 
 export function bootstrapRepairs({ onActiveEmpty } = {}) {
   const views = [false, true].map((testPlatform) => {
@@ -82,9 +85,9 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
     const headers = view.section.querySelector("thead tr");
     const readinessColumn = columns.children[1];
     const readinessHeader = headers.children[1];
-    for (const [field, label] of orderMetaColumns) {
+    for (const [, label, className] of orderMetaColumns) {
       const column = document.createElement("col");
-      column.className = `repairs-${field}-column`;
+      column.className = className;
       column.dataset.openRepairMeta = "";
       columns.insertBefore(column, readinessColumn);
       const header = document.createElement("th");
@@ -203,7 +206,7 @@ export function bootstrapRepairs({ onActiveEmpty } = {}) {
       || ["documentId", "number", "date", "vehicleName", "status"].some((key) => typeof card[key] !== "string")
       || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(card.documentId)
       || (card.counterpartyName !== undefined && (typeof card.counterpartyName !== "string" || !card.counterpartyName.trim()))
-      || card.performer !== undefined && (typeof card.performer !== "string" || !card.performer.trim() || card.performer.length > 2000)
+      || card.responsibleFio !== undefined && (typeof card.responsibleFio !== "string" || !card.responsibleFio.trim() || card.responsibleFio.length > 256)
       || card.unposted !== undefined && card.unposted !== true
       || ["contactName", "contactPhone"].some((field) => card[field] !== undefined
         && (typeof card[field] !== "string" || !card[field].trim() || card[field].length > (field === "contactName" ? 500 : 200)

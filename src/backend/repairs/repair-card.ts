@@ -18,6 +18,7 @@ export interface RepairCard {
   vehicleName: string;
   status: string;
   responsibleFio?: string;
+  // Accepted in replies from earlier 1C workers.
   performer?: string;
   unposted?: true;
   testPlatform?: boolean;

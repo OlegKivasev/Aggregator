@@ -91,12 +91,13 @@ test("the all-open position expands list and refresh access without exposing com
     const usual = await addUser(first.responsibleFio);
     const listed = async (cookie) => (await request("/api/repairs?testPlatform=false", { headers: { Cookie: cookie } })).json();
     const own = { ...first, performer: "Механик смены" };
-    const open = { ...second, status: "Ожидание", responsibleFio: "Другой сотрудник", performer: "Иванов, Петров" };
+    const openOrder = { ...second, status: "Ожидание", responsibleFio: "Другой сотрудник" };
+    const open = { ...openOrder, performer: "Иванов, Петров" };
     const draft = { ...first, documentId: "32345678-abcd-1234-abcd-123456789abc", unposted: true };
     const closed = { ...first, documentId: "42345678-abcd-1234-abcd-123456789abc", status: "зАвЕрШёН" };
     for (const card of [own, open, draft, closed, { ...open, testPlatform: true }]) assert.equal((await send(card)).status, 200);
     assert.deepEqual(await listed(usual), { repairs: [first] });
-    assert.deepEqual(await listed(senior), { repairs: [own, open, draft], allOpen: true });
+    assert.deepEqual(await listed(senior), { repairs: [first, openOrder, draft], allOpen: true });
     assert.equal((await request("/api/repairs?testPlatform=true", { headers: { Cookie: senior } })).status, 403);
 
     await poll();
@@ -107,7 +108,7 @@ test("the all-open position expands list and refresh access without exposing com
     const job = await poll();
     const fresh = { ...open, status: "На выполнении", performer: "Петров" };
     assert.equal((await (await result(job, [fresh])).json()).status, "completed");
-    assert.deepEqual((await (await get(job, senior)).json()).refresh.repairs, [fresh]);
+    assert.deepEqual((await (await get(job, senior)).json()).refresh.repairs, [{ ...openOrder, status: fresh.status }]);
     assert.equal((await get(job, usual)).status, 404);
 
     const updatedPosition = await configure("PATCH", { ...position, showAllOpenRepairs: false });

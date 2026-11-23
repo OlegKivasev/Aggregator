@@ -19,6 +19,8 @@ interface Job {
 interface Result { repairs: RepairCard[]; removedDocumentIds: string[]; details?: RepairDetails }
 const replyFields = ["requestId", "leaseId", "testPlatform", "status", "repairs", "removedDocumentIds", "details"];
 
+const withoutLegacyPerformer = ({ performer, ...card }: RepairCard): RepairCard => card;
+
 function parseResult(data: Record<string, unknown>, job: Job): Result {
   if (Object.keys(data).some((key) => !replyFields.includes(key))
     || data.status !== "success" || !Array.isArray(data.repairs) || !Array.isArray(data.removedDocumentIds)) throw new Error("Invalid reply");
@@ -128,15 +130,8 @@ export class RepairRefreshService {
       // Access can change when 1C updates the status or responsible employee.
       const repairs = [], hidden = [];
       for (const card of stored.repairs) {
-        if (!current.has(card.documentId)) {
-          hidden.push(card.documentId);
-          continue;
-        }
-        if (access.allOpen || card.performer === undefined) repairs.push(card);
-        else {
-          const { performer, ...visibleCard } = card;
-          repairs.push(visibleCard);
-        }
+        if (current.has(card.documentId)) repairs.push(withoutLegacyPerformer(card));
+        else hidden.push(card.documentId);
       }
       result = { repairs, removedDocumentIds: [...stored.removedDocumentIds, ...hidden],
         ...(!hidden.length && stored.details ? { details: stored.details } : {}) };
@@ -214,7 +209,7 @@ export class RepairRefreshService {
         if (changedIds.length) {
           const current = new Map(this.list().filter((card) => (card.testPlatform === true) === data.testPlatform)
             .map((card) => [card.documentId, JSON.stringify(parseRepairCard(card))]));
-          const incoming = new Map(repairs.map((card) => [card.documentId, JSON.stringify(card)]));
+          const incoming = new Map(repairs.map((card) => [card.documentId, JSON.stringify(withoutLegacyPerformer(card))]));
           // The independent scheduled sender may have delivered this exact 1C snapshot
           // first. Confirm matching values/removals, but never overwrite a different update.
           if (changedIds.some((id) => current.get(id) !== incoming.get(id))) throw new Error("Concurrent update");

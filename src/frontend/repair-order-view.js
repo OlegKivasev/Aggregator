@@ -205,10 +205,12 @@ export function createRepairOrderView() {
   };
   for (const button of paymentButtons) button.addEventListener("click", () => previewPayment?.(button.dataset.payment));
 
-  const render = (card, data, requestId, query) => {
+  const render = (card, data, requestId, query, canOpenProductCards) => {
     const source = `/api/repairs/refresh/${requestId}`;
     const supplySource = `${source}/incoming?${query}`;
-    const cardUrl = (row) => row.id ? `${source}/products/${row.id}?${query}${row.cardProof ? "&grant=" + row.cardProof : ""}` : null;
+    const cardUrl = canOpenProductCards
+      ? (row) => row.id ? `${source}/products/${row.id}?${query}${row.cardProof ? "&grant=" + row.cardProof : ""}` : null
+      : undefined;
     showHeading(card);
     facts(summary, [
       ["Покупатель", data.customer || card.counterpartyName || card.vehicleName || missing],
@@ -237,8 +239,10 @@ export function createRepairOrderView() {
       }
     }
     if (goods) panels[0].replaceChildren(lines([
-      ["Наименование", (row) => row.productId
-        ? productCardButton(row, `${source}/products/${row.productId}?${query}`) : row.name],
+      ["Наименование", (row) => {
+        const url = cardUrl?.({ id: row.productId });
+        return url ? productCardButton(row, url) : row.name;
+      }],
       ...(data.hideArticles ? [] : [["Артикул", (row) => row.article, "repair-order-article", (row) => Boolean(row.article)]]),
       ["Остаток", (row) => stockQuantity(row, row.stock, popover, cardUrl), "repair-order-numeric repair-order-stock"],
       ["Цена", (row) => tableMoney.format(row.price), "repair-order-numeric repair-order-price"],
@@ -306,7 +310,7 @@ export function createRepairOrderView() {
         && (repair.testPlatform === true) === view.testPlatform);
       if (!card) throw new Error("Заказ-наряд больше недоступен.");
       if (!refresh.details) throw new Error("Для открытия формы требуется обновить расширение 1С.");
-      render(card, refresh.details, requestId, query);
+      render(card, refresh.details, requestId, query, refresh.canOpenProductCards === true);
     } catch (error) {
       if (current !== view) return;
       cancel(view.route);

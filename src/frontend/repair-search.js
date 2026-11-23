@@ -8,7 +8,7 @@ export function filterRepairCards(cards, query, includeOrderMeta = false) {
   if (!terms.length) return cards;
   return cards.filter((card) => {
     const fields = [card.vehicleName, card.counterpartyName ?? "", card.number];
-    if (includeOrderMeta) fields.push(card.status, card.performer ?? "");
+    if (includeOrderMeta) fields.push(card.status, card.responsibleFio ?? "");
     const searchFields = fields.map(normalize);
     return terms.every((term) => searchFields.some((field) => field.includes(term)));
   });

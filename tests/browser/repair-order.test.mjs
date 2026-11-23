@@ -45,7 +45,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     const post = (path, data, headers = {}) => fetch(`${origin}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(data) });
     const admin = (await post("/api/auth/login", { fio: "Администратор", password: "test-admin-password" })).headers.get("set-cookie").split(";", 1)[0];
     for (const fio of [card.responsibleFio, "Другой мастер"]) {
-      const user = await post("/api/users", { fio, permissions: ["repairs"], password: "test-user-password" }, { Cookie: admin });
+      const user = await post("/api/users", { fio, permissions: ["repairs", "nomenclature"], password: "test-user-password" }, { Cookie: admin });
       assert.equal(user.status, 201);
     }
     const other = (await post("/api/auth/login", { fio: "Другой мастер", password: "test-user-password" })).headers.get("set-cookie").split(";", 1)[0];
@@ -65,6 +65,7 @@ test("employee opens a single fresh repair order and its allowed supplier orders
 
     browser = await chromium.launch({ headless: true, executablePath: process.env.TEST_BROWSER_EXECUTABLE_PATH });
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, hasTouch: true, timezoneId: "America/Los_Angeles" });
+    await page.addInitScript(() => localStorage.setItem("autoservice.activeFunction", "repairs"));
     await page.request.post(`${origin}/api/auth/login`, { data: { fio: card.responsibleFio, password: "test-user-password" } });
     const pageErrors = [];
     const jobs = [];
@@ -207,7 +208,6 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     const supplyPath = `/api/repairs/refresh/${requestId}/incoming?testPlatform=false&side=original&product=`;
     assert.equal((await fetch(`${origin}${supplyPath}${stock.productId}`, { headers: { Cookie: other } })).status, 404);
     assert.equal((await page.request.get(`${origin}${supplyPath}${randomUUID()}`)).status(), 404);
-    assert.equal((await page.request.get(`${origin}/api/nomenclature/incoming?side=original&product=${stock.productId}`)).status(), 403);
     const engineRow = goodsTable.getByRole("row", { name: /Комплект ГРМ/ });
     async function checkSupply(row, product, side, width, mobile = false) {
       const button = row.getByRole("button", { name: side === "original" ? /Поставки оригинала/ : /Поставки замен/ });
@@ -408,6 +408,48 @@ test("employee opens a single fresh repair order and its allowed supplier orders
     const unrestricted = await rawSnapshot();
     assert.equal(unrestricted.goods[0].name, branded.name);
     assert.equal(unrestricted.goods[0].article, branded.article);
+
+    // Revoking nomenclature access blocks even a product request already waiting on 1C.
+    const pendingProduct = page.request.get(detailsUrl).catch((error) => error);
+    const pendingProductJob = await claim("stock", 5, false, 12);
+    assert.ok(pendingProductJob, "the authorized request reaches the worker");
+    assert.equal((await adminEdit("/api/users", { id: employee.id, fio: employee.fio, permissions: ["repairs"] })).status, 200);
+    assert.equal((await post("/api/integration/1c/nomenclature/stock-results", {
+      requestId: pendingProductJob.id, leaseId: pendingProductJob.leaseId, status: "completed", hasMore: false, products: [],
+      productCard: { id: branded.productId, view: "details", data: { image, incoming, monthlySales, average, recommendation } },
+    }, nomenclatureHeader)).status, 200);
+    assert.equal((await pendingProduct).status(), 403);
+    for (const url of [cardUrl(restrictedId, branded.productId), detailsUrl,
+      cardUrl(restrictedId, related.id) + "&grant=" + signedRelated.cardProof,
+      `${origin}/api/nomenclature/products/${branded.productId}`]) {
+      assert.equal((await page.request.get(url)).status(), 403);
+    }
+    assert.equal(await claim("stock", 0), null, "denied card requests do not create 1C jobs");
+
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    assert.equal(await page.locator("#nomenclature-function-tab").isVisible(), false);
+    const deniedCardDetails = { ...branded, stockDetails: { original: 5, replacements: [{ ...stockDetails.replacements[0], id: related.id }] } };
+    await open({ ...details, goods: [deniedCardDetails] }, card);
+    assert.equal(await goodsTable.getByRole("rowheader", { name: branded.name, exact: true }).isVisible(), true);
+    assert.equal(await goodsTable.locator(".product-card-link").count(), 0);
+    await goodsTable.getByRole("button", { name: /Остаток 20/ }).click();
+    await popover.getByRole("region", { name: "Замена" }).getByText(related.name).waitFor();
+    assert.equal(await popover.locator(".product-card-link").count(), 0);
+    await popover.getByRole("button", { name: "Закрыть расшифровку остатка" }).click();
+
+    const deniedSupply = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith("/incoming"));
+    await dialog.getByRole("button", { name: /Поставки замен/ }).click();
+    const deniedSupplyJob = await claim("stock", 5);
+    assert.equal((await post("/api/integration/1c/nomenclature/stock-results", {
+      requestId: deniedSupplyJob.id, leaseId: deniedSupplyJob.leaseId, status: "completed", products: [], hasMore: false,
+      incomingDetails: { orders: [{ orderId: randomUUID(), productId: related.id,
+        supplier: "Тестовый поставщик", number: "003", name: related.name, article: related.article,
+        ordered: 3, quantity: 2, expectedDate: "2026-11-19" }], hasMore: false },
+    }, nomenclatureHeader)).status, 200);
+    assert.equal((await (await deniedSupply).json()).orders[0].cardProof, undefined);
+    await popover.getByRole("listitem").getByText(related.name).waitFor();
+    assert.equal(await popover.locator(".product-card-link").count(), 0);
     assert.deepEqual(pageErrors, []);
   } finally {
     await browser?.close();
