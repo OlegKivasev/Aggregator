@@ -115,10 +115,7 @@ function renderOrder(order, limited, supplierName, supplier, copyControls) {
   const card = element("article", "history-card");
   const header = element("header", "history-card__header");
   const heading = element("div", "history-card__identity");
-  const orderHeading = element("div", "history-card__order-heading");
-  orderHeading.append(element("h3", "", `Заказ № ${order.number}`),
-    copyControls.add(order, supplier, { shownItemsOnly: supplier === "part-kom" && limited }));
-  heading.append(element("small", "", supplierName), orderHeading);
+  heading.append(element("small", "", supplierName), element("h3", "", `Заказ № ${order.number}`));
   if (order.documentNumber) heading.append(element("small", "history-document-number", `Документ № ${order.documentNumber}`));
   const states = new Map();
   const rows = order.items.flatMap(historyItemRows);
@@ -195,7 +192,9 @@ function renderOrder(order, limited, supplierName, supplier, copyControls) {
   }
   table.append(columns, thead, tbody);
   wrap.append(table);
-  card.append(wrap);
+  const actions = element("footer", "history-card__actions");
+  actions.append(copyControls.add(order, supplier, { shownItemsOnly: supplier === "part-kom" && limited }));
+  card.append(wrap, actions);
   return card;
 }
 

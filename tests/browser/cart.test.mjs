@@ -1430,7 +1430,7 @@ test("live counterparties and 1C copy from supplier history and checkout", async
     for (const [index, [supplier]] of suppliers.entries()) {
       await page.locator(`#history-tab-${supplier}`).click();
       const number = `OR-${index + 1}`;
-      await historyDialog.getByRole("button", { name: "Скопировать заказ " + number + " в 1С", exact: true }).waitFor();
+      await historyDialog.locator(".history-card > footer").getByRole("button", { name: "Скопировать заказ " + number + " в 1С", exact: true }).waitFor();
       const before = historyRequests(supplier);
       const payload = await copy(historyDialog, number);
       payloads.push(payload);

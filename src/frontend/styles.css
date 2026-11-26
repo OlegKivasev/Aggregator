@@ -226,7 +226,7 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .history-card td .history-status-detail { margin-top: 8px; line-height: 1.5; }
 .history-card__header { display: grid; grid-template-columns: minmax(0, 1fr) 150px 150px minmax(120px, 170px); grid-template-areas: "identity ordered quantity total"; align-items: start; gap: 12px 20px; padding: 16px; background: #e3e8f0; }
 .history-card__identity { grid-area: identity; min-width: 0; }
-.history-card__order-heading { display: flex; align-items: center; gap: 8px; }
+.history-card__actions { display: flex; justify-content: flex-end; padding: 10px 14px; border-top: 1px solid var(--line); }
 .history-card__ordered { grid-area: ordered; }
 .history-card__quantity { grid-area: quantity; }
 .history-card__header h3 { margin: 3px 0 0; font-size: 20px; font-weight: 700; overflow-wrap: anywhere; }
