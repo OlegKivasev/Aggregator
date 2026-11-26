@@ -3,10 +3,29 @@ import { formatDeliveryDate } from "./supplier-search-summary.js";
 import { hasOfferDeliveryWarning } from "./order-notices.js";
 import { supplierNames, orderReceiptCard, partKomReceiptNode, forumAutoReceiptNode, supplierOrderReceiptNode } from "./order-receipts.js";
 import { setupCartTabs } from "./cart-tabs-ui.js";
+import { createCartToast } from "./cart-toast.js";
+import { createOrderCopyControls } from "./order-copy.js";
+import { latestDeliveryDay } from "./order-date-formatting.js";
 
 const maximumQuantity = (result) => Number.isFinite(result.quantity) ? Math.min(1_000_000, Math.floor(result.quantity)) : 0;
 const cartIcon = '<img src="/shopping-cart.png" alt="" aria-hidden="true">';
 const cartPriceFormat = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function checkoutCopyItem(product, receipt, quantity) {
+  const expectedDate = latestDeliveryDay(receipt?.expectedDate, receipt?.guaranteedDate,
+    receipt?.deliveryStart, receipt?.deliveryEnd, receipt?.deliveryAt, product.deliveryDateTo)
+    ?? latestDeliveryDay(product.deliveryDate);
+  const text = (...values) => values.find((value) => typeof value === "string" && value.trim());
+  return {
+    article: text(receipt?.article, receipt?.detailNum, product.article),
+    brand: text(receipt?.brand, receipt?.maker, product.brand),
+    title: text(receipt?.title, receipt?.description, product.title),
+    price: Number.isFinite(receipt?.price) && receipt.price >= 0 ? receipt.price : product.price,
+    returnDays: receipt?.returnDays,
+    quantity,
+    expectedDate,
+  };
+}
 
 
 export const formatCartLatestDeliveryDate = (items) => {
@@ -148,12 +167,8 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       <div class="cart-confirm-actions"><button type="button" class="btn btn-light" id="cart-order-cancel" autofocus>Вернуться в корзину</button>
         <button type="button" class="btn cart-order-submit" id="cart-order-accept">Заказать</button></div></footer>`;
   document.body.append(orderDialog);
-  const toast = document.createElement("div");
-  toast.className = "cart-toast";
-  toast.hidden = true;
-  toast.setAttribute("role", "status");
-  toast.setAttribute("aria-live", "polite");
-  document.body.append(toast);
+  const copyControls = createOrderCopyControls(orderDialog);
+  const notify = createCartToast(document.body);
   const body = modal.querySelector("#cart-items");
   const status = modal.querySelector("#cart-status");
   const refreshOverlay = modal.querySelector("#cart-refresh-overlay");
@@ -173,7 +188,6 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   let cart = null;
   let busy = false;
   let checking = false;
-  let toastTimeout;
   let returnFocus = toggle;
   let refreshedRevision = null;
   let refreshedItemIds = new Set();
@@ -191,13 +205,6 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     }
   };
 
-  const notify = (message, error = false) => {
-    clearTimeout(toastTimeout);
-    toast.textContent = message;
-    toast.classList.toggle("is-error", error);
-    toast.hidden = false;
-    toastTimeout = setTimeout(() => { toast.hidden = true; }, 4000);
-  };
   const cartTabs = setupCartTabs({ modal, supplierNames, getCart: () => cart,
     getSelectedIds: () => selectedIds,
     isLocked: () => busy || checking || Boolean(cart?.testing),
@@ -569,7 +576,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
         throw new Error("Не удалось подтвердить результат заказа.");
       }
       const nextCart = validateCart(result.cart);
-      const known = new Set(items.map((item) => item.id));
+      const known = new Map(items.map((item) => [item.id, item]));
       const receipts = [];
       const supplierReceiptCards = new Map();
       let accepted = 0;
@@ -594,31 +601,39 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
             || !Array.isArray(line.orderIds) || !line.orderIds.length || line.orderIds.some((id) => typeof id !== "string" || !id || id.length > 100)) {
             throw new Error("Некорректное подтверждение поставщика.");
           }
-          const selectedItem = items.find((item) => item.id === line.id);
+          const selectedItem = known.get(line.id);
           if (selectedItem.result.supplier !== group.supplier) throw new Error("Некорректное подтверждение поставщика.");
           accepted++;
           const renderedOrderIds = new Set();
-          const appendReceipt = (orderId, renderReceipt) => {
+          const detailQuantities = new Map();
+          const appendReceipt = (orderId, renderReceipt, receipt, exactQuantity = true) => {
             const key = JSON.stringify([group.supplier, orderId]);
-            const existingCard = supplierReceiptCards.get(key);
-            const card = renderReceipt(existingCard);
+            const existing = supplierReceiptCards.get(key);
+            const card = renderReceipt(existing?.card);
             if (!card) return;
             renderedOrderIds.add(orderId);
-            if (!existingCard) {
-              supplierReceiptCards.set(key, card);
+            const order = existing?.order ?? { number: orderId, date: null, items: [] };
+            order.date ??= receipt?.orderDate ?? receipt?.createdAt ?? null;
+            if (exactQuantity) {
+              const quantity = receipt?.quantity ?? receipt?.orderedQuantity ?? line.acceptedQuantity;
+              detailQuantities.set(order, (detailQuantities.get(order) ?? 0) + quantity);
+              order.items.push(checkoutCopyItem(selectedItem.result, receipt, quantity));
+            } else order.itemsLimited = true;
+            if (!existing) {
+              supplierReceiptCards.set(key, { card, order, supplier: group.supplier });
               receipts.push(card);
             }
           };
           if (group.supplier === "part-kom" && Array.isArray(line.partKomOrders)) {
             for (const receipt of line.partKomOrders) appendReceipt(receipt?.orderNumber,
-              (card) => partKomReceiptNode(receipt, line.orderIds, line.acceptedQuantity, card));
+              (card) => partKomReceiptNode(receipt, line.orderIds, line.acceptedQuantity, card), receipt);
           } else if (group.supplier === "forum-auto") {
             appendReceipt(line.forumAutoOrder?.orderId,
-              (card) => forumAutoReceiptNode(line.forumAutoOrder, line.orderIds, line.acceptedQuantity, card));
+              (card) => forumAutoReceiptNode(line.forumAutoOrder, line.orderIds, line.acceptedQuantity, card), line.forumAutoOrder);
           } else if (group.supplier === "rossko" || group.supplier === "armtek" || group.supplier === "autopiter") {
             const supplierOrders = group.supplier === "rossko" ? line.rosskoOrders : group.supplier === "armtek" ? line.armtekOrders : line.autopiterOrders;
             if (Array.isArray(supplierOrders)) for (const receipt of supplierOrders) appendReceipt(receipt?.orderId,
-              (card) => supplierOrderReceiptNode(group.supplier, receipt, line.orderIds, line.acceptedQuantity, selectedItem.result, card));
+              (card) => supplierOrderReceiptNode(group.supplier, receipt, line.orderIds, line.acceptedQuantity, selectedItem.result, card), receipt);
           }
           const orderIds = [...new Set(line.orderIds)];
           for (const orderId of orderIds) {
@@ -632,7 +647,11 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
               row.textContent = `${part} · ${quantityLabel}: ${line.acceptedQuantity} шт.`;
               card.append(row);
               return card;
-            });
+            }, null, orderIds.length === 1);
+          }
+          const counted = [...detailQuantities.values()].reduce((total, quantity) => total + quantity, 0);
+          if (counted > line.acceptedQuantity || (detailQuantities.size === orderIds.length && counted !== line.acceptedQuantity)) {
+            for (const order of detailQuantities.keys()) order.itemsLimited = true;
           }
           if (typeof line.message === "string" && line.message) {
             const note = document.createElement("p");
@@ -662,6 +681,14 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
         : accepted ? "Часть заказа оформлена. Подтверждённые товары удалены из корзины; остальные оставлены для проверки."
           : uncertain ? "Заказ не подтверждён. Проверьте результат у поставщика перед повторной попыткой."
             : "Заказ не оформлен. Поставщик отклонил выбранные товары.";
+      for (const { card, order, supplier } of supplierReceiptCards.values()) {
+        const heading = document.createElement("div");
+        heading.className = "cart-supplier-receipt__heading";
+        const title = card.firstElementChild;
+        title.before(heading);
+        const options = order.itemsLimited ? { issue: "Поставщик не подтвердил количество по этому номеру заказа." } : undefined;
+        heading.append(title, copyControls.add(order, supplier, options));
+      }
       orderReceipt.replaceChildren(...receipts);
       orderReceipt.hidden = false;
       orderReceipt.classList.toggle("is-error", !complete);

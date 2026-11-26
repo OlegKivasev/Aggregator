@@ -1,7 +1,7 @@
 import { formatOrderDate } from "./order-date-formatting.js";
 import { armtekReturnSource, formatArmtekReturnDays, hasSupplierWeekendDelivery } from "./order-notices.js";
 import { historyItemRows } from "./order-history-presentation.js";
-import { renderHistoryReceipt } from "./order-receipts.js";
+import { createOrderCopyControls } from "./order-copy.js";
 
 const suppliers = [
   ["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"], ["autopiter", "Автопитер"],
@@ -111,11 +111,14 @@ function fulfillmentBadge(fulfillment, count) {
   return badge;
 }
 
-function renderOrder(order, limited, supplierName, supplier, openPreview) {
+function renderOrder(order, limited, supplierName, supplier, copyControls) {
   const card = element("article", "history-card");
   const header = element("header", "history-card__header");
   const heading = element("div", "history-card__identity");
-  heading.append(element("small", "", supplierName), element("h3", "", `Заказ № ${order.number}`));
+  const orderHeading = element("div", "history-card__order-heading");
+  orderHeading.append(element("h3", "", `Заказ № ${order.number}`),
+    copyControls.add(order, supplier, { shownItemsOnly: supplier === "part-kom" && limited }));
+  heading.append(element("small", "", supplierName), orderHeading);
   if (order.documentNumber) heading.append(element("small", "history-document-number", `Документ № ${order.documentNumber}`));
   const states = new Map();
   const rows = order.items.flatMap(historyItemRows);
@@ -193,122 +196,7 @@ function renderOrder(order, limited, supplierName, supplier, openPreview) {
   table.append(columns, thead, tbody);
   wrap.append(table);
   card.append(wrap);
-  if (openPreview) {
-    const actions = element("div", "history-preview-actions");
-    const button = element("button", "btn btn-light", "Тестовый предпросмотр");
-    button.type = "button";
-    button.setAttribute("aria-label", `Тестовый предпросмотр заказа ${order.number}`);
-    button.addEventListener("click", () => openPreview(order, limited, supplier));
-    actions.append(button);
-    card.append(actions);
-  }
   return card;
-}
-
-async function historyImportData(order, supplier) {
-  const day = (value) => {
-    const text = /^\d{4}-\d{2}-\d{2}/.exec(value ?? "")?.[0];
-    const parsed = text && new Date(`${text}T00:00:00.000Z`);
-    return parsed && Number.isFinite(parsed.getTime()) && parsed.toISOString().startsWith(text) ? text : null;
-  };
-  const key = new TextEncoder().encode(JSON.stringify([supplier, order.number]));
-  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", key)).slice(0, 16);
-  bytes[6] = (bytes[6] & 0x0f) | 0x80;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  const date = day(order.date);
-  return { format: "aggregator.supplier-order", version: 1, testOnly: true, id,
-    number: `TEST-${hex.slice(0, 20).toUpperCase()}`, sourceOrderNumber: order.number, supplier,
-    createdAt: date ? `${date}T00:00:00.000Z` : null, currency: "RUB",
-    items: order.items.map((item) => ({ article: item.article, brand: item.brand ?? "", title: item.title ?? "",
-      quantity: item.quantity, price: item.price, deliveryDate: day(item.expectedDate),
-      returnDays: Number.isInteger(item.returnDays) && item.returnDays >= 0 && item.returnDays <= 9999 ? item.returnDays : null })),
-  };
-}
-
-function createHistoryPreview() {
-  const dialog = element("dialog", "cart-modal cart-order-confirm is-success");
-  dialog.id = "history-order-preview";
-  dialog.setAttribute("aria-labelledby", "history-preview-title");
-  dialog.innerHTML = `<header class="analogs-modal__header"><h2 id="history-preview-title">Тестовый предпросмотр</h2></header>
-    <div class="cart-content">
-      <div class="cart-order-receipt"></div>
-      <p class="cart-order-status" role="status"></p>
-    </div>
-    <footer class="cart-footer">
-      <button class="btn btn-light" type="button" data-preview-close autofocus>Закрыть</button>
-      <span class="cart-copy-order-unavailable" tabindex="0" hidden>В 1С</span>
-      <button class="btn btn-primary" type="button" data-preview-copy hidden>В 1С</button>
-    </footer>`;
-  document.body.append(dialog);
-  const copy = dialog.querySelector("[data-preview-copy]");
-  const unavailable = dialog.querySelector(".cart-copy-order-unavailable");
-  const status = dialog.querySelector("[role=status]");
-  let context;
-  dialog.querySelector("[data-preview-close]").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("close", () => { context?.stream?.close(); context = undefined; });
-  const availability = () => {
-    copy.hidden = !(context?.payload && context.counterpartyId);
-    unavailable.hidden = !copy.hidden;
-    unavailable.title = context?.issue || "Контрагент не выбран. Выберите контрагента в настройках поставщика.";
-    unavailable.setAttribute("aria-label", unavailable.title);
-  };
-  copy.addEventListener("click", async () => {
-    const current = context;
-    if (!current?.payload || !current.counterpartyId) return;
-    try {
-      await navigator.clipboard.writeText(JSON.stringify({ ...current.payload, counterpartyId: current.counterpartyId }));
-      if (context === current) status.textContent = current.shownItemsOnly
-        ? "Показанные позиции скопированы. В 1С нажмите «Добавить из агрегатора»."
-        : "Заказ скопирован. В 1С нажмите «Добавить из агрегатора».";
-    } catch {
-      if (context === current) status.textContent = "Не удалось скопировать заказ. Проверьте доступ к буферу обмена.";
-    }
-  });
-  return async (order, limited, supplier) => {
-    context?.stream?.close();
-    const incomplete = order.itemsLimited === true;
-    const shownItemsOnly = supplier === "part-kom" && limited;
-    const current = { issue: "Подготавливаем данные для 1С…", shownItemsOnly };
-    context = current;
-    dialog.querySelector(".cart-order-receipt").replaceChildren(renderHistoryReceipt(order, supplier,
-      { shownItemsOnly: shownItemsOnly || incomplete }));
-    const missing = order.items.some((item) => item.price === null || item.price < 0.005 || !item.brand?.trim());
-    status.textContent = incomplete ? "Выдача ограничена. Для переноса нужен полный состав заказа."
-      : [shownItemsOnly && "В 1С попадут показанные позиции этого заказа.",
-        missing && "По некоторым товарам нужно уточнить бренд или цену в 1С."].filter(Boolean).join(" ");
-    availability();
-    if (!dialog.open) dialog.showModal();
-    if (incomplete || !order.number.trim() || order.number.length > 100 || order.items.length > 500
-      || order.items.some((item) => !item.article.trim() || item.article.length > 128 || item.brand?.length > 128
-        || item.title?.length > 4000 || item.quantity > 1e6 || (item.price ?? 0) * item.quantity >= 1e12
-        || Math.abs(item.quantity * 1000 - Math.round(item.quantity * 1000)) > 0.0001)) {
-      current.issue = incomplete ? status.textContent : "Часть данных заказа выходит за допустимые пределы для импорта в 1С.";
-      status.textContent = current.issue;
-      availability();
-      return;
-    }
-    try {
-      current.payload = await historyImportData(order, supplier);
-      if (context !== current) return;
-      const stream = new EventSource("/api/order-history/counterparties/events");
-      current.stream = stream;
-      stream.onmessage = ({ data }) => {
-        current.counterpartyId = JSON.parse(data)[supplier];
-        current.issue = "";
-        availability();
-      };
-      stream.onerror = () => {
-        current.counterpartyId = undefined;
-        current.issue = "Не удалось проверить сопоставление с 1С.";
-        availability();
-      };
-    } catch {
-      current.issue = "Не удалось подготовить данные для 1С.";
-      if (context === current) availability();
-    }
-  };
 }
 
 export function bootstrapOrderHistory() {
@@ -339,7 +227,7 @@ export function bootstrapOrderHistory() {
   const search = dialog.querySelector("#history-search");
   const reset = dialog.querySelector("#history-reset");
   const statusTabs = dialog.querySelector("#history-status-tabs");
-  const openPreview = createHistoryPreview();
+  const copyControls = createOrderCopyControls(dialog);
   const views = [...suppliers, ["all", "Все поставщики"]];
   const defaultPeriod = (end = new Date()) => {
     const start = new Date(end);
@@ -404,6 +292,7 @@ export function bootstrapOrderHistory() {
   };
 
   const message = (value, error = false) => {
+    copyControls.clear();
     results.replaceChildren(element("p", `history-message${error ? " is-error" : ""}`, value));
   };
   const filterError = () => {
@@ -446,7 +335,10 @@ export function bootstrapOrderHistory() {
       }
       return (b.order.date ?? "").localeCompare(a.order.date ?? "");
     });
-    for (const { order, name, supplier, limited } of orders) fragment.append(renderOrder(order, limited, name, supplier, openPreview));
+    copyControls.clear();
+    for (const { order, name, supplier, limited } of orders) {
+      fragment.append(renderOrder(order, limited, name, supplier, copyControls));
+    }
     if (!orders.length && !loading.length && !failures) {
       const empty = selected === "all" ? "В выбранной истории заказов нет."
         : `В выбранной истории ${suppliers.find(([id]) => id === selected)[1]} заказов нет.`;

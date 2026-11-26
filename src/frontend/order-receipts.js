@@ -159,37 +159,3 @@ function appendSupplierOrderReceipt(supplier, receipt, product, existingCard) {
   card.append(details);
   return card;
 }
-
-export function renderHistoryReceipt(order, supplier, { shownItemsOnly = false } = {}) {
-  const header = order.receipt ?? {};
-  const sum = (item) => item.receipt?.total ?? (Number.isFinite(item.price) ? item.price * item.quantity : undefined);
-  const subtotal = !shownItemsOnly && order.items.every((item) => Number.isFinite(sum(item)))
-    ? order.items.reduce((total, item) => total + sum(item), 0) : undefined;
-  const orderTotal = header.orderTotal ?? subtotal;
-  let card;
-  for (const item of order.items) {
-    const details = item.receipt ?? {};
-    if (supplier === "part-kom") {
-      card = appendPartKomReceipt({ orderNumber: order.number, orderDate: order.date, quantity: item.quantity,
-        detailNum: item.article, maker: item.brand, description: item.title, price: item.price,
-        expectedDate: item.expectedDate, guaranteedDate: item.guaranteedDate, placement: item.warehouse,
-        stateTxt: details.status ?? item.status, refusalCount: details.refusalCount ?? item.cancelledQuantity,
-        storeCount: details.storeCount, releaseCount: details.releaseCount ?? item.deliveredQuantity, comment: details.comment,
-      }, card);
-    } else if (supplier === "forum-auto") {
-      card = appendForumAutoReceipt({ orderId: order.number, documentNumber: order.documentNumber, createdAt: order.date,
-        article: item.article, brand: item.brand, title: item.title, status: item.status ?? header.status,
-        deliveryAt: item.expectedDate, orderedQuantity: item.quantity, price: item.price, total: sum(item),
-        reservedQuantity: details.reservedQuantity, confirmedQuantity: details.confirmedQuantity,
-      }, card);
-    } else {
-      card = appendSupplierOrderReceipt(supplier, { orderId: order.number, createdAt: order.date,
-        quantity: item.quantity, price: item.price, orderTotal, total: supplier === "armtek" ? orderTotal : sum(item),
-        status: supplier === "armtek" ? header.status : item.status, itemStatus: item.status,
-        deliveryAt: item.expectedDate ?? item.guaranteedDate, warehouse: item.warehouse, returnDays: item.returnDays,
-        deliveryType: header.deliveryType, deliveryAddress: header.deliveryAddress, paymentType: header.paymentType,
-      }, item, card);
-    }
-  }
-  return card;
-}
