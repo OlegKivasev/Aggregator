@@ -325,11 +325,14 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   const selectedIds = new Set();
 
   const setCartRefreshing = (refreshing) => {
+    const overlayHadFocus = document.activeElement === refreshOverlay;
     refreshOverlay.hidden = !refreshing;
     modal.classList.toggle("is-refreshing", refreshing);
     for (const section of modal.children) if (section !== refreshOverlay) section.inert = refreshing;
     if (refreshing && modal.open) refreshOverlay.focus();
-    else if (!refreshing && modal.open && document.activeElement === refreshOverlay) modal.querySelector("#cart-close").focus();
+    else if (!refreshing && modal.open && (overlayHadFocus || !modal.contains(document.activeElement))) {
+      modal.querySelector("#cart-close").focus();
+    }
   };
 
   const notify = (message, error = false) => {
