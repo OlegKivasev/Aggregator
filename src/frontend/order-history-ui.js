@@ -1,6 +1,7 @@
 import { formatOrderDate } from "./order-date-formatting.js";
 import { armtekReturnSource, formatArmtekReturnDays, hasSupplierWeekendDelivery } from "./order-notices.js";
 import { historyItemRows } from "./order-history-presentation.js";
+import { createOrderCopyControls } from "./order-copy.js";
 
 const suppliers = [
   ["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"], ["autopiter", "Автопитер"],
@@ -63,6 +64,7 @@ function validHistory(value) {
     && typeof value.limited === "boolean" && value.orders.every((order) => order && typeof order.number === "string"
       && (order.documentNumber === undefined || typeof order.documentNumber === "string" && order.documentNumber.length > 0 && order.documentNumber.length <= 100)
       && (order.date === null || typeof order.date === "string") && Array.isArray(order.items) && order.items.length > 0
+      && (order.itemsLimited === undefined || order.itemsLimited === true)
       && (order.cancellationDetectedAt === undefined || typeof order.cancellationDetectedAt === "string"
         && Number.isFinite(Date.parse(order.cancellationDetectedAt)))
       && order.items.every((item) => item && typeof item.article === "string" && Number.isFinite(item.quantity)
@@ -109,7 +111,7 @@ function fulfillmentBadge(fulfillment, count) {
   return badge;
 }
 
-function renderOrder(order, limited, supplierName, supplier) {
+function renderOrder(order, limited, supplierName, supplier, copyControls) {
   const card = element("article", "history-card");
   const header = element("header", "history-card__header");
   const heading = element("div", "history-card__identity");
@@ -190,7 +192,9 @@ function renderOrder(order, limited, supplierName, supplier) {
   }
   table.append(columns, thead, tbody);
   wrap.append(table);
-  card.append(wrap);
+  const actions = element("footer", "history-card__actions");
+  actions.append(copyControls.add(order, supplier, { shownItemsOnly: supplier === "part-kom" && limited }));
+  card.append(wrap, actions);
   return card;
 }
 
@@ -222,6 +226,7 @@ export function bootstrapOrderHistory() {
   const search = dialog.querySelector("#history-search");
   const reset = dialog.querySelector("#history-reset");
   const statusTabs = dialog.querySelector("#history-status-tabs");
+  const copyControls = createOrderCopyControls(dialog);
   const views = [...suppliers, ["all", "Все поставщики"]];
   const defaultPeriod = (end = new Date()) => {
     const start = new Date(end);
@@ -286,6 +291,7 @@ export function bootstrapOrderHistory() {
   };
 
   const message = (value, error = false) => {
+    copyControls.clear();
     results.replaceChildren(element("p", `history-message${error ? " is-error" : ""}`, value));
   };
   const filterError = () => {
@@ -328,7 +334,10 @@ export function bootstrapOrderHistory() {
       }
       return (b.order.date ?? "").localeCompare(a.order.date ?? "");
     });
-    for (const { order, name, supplier, limited } of orders) fragment.append(renderOrder(order, limited, name, supplier));
+    copyControls.clear();
+    for (const { order, name, supplier, limited } of orders) {
+      fragment.append(renderOrder(order, limited, name, supplier, copyControls));
+    }
     if (!orders.length && !loading.length && !failures) {
       const empty = selected === "all" ? "В выбранной истории заказов нет."
         : `В выбранной истории ${suppliers.find(([id]) => id === selected)[1]} заказов нет.`;

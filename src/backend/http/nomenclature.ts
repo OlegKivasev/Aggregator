@@ -117,7 +117,7 @@ export async function serveNomenclature(request: IncomingMessage, response: Serv
         const platform = url.searchParams.get("testPlatform");
         const stock = url.searchParams.get("stock");
         if ([...url.searchParams.keys()].some((key) => !["waitSeconds", "stock", "testPlatform"].includes(key)) || url.searchParams.getAll("waitSeconds").length > 1
-          || url.searchParams.getAll("stock").length > 1 || stock !== null && !/^(?:[1-9]|1[0-3])$/.test(stock)
+          || url.searchParams.getAll("stock").length > 1 || stock !== null && !/^(?:[1-9]|1[0-4])$/.test(stock)
           || url.searchParams.getAll("testPlatform").length > 1
           || (Number(stock) >= 11 ? platform !== "true" && platform !== "false" : platform !== null)
           || !/^(?:\d|1\d|20)$/.test(wait)) throw new NomenclatureError(400, "wait", "Ожидание должно быть от 0 до 20 секунд.");

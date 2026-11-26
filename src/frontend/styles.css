@@ -226,6 +226,7 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .history-card td .history-status-detail { margin-top: 8px; line-height: 1.5; }
 .history-card__header { display: grid; grid-template-columns: minmax(0, 1fr) 150px 150px minmax(120px, 170px); grid-template-areas: "identity ordered quantity total"; align-items: start; gap: 12px 20px; padding: 16px; background: #e3e8f0; }
 .history-card__identity { grid-area: identity; min-width: 0; }
+.history-card__actions { display: flex; justify-content: flex-end; padding: 10px 14px; border-top: 1px solid var(--line); }
 .history-card__ordered { grid-area: ordered; }
 .history-card__quantity { grid-area: quantity; }
 .history-card__header h3 { margin: 3px 0 0; font-size: 20px; font-weight: 700; overflow-wrap: anywhere; }
@@ -303,8 +304,6 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-table tr:last-child td { border-bottom: 0; }
 .cart-item-warehouse, .cart-item-stock, .cart-item-check { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .cart-item-check { color: #b63822; }
-.rossko-order-settings { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
-.rossko-order-settings h4 { margin: 0 0 12px; font-size: 14px; }
 .rossko-order-settings fieldset { display: grid; gap: 12px; min-width: 0; margin: 0 0 12px; padding: 0; border: 0; }
 .rossko-order-settings select, .rossko-order-settings input { width: 100%; min-width: 0; min-height: 40px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); font: inherit; }
 .rossko-order-settings .btn { white-space: normal; }
@@ -336,6 +335,10 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-status:empty { display: none; }
 .cart-footer { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; border-top: 1px solid var(--line); background: var(--surface); }
 .cart-footer__summary { display: grid; grid-template-columns: max-content minmax(0, 260px); gap: 4px 32px; }
+.cart-modal .btn.cart-copy-order { display: grid; flex: 0 0 auto; place-items: center; width: 40px; min-height: 40px; padding: 0; border-radius: 7px; }
+.cart-copy-order img { display: block; object-fit: contain; }
+.cart-modal .cart-copy-order-unavailable { cursor: help; border-style: dashed; }
+.cart-copy-order-unavailable img { opacity: .48; }
 .cart-footer span { display: block; color: var(--muted); font-size: 12px; }
 .cart-footer strong { display: block; margin: 0; font-size: 23px; font-weight: 700; line-height: 1.3; font-variant-numeric: tabular-nums; }
 .cart-order-confirm { width: min(1040px, calc(100vw - 24px)); border: 3px solid transparent; }
@@ -359,6 +362,8 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 :is(.cart-partkom-receipt, .cart-forum-receipt, .cart-rossko-receipt, .cart-armtek-receipt, .cart-autopiter-receipt):first-child { padding-top: 0; border-top: 0; }
 :is(.cart-partkom-receipt, .cart-forum-receipt, .cart-rossko-receipt, .cart-armtek-receipt, .cart-autopiter-receipt):last-child { padding-bottom: 0; }
 :is(.cart-partkom-receipt, .cart-forum-receipt, .cart-rossko-receipt, .cart-armtek-receipt, .cart-autopiter-receipt) h4 { margin: 0 0 10px; overflow-wrap: anywhere; font-size: 15px; }
+.cart-supplier-receipt__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.cart-supplier-receipt__heading h4 { min-width: 0; margin: 0; }
 :is(.cart-partkom-receipt, .cart-forum-receipt, .cart-rossko-receipt, .cart-armtek-receipt, .cart-autopiter-receipt) dl { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 7px 12px; margin: 0; font-size: 13px; }
 :is(.cart-partkom-receipt, .cart-forum-receipt, .cart-rossko-receipt, .cart-armtek-receipt, .cart-autopiter-receipt) dt { color: var(--muted); }
 :is(.cart-partkom-receipt, .cart-forum-receipt, .cart-rossko-receipt, .cart-armtek-receipt, .cart-autopiter-receipt) dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
@@ -374,6 +379,9 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-order-submit[hidden] { display: none; }
 .cart-toast { position: fixed; right: 24px; bottom: 24px; z-index: 1500; max-width: min(400px, calc(100vw - 32px)); padding: 12px 18px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--surface); box-shadow: 0 8px 28px #11182029; font-size: 13px; }
 .cart-toast.is-error { color: #b63822; border-color: #f0b7ab; }
+.cart-modal .cart-toast { pointer-events: none; }
+.cart-order-confirm > .cart-footer { position: relative; }
+.cart-order-confirm > .cart-footer > .cart-toast { position: absolute; right: 12px; bottom: calc(100% + 8px); }
 .cart-flying-icon { position: fixed; display: grid; place-items: center; width: 36px; height: 36px; z-index: 1600; pointer-events: none; border: 1px solid var(--accent); border-radius: 50%; background: #fff3ed; box-shadow: 0 4px 14px #ff4b0b30; }
 .cart-flying-icon img { width: 20px; height: 20px; }
 @media (max-width: 600px) {
@@ -3621,6 +3629,15 @@ th[aria-sort="descending"] .analogs-sort span::after {
   font-size: 12px;
   font-weight: 750;
 }
+
+.supplier-options__content { margin-top: 10px; }
+.supplier-counterparty-current { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.supplier-counterparty-current span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.supplier-counterparty-current[hidden] { display: none; }
+.supplier-counterparty-suggestions { max-height: 220px; overflow: auto; margin: 4px 0 0; padding: 3px; border: 1px solid var(--line); border-radius: 7px; list-style: none; }
+.supplier-counterparty-suggestions li { padding: 8px; color: var(--ink); border-radius: 4px; cursor: pointer; overflow-wrap: anywhere; }
+.supplier-counterparty-suggestions li:hover, .supplier-counterparty-suggestions li[aria-selected="true"] { background: #edf3fa; }
+.supplier-counterparty-settings .auth-feedback:empty { display: none; }
 
 .supplier-options__list {
   display: grid;

@@ -135,13 +135,14 @@ export class NomenclatureService {
     const purchase = options?.supplierOrders;
     const view = options?.productCard?.view;
     const testPlatform = options?.productCard?.testPlatform ?? options?.incomingDetails?.testPlatform;
-    const required = view === "progressive" ? 13 : view === "preview" || view === "details" ? 12 : options?.productCard || options?.salesCount || testPlatform !== undefined ? 11
+    const required = purchase?.view === "counterparties" ? 14 : view === "progressive" ? 13 : view === "preview" || view === "details" ? 12 : options?.productCard || options?.salesCount || testPlatform !== undefined ? 11
       : purchase?.view === "listPage" ? 10 : purchase ? 9 : options?.incomingDetails ? 8 : options?.inventory ? 7 : options?.searchMode ? 6 : options ? 5 : sort.field !== "id" ? 4 : query.includes(" ") ? 3 : query ? 2 : 1;
     const checkWorker = () => {
       const version = this.stockVersion(testPlatform);
       // After a restart, let the first authenticated poll identify the worker.
       if (version !== null && version < required) {
-        const list = purchase?.view === "listPage" ? "поиск и сортировку заказов поставщикам"
+        const list = purchase?.view === "counterparties" ? "поиск контрагентов для заказов поставщикам"
+          : purchase?.view === "listPage" ? "поиск и сортировку заказов поставщикам"
           : purchase ? "заказы поставщикам" : options?.productCard ? "карточку товара"
             : options?.salesCount ? "количество продаж" : options?.incomingDetails ? "расшифровку поставок" : "этот список номенклатуры";
         throw new NomenclatureError(503, "stock_unsupported", `Обработчик 1С подключён, но не поддерживает ${list}. Обновите расширение в базе 1С и перезапустите задание поиска, затем обновите список.`);

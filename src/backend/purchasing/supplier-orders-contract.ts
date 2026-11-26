@@ -13,7 +13,10 @@ interface ListOptions { sort: SortField; direction: SortDirection; query: string
 export type SupplierOrdersRequest =
   | { view: "list"; after: SupplierOrdersCursor | null }
   | ({ view: "listPage"; after: { id: string; value: SortValue } | null } & ListOptions)
-  | { view: "order"; id: string };
+  | { view: "order"; id: string }
+  | { view: "counterparties"; query: string; id: string | null };
+
+export interface SupplierCounterparty { id: string; name: string; taxId: string }
 
 interface Summary extends SupplierOrdersCursor {
   number: string;
@@ -40,7 +43,8 @@ interface OrderProduct extends Product {
 export type SupplierOrdersResult =
   | { view: "list"; orders: Summary[]; hasMore: boolean }
   | { view: "listPage"; orders: Summary[]; hasMore: boolean; lastValue?: SortValue }
-  | { view: "order"; id: string; order: (Summary & { market: boolean; contract: string; products: OrderProduct[] }) | null };
+  | { view: "order"; id: string; order: (Summary & { market: boolean; contract: string; products: OrderProduct[] }) | null }
+  | { view: "counterparties"; counterparties: SupplierCounterparty[] };
 
 const invalid = () => new NomenclatureError(400, "invalid_supplier_orders", "Некорректные данные заказа поставщику.");
 
@@ -50,7 +54,7 @@ function dateTime(value: unknown): string {
   return value;
 }
 
-export function parseSupplierOrdersRequest(pathname: string, search: URLSearchParams): SupplierOrdersRequest {
+export function parseSupplierOrdersRequest(pathname: string, search: URLSearchParams): Exclude<SupplierOrdersRequest, { view: "counterparties" }> {
   if (pathname === "/api/purchasing/supplier-orders") {
     if ([...search.keys()].some((key) => !["after", "sort", "direction", "q"].includes(key) || search.getAll(key).length > 1)) throw invalid();
     const sort = search.get("sort") ?? "date";
@@ -100,11 +104,15 @@ export function supplierListCursor(read: Extract<SupplierOrdersRequest, { view: 
 
 export function validateSupplierOrdersResponse(read: SupplierOrdersRequest, result: SupplierOrdersResult): void {
   if (read.view !== result.view) throw invalid();
+  if (read.view === "counterparties" && result.view === "counterparties") {
+    if (read.id !== null && result.counterparties.some(({ id }) => id !== read.id)) throw invalid();
+    return;
+  }
   if (read.view === "order" && result.view === "order") {
     if (read.id !== result.id) throw invalid();
     return;
   }
-  if (read.view === "order" || result.view === "order") return;
+  if (read.view === "order" || result.view === "order" || read.view === "counterparties" || result.view === "counterparties") return;
   const afterId = read.after?.id;
   if (afterId && result.orders.some((order) => order.id === afterId)) throw invalid();
   const previousDate = read.view === "list" ? read.after?.date : undefined;
@@ -150,7 +158,19 @@ function products<T>(value: unknown, parse: (item: unknown) => T): T[] {
 }
 
 export function parseSupplierOrdersResult(value: unknown): SupplierOrdersResult {
-  const data = objectFields(value, ["view", "orders", "hasMore", "id", "lastValue", "order"]);
+  const data = objectFields(value, ["view", "orders", "hasMore", "id", "lastValue", "order", "counterparties"]);
+  if (data.view === "counterparties") {
+    objectFields(value, ["view", "counterparties"]);
+    if (!Array.isArray(data.counterparties) || data.counterparties.length > 50) throw invalid();
+    const counterparties = data.counterparties.map((value) => {
+      const item = objectFields(value, ["id", "name", "taxId"]);
+      const name = text(item.name, 250);
+      if (!name) throw invalid();
+      return { id: parseUuid(item.id), name, taxId: text(item.taxId, 20) };
+    });
+    if (new Set(counterparties.map(({ id }) => id)).size !== counterparties.length) throw invalid();
+    return { view: "counterparties", counterparties };
+  }
   if (data.view === "list" || data.view === "listPage") {
     const { orders, hasMore, lastValue } = objectFields(value,
       data.view === "list" ? ["view", "orders", "hasMore"] : ["view", "orders", "hasMore", "lastValue"]);

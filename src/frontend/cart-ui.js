@@ -1,157 +1,32 @@
 import { escapeHtml, formatArticle, formatBrand, formatPrice } from "./result-formatting.js";
 import { formatDeliveryDate } from "./supplier-search-summary.js";
-import { formatOrderDate } from "./order-date-formatting.js";
-import { formatOrderStatus } from "./order-history-presentation.js";
-import { armtekReturnSource, formatArmtekReturnDays, hasOfferDeliveryWarning, hasSupplierWeekendDelivery } from "./order-notices.js";
+import { hasOfferDeliveryWarning } from "./order-notices.js";
+import { supplierNames, orderReceiptCard, partKomReceiptNode, forumAutoReceiptNode, supplierOrderReceiptNode } from "./order-receipts.js";
 import { setupCartTabs } from "./cart-tabs-ui.js";
+import { createCartToast } from "./cart-toast.js";
+import { createOrderCopyControls } from "./order-copy.js";
+import { latestDeliveryDay } from "./order-date-formatting.js";
 
-const supplierNames = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko", autopiter: "Автопитер" };
 const maximumQuantity = (result) => Number.isFinite(result.quantity) ? Math.min(1_000_000, Math.floor(result.quantity)) : 0;
 const cartIcon = '<img src="/shopping-cart.png" alt="" aria-hidden="true">';
 const cartPriceFormat = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const receiptClasses = { "part-kom": "cart-partkom-receipt", "forum-auto": "cart-forum-receipt",
-  rossko: "cart-rossko-receipt", armtek: "cart-armtek-receipt", autopiter: "cart-autopiter-receipt" };
-
-const orderReceiptCard = (supplier, number, existingCard) => {
-  if (existingCard) return existingCard;
-  const card = document.createElement("section");
-  card.className = receiptClasses[supplier];
-  const heading = document.createElement("h4");
-  heading.textContent = `${supplierNames[supplier]} · заказ № ${number}`;
-  card.append(heading);
-  return card;
-};
-
-const partKomReceiptNode = (receipt, orderIds, acceptedQuantity, existingCard) => {
-  if (!receipt || typeof receipt !== "object" || typeof receipt.orderNumber !== "string"
-    || !receipt.orderNumber || receipt.orderNumber.length > 100 || !orderIds.includes(receipt.orderNumber)
-    || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1 || receipt.quantity > acceptedQuantity) return null;
-  const card = orderReceiptCard("part-kom", receipt.orderNumber, existingCard);
-  const details = document.createElement("dl");
-  details.className = "cart-supplier-receipt__item";
-  const add = (label, value, status = false, highlightDate = false) => {
-    if (value === null || value === undefined || value === "") return;
-    if (typeof value !== "string" && typeof value !== "number") return;
-    if (typeof value === "number" && !Number.isFinite(value) || typeof value === "string" && value.length > 500) return;
-    const term = document.createElement("dt");
-    term.textContent = label;
-    const description = document.createElement("dd");
-    description.textContent = status ? formatOrderStatus(String(value)) : String(value);
-    if (status) description.className = "cart-partkom-receipt__state";
-    if (highlightDate) {
-      const date = document.createElement("span");
-      date.className = "delivery-date--warning";
-      date.textContent = String(value);
-      description.replaceChildren(date);
-    }
-    details.append(term, description);
+function checkoutCopyItem(product, receipt, quantity) {
+  const expectedDate = latestDeliveryDay(receipt?.expectedDate, receipt?.guaranteedDate,
+    receipt?.deliveryStart, receipt?.deliveryEnd, receipt?.deliveryAt, product.deliveryDateTo)
+    ?? latestDeliveryDay(product.deliveryDate);
+  const text = (...values) => values.find((value) => typeof value === "string" && value.trim());
+  return {
+    article: text(receipt?.article, receipt?.detailNum, product.article),
+    brand: text(receipt?.brand, receipt?.maker, product.brand),
+    title: text(receipt?.title, receipt?.description, product.title),
+    price: Number.isFinite(receipt?.price) && receipt.price >= 0 ? receipt.price : product.price,
+    returnDays: receipt?.returnDays,
+    quantity,
+    expectedDate,
   };
-  add("Дата заказа", formatOrderDate(receipt.orderDate));
-  add("Деталь", [receipt.detailNum, receipt.maker, receipt.description].filter((value) => typeof value === "string" && value).join(" · "));
-  add("Заказано", `${receipt.quantity} шт.`);
-  const price = Number.isFinite(receipt.price) && receipt.price > 0 && Number.isFinite(receipt.price * receipt.quantity) ? receipt.price : null;
-  add("Цена", price === null ? null : formatPrice(price));
-  add("Сумма", price === null ? null : formatPrice(price * receipt.quantity));
-  const highlightDelivery = hasSupplierWeekendDelivery("part-kom", receipt.expectedDate);
-  add("Ожидаемый срок", formatOrderDate(receipt.expectedDate), false, highlightDelivery);
-  add("Гарантированный срок", formatOrderDate(receipt.guaranteedDate));
-  add("Склад", receipt.placement);
-  for (const [label, value] of [["Отказано", receipt.refusalCount], ["В пути", receipt.storeCount], ["Отгружено", receipt.releaseCount]]) {
-    if (Number.isSafeInteger(value) && value >= 0 && value <= receipt.quantity) add(label, value);
-  }
-  add("Состояние", receipt.stateTxt, true);
-  add("Комментарий", receipt.comment);
-  card.append(details);
-  return card;
-};
+}
 
-const forumAutoReceiptNode = (receipt, orderIds, acceptedQuantity, existingCard) => {
-  if (!receipt || typeof receipt !== "object" || typeof receipt.orderId !== "string"
-    || !receipt.orderId || receipt.orderId.length > 100 || !orderIds.includes(receipt.orderId)
-    || !Number.isSafeInteger(receipt.orderedQuantity) || receipt.orderedQuantity !== acceptedQuantity) return null;
-  const card = orderReceiptCard("forum-auto", receipt.orderId, existingCard);
-  const details = document.createElement("dl");
-  details.className = "cart-supplier-receipt__item";
-  const add = (label, value, status = false, highlightDate = false) => {
-    if (typeof value !== "string" && typeof value !== "number") return;
-    if (typeof value === "string" && (!value || value.length > 500)
-      || typeof value === "number" && !Number.isFinite(value)) return;
-    const term = document.createElement("dt");
-    term.textContent = label;
-    const description = document.createElement("dd");
-    description.textContent = status ? formatOrderStatus(String(value)) : String(value);
-    if (highlightDate) {
-      const date = document.createElement("span");
-      date.className = "delivery-date--warning";
-      date.textContent = String(value);
-      description.replaceChildren(date);
-    }
-    if (status) description.className = "cart-forum-receipt__state";
-    details.append(term, description);
-  };
-  add("Номер документа", receipt.documentNumber);
-  add("Статус", receipt.status, true);
-  add("Создан", formatOrderDate(receipt.createdAt));
-  add("Доставка", formatOrderDate(receipt.deliveryAt), false, hasSupplierWeekendDelivery("forum-auto", receipt.deliveryAt));
-  add("Товар", [receipt.article, receipt.brand, receipt.title].filter((value) => typeof value === "string" && value.length <= 500 && value).join(" · "));
-  add("Заказано", `${receipt.orderedQuantity} шт.`);
-  for (const [label, value] of [["Забронировано", receipt.reservedQuantity], ["Подтверждено", receipt.confirmedQuantity]]) {
-    if (Number.isSafeInteger(value) && value >= 0 && value <= acceptedQuantity) add(label, value);
-  }
-  if (Number.isFinite(receipt.price) && receipt.price >= 0) add("Цена", formatPrice(receipt.price));
-  if (Number.isFinite(receipt.total) && receipt.total >= 0) add("Сумма", formatPrice(receipt.total));
-  card.append(details);
-  return card;
-};
-
-const supplierOrderReceiptNode = (supplier, receipt, orderIds, acceptedQuantity, item, existingCard) => {
-  if (!receipt || typeof receipt !== "object" || typeof receipt.orderId !== "string"
-    || !receipt.orderId || receipt.orderId.length > 100 || !orderIds.includes(receipt.orderId)
-    || !Number.isSafeInteger(receipt.quantity) || receipt.quantity < 1 || receipt.quantity > acceptedQuantity) return null;
-  const card = orderReceiptCard(supplier, receipt.orderId, existingCard);
-  let details = document.createElement("dl");
-  const add = (label, value, status = false) => {
-    if (typeof value !== "string" && typeof value !== "number") return;
-    if (typeof value === "string" && (!value || value.length > 500)
-      || typeof value === "number" && !Number.isFinite(value)) return;
-    const term = document.createElement("dt");
-    term.textContent = label;
-    const description = document.createElement("dd");
-    description.textContent = status ? formatOrderStatus(String(value)) : String(value);
-    if (status) description.className = "cart-supplier-receipt__state";
-    details.append(term, description);
-  };
-  if (!card.querySelector(".cart-supplier-receipt__order")) {
-    details.className = "cart-supplier-receipt__order";
-    add("Создан", formatOrderDate(receipt.createdAt));
-    if (supplier === "armtek") add("Статус заказа", receipt.status, true);
-    const orderTotal = supplier === "armtek" ? receipt.total : receipt.orderTotal;
-    if (Number.isFinite(orderTotal) && orderTotal > 0) add("Сумма заказа", formatPrice(orderTotal));
-    card.firstElementChild.after(details);
-    details = document.createElement("dl");
-  }
-  details.className = "cart-supplier-receipt__item";
-  add("Статус позиции", supplier === "armtek" ? receipt.itemStatus : receipt.status, true);
-  add("Товар", [item.result.article, item.result.brand, item.result.title].filter((value) => typeof value === "string" && value.length <= 500).join(" · "));
-  add("Заказано", `${receipt.quantity} шт.`);
-  if (Number.isFinite(receipt.price) && receipt.price > 0) add("Цена", formatPrice(receipt.price));
-  if (supplier === "rossko" && Number.isFinite(receipt.total) && receipt.total > 0) add("Сумма позиции", formatPrice(receipt.total));
-  add("Срок доставки", formatOrderDate(receipt.deliveryAt ?? receipt.deliveryEnd ?? receipt.deliveryStart));
-  add("Склад", receipt.warehouse);
-  add("Доставка", receipt.deliveryType);
-  add("Адрес доставки", receipt.deliveryAddress);
-  add("Оплата", receipt.paymentType);
-  if (supplier === "armtek") {
-    add("Возврат", formatArmtekReturnDays(receipt.returnDays));
-    details.lastElementChild.title = armtekReturnSource;
-    if (Number.isInteger(receipt.returnDays) && receipt.returnDays >= 0 && receipt.returnDays <= 9999) {
-      add("Источник срока", armtekReturnSource);
-    }
-  }
-  card.append(details);
-  return card;
-};
 
 export const formatCartLatestDeliveryDate = (items) => {
   if (!items.length) return "Не указана";
@@ -249,7 +124,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       <p class="cart-status" id="cart-status" role="status" aria-live="polite"></p></div>
     <footer class="cart-footer"><div class="cart-footer__summary"><span>К заказу</span><span>Дата поставки выбранных товаров</span>
       <div id="cart-total"></div><strong id="cart-delivery-date"></strong></div>
-      <button type="button" class="btn btn-primary" id="cart-test-order">Оформить заказы</button></footer>
+      <button type="button" class="btn btn-primary" id="cart-checkout">Оформить заказы</button></footer>
     <div class="cart-refresh-overlay" id="cart-refresh-overlay" role="status" aria-live="polite" tabindex="-1" hidden>
       <div class="cart-refresh-overlay__message"><span class="cart-refresh-overlay__spinner" aria-hidden="true"></span>
         <strong>Обновляем корзину</strong><span>Проверяем цены, остатки и сроки у поставщиков…</span></div></div>`;
@@ -292,16 +167,12 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       <div class="cart-confirm-actions"><button type="button" class="btn btn-light" id="cart-order-cancel" autofocus>Вернуться в корзину</button>
         <button type="button" class="btn cart-order-submit" id="cart-order-accept">Заказать</button></div></footer>`;
   document.body.append(orderDialog);
-  const toast = document.createElement("div");
-  toast.className = "cart-toast";
-  toast.hidden = true;
-  toast.setAttribute("role", "status");
-  toast.setAttribute("aria-live", "polite");
-  document.body.append(toast);
+  const copyControls = createOrderCopyControls(orderDialog);
+  const notify = createCartToast(document.body);
   const body = modal.querySelector("#cart-items");
   const status = modal.querySelector("#cart-status");
   const refreshOverlay = modal.querySelector("#cart-refresh-overlay");
-  const testButton = modal.querySelector("#cart-test-order");
+  const checkoutButton = modal.querySelector("#cart-checkout");
   const clearButton = modal.querySelector("#cart-clear");
   const clearCancel = clearDialog.querySelector("#cart-clear-cancel");
   const clearAccept = clearDialog.querySelector("#cart-clear-accept");
@@ -317,7 +188,6 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   let cart = null;
   let busy = false;
   let checking = false;
-  let toastTimeout;
   let returnFocus = toggle;
   let refreshedRevision = null;
   let refreshedItemIds = new Set();
@@ -325,20 +195,16 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   const selectedIds = new Set();
 
   const setCartRefreshing = (refreshing) => {
+    const overlayHadFocus = document.activeElement === refreshOverlay;
     refreshOverlay.hidden = !refreshing;
     modal.classList.toggle("is-refreshing", refreshing);
     for (const section of modal.children) if (section !== refreshOverlay) section.inert = refreshing;
     if (refreshing && modal.open) refreshOverlay.focus();
-    else if (!refreshing && modal.open && document.activeElement === refreshOverlay) modal.querySelector("#cart-close").focus();
+    else if (!refreshing && modal.open && (overlayHadFocus || !modal.contains(document.activeElement))) {
+      modal.querySelector("#cart-close").focus();
+    }
   };
 
-  const notify = (message, error = false) => {
-    clearTimeout(toastTimeout);
-    toast.textContent = message;
-    toast.classList.toggle("is-error", error);
-    toast.hidden = false;
-    toastTimeout = setTimeout(() => { toast.hidden = true; }, 4000);
-  };
   const cartTabs = setupCartTabs({ modal, supplierNames, getCart: () => cart,
     getSelectedIds: () => selectedIds,
     isLocked: () => busy || checking || Boolean(cart?.testing),
@@ -387,8 +253,8 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
         <td class="cart-item-sum" data-label="Стоимость, ₽">${renderPrices(result, item.quantity)}</td>
         <td class="cart-item-remove"><button type="button" class="cart-remove btn btn-light" aria-label="Удалить ${escapeHtml(result.article)}" title="Удалить" ${locked || unresolved ? "disabled" : ""}>×</button></td></tr>`;
     }).join("") : `<tr><td colspan="${supplierView ? 8 : 9}" class="cart-empty">${cart.items.length ? "В этой вкладке нет товаров. Перетащите сюда товар из другой вкладки." : "Корзина пуста. Добавьте товары из таблицы предложений."}</td></tr>`;
-    testButton.disabled = locked || !selected.length;
-    testButton.textContent = checking ? "Оформляем…" : supplierView ? "Оформить заказ" : "Оформить заказы";
+    checkoutButton.disabled = locked || !selected.length;
+    checkoutButton.textContent = checking ? "Оформляем…" : supplierView ? "Оформить заказ" : "Оформить заказы";
     clearButton.disabled = locked || !items.length || items.some((item) => pending.has(item.id));
     const clearLabel = `Очистить вкладку «${cartTabs.getName()}»`;
     clearButton.title = clearLabel;
@@ -612,7 +478,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       }
     }
   };
-  testButton.addEventListener("click", async () => {
+  checkoutButton.addEventListener("click", async () => {
     if (busy || checking || cart?.testing || !cart?.items.length || !selectedIds.size) return;
     const supplier = cartTabs.getSupplier();
     busy = true;
@@ -681,7 +547,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   orderDialog.addEventListener("cancel", (event) => { if (checking) event.preventDefault(); });
   orderDialog.addEventListener("close", () => {
     orderTarget = null;
-    if (modal.open) (testButton.disabled ? modal.querySelector("#cart-close") : testButton).focus();
+    if (modal.open) (checkoutButton.disabled ? modal.querySelector("#cart-close") : checkoutButton).focus();
   });
   orderDialog.addEventListener("keydown", (event) => {
     if (event.key !== "Tab") return;
@@ -710,7 +576,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
         throw new Error("Не удалось подтвердить результат заказа.");
       }
       const nextCart = validateCart(result.cart);
-      const known = new Set(items.map((item) => item.id));
+      const known = new Map(items.map((item) => [item.id, item]));
       const receipts = [];
       const supplierReceiptCards = new Map();
       let accepted = 0;
@@ -735,31 +601,39 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
             || !Array.isArray(line.orderIds) || !line.orderIds.length || line.orderIds.some((id) => typeof id !== "string" || !id || id.length > 100)) {
             throw new Error("Некорректное подтверждение поставщика.");
           }
-          const selectedItem = items.find((item) => item.id === line.id);
+          const selectedItem = known.get(line.id);
           if (selectedItem.result.supplier !== group.supplier) throw new Error("Некорректное подтверждение поставщика.");
           accepted++;
           const renderedOrderIds = new Set();
-          const appendReceipt = (orderId, renderReceipt) => {
+          const detailQuantities = new Map();
+          const appendReceipt = (orderId, renderReceipt, receipt, exactQuantity = true) => {
             const key = JSON.stringify([group.supplier, orderId]);
-            const existingCard = supplierReceiptCards.get(key);
-            const card = renderReceipt(existingCard);
+            const existing = supplierReceiptCards.get(key);
+            const card = renderReceipt(existing?.card);
             if (!card) return;
             renderedOrderIds.add(orderId);
-            if (!existingCard) {
-              supplierReceiptCards.set(key, card);
+            const order = existing?.order ?? { number: orderId, date: null, items: [] };
+            order.date ??= receipt?.orderDate ?? receipt?.createdAt ?? null;
+            if (exactQuantity) {
+              const quantity = receipt?.quantity ?? receipt?.orderedQuantity ?? line.acceptedQuantity;
+              detailQuantities.set(order, (detailQuantities.get(order) ?? 0) + quantity);
+              order.items.push(checkoutCopyItem(selectedItem.result, receipt, quantity));
+            } else order.itemsLimited = true;
+            if (!existing) {
+              supplierReceiptCards.set(key, { card, order, supplier: group.supplier });
               receipts.push(card);
             }
           };
           if (group.supplier === "part-kom" && Array.isArray(line.partKomOrders)) {
             for (const receipt of line.partKomOrders) appendReceipt(receipt?.orderNumber,
-              (card) => partKomReceiptNode(receipt, line.orderIds, line.acceptedQuantity, card));
+              (card) => partKomReceiptNode(receipt, line.orderIds, line.acceptedQuantity, card), receipt);
           } else if (group.supplier === "forum-auto") {
             appendReceipt(line.forumAutoOrder?.orderId,
-              (card) => forumAutoReceiptNode(line.forumAutoOrder, line.orderIds, line.acceptedQuantity, card));
+              (card) => forumAutoReceiptNode(line.forumAutoOrder, line.orderIds, line.acceptedQuantity, card), line.forumAutoOrder);
           } else if (group.supplier === "rossko" || group.supplier === "armtek" || group.supplier === "autopiter") {
             const supplierOrders = group.supplier === "rossko" ? line.rosskoOrders : group.supplier === "armtek" ? line.armtekOrders : line.autopiterOrders;
             if (Array.isArray(supplierOrders)) for (const receipt of supplierOrders) appendReceipt(receipt?.orderId,
-              (card) => supplierOrderReceiptNode(group.supplier, receipt, line.orderIds, line.acceptedQuantity, selectedItem, card));
+              (card) => supplierOrderReceiptNode(group.supplier, receipt, line.orderIds, line.acceptedQuantity, selectedItem.result, card), receipt);
           }
           const orderIds = [...new Set(line.orderIds)];
           for (const orderId of orderIds) {
@@ -773,7 +647,11 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
               row.textContent = `${part} · ${quantityLabel}: ${line.acceptedQuantity} шт.`;
               card.append(row);
               return card;
-            });
+            }, null, orderIds.length === 1);
+          }
+          const counted = [...detailQuantities.values()].reduce((total, quantity) => total + quantity, 0);
+          if (counted > line.acceptedQuantity || (detailQuantities.size === orderIds.length && counted !== line.acceptedQuantity)) {
+            for (const order of detailQuantities.keys()) order.itemsLimited = true;
           }
           if (typeof line.message === "string" && line.message) {
             const note = document.createElement("p");
@@ -803,6 +681,14 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
         : accepted ? "Часть заказа оформлена. Подтверждённые товары удалены из корзины; остальные оставлены для проверки."
           : uncertain ? "Заказ не подтверждён. Проверьте результат у поставщика перед повторной попыткой."
             : "Заказ не оформлен. Поставщик отклонил выбранные товары.";
+      for (const { card, order, supplier } of supplierReceiptCards.values()) {
+        const heading = document.createElement("div");
+        heading.className = "cart-supplier-receipt__heading";
+        const title = card.firstElementChild;
+        title.before(heading);
+        const options = order.itemsLimited ? { issue: "Поставщик не подтвердил количество по этому номеру заказа." } : undefined;
+        heading.append(title, copyControls.add(order, supplier, options));
+      }
       orderReceipt.replaceChildren(...receipts);
       orderReceipt.hidden = false;
       orderReceipt.classList.toggle("is-error", !complete);

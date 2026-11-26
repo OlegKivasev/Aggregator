@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -11,7 +12,6 @@ import { chromium } from "playwright";
 import { createAggregatorServer } from "../../src/backend/http/create-server.ts";
 import { attachPurchaseReference } from "../../src/backend/purchasing/purchase-offer.ts";
 import { formatDeliveryDate } from "../../src/frontend/supplier-search-summary.js";
-import { testPurchaseOrder } from "../../src/backend/application/test-order-application-service.ts";
 import { CartError } from "../../src/backend/purchasing/cart-application-service.ts";
 import { SupplierAuthError } from "../../src/backend/errors.ts";
 import { parsePartKomOrderHistory } from "../../src/backend/suppliers/part-kom/part-kom-order.ts";
@@ -91,11 +91,6 @@ async function withCartPage(check, options = {}) {
         emit({ type: "supplier_status", supplier: "part-kom", status: "completed" });
         emit({ type: "search_completed", article: query.article });
       },
-      testCartOrder: async (lines, signal) => {
-        orderCalls.push(structuredClone(lines));
-        await options.testGate?.(signal);
-        return testPurchaseOrder(lines, signal);
-      },
       realCartOrder: {
         refresh: async (lines, signal) => { refreshCalls.push(structuredClone(lines)); await options.refreshGate?.(); if (options.refresh) return options.refresh(lines, signal); return lines.map((line) => ({ ...structuredClone(line),
           result: { ...line.result, price: options.refreshedPrice ?? line.result.price } })); },
@@ -168,7 +163,7 @@ async function withCartPage(check, options = {}) {
 
 async function openCheckout(page) {
   if (!await page.locator("#cart-items .cart-item-select:checked").count()) await page.locator("#cart-select-all").check();
-  await page.locator("#cart-test-order").click();
+  await page.locator("#cart-checkout").click();
   await page.waitForFunction(() => document.querySelector("#cart-order-confirm").open);
 }
 
@@ -1342,6 +1337,168 @@ test("Autopiter adds goods, restores its supplier tab and orders selected goods 
   })) }) });
 });
 
+test("live counterparties and 1C copy from supplier history and checkout", async () => {
+  const suppliers = [["armtek", "Armtek"], ["part-kom", "PartKOM"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"], ["autopiter", "Автопитер"]];
+  const history = Object.fromEntries(suppliers.map(([id], index) => [id, { limited: id === "rossko" || id === "part-kom", orders: [{
+    number: `OR-${index + 1}`, date: "2026-11-25T10:30:00", items: [{
+      article: "A1", brand: id === "armtek" ? null : "TEST", title: "Деталь из истории", quantity: index + 1,
+      price: id === "armtek" ? null : 132, status: "Ожидает поставки", fulfillment: "processing",
+      expectedDate: "2026-11-30", guaranteedDate: null, warehouse: "Склад поставщика",
+    }],
+  }] }]));
+  Object.assign(history["part-kom"].orders[0].items[0], { price: 5032.5, guaranteedDate: "2026-12-01 14:00:00",
+    receipt: { releaseCount: 2, status: "Выдан", comment: "Комментарий поставщика" } });
+  history["forum-auto"].orders[0].items[0].receipt = { reservedQuantity: 2, confirmedQuantity: 3 };
+  history.rossko.orders[0].receipt = { orderTotal: 528, deliveryType: "Курьерская доставка",
+    deliveryAddress: "Тестовый адрес", paymentType: "Оплата банковским платежом" };
+  history.rossko.orders.push({ ...history.rossko.orders[0], number: "PARTIAL", itemsLimited: true });
+  await withCartPage(async (page, { origin, orderCalls }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
+    const api = origin + "/api/suppliers/onec-counterparties";
+    const worker = origin + "/api/integration/1c/nomenclature";
+    const { token } = await (await page.request.post(origin + "/api/nomenclature/connection", { data: {} })).json();
+    const headers = { Authorization: `Bearer ${token}` };
+    const claim = async (version = 14, waitSeconds = 5) => {
+      const response = await fetch(`${worker}/requests?stock=${version}&testPlatform=false&waitSeconds=${waitSeconds}`, { headers });
+      assert.equal(response.status, 200);
+      return (await response.json()).request;
+    };
+    const reply = async (job, item) => {
+      const res = await page.request.post(worker + "/stock-results", { headers, data: {
+        requestId: job.id, leaseId: job.leaseId, status: "completed", products: [], hasMore: false,
+        supplierOrders: { view: "counterparties", counterparties: [item] },
+      } });
+      assert.equal(res.status(), 200);
+    };
+    assert.equal(await claim(13, 0), null);
+    assert.equal((await page.request.get(api + "/search?q=Armtek")).status(), 503);
+    assert.equal(await claim(14, 0), null);
+    const mappings = {};
+    const reads = [];
+    page.on("request", (req) => { if (req.method() === "GET") reads.push(req.url()); });
+    await page.locator("#settings-toggle").click();
+    await page.locator("#suppliers-settings > summary").click();
+    assert.equal(await page.getByText("Контрагенты 1С для поставщиков", { exact: true }).count(), 0);
+    const cards = page.locator("#suppliers-settings > .auth-card");
+    assert.equal(await cards.count(), 8);
+    for (const card of await cards.all()) {
+      assert.equal(await card.locator(":scope > details > summary").first().textContent(), "Контрагент 1С");
+      assert.equal(await card.locator(":scope > details[open]").count(), 0);
+    }
+    for (const [supplier, label] of [...suppliers, ["stparts", "STParts"]]) {
+      const entry = { id: randomUUID(), name: `ООО ${label}`, taxId: "1234567890" };
+      mappings[supplier] = entry.id;
+      const section = page.locator(`#suppliers-settings > [data-supplier="${supplier}"] > .supplier-counterparty-settings`);
+      await section.locator("summary").click();
+      const input = section.getByRole("combobox");
+      await input.fill(label.slice(0, 1));
+      await input.fill(label);
+      const search = await claim();
+      assert.deepEqual(search.options.supplierOrders, { view: "counterparties", query: label, id: null });
+      await reply(search, entry);
+      const option = section.getByRole("option", { name: `${entry.name} · ИНН 1234567890` });
+      await option.waitFor();
+      if (supplier === "armtek") { await input.press("ArrowDown"); await input.press("Enter"); }
+      else await option.click();
+      const verify = await claim();
+      assert.deepEqual(verify.options.supplierOrders, { view: "counterparties", query: "", id: entry.id });
+      await reply(verify, entry);
+      await section.getByRole("button", { name: "Убрать", exact: true }).waitFor();
+      await section.locator("summary").click();
+    }
+    assert.equal(reads.filter((url) => url === api).length, 1);
+    assert.equal(reads.filter((url) => url.startsWith(api + "/search?")).length, 6);
+    await page.locator("#settings-close").click();
+    await page.locator("#results-body .cart-offer-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
+    await page.locator("#cart-toggle").click();
+    await page.locator("#cart-select-all").check();
+    assert.equal(await page.getByRole("button", { name: "Оформить тестовый заказ" }).count(), 0);
+    await page.keyboard.press("Escape");
+    await page.locator("#history-toggle").click();
+    const historyRequests = (id) => reads.filter((url) => url.split("?")[0] === origin + "/api/order-history/" + id).length;
+    const historyDialog = page.getByRole("dialog", { name: "История заказов" });
+    const copy = async (dialog, number) => {
+      const button = dialog.getByRole("button", { name: "Скопировать заказ " + number + " в 1С", exact: true });
+      await button.click();
+      assert.equal(await button.locator("img").evaluate((img) => img.complete && img.naturalWidth === 80), true);
+      await dialog.locator(".cart-toast").getByText(/(?:Заказ скопирован|Показанные позиции скопированы)/).waitFor();
+      await page.waitForFunction(async (orderNumber) => JSON.parse(await navigator.clipboard.readText()).sourceOrderNumber === orderNumber, number);
+      return JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
+    };
+    const payloads = [];
+    for (const [index, [supplier]] of suppliers.entries()) {
+      await page.locator(`#history-tab-${supplier}`).click();
+      const number = `OR-${index + 1}`;
+      await historyDialog.locator(".history-card > footer").getByRole("button", { name: "Скопировать заказ " + number + " в 1С", exact: true }).waitFor();
+      const before = historyRequests(supplier);
+      const payload = await copy(historyDialog, number);
+      payloads.push(payload);
+      assert.equal(payload.sourceOrderNumber, number);
+      assert.equal(payload.counterpartyId, mappings[supplier]);
+      assert.equal(payload.items[0].quantity, index + 1);
+      assert.equal(historyRequests(supplier), before, "copy reuses the loaded history");
+      assert.equal(await page.locator("dialog[open]").count(), 1);
+      assert.equal(await historyDialog.getByRole("button", { name: /Предпросмотр/ }).count(), 0);
+    }
+    assert.equal(new Set(payloads.map(({ id }) => id)).size, 5);
+    assert.ok(payloads.every(({ format, version, testOnly }) => format === "aggregator.supplier-order" && version === 1 && testOnly === true));
+    assert.equal(payloads[0].items[0].price, null);
+    assert.equal(payloads[1].items[0].price, 5032.5);
+    assert.equal(payloads[1].items[0].deliveryDate, "2026-12-01");
+    await page.locator("#history-tab-part-kom").click();
+    assert.deepEqual(await copy(historyDialog, "OR-2"), payloads[1]);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "history-1c-copy.png") });
+    await page.locator("#history-tab-rossko").click();
+    const partial = historyDialog.getByRole("button", { name: "Скопировать заказ PARTIAL в 1С" });
+    await partial.waitFor();
+    assert.equal(await partial.isDisabled(), true);
+    assert.match(await partial.getAttribute("title"), /Для переноса нужен полный состав/);
+    await page.locator("#history-tab-armtek").click();
+    assert.equal((await copy(historyDialog, "OR-1")).id, payloads[0].id);
+    assert.equal((await page.request.put(api, { data: { supplier: "armtek", id: null } })).status(), 200);
+    const armtekCopy = historyDialog.getByRole("button", { name: "Скопировать заказ OR-1 в 1С" });
+    await page.waitForFunction(() => document.querySelector('#history-modal .cart-copy-order')?.title.includes("Контрагент не выбран"));
+    assert.equal(await armtekCopy.isDisabled(), true);
+    assert.equal(await page.locator("#cart-badge").textContent(), "1");
+    assert.deepEqual(orderCalls, []);
+    const counterpartyStream = origin + "/api/order-history/counterparties/events";
+    assert.equal(reads.filter((url) => url === counterpartyStream).length, 1);
+    await page.locator("#history-close").click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('#results-body tr').filter({ hasText: "PartKOM" }).locator(".cart-offer-button").click();
+    await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
+    await page.locator("#cart-toggle").click();
+    await page.locator("#cart-tab-part-kom").click();
+    await openCheckout(page);
+    await page.locator("#cart-order-accept").click();
+    const checkout = page.locator("#cart-order-confirm");
+    await checkout.locator(".cart-partkom-receipt").waitFor();
+    const observationsBeforeCopy = reads.filter((url) => url.includes("/api/order-history/")).length;
+    const checkoutPayload = await copy(checkout, "OR-2");
+    assert.equal(checkoutPayload.id, payloads[1].id, "the receipt and history describe the same 1C order");
+    assert.equal(checkoutPayload.counterpartyId, mappings["part-kom"]);
+    assert.equal(checkoutPayload.items[0].price, 135);
+    assert.equal(checkoutPayload.items[0].quantity, 1);
+    assert.equal(checkoutPayload.items[0].deliveryDate, "2026-12-02");
+    assert.equal(reads.filter((url) => url === counterpartyStream).length, 2);
+    assert.equal(reads.filter((url) => url.includes("/api/order-history/")).length, observationsBeforeCopy);
+    assert.equal(orderCalls.length, 1);
+    const toast = await checkout.locator(".cart-toast").boundingBox();
+    const footer = await checkout.locator(".cart-footer").boundingBox();
+    assert.ok(toast.x >= 0 && toast.x + toast.width <= 390 && toast.y + toast.height < footer.y);
+    if (process.env.TEST_CAPTURE_DIR) await page.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "checkout-1c-copy.png") });
+    await checkout.getByRole("button", { name: "Закрыть" }).click();
+  }, { allSuppliers: true, autopiter: true, fixedTime: "2026-11-26T12:00:00Z",
+    deliveries: { partkom: { deliveryDate: "2026-11-30", deliveryDateTo: "2026-12-02" } },
+    confirmOrders: (lines) => ({ rejected: [], confirmed: lines.map(({ id, quantity }) => ({
+      id, acceptedQuantity: quantity, orderIds: ["OR-2"], partKomOrders: [{ orderNumber: "OR-2", quantity,
+        price: 135, expectedDate: "2026-11-30 09:36", guaranteedDate: "2026-12-01 08:00" }],
+    })) }),
+    partKomOrderHistory: async () => history["part-kom"], supplierOrderHistory: async ({ supplier }) => history[supplier],
+  });
+});
+
 test("cart adds bounded quantities, persists, orders and removes confirmed items", async () => {
   await withCartPage(async (page, { orderCalls }) => {
     const row = page.locator("#results-body tr").first();
@@ -1407,13 +1564,13 @@ test("checkout orders only marked goods and keeps unmarked goods in the cart", a
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "2");
     await page.locator("#cart-toggle").click();
     await page.waitForFunction(() => document.querySelectorAll("#cart-items tr[data-cart-item-id]").length === 2);
-    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    assert.equal(await page.locator("#cart-checkout").isDisabled(), true);
     assert.equal(await page.locator("#cart-total .cart-purchase-price").textContent(), "0,00 ₽");
     await page.locator("#cart-items .cart-item-select").nth(1).check();
     assert.equal(await page.locator("#cart-summary").textContent(), "Количество: 2 шт. Выбрано к заказу: 1 шт.");
     assert.equal(await page.locator("#cart-total .cart-purchase-price").textContent(), "120,00 ₽");
     await page.locator("#cart-tab-armtek").click();
-    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    assert.equal(await page.locator("#cart-checkout").isDisabled(), true);
     await page.locator("#cart-tab-all").click();
     assert.equal(await page.locator("#cart-items .cart-item-select:checked").count(), 1);
     await openCheckout(page);
@@ -1424,7 +1581,7 @@ test("checkout orders only marked goods and keeps unmarked goods in the cart", a
     await page.locator("#cart-order-cancel").click();
     assert.equal(await page.locator("#cart-badge").textContent(), "1");
     assert.equal(await page.locator("#cart-items .cart-item-supplier").textContent(), "ArmtekТестовый склад");
-    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    assert.equal(await page.locator("#cart-checkout").isDisabled(), true);
     await openCheckout(page);
     assert.equal(await page.locator("#cart-order-confirm").evaluate((node) => node.classList.contains("is-success")), false);
     assert.equal(await page.locator("#cart-order-confirm").evaluate((node) => getComputedStyle(node).borderTopColor), "rgba(0, 0, 0, 0)");
@@ -1489,13 +1646,15 @@ for (const supplier of ["armtek", "part-kom", "forum-auto", "rossko"]) {
         assert.equal(await other.locator("h4").count(), 1);
         assert.equal(await other.locator(".cart-supplier-receipt__item").count(), 1);
         assert.match(await other.textContent(), /A3/);
+        assert.equal(await shared.getByRole("button", { name: "Скопировать заказ shared-number в 1С", exact: true }).count(), 1);
+        assert.equal(await other.getByRole("button", { name: "Скопировать заказ other-number в 1С", exact: true }).count(), 1);
         if (detailed) {
           assert.deepEqual(await shared.locator("dt").filter({ hasText: /^Заказано$/ }).evaluateAll((nodes) =>
             nodes.map((node) => node.nextElementSibling.textContent)), ["1 шт.", "1 шт."]);
           if (supplier === "armtek" || supplier === "rossko") assert.equal(await shared.locator("dt").filter({ hasText: /^Сумма заказа$/ }).count(), 1);
           if (supplier === "forum-auto") assert.equal(await shared.locator("dt").filter({ hasText: /^Забронировано$/ }).count(), 2);
         }
-        assert.equal(await page.locator("#cart-order-receipt img").count(), 0);
+        assert.equal(await page.locator("#cart-order-receipt img:not(.cart-copy-order img)").count(), 0);
         assert.equal(await page.evaluate(() => window.cartXss), undefined);
         if (process.env.CART_ORDER_RESULT_SCREENSHOT_DIR && supplier === "forum-auto" && detailed) {
           await shared.screenshot({ path: join(process.env.CART_ORDER_RESULT_SCREENSHOT_DIR, "grouped-forum-desktop.png") });
@@ -1541,6 +1700,12 @@ test("order confirmation preserves split numbers without inventing per-order qua
     assert.equal(await page.locator("#cart-order-receipt .cart-supplier-receipt__item").count(), 2);
     assert.doesNotMatch(await page.locator("#cart-order-receipt").textContent(), /Заказано:/);
     assert.match(await page.locator("#cart-order-receipt").textContent(), /Подтверждено по позиции во всех заказах: 1 шт./);
+    const buttons = page.locator("#cart-order-receipt .cart-copy-order");
+    assert.equal(await buttons.count(), 2);
+    for (const button of await buttons.all()) {
+      assert.equal(await button.isDisabled(), true);
+      assert.match(await button.getAttribute("title"), /не подтвердил количество по этому номеру заказа/);
+    }
   }, { reducedMotion: "reduce", confirmOrders: (lines) => ({ rejected: [], confirmed: lines.map((line) => ({
     id: line.id, acceptedQuantity: line.quantity, orderIds: ["split-first", "split-second", "split-first"],
   })) }) });
@@ -1563,7 +1728,7 @@ test("successful PartKOM checkout displays the confirmed order motion without a 
     assert.equal(await receipt.locator("dt", { hasText: "Ожидаемый срок" }).evaluate((node) => node.nextElementSibling.textContent), "18.10.2026 02:41");
     assert.equal(await receipt.locator("dt", { hasText: "Гарантированный срок" }).evaluate((node) => node.nextElementSibling.textContent), "21.10.2026 07:01");
     assert.match(await receipt.textContent(), /120,00/);
-    assert.equal(await receipt.locator("img").count(), 0);
+    assert.equal(await receipt.locator("img:not(.cart-copy-order img)").count(), 0);
     assert.equal(await page.evaluate(() => window.cartXss), undefined);
     assert.equal(await page.locator("#cart-badge").isVisible(), false);
     if (process.env.CART_ORDER_RESULT_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.CART_ORDER_RESULT_SCREENSHOT_DIR, "order-result-desktop.png") });
@@ -1591,7 +1756,7 @@ test("successful Forum Auto checkout displays the supplier order details", async
     assert.equal(await receipt.locator("dt", { hasText: "Создан" }).evaluate((node) => node.nextElementSibling.textContent), "15.10.2026 12:30");
     assert.equal(await receipt.locator("dt", { hasText: "Доставка" }).evaluate((node) => node.nextElementSibling.textContent), "17.10.2026 09:00");
     assert.match(await receipt.textContent(), /Забронировано1/);
-    assert.equal(await receipt.locator("img").count(), 0);
+    assert.equal(await receipt.locator("img:not(.cart-copy-order img)").count(), 0);
     assert.equal(await page.evaluate(() => window.cartXss), undefined);
     assert.equal(await page.locator("#cart-badge").isVisible(), false);
     await page.setViewportSize({ width: 390, height: 844 });
@@ -1618,7 +1783,7 @@ for (const supplier of ["rossko", "armtek"]) {
       assert.equal(await receipt.locator("dt", { hasText: "Создан" }).evaluate((node) => node.nextElementSibling.textContent), supplier === "rossko" ? "15.10.2026 13:33" : "15.10.2026 13:46");
       assert.equal(await receipt.locator("dt", { hasText: "Срок доставки" }).evaluate((node) => node.nextElementSibling.textContent), "16.10.2026");
       assert.match(await receipt.textContent(), /120,00|100,00/);
-      assert.equal(await receipt.locator("img").count(), 0);
+      assert.equal(await receipt.locator("img:not(.cart-copy-order img)").count(), 0);
       if (supplier === "armtek") assert.match(await receipt.textContent(), /Срок возврата не указан/);
       else assert.doesNotMatch(await receipt.textContent(), /Возврат/);
       assert.equal(await page.evaluate(() => window.cartXss), undefined);
@@ -2323,8 +2488,8 @@ test("mobile cart and checkout show complete item cards with working selection, 
       await assertMobileDialogFits(page, "#cart-modal");
       assert.equal(await page.locator("#cart-items .cart-item-name").first().innerText(), title);
       assert.equal(await page.locator("#cart-modal th").filter({ hasText: "Наименование" }).isVisible(), false);
-      await page.locator("#cart-test-order").scrollIntoViewIfNeeded();
-      const button = await page.locator("#cart-test-order").boundingBox();
+      await page.locator("#cart-checkout").scrollIntoViewIfNeeded();
+      const button = await page.locator("#cart-checkout").boundingBox();
       assert.ok(button.y >= 0 && button.y + button.height <= viewport.height);
       assert.equal(await page.locator("#cart-modal .cart-content").evaluate((node) => node.scrollTop), 0);
     }
@@ -2332,7 +2497,7 @@ test("mobile cart and checkout show complete item cards with working selection, 
     await page.locator("#cart-select-all").check();
     assert.equal(await page.locator("#cart-items .cart-item-select:checked").count(), 4);
     await page.locator("#cart-select-all").uncheck();
-    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    assert.equal(await page.locator("#cart-checkout").isDisabled(), true);
     await page.locator("#cart-select-all").check();
     const first = page.locator("#cart-items tr[data-cart-item-id]").first();
     await first.locator(".cart-quantity").fill("3");
@@ -2440,7 +2605,7 @@ test("cart honors reduced motion, constrains focus and fits mobile viewport", as
     await page.locator("#cart-items .cart-remove").click();
     await page.waitForFunction(() => document.querySelector("#cart-badge").hidden);
     assert.equal(await page.locator("#cart-toggle").isVisible(), false);
-    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    assert.equal(await page.locator("#cart-checkout").isDisabled(), true);
     assert.match(await page.locator(".cart-empty").textContent(), /Корзина пуста/);
     await page.keyboard.press("Escape");
     await page.waitForFunction(() => document.activeElement?.id === "submit-button");
@@ -2778,7 +2943,7 @@ test("hidden custom cart goods are excluded from All checkout and All clear, but
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
     assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 0);
     assert.equal(await page.locator("#cart-clear").isDisabled(), true);
-    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    assert.equal(await page.locator("#cart-checkout").isDisabled(), true);
     assert.equal(await page.locator("#cart-toggle").isVisible(), true);
     await custom.click();
     assert.equal(await page.locator("#cart-items tr[data-cart-item-id]").count(), 1);
@@ -2864,7 +3029,7 @@ test("custom cart tab strip keeps goods and actions accessible with many tabs on
       await customCartTabs(page).last().scrollIntoViewIfNeeded();
       await assertMobileDialogFits(page, "#cart-modal");
       assert.ok((await page.locator("#cart-tabs").boundingBox()).height <= 156);
-      const footer = await page.locator("#cart-test-order").boundingBox();
+      const footer = await page.locator("#cart-checkout").boundingBox();
       assert.ok(footer.y >= 0 && footer.y + footer.height <= 740);
       assert.equal(await page.locator("#cart-tab-exclude").isVisible(), true);
     }
@@ -2902,7 +3067,7 @@ test("cart supplier tabs filter rows, hide suppliers and recalculate purchase to
     assert.equal(await page.locator("#cart-delivery-date").textContent(), formatDeliveryDate(deliveries.armtek.deliveryDateTo));
     assert.match(await page.locator("#cart-items .cart-item-delivery").textContent(), /10\.03\.2028 - 12\.03\.2028/);
     assert.equal(await page.locator("#cart-badge").textContent(), "3");
-    assert.equal(await page.locator("#cart-test-order").textContent(), "Оформить заказ");
+    assert.equal(await page.locator("#cart-checkout").textContent(), "Оформить заказ");
     await page.keyboard.press("End");
     assert.equal(await page.locator("#cart-tab-part-kom").getAttribute("aria-selected"), "true");
     assert.equal(await page.locator("#cart-tab-part-kom").evaluate((node) => node === document.activeElement), true);
@@ -2993,8 +3158,8 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     assert.deepEqual(totals.amount, totals.date);
     assert.equal(totals.amountTop, totals.dateTop);
     assert.equal(await page.locator(".cart-footer__summary > span").nth(1).textContent(), "Дата поставки выбранных товаров");
-    assert.equal(await page.locator("#cart-test-order").textContent(), "Оформить заказы");
-    assert.equal(await page.locator("#cart-test-order").getAttribute("title"), null);
+    assert.equal(await page.locator("#cart-checkout").textContent(), "Оформить заказы");
+    assert.equal(await page.locator("#cart-checkout").getAttribute("title"), null);
     const clearBox = await page.locator("#cart-clear").boundingBox();
     const closeBox = await page.locator("#cart-close").boundingBox();
     assert.ok(clearBox.x + clearBox.width < closeBox.x);
@@ -3014,7 +3179,7 @@ test("cart reference fields, aligned totals and tab-specific clear confirmations
     await page.waitForFunction(() => !document.querySelector("#cart-clear-confirm").open);
     assert.equal(await page.locator("#cart-badge").textContent(), "3");
     await page.locator("#cart-tab-armtek").click();
-    assert.equal(await page.locator("#cart-test-order").textContent(), "Оформить заказ");
+    assert.equal(await page.locator("#cart-checkout").textContent(), "Оформить заказ");
     await openCheckout(page);
     assert.equal(await page.locator(".cart-order-table .cart-item-price .cart-price").textContent(), "135,00");
     assert.equal(await page.locator(".cart-order-table .cart-item-price .cart-purchase-price").textContent(), "100,00");
@@ -3125,8 +3290,8 @@ test("four supplier checkout requires confirmation, details and removes confirme
     assert.equal(await page.locator("#cart-order-fields").count(), 0);
     await page.locator("#cart-order-cancel").click();
     assert.equal(posts.length, 0);
-    await page.waitForFunction(() => document.activeElement?.id === "cart-test-order");
-    assert.equal(await page.locator("#cart-test-order").evaluate((node) => node === document.activeElement), true);
+    await page.waitForFunction(() => document.activeElement?.id === "cart-checkout");
+    assert.equal(await page.locator("#cart-checkout").evaluate((node) => node === document.activeElement), true);
     await openCheckout(page);
     await page.waitForFunction(() => document.querySelector("#cart-order-confirm").open);
     await page.keyboard.press("Escape");
@@ -3223,7 +3388,7 @@ test("opening the cart refreshes its offers and a supplier tab can order without
     await page.waitForFunction(() => document.querySelector("#cart-badge").textContent === "1");
     await page.locator("#cart-toggle").click();
     await page.waitForFunction(() => document.querySelector("#cart-items .cart-purchase-price")?.textContent === "125,00");
-    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    assert.equal(await page.locator("#cart-checkout").isDisabled(), true);
     assert.equal(refreshCalls.length, 1);
     await page.locator("#cart-tab-armtek").click();
     await openCheckout(page);
@@ -3252,7 +3417,7 @@ test("opening the cart shows a centered blocking refresh state until supplier of
       assert.ok(Math.abs(messageBounds.y + messageBounds.height / 2 - (modalBounds.y + modalBounds.height / 2)) < 2);
       assert.equal(await page.locator("#cart-tabs").evaluate((element) => element.inert), true);
       assert.equal(await page.locator("#cart-close").evaluate((element) => element.closest("header").inert), true);
-      assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+      assert.equal(await page.locator("#cart-checkout").isDisabled(), true);
       await page.keyboard.press("Tab");
       assert.equal(await page.locator("#cart-refresh-overlay").evaluate((element) => document.activeElement === element), true);
       await page.keyboard.press("Escape");
@@ -3261,7 +3426,7 @@ test("opening the cart shows a centered blocking refresh state until supplier of
       await overlay.waitFor({ state: "hidden" });
       assert.equal(await page.locator("#cart-tabs").evaluate((element) => element.inert), false);
       await page.locator("#cart-select-all").check();
-      assert.equal(await page.locator("#cart-test-order").isEnabled(), true);
+      assert.equal(await page.locator("#cart-checkout").isEnabled(), true);
       assert.equal(refreshCalls.length, 1);
       assert.equal(await page.locator("#cart-status").textContent(), "");
     }, { refreshGate: () => gate });
@@ -3283,6 +3448,9 @@ test("Rossko order settings appear after authorization, safely select account da
     await page.locator("#rossko-key1").fill("fixture-key-one");
     await page.locator("#rossko-key2").fill("fixture-key-two");
     await page.locator("#rossko-connect-button").click();
+    await section.waitFor();
+    assert.equal(await section.evaluate((node) => node.open), false);
+    await section.locator("summary").click();
     await section.locator("fieldset:not(:disabled)").waitFor();
     assert.equal(await page.locator('[data-supplier="rossko"] .auth-card__loading').isVisible(), false);
     assert.equal(await section.isVisible(), true);
@@ -3303,6 +3471,7 @@ test("Rossko order settings appear after authorization, safely select account da
     await page.reload();
     await page.locator("#settings-toggle").click();
     await page.locator("#settings-drawer summary").getByText("Поставщики", { exact: true }).click();
+    await section.locator("summary").click();
     await section.locator("fieldset:not(:disabled)").waitFor();
     assert.equal(await section.locator('[name="companyId"]').inputValue(), "buyer-2");
     assert.equal(await section.locator('[name="delivery"]').inputValue(), "1");
@@ -3332,6 +3501,7 @@ test("Rossko settings preserve a failed draft, retry loading and explain memory-
     await page.locator("#settings-toggle").click();
     await page.locator("#settings-drawer summary").getByText("Поставщики", { exact: true }).click();
     const section = page.locator("#rossko-order-settings");
+    await section.locator("summary").click();
     await page.waitForFunction(() => document.querySelector("#rossko-order-settings [role=status]").textContent.includes("Тестовая ошибка загрузки"));
     assert.equal(await section.locator("fieldset").evaluate((node) => node.disabled), true);
     loadFails = false;
@@ -3363,7 +3533,7 @@ test("opening refresh greys only missing goods and allows only their removal wit
     await page.locator("#cart-toggle").click();
     await page.locator("#cart-items tr.is-unavailable").waitFor();
     await page.locator("#cart-refresh-overlay").waitFor({ state: "hidden" });
-    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    assert.equal(await page.locator("#cart-checkout").isDisabled(), true);
     assert.equal(await page.locator("#cart-items .cart-item-check").count(), 1);
     const available = page.locator('#cart-items tr[data-cart-item-id]').filter({ hasText: "A1" });
     const missing = page.locator('#cart-items tr[data-cart-item-id]').filter({ hasText: "MISSING" });
@@ -3427,7 +3597,7 @@ test("an entirely missing cart stays delete-only and can be cleared", async () =
     await page.locator("#cart-items tr.is-unavailable").waitFor();
     await page.locator("#cart-refresh-overlay").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#cart-select-all").isDisabled(), true);
-    assert.equal(await page.locator("#cart-test-order").isDisabled(), true);
+    assert.equal(await page.locator("#cart-checkout").isDisabled(), true);
     await page.locator("#cart-items .cart-remove").click();
     await page.waitForFunction(() => !document.querySelector("#cart-items tr[data-cart-item-id]"));
     assert.deepEqual(orderCalls, []);
@@ -3466,7 +3636,7 @@ test("checkout also shows the blocking refresh state when cart data became stale
       assert.equal(refreshCalls.length, 1, "changing quantity within the verified stock does not request the supplier again");
       await page.clock.install();
       await page.clock.fastForward(111_000);
-      await page.locator("#cart-test-order").click();
+      await page.locator("#cart-checkout").click();
       await page.locator("#cart-refresh-overlay").waitFor({ state: "visible" });
       assert.equal(await page.locator("#cart-tabs").evaluate((element) => element.inert), true);
       assert.equal(refreshCalls.length, 2);

@@ -41,7 +41,6 @@ import { SqliteRepairRepository } from "../repairs/sqlite-repair-repository.ts";
 import { serveRepairs } from "./repairs.ts";
 import { CartApplicationService, CartError, type RealOrderGateway } from "../purchasing/cart-application-service.ts";
 import { SqliteCartRepository } from "../purchasing/sqlite-cart-repository.ts";
-import type { TestOrder } from "../purchasing/purchase-offer.ts";
 import type { OrderHistory, SupplierOrderHistoryQuery } from "../purchasing/order-history-contract.ts";
 import { historyDate } from "../purchasing/order-history-values.ts";
 import { OrderCancellationService, CancellationInputError } from "../purchasing/order-cancellation-service.ts";
@@ -55,10 +54,11 @@ import type { AuthenticatedUser, UserAuthService, UserPermission } from "../auth
 import { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
 import { serveNomenclature } from "./nomenclature.ts";
 import { serveSupplierOrders } from "./supplier-orders.ts";
+import { serveSupplierCounterparties } from "./supplier-counterparties.ts";
+import { SupplierCounterparties } from "../purchasing/supplier-counterparties.ts";
 import { SupplierOrderNotes } from "../purchasing/supplier-order-notes.ts";
 
 export interface AggregatorApplication extends RosskoOrderSettingsApplication {
-  testCartOrder?: TestOrder;
   realCartOrder?: RealOrderGateway;
   partKomOrderHistory?: (archive: boolean, signal: AbortSignal) => Promise<OrderHistory>;
   supplierOrderHistory?: (query: SupplierOrderHistoryQuery, signal: AbortSignal) => Promise<OrderHistory>;
@@ -260,14 +260,12 @@ export function createAggregatorServer({
   const resolvedPublicDir = resolve(publicDir);
   const repairIntegrationSecret = readRepairIntegrationSecret();
   const garage = createHttpGarageApplication(application.streamSearch.bind(application));
-  const cart = new CartApplicationService(new SqliteCartRepository(getGarageDatabasePath()), (lines, signal) => {
-    if (!application.testCartOrder) throw new CartError("Тестовая проверка заказов не настроена.", 503);
-    return application.testCartOrder(lines, signal);
-  }, application.realCartOrder ?? null);
+  const cart = new CartApplicationService(new SqliteCartRepository(getGarageDatabasePath()), application.realCartOrder ?? null);
   const cancellations = new OrderCancellationService(new SqliteOrderCancellationRepository(getGarageDatabasePath()));
   const repairs = new SqliteRepairRepository(getGarageDatabasePath());
   const nomenclature = new NomenclatureService(getGarageDatabasePath());
   const supplierOrderNotes = new SupplierOrderNotes(getGarageDatabasePath());
+  const supplierCounterparties = new SupplierCounterparties(getGarageDatabasePath());
 
   const server = createServer(async (request, response) => {
     if (!request.url) {
@@ -295,6 +293,9 @@ export function createAggregatorServer({
       () => reportError({ operation: "repairs", category: "internal" }), authenticatedUser ?? undefined, readCurrentUser)) return;
     if (await serveNomenclature(request, response, url, nomenclature, authenticatedUser,
       () => reportError({ operation: "nomenclature", category: "internal" }), readCurrentUser)) return;
+    if (await serveSupplierCounterparties(request, response, url, supplierCounterparties, nomenclature,
+      () => !auth?.enabled || Boolean(auth.authorize(request, response, "admin")),
+      () => reportError({ operation: "supplier-counterparties", category: "internal" }))) return;
     if (url.pathname.startsWith("/api/purchasing/")) {
       await serveSupplierOrders(request, response, url, nomenclature, supplierOrderNotes,
         () => !auth?.enabled || Boolean(auth.authorize(request, response, "purchasing")),
@@ -389,7 +390,7 @@ export function createAggregatorServer({
     }
 
     const cartItemMatch = /^\/api\/cart\/items\/([0-9a-f-]{36})$/.exec(url.pathname);
-    if (url.pathname === "/api/cart" || url.pathname === "/api/cart/items" || url.pathname === "/api/cart/items/batch" || url.pathname === "/api/cart/test-order"
+    if (url.pathname === "/api/cart" || url.pathname === "/api/cart/items" || url.pathname === "/api/cart/items/batch"
       || url.pathname === "/api/cart/order-options" || url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh"
       || url.pathname === "/api/cart/uncertain/resolve" || url.pathname === "/api/cart/tabs"
       || url.pathname === "/api/cart/tabs/import" || cartItemMatch) {
@@ -415,12 +416,13 @@ export function createAggregatorServer({
           if (!controller.signal.aborted) serveJson(response, 200, choices);
         } else if (url.pathname === "/api/cart/items" && (request.method === "POST" || request.method === "DELETE")
           || cartItemMatch && (request.method === "PATCH" || request.method === "DELETE")
-          || (url.pathname === "/api/cart/test-order" || url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh"
+          || (url.pathname === "/api/cart/order" || url.pathname === "/api/cart/refresh"
             || url.pathname === "/api/cart/items/batch"
             || url.pathname === "/api/cart/uncertain/resolve"
             || url.pathname === "/api/cart/order-options") && request.method === "POST") {
           const payload = await readJsonBody(request, url.pathname === "/api/cart/items/batch" ? 64 * 1024
-            : url.pathname === "/api/cart/items" && request.method === "DELETE" ? 32 * 1024 : undefined);
+            : url.pathname === "/api/cart/items" && request.method === "DELETE"
+              ? 32 * 1024 : undefined);
           if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new CartError("Неверные параметры корзины.");
           const fields = payload as Record<string, unknown>;
           if (url.pathname === "/api/cart/order-options") {
@@ -435,9 +437,6 @@ export function createAggregatorServer({
             const details = fields.details;
             if (!details || typeof details !== "object" || Array.isArray(details)) throw new CartError("Неверные параметры заказа.");
             const result = await cart.order(fields.revision, fields.supplier, fields.itemIds, details, controller.signal);
-            if (!controller.signal.aborted) serveJson(response, 200, result);
-          } else if (url.pathname === "/api/cart/test-order") {
-            const result = await cart.test(fields.revision, controller.signal, fields.supplier);
             if (!controller.signal.aborted) serveJson(response, 200, result);
           } else if (url.pathname === "/api/cart/items" && request.method === "DELETE") {
             serveJson(response, 200, cart.clear(fields.supplier, fields.revision, fields.itemIds));
@@ -896,7 +895,7 @@ export function createAggregatorServer({
     serveJson(response, 405, { message: "Method not allowed" });
   });
   server.once("close", () => {
-    garage.close(); cart.close(); cancellations.close(); repairs.close(); nomenclature.close(); supplierOrderNotes.close(); auth?.close();
+    garage.close(); cart.close(); cancellations.close(); repairs.close(); nomenclature.close(); supplierOrderNotes.close(); supplierCounterparties.close(); auth?.close();
   });
   return server;
 }

@@ -12,7 +12,6 @@ import { parseArmtekReturnDays } from "../src/backend/suppliers/armtek/armtek-ap
 import { parsePartKomApiResults } from "../src/backend/suppliers/part-kom/part-kom-api-adapter.ts";
 import { parseForumAutoApiResults, parseForumAutoApiAnalogResults, parseForumAutoApiResponse } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { normalizeRosskoApiSearchResults, normalizeRosskoApiAnalogResults } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
-import { testPurchaseOrder } from "../src/backend/application/test-order-application-service.ts";
 import { parseArmtekOrderDetails, parseArmtekOrderResult, parseArmtekOrderHistory } from "../src/backend/suppliers/armtek/armtek-order.ts";
 import { parseForumAutoOrderResult, placeForumAutoOrder } from "../src/backend/suppliers/forum-auto/forum-auto-api-adapter.ts";
 import { buildRosskoOrderEnvelope, parseRosskoOrderResult, parseRosskoOrdersDetails } from "../src/backend/suppliers/rossko/rossko-api-adapter.ts";
@@ -32,11 +31,11 @@ const result = (supplier = "armtek", quantity = 4) => attachPurchaseReference({ 
   price: 100, quantity, warehouse: "Тестовый склад", deliveryDate: null, deliveryDateApproximate: false, link: supplierOrigins[supplier] }, reference(supplier));
 const line = (supplier = "armtek") => ({ id: randomUUID(), result: result(supplier), quantity: 2, reference: reference(supplier) });
 
-const withCart = async (check, testOrder = async () => [], realOrder = null) => {
+const withCart = async (check, realOrder = null) => {
   const directory = mkdtempSync(join(tmpdir(), "aggregator-cart-"));
   const path = join(directory, "cart.sqlite");
-  let service = new CartApplicationService(new SqliteCartRepository(path), testOrder, realOrder);
-  try { await check(service, () => { service.close(); service = new CartApplicationService(new SqliteCartRepository(path), testOrder, realOrder); return service; }, path); }
+  let service = new CartApplicationService(new SqliteCartRepository(path), realOrder);
+  try { await check(service, () => { service.close(); service = new CartApplicationService(new SqliteCartRepository(path), realOrder); return service; }, path); }
   finally { service.close(); rmSync(directory, { recursive: true, force: true }); }
 };
 
@@ -119,7 +118,7 @@ test("Armtek stores refreshed return terms only for confirmed positions and rest
     otherOrder.orders[0].number = "EXTERNAL-ORDER";
     assert.equal(restored.withArmtekReturnDays(otherOrder).orders[0].items[0].returnDays, undefined);
     assert.equal(restored.withArmtekReturnDays(armtekReturnHistory([null])).orders[0].items[0].returnDays, undefined);
-  }, undefined, gateway);
+  }, gateway);
 });
 
 test("Armtek zero return days survive persistence, while a rolled back confirmation stores nothing", async () => {
@@ -246,26 +245,6 @@ test("cart refuses missing routing, zero/unknown stock and keeps warehouses sepa
   });
 });
 
-test("cart freezes mutations during testing, forwards cancellation and does not clear goods", async () => {
-  let started;
-  const gate = new Promise((resolve) => { started = resolve; });
-  await withCart(async (cart) => {
-    const id = randomUUID();
-    cart.registerOffer(id, result());
-    cart.mutate("add", { offerId: id, quantity: 1, revision: 0 });
-    const controller = new AbortController();
-    const checking = cart.test(1, controller.signal);
-    await gate;
-    assert.throws(() => cart.mutate("remove", { id: cart.view().items[0].id, revision: 1 }), /Дождитесь/);
-    assert.throws(() => cart.clear("all", 1), /Дождитесь/);
-    await assert.rejects(cart.test(1, controller.signal), /уже проверяется/);
-    controller.abort(new Error("Cancelled fixture"));
-    await assert.rejects(checking, /Cancelled fixture/);
-    assert.equal(cart.view().count, 1);
-    assert.equal(cart.view().testing, false);
-  }, async (_lines, signal) => { started(); return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })); });
-});
-
 test("cart atomically clears only the requested supplier and rejects invalid or stale scopes", async () => {
   await withCart((cart, reopen) => {
     for (const supplier of suppliers) {
@@ -309,36 +288,6 @@ test("cart clears an exact mixed-supplier subset atomically and rejects stale, d
     assert.equal(cleared.revision, before.revision + 1);
     assert.deepEqual(cleared.items.map((item) => item.id), before.items.filter((item) => !ids.includes(item.id)).map((item) => item.id));
     assert.deepEqual(reopen().view(), cleared);
-  });
-});
-
-test("cart tests only the selected supplier while keeping all-mode and real-order protection", async () => {
-  const calls = [];
-  await withCart(async (cart) => {
-    for (const supplier of suppliers) {
-      const id = randomUUID();
-      cart.registerOffer(id, result(supplier));
-      cart.mutate("add", { offerId: id, quantity: 1, revision: cart.view().revision });
-    }
-    const controller = new AbortController();
-    for (const [index, supplier] of suppliers.entries()) {
-      const selected = await cart.test(4, controller.signal, supplier);
-      assert.equal(selected.testOnly, true);
-      assert.equal(selected.supplier, supplier);
-      assert.equal(selected.results.length, 1);
-      assert.deepEqual(calls[index], [supplier]);
-    }
-    assert.equal((await cart.test(4, controller.signal)).supplier, "all");
-    assert.deepEqual(calls[4], suppliers);
-    await assert.rejects(cart.test(4, controller.signal, "stparts"), /Выберите вкладку/);
-    await assert.rejects(cart.test(3, controller.signal), /Корзина изменилась/);
-    assert.equal(calls.length, 5);
-    cart.clear("rossko", 4);
-    await assert.rejects(cart.test(5, controller.signal, "rossko"), /выбранную вкладку/);
-    assert.equal(cart.view().count, 3);
-  }, async (lines) => {
-    calls.push(lines.map((line) => line.reference.supplier));
-    return testPurchaseOrder(lines, new AbortController().signal);
   });
 });
 
@@ -404,26 +353,6 @@ test("new supplier cart offers persist, keep warehouses separate and merge repea
   });
 });
 
-test("demo completion covers all suppliers without credentials, keeps the cart and honors abort", async () => {
-  const lines = suppliers.map((supplier) => line(supplier));
-  const completed = await testPurchaseOrder(lines, new AbortController().signal);
-  assert.deepEqual(completed.map((item) => item.id), lines.map((item) => item.id));
-  assert.ok(completed.every((item) => item.status === "simulated" && item.acceptedQuantity === null && /не отправлен/.test(item.message)));
-  const controller = new AbortController();
-  controller.abort(new Error("Fixture abort"));
-  await assert.rejects(testPurchaseOrder(lines, controller.signal), /Fixture abort/);
-  await withCart(async (cart) => {
-    for (const supplier of suppliers) {
-      const id = randomUUID();
-      cart.registerOffer(id, result(supplier));
-      cart.mutate("add", { offerId: id, quantity: 1, revision: cart.view().revision });
-    }
-    const before = cart.view();
-    assert.equal((await cart.test(before.revision, new AbortController().signal)).results.length, 4);
-    assert.deepEqual(cart.view(), before);
-  }, testPurchaseOrder);
-});
-
 test("real checkout removes only confirmed quantities and preserves rejected items", async () => {
   const calls = [];
   const gateway = {
@@ -450,7 +379,7 @@ test("real checkout removes only confirmed quantities and preserves rejected ite
     assert.equal(response.cart.revision, 3);
     assert.deepEqual(response.cart.pendingIds, []);
     assert.equal(reopen().view().count, 3);
-  }, undefined, gateway);
+  }, gateway);
 });
 
 test("refreshing the whole cart authorizes a supplier tab without another refresh", async () => {
@@ -473,7 +402,7 @@ test("refreshing the whole cart authorizes a supplier tab without another refres
     assert.equal(refreshes, 1);
     assert.equal(response.cart.count, 1);
     assert.equal(response.cart.items[0].result.supplier, "forum-auto");
-  }, undefined, gateway);
+  }, gateway);
 });
 
 test("real checkout sends only selected lines and leaves other cart goods untouched", async () => {
@@ -505,7 +434,7 @@ test("real checkout sends only selected lines and leaves other cart goods untouc
     assert.deepEqual(prepared, [{ supplier: "forum-auto", ids: selected }]);
     assert.equal(response.cart.items.length, 1);
     assert.equal(response.cart.items[0].id, items[0].id);
-  }, undefined, gateway);
+  }, gateway);
 });
 
 test("uncertain supplier response remains in cart and blocks duplicate checkout after restart", async () => {
@@ -525,7 +454,7 @@ test("uncertain supplier response remains in cart and blocks duplicate checkout 
     assert.throws(() => restored.clear("armtek", 1), /сверить/);
     assert.throws(() => restored.clear("all", 1, response.cart.pendingIds), /сверить/);
     assert.equal(calls, 1);
-  }, undefined, gateway);
+  }, gateway);
 });
 
 test("verified missing Forum Auto order can be unlocked while retaining the attempt record", async () => {
@@ -552,7 +481,7 @@ test("verified missing Forum Auto order can be unlocked while retaining the atte
       assert.equal(database.prepare("SELECT resolution FROM purchase_order_resolution").get().resolution, "customer_verified_missing");
     } finally { database.close(); }
     assert.throws(() => restored.resolveUncertainLine(itemId, resolved.revision, true), /Не найдена/);
-  }, undefined, gateway);
+  }, gateway);
 });
 
 for (const supplier of suppliers) {
@@ -595,7 +524,7 @@ for (const supplier of suppliers) {
           cart.mutate("update", { id: itemId, quantity: 1, revision: 2 });
           assert.equal(cart.mutate("remove", { id: itemId, revision: 3 }).count, 0);
         }
-      }, undefined, gateway);
+      }, gateway);
     });
   }
 }
@@ -622,7 +551,7 @@ test("resolving one line of a grouped order leaves its other lines blocked", asy
     assert.throws(() => cart.clear("all", 3), /сверить/);
     assert.deepEqual(cart.resolveUncertainLine(second.id, 3, true).pendingIds, []);
     assert.equal(cart.view().count, 1);
-  }, undefined, gateway);
+  }, gateway);
 });
 
 test("manual reconciliation rejects active pending attempts and rolls back storage failures", async () => {
@@ -685,7 +614,7 @@ test("an uncertain Forum Auto fault exposes only its safe supplier code", async 
       const response = await cart.order(1, "forum-auto", [cart.view().items[0].id], {}, new AbortController().signal);
       assert.match(response.results[0].message, new RegExp(`код ${code}`));
       assert.doesNotMatch(response.results[0].message, /Internal upstream details/);
-    }, undefined, gateway);
+    }, gateway);
   }
 });
 
@@ -703,7 +632,7 @@ test("an uncertain Forum Auto response shows its order number for supplier verif
     const response = await cart.order(1, "forum-auto", [cart.view().items[0].id], {}, new AbortController().signal);
     assert.match(response.results[0].message, /№42/);
     assert.deepEqual(response.cart.pendingIds, [cart.view().items[0].id]);
-  }, undefined, gateway);
+  }, gateway);
 });
 
 test("an existing Forum Auto cart line obtains a fresh product id before order", async () => {
@@ -721,7 +650,7 @@ test("an existing Forum Auto cart line obtains a fresh product id before order",
     assert.equal(refreshed.revision, 2);
     assert.equal(refreshed.items[0].result.price, 125);
     assert.equal((await cart.order(2, "forum-auto", cart.view().items.map((item) => item.id), {}, new AbortController().signal)).cart.count, 0);
-  }, undefined, gateway);
+  }, gateway);
 });
 
 test("supplier refresh matches a legacy Forum Auto row and rejects ambiguous or insufficient offers", async () => {
@@ -762,7 +691,7 @@ test("refresh failure keeps the cart unchanged and cannot authorize a real order
     assert.deepEqual(cart.view(), before);
     await assert.rejects(cart.order(before.revision, "armtek", before.items.map((item) => item.id), {}, new AbortController().signal), /Сначала обновите/);
     assert.equal(sends, 0);
-  }, undefined, gateway);
+  }, gateway);
 });
 
 test("selected refresh ignores an unavailable unselected offer and authorizes only the verified ids", async () => {
@@ -798,7 +727,7 @@ test("selected refresh ignores an unavailable unselected offer and authorizes on
     assert.deepEqual(submitted, [available.id]);
     assert.deepEqual(response.cart.items.map((item) => item.id), [missing.id]);
     assert.deepEqual(checked, [["A1", "MISSING"], ["A1"]]);
-  }, undefined, gateway);
+  }, gateway);
 });
 
 test("pending unselected orders do not block refreshing and ordering another cart line", async () => {
@@ -823,7 +752,7 @@ test("pending unselected orders do not block refreshing and ordering another car
     const response = await cart.order(2, "all", [available.id], {}, signal);
     assert.deepEqual(response.cart.pendingIds, [uncertain.id]);
     assert.equal(submissions, 2);
-  }, undefined, gateway);
+  }, gateway);
 });
 
 test("cart refresh accepts both supported VAZ article forms while retaining supplier, brand and warehouse identifiers", async () => {
@@ -908,7 +837,7 @@ test("opening refresh preserves available items while missing and failed lines a
     assert.equal(ordered.cart.items[0].unavailable.reason, "not_found");
     assert.deepEqual(searches, ["MISSING", "AVAILABLE", "ERROR"]);
     assert.equal(cart.mutate("remove", { id: missing.id, revision: ordered.cart.revision }).count, 0);
-  }, undefined, gateway);
+  }, gateway);
 });
 
 test("a later opening refresh can restore an unavailable line without persisting invented availability", async () => {
@@ -925,7 +854,7 @@ test("a later opening refresh can restore an unavailable line without persisting
     assert.equal((await cart.refreshForOrder(1, "all", new AbortController().signal)).items[0].unavailable.reason, "not_found");
     present = true;
     assert.equal((await cart.refreshForOrder(1, "all", new AbortController().signal)).items[0].unavailable, null);
-  }, undefined, { refresh: service.refresh.bind(service), choices: async () => ({}), prepare: async () => { throw new Error("not submitted"); } });
+  }, { refresh: service.refresh.bind(service), choices: async () => ({}), prepare: async () => { throw new Error("not submitted"); } });
 });
 
 test("a partial refresh respects abort and never converts a supplier error to confirmed absence", async () => {

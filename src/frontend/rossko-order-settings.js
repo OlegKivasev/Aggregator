@@ -82,14 +82,15 @@ export function bootstrapRosskoOrderSettings() {
       deliveryId: delivery.id, addressId: delivery.addressId, contactName: fields.contactName.value.trim(), contactPhone: fields.contactPhone.value.trim() });
   });
   reload.addEventListener("click", () => { if (authorized && !saving) void exchange(); });
+  section.addEventListener("toggle", () => { if (section.open && authorized && !state && !request) void exchange(); });
   return {
     setAuthorized(value) {
       if (authorized === value) return;
       authorized = value;
       section.hidden = !value;
       request?.abort(); request = null; saving = false; state = null; form.reset(); setBusy(false); status.textContent = "";
-      if (value) void exchange();
+      if (!value) section.open = false;
     },
-    refresh() { if (authorized && !request) void exchange(); },
+    refresh() { if (section.open && authorized && !request) void exchange(); },
   };
 }

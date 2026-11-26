@@ -46,6 +46,7 @@ export async function serveSupplierOrders(request: IncomingMessage, response: Se
     const started = performance.now();
     const result = await service.loadSupplierOrders(read, controller.signal);
     if (response.destroyed || !recheckAccess()) return;
+    if (result.view === "counterparties") throw new NomenclatureError(503, "stock_failed", "Ответ 1С не соответствует запросу заказов.");
     response.setHeader("Server-Timing", `supplier-orders;dur=${(performance.now() - started).toFixed(1)}`);
     if (read.view !== "order" && result.view !== "order") {
       serveJson(response, 200, { orders: result.orders, nextCursor: supplierListCursor(read, result) });

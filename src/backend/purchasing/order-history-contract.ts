@@ -20,6 +20,16 @@ export interface OrderHistoryItem {
   expectedDate: string | null;
   guaranteedDate: string | null;
   warehouse: string | null;
+  receipt?: {
+    status?: string;
+    comment?: string;
+    refusalCount?: number;
+    storeCount?: number;
+    releaseCount?: number;
+    reservedQuantity?: number;
+    confirmedQuantity?: number;
+    total?: number;
+  };
 }
 
 export interface OrderHistoryOrder {
@@ -27,6 +37,15 @@ export interface OrderHistoryOrder {
   /** Supplier document reference, separate from the stable order number. */
   documentNumber?: string;
   date: string | null;
+  /** The displayed order was split by the item limit of the history response. */
+  itemsLimited?: true;
+  receipt?: {
+    status?: string;
+    orderTotal?: number;
+    deliveryType?: string;
+    deliveryAddress?: string;
+    paymentType?: string;
+  };
   /** When the aggregator last detected an increase in confirmed cancellations. */
   cancellationDetectedAt?: string;
   items: OrderHistoryItem[];

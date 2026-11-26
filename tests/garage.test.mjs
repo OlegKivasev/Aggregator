@@ -200,7 +200,7 @@ test("garage prepares only fresh confirmed cart offers and retains missing or fa
       return { results: offers.has(article) ? [offers.get(article)] : [], failed: article === "FAILED" };
     },
   });
-  const cart = new CartApplicationService(new SqliteCartRepository(path), async () => []);
+  const cart = new CartApplicationService(new SqliteCartRepository(path));
   try {
     const vehicle = service.createVehicle("Тестовый автомобиль");
     const ids = new Map();

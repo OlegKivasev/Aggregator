@@ -161,7 +161,7 @@ for (const count of [1, 50, 500]) test(`Autopiter cart refresh deduplicates ${co
     await adapter.search(query, { signal: searchSignal, timeoutMs: 1000 }, (result) => emit({ type: "result", result }), sessions);
     emit({ type: "supplier_status", supplier: "autopiter", status: "completed" });
   }, null, adapter);
-  const cart = new CartApplicationService(new SqliteCartRepository(join(directory, "cart.sqlite")), async () => [], gateway);
+  const cart = new CartApplicationService(new SqliteCartRepository(join(directory, "cart.sqlite")), gateway);
   try {
     lines.forEach((item) => assert.equal(cart.registerOffer(item.id, item.result), true));
     cart.mutate("add", { revision: 0, offers: lines.map((item) => ({ offerId: item.id, quantity: item.quantity })) });
@@ -183,13 +183,13 @@ test("Autopiter persists uncertain batch attempts and prevents duplicate orders 
   const gateway = { refresh: async (lines) => lines, choices: async () => ({}), prepare: async () => async () => {
     submissions++; throw new SupplierTimeoutError("lost reply");
   } };
-  let cart = new CartApplicationService(new SqliteCartRepository(path), async () => [], gateway);
+  let cart = new CartApplicationService(new SqliteCartRepository(path), gateway);
   try {
     cart.registerOffer(item.id, item.result); cart.mutate("add", { revision: 0, offerId: item.id, quantity: 2 });
     const fresh = await cart.refreshForOrder(1, "autopiter", signal());
     const result = await cart.order(fresh.revision, "autopiter", fresh.items.map((entry) => entry.id), {}, signal());
     assert.equal(result.results[0].status, "uncertain"); assert.equal(result.cart.count, 2);
-    cart.close(); cart = new CartApplicationService(new SqliteCartRepository(path), async () => [], gateway);
+    cart.close(); cart = new CartApplicationService(new SqliteCartRepository(path), gateway);
     assert.equal(cart.view().pendingIds.length, 1);
     await assert.rejects(cart.order(cart.view().revision, "autopiter", cart.view().items.map((entry) => entry.id), {}, signal()), /сверить/);
     assert.equal(submissions, 1);

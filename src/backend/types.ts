@@ -1,4 +1,5 @@
-export type SupplierId = "rossko" | "armtek" | "part-kom" | "stparts" | "forum-auto" | "autopiter" | "motordetal" | "mladov";
+export const supplierIds = ["rossko", "armtek", "part-kom", "stparts", "forum-auto", "autopiter", "motordetal", "mladov"] as const;
+export type SupplierId = typeof supplierIds[number];
 
 export type SupplierSearchStatus =
   | "searching"

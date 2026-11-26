@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { SupplierIntegrationError, SupplierTimeoutError } from "../errors.ts";
 import type { NormalizedSearchResult } from "../types.ts";
-import { getPurchaseReference, purchaseOfferKey, type PurchaseLine, type PurchaseReference, type TestOrder } from "./purchase-offer.ts";
+import { getPurchaseReference, purchaseOfferKey, type PurchaseLine, type PurchaseReference } from "./purchase-offer.ts";
 import { SqliteCartRepository, type CartTab } from "./sqlite-cart-repository.ts";
 import type { CheckoutDetails, OrderChoices, OrderGroupResult, OrderSupplier } from "./order-contract.ts";
 import type { OrderHistory } from "./order-history-contract.ts";
@@ -120,7 +120,6 @@ function validLine(line: PurchaseLine): boolean {
 
 export class CartApplicationService {
   private readonly repository: SqliteCartRepository;
-  private readonly testOrder: TestOrder;
   private readonly realOrder: RealOrderGateway | null;
   private readonly offers = new Map<string, { line: PurchaseLine; expires: number }>();
   private testing = false;
@@ -128,9 +127,8 @@ export class CartApplicationService {
   private readonly refreshIssues = new Map<string, CartRefreshIssue>();
   private readonly controller = new AbortController();
 
-  constructor(repository: SqliteCartRepository, testOrder: TestOrder, realOrder: RealOrderGateway | null = null) {
+  constructor(repository: SqliteCartRepository, realOrder: RealOrderGateway | null = null) {
     this.repository = repository;
-    this.testOrder = testOrder;
     this.realOrder = realOrder;
   }
 
@@ -337,23 +335,6 @@ export class CartApplicationService {
         lineIds: checked.filter((line) => !line.refreshIssue).map((line) => line.id), expires: Date.now() + 2 * 60_000 };
       this.testing = false;
       return this.view();
-    } finally { this.testing = false; }
-  }
-
-  async test(revision: unknown, signal: AbortSignal, supplier: unknown = "all") {
-    if (this.testing) throw new CartError("Заказ уже проверяется.", 409);
-    const scope = normalizeCartSupplier(supplier);
-    const cart = this.load();
-    if (revision !== cart.revision) throw new CartError("Корзина изменилась. Обновите её перед проверкой.", 409);
-    const lines = scope === "all" ? cart.lines : cart.lines.filter((line) => line.reference.supplier === scope);
-    if (!lines.length) throw new CartError("Добавьте товары в выбранную вкладку корзины.");
-    this.testing = true;
-    try {
-      const combinedSignal = AbortSignal.any([signal, this.controller.signal]);
-      combinedSignal.throwIfAborted();
-      const results = await this.testOrder(structuredClone(lines), combinedSignal);
-      combinedSignal.throwIfAborted();
-      return { testOnly: true, revision: cart.revision, supplier: scope, results };
     } finally { this.testing = false; }
   }
 
