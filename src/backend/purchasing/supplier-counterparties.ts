@@ -1,10 +1,9 @@
 import { EventEmitter } from "node:events";
 import { DatabaseSync } from "node:sqlite";
-import type { OrderSupplier } from "./order-contract.ts";
+import type { SupplierId } from "../types.ts";
 import type { SupplierCounterparty } from "./supplier-orders-contract.ts";
 
-export const orderSuppliers = ["armtek", "part-kom", "forum-auto", "rossko", "autopiter"] as const satisfies readonly OrderSupplier[];
-type CounterpartyMapping = SupplierCounterparty & { supplier: OrderSupplier };
+type CounterpartyMapping = SupplierCounterparty & { supplier: SupplierId };
 
 export class SupplierCounterparties {
   private readonly database: DatabaseSync;
@@ -33,7 +32,7 @@ export class SupplierCounterparties {
     return Object.fromEntries(this.list().map(({ supplier, id }) => [supplier, id]));
   }
 
-  save(supplier: OrderSupplier, entry: SupplierCounterparty | null): void {
+  save(supplier: SupplierId, entry: SupplierCounterparty | null): void {
     if (entry) {
       this.database.prepare(`INSERT INTO supplier_counterparties (supplier, id, name, taxId) VALUES (?, ?, ?, ?)
         ON CONFLICT(supplier) DO UPDATE SET id=excluded.id, name=excluded.name, taxId=excluded.taxId`)

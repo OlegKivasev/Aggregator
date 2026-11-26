@@ -103,7 +103,7 @@ const rosskoLogoutButton = document.querySelector("#rossko-logout-button");
 const rosskoSessionPill = document.querySelector("#rossko-session-pill");
 const rosskoAuthFeedback = document.querySelector("#rossko-auth-feedback");
 const rosskoOrderSettings = bootstrapRosskoOrderSettings();
-bootstrapSupplierCounterpartiesSettings();
+const supplierCounterpartiesSettings = bootstrapSupplierCounterpartiesSettings();
 const armtekAuthForm = document.querySelector("#armtek-auth-form");
 const armtekLoginInput = document.querySelector("#armtek-login");
 const armtekPasswordInput = document.querySelector("#armtek-password");
@@ -1378,10 +1378,12 @@ const closeActiveSource = () => {
 const openSettings = () => {
   settingsDrawer.hidden = false;
   rosskoOrderSettings.refresh();
+  supplierCounterpartiesSettings.refresh();
 };
 
 const closeSettings = () => {
   settingsDrawer.hidden = true;
+  supplierCounterpartiesSettings.close();
 };
 
 const updateRosskoSessionCard = (session) => {

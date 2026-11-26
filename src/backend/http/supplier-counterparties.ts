@@ -1,13 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { NomenclatureError, objectFields, parseUuid } from "../nomenclature/contract.ts";
 import type { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
-import type { OrderSupplier } from "../purchasing/order-contract.ts";
-import { orderSuppliers, type SupplierCounterparties } from "../purchasing/supplier-counterparties.ts";
+import type { SupplierCounterparties } from "../purchasing/supplier-counterparties.ts";
+import { supplierIds, type SupplierId } from "../types.ts";
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
 import { serveJson } from "./responses.ts";
 
 const settingsPath = "/api/suppliers/onec-counterparties";
-const streamPath = "/api/cart/test-order/counterparties/events";
+const streamPath = "/api/order-history/counterparties/events";
 
 export async function serveSupplierCounterparties(request: IncomingMessage, response: ServerResponse, url: URL,
   store: SupplierCounterparties, nomenclature: NomenclatureService, recheckAdmin: () => boolean, reportError: () => void) {
@@ -48,8 +48,8 @@ export async function serveSupplierCounterparties(request: IncomingMessage, resp
       serveJson(response, 200, result.counterparties);
     } else if (request.method === "PUT") {
       const { supplier, id } = objectFields(await readJsonBody(request, 4096), ["supplier", "id"]);
-      if (!orderSuppliers.includes(supplier as OrderSupplier)) {
-        throw new NomenclatureError(400, "invalid_supplier", "Выберите поставщика из корзины.");
+      if (!supplierIds.includes(supplier as SupplierId)) {
+        throw new NomenclatureError(400, "invalid_supplier", "Неизвестный поставщик.");
       }
       const requestedId = id === null ? null : parseUuid(id);
       const result = requestedId && await nomenclature.loadSupplierOrders({ view: "counterparties", query: "", id: requestedId }, controller.signal);
@@ -58,7 +58,7 @@ export async function serveSupplierCounterparties(request: IncomingMessage, resp
       if (requestedId && !entry) {
         throw new NomenclatureError(404, "counterparty_missing", "Поставщик не найден в 1С. Повторите поиск.");
       }
-      store.save(supplier as OrderSupplier, entry ?? null);
+      store.save(supplier as SupplierId, entry ?? null);
       serveJson(response, 200, store.list());
     } else {
       serveJson(response, 200, store.list());

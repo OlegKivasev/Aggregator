@@ -249,10 +249,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       <p class="cart-status" id="cart-status" role="status" aria-live="polite"></p></div>
     <footer class="cart-footer"><div class="cart-footer__summary"><span>К заказу</span><span>Дата поставки выбранных товаров</span>
       <div id="cart-total"></div><strong id="cart-delivery-date"></strong></div>
-      <div class="cart-checkout-actions">
-        <button type="button" class="btn btn-light cart-test-submit" id="cart-simulate-order" hidden>Оформить тестовый заказ</button>
-        <button type="button" class="btn btn-primary" id="cart-test-order">Оформить заказы</button>
-      </div></footer>
+      <button type="button" class="btn btn-primary" id="cart-checkout">Оформить заказы</button></footer>
     <div class="cart-refresh-overlay" id="cart-refresh-overlay" role="status" aria-live="polite" tabindex="-1" hidden>
       <div class="cart-refresh-overlay__message"><span class="cart-refresh-overlay__spinner" aria-hidden="true"></span>
         <strong>Обновляем корзину</strong><span>Проверяем цены, остатки и сроки у поставщиков…</span></div></div>`;
@@ -295,21 +292,6 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       <div class="cart-confirm-actions"><button type="button" class="btn btn-light" id="cart-order-cancel" autofocus>Вернуться в корзину</button>
         <button type="button" class="btn cart-order-submit" id="cart-order-accept">Заказать</button></div></footer>`;
   document.body.append(orderDialog);
-  const testDialog = document.createElement("dialog");
-  testDialog.id = "cart-test-receipts";
-  testDialog.className = "cart-modal cart-order-confirm is-success";
-  testDialog.setAttribute("aria-labelledby", "cart-test-receipts-title");
-  testDialog.innerHTML = `<header class="analogs-modal__header"><h2 id="cart-test-receipts-title">Тестовые заказы</h2></header>
-    <div class="cart-content"><div class="cart-order-receipt"></div>
-      <p class="cart-order-status" role="status"></p></div>
-    <footer class="cart-footer"><button type="button" class="btn btn-light" autofocus>Закрыть</button></footer>`;
-  document.body.append(testDialog);
-  testDialog.querySelector("footer button").addEventListener("click", () => testDialog.close());
-  let counterpartyStream;
-  testDialog.addEventListener("close", () => {
-    counterpartyStream?.close();
-    counterpartyStream = undefined;
-  });
   const toast = document.createElement("div");
   toast.className = "cart-toast";
   toast.hidden = true;
@@ -319,8 +301,7 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
   const body = modal.querySelector("#cart-items");
   const status = modal.querySelector("#cart-status");
   const refreshOverlay = modal.querySelector("#cart-refresh-overlay");
-  const checkoutButton = modal.querySelector("#cart-test-order");
-  const simulateButton = modal.querySelector("#cart-simulate-order");
+  const checkoutButton = modal.querySelector("#cart-checkout");
   const clearButton = modal.querySelector("#cart-clear");
   const clearCancel = clearDialog.querySelector("#cart-clear-cancel");
   const clearAccept = clearDialog.querySelector("#cart-clear-accept");
@@ -408,8 +389,6 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
     }).join("") : `<tr><td colspan="${supplierView ? 8 : 9}" class="cart-empty">${cart.items.length ? "В этой вкладке нет товаров. Перетащите сюда товар из другой вкладки." : "Корзина пуста. Добавьте товары из таблицы предложений."}</td></tr>`;
     checkoutButton.disabled = locked || !selected.length;
     checkoutButton.textContent = checking ? "Оформляем…" : supplierView ? "Оформить заказ" : "Оформить заказы";
-    simulateButton.hidden = !selected.length;
-    simulateButton.disabled = locked;
     clearButton.disabled = locked || !items.length || items.some((item) => pending.has(item.id));
     const clearLabel = `Очистить вкладку «${cartTabs.getName()}»`;
     clearButton.title = clearLabel;
@@ -633,88 +612,6 @@ export const bootstrapCart = ({ getMarkupPrice, showPurchasePrice }) => {
       }
     }
   };
-  simulateButton.addEventListener("click", async () => {
-    const supplier = cartTabs.getSupplier();
-    const itemIds = cartTabs.getItems().filter((item) => selectedIds.has(item.id)).map((item) => item.id);
-    if (!cart || busy || checking || !itemIds.length) return;
-    checking = true;
-    status.textContent = "";
-    render();
-    try {
-      const result = await api("/api/cart/test-order", { method: "POST",
-        body: JSON.stringify({ revision: cart.revision, supplier, itemIds }) });
-      if (result.testOnly !== true || !Array.isArray(result.orders) || !result.orders.length) {
-        throw new Error("Тестовые заказы не получены.");
-      }
-      const copyStatus = testDialog.querySelector("[role=status]");
-      copyStatus.textContent = "";
-      copyStatus.classList.remove("is-error");
-      let counterparties = result.counterparties ?? {};
-      const updateAvailability = [];
-      const cards = result.orders.map((order) => {
-        const card = orderReceiptCard(order.supplier, order.number);
-        const copy = document.createElement("button");
-        copy.type = "button";
-        copy.className = "btn btn-light cart-copy-order";
-        copy.textContent = "В 1С";
-        copy.setAttribute("aria-label", `В 1С, заказ ${order.number}`);
-        const unavailable = document.createElement("span");
-        unavailable.className = "cart-copy-order-unavailable";
-        unavailable.textContent = "В 1С";
-        unavailable.title = "Контрагент не выбран. Выберите контрагента в настройках поставщика и продолжите.";
-        unavailable.tabIndex = 0;
-        unavailable.setAttribute("aria-label", unavailable.title);
-        updateAvailability.push(() => {
-          copy.hidden = !counterparties[order.supplier];
-          unavailable.hidden = !copy.hidden;
-        });
-        copy.addEventListener("click", async () => {
-          const counterpartyId = counterparties[order.supplier];
-          if (!counterpartyId) return;
-          try {
-            await navigator.clipboard.writeText(JSON.stringify({ ...order, counterpartyId }));
-            copyStatus.textContent = `Заказ ${order.number} скопирован. В 1С нажмите «Добавить из агрегатора».`;
-            copyStatus.classList.remove("is-error");
-          } catch {
-            copyStatus.textContent = "Не удалось скопировать заказ. Проверьте доступ браузера к буферу обмена.";
-            copyStatus.classList.add("is-error");
-          }
-        });
-        card.querySelector("h4").append(" ", copy, unavailable);
-        const list = document.createElement("ul");
-        for (const item of order.items) {
-          const row = document.createElement("li");
-          const details = [`${item.brand} ${item.article}`, item.title, `${item.quantity} шт.`, `${formatPrice(item.price)} за шт.`];
-          if (item.deliveryDate) details.push(`Поставка ${formatOrderDate(item.deliveryDate)}`);
-          if (item.returnDays !== null) details.push(formatArmtekReturnDays(item.returnDays));
-          row.textContent = details.filter(Boolean).join(" · ");
-          list.append(row);
-        }
-        card.append(list);
-        return card;
-      });
-      testDialog.querySelector(".cart-order-receipt").replaceChildren(...cards);
-      for (const update of updateAvailability) update();
-      if (modal.open) {
-        testDialog.showModal();
-        counterpartyStream = new EventSource("/api/cart/test-order/counterparties/events");
-        counterpartyStream.onmessage = ({ data }) => {
-          counterparties = JSON.parse(data);
-          for (const update of updateAvailability) update();
-        };
-        counterpartyStream.onerror = () => {
-          counterparties = {};
-          for (const update of updateAvailability) update();
-        };
-      }
-    } catch (error) {
-      status.textContent = error.message;
-    } finally {
-      checking = false;
-      render();
-    }
-  });
-
   checkoutButton.addEventListener("click", async () => {
     if (busy || checking || cart?.testing || !cart?.items.length || !selectedIds.size) return;
     const supplier = cartTabs.getSupplier();

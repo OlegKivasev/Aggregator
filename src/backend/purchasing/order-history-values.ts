@@ -31,8 +31,11 @@ export function finishOrderHistory(orders: OrderHistoryOrder[], limited = false)
   let remaining = 500;
   const selected: OrderHistoryOrder[] = [];
   for (const order of orders) {
-    if (order.items.length > remaining) limited = true;
-    if (remaining > 0) selected.push({ ...order, items: order.items.slice(0, remaining) });
+    const itemsLimited = order.items.length > remaining;
+    if (itemsLimited) limited = true;
+    if (remaining > 0) selected.push(itemsLimited
+      ? { ...order, items: order.items.slice(0, remaining), itemsLimited: true }
+      : order);
     remaining -= Math.min(remaining, order.items.length);
   }
   return { orders: selected, limited };

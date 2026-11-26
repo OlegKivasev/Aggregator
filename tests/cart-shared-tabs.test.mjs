@@ -13,14 +13,14 @@ const tab = (n, itemIds = [], excludeFromAll = false) => ({ id: `custom-${id(n)}
 const withCart = async (check) => {
   const directory = mkdtempSync(join(tmpdir(), "shared-cart-tabs-"));
   const path = join(directory, "cart.sqlite");
-  let cart = new CartApplicationService(new SqliteCartRepository(path), async () => []);
+  let cart = new CartApplicationService(new SqliteCartRepository(path));
   try {
     const offer = attachPurchaseReference({ supplier: "armtek", brand: "TEST", article: "A1", title: "Тестовая деталь",
       quantity: 5, price: 100, warehouse: null, deliveryDate: null, deliveryDateApproximate: false,
       link: "https://etp.armtek.ru/" }, { supplier: "armtek", keyzak: "TEST01" });
     cart.registerOffer(id(1), offer);
     cart.mutate("add", { revision: 0, offerId: id(1), quantity: 1 });
-    await check(cart, () => { cart.close(); cart = new CartApplicationService(new SqliteCartRepository(path), async () => []); return cart; });
+    await check(cart, () => { cart.close(); cart = new CartApplicationService(new SqliteCartRepository(path)); return cart; });
   } finally { cart.close(); rmSync(directory, { recursive: true, force: true }); }
 };
 

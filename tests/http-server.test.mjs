@@ -14,7 +14,6 @@ import { SqliteApplicabilityCacheRepository } from "../src/backend/applicability
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { attachPurchaseReference } from "../src/backend/purchasing/purchase-offer.ts";
-import { testPurchaseOrder } from "../src/backend/application/test-order-application-service.ts";
 
 const publicDir = join(process.cwd(), "src", "frontend");
 const openServers = new Set();
@@ -136,14 +135,11 @@ test("cart HTTP validates server offers and quantities, hides routing and cannot
   const previousPath = process.env.GARAGE_DB_PATH;
   process.env.GARAGE_DB_PATH = join(directory, "cart.sqlite");
   let server;
-  let called = 0;
   try {
     const application = createApplication({
       streamSearch: async (_query, emit) => emit({ type: "result", result: attachPurchaseReference({ supplier: "part-kom", article: "A1", brand: "TEST", title: "Тест",
         price: 100, quantity: 3, warehouse: "Тестовый склад", deliveryDate: null, deliveryDateApproximate: false, link: "https://www.part-kom.ru/" },
       { supplier: "part-kom", makerId: "101", providerId: "202" }) }),
-      testCartOrder: async (lines, signal) => { called++; assert.equal(lines[0].result.price, 100); assert.equal(lines[0].reference.providerId, "202");
-        return testPurchaseOrder(lines, signal); },
     });
     const listening = await listen(application);
     server = listening.server;
@@ -168,14 +164,7 @@ test("cart HTTP validates server offers and quantities, hides routing and cannot
     assert.equal(oversized.status, 413);
     const malformed = await fetch(`${baseUrl}/api/cart/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{" });
     assert.equal(malformed.status, 400);
-    assert.equal((await send("/api/cart/test-order", { revision: 0 })).status, 409);
-    const tested = await (await send("/api/cart/test-order", { revision: added.revision, supplier: "part-kom", flagTest: 0, testOnly: false })).json();
-    assert.equal(tested.testOnly, true);
-    assert.equal(tested.supplier, "part-kom");
-    assert.equal(tested.results[0].status, "simulated");
-    assert.equal(tested.results[0].acceptedQuantity, null);
-    assert.equal(called, 1);
-    assert.equal((await send("/api/cart/test-order", { revision: added.revision, supplier: "stparts" })).status, 400);
+    assert.equal((await send("/api/cart/test-order", { revision: added.revision })).status, 405);
     assert.equal((await send("/api/cart/items", { revision: added.revision }, "DELETE")).status, 400);
     assert.equal((await send("/api/cart/items", { revision: 0, supplier: "all" }, "DELETE")).status, 409);
     assert.equal((await send("/api/cart/order", { revision: added.revision })).status, 400);

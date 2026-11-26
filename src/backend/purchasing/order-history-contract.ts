@@ -27,6 +27,8 @@ export interface OrderHistoryOrder {
   /** Supplier document reference, separate from the stable order number. */
   documentNumber?: string;
   date: string | null;
+  /** The displayed order was split by the item limit of the history response. */
+  itemsLimited?: true;
   /** When the aggregator last detected an increase in confirmed cancellations. */
   cancellationDetectedAt?: string;
   items: OrderHistoryItem[];

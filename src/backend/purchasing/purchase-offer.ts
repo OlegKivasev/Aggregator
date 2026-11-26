@@ -15,15 +15,6 @@ export interface PurchaseLine {
   reference: PurchaseReference;
 }
 
-export interface TestOrderLineResult {
-  id: string;
-  status: "simulated";
-  message: string;
-  acceptedQuantity: null;
-}
-
-export type TestOrder = (lines: PurchaseLine[], signal: AbortSignal) => Promise<TestOrderLineResult[]>;
-
 // Supplier routing identifiers remain on the server; the public search payload stays unchanged.
 const references = new WeakMap<NormalizedSearchResult, PurchaseReference>();
 

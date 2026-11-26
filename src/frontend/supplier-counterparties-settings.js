@@ -1,5 +1,5 @@
 const path = "/api/suppliers/onec-counterparties";
-const suppliers = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko", autopiter: "Автопитер" };
+const searchDelay = 250;
 
 async function request(url, options) {
   const response = await fetch(url, options);
@@ -8,104 +8,183 @@ async function request(url, options) {
   return data;
 }
 
+const counterpartyLabel = ({ name, taxId }) => taxId ? `${name} · ИНН ${taxId}` : name;
+
 export function bootstrapSupplierCounterpartiesSettings() {
-  const panel = document.querySelector("#supplier-counterparties-settings");
-  const rows = panel.querySelector("[data-mappings]");
-  const form = panel.querySelector("[data-counterparty-search]");
-  const results = panel.querySelector("[data-counterparty-results]");
-  const status = panel.querySelector("[data-counterparty-status]");
-  let supplier;
-  let searching;
-  let saving = false;
+  const panel = document.querySelector("#suppliers-settings");
+  const template = panel.querySelector("#supplier-counterparty-template");
+  const cards = new Map();
+  let mappings = new Map();
+  let load;
+  let loaded = false;
+  let revision = 0;
 
-  const button = (label, onClick) => {
-    const element = document.createElement("button");
-    element.className = "btn btn-light";
-    element.type = "button";
-    element.textContent = label;
-    element.addEventListener("click", onClick);
-    return element;
+  const refresh = () => {
+    if (loaded) return Promise.resolve();
+    if (load) return load;
+    const startedAt = revision;
+    load = request(path).then((entries) => {
+      if (revision === startedAt) {
+        mappings = new Map(entries.map((entry) => [entry.supplier, entry]));
+        for (const [supplier, card] of cards) card.paint(mappings.get(supplier));
+        loaded = true;
+      }
+    }).finally(() => { load = undefined; });
+    return load;
   };
-  const render = (mappings) => {
-    const entries = new Map(mappings.map((mapping) => [mapping.supplier, mapping]));
-    rows.replaceChildren(...Object.entries(suppliers).map(([id, name]) => {
-      const row = document.createElement("div");
-      row.className = "supplier-counterparty-row";
-      const label = document.createElement("strong");
-      label.textContent = name;
-      const description = document.createElement("span");
-      const entry = entries.get(id);
-      description.textContent = entry ? `${entry.name}${entry.taxId ? ` · ${entry.taxId}` : ""}` : "Контрагент не выбран";
-      const choose = button(entry ? "Изменить" : "Выбрать", () => {
-        supplier = id;
-        searching?.abort();
-        results.replaceChildren();
+
+  for (const card of panel.querySelectorAll(":scope > .auth-card[data-supplier]")) {
+    const { supplier } = card.dataset;
+    const section = template.content.firstElementChild.cloneNode(true);
+    card.insertBefore(section, card.querySelector(":scope > details"));
+    const input = section.querySelector("input");
+    const list = section.querySelector("[role=listbox]");
+    const status = section.querySelector("[role=status]");
+    const current = section.querySelector(".supplier-counterparty-current");
+    const remove = current.querySelector("button");
+    list.id = `supplier-${supplier}-counterparties`;
+    input.setAttribute("aria-controls", list.id);
+    let entries = [];
+    let selected = -1;
+    let timer;
+    let search;
+    let saving = false;
+
+    const paint = (mapping) => {
+      current.hidden = !mapping;
+      current.querySelector("[data-selected]").textContent = mapping ? counterpartyLabel(mapping) : "";
+    };
+    cards.set(supplier, { paint, close });
+
+    const selectIndex = (index) => {
+      if (selected >= 0) list.children[selected].setAttribute("aria-selected", "false");
+      selected = index;
+      if (index < 0) {
+        input.removeAttribute("aria-activedescendant");
+        return;
+      }
+      const option = list.children[index];
+      option.setAttribute("aria-selected", "true");
+      input.setAttribute("aria-activedescendant", option.id);
+      option.scrollIntoView({ block: "nearest" });
+    };
+
+    const show = (found) => {
+      selectIndex(-1);
+      entries = found;
+      list.replaceChildren(...found.map((entry, index) => {
+        const item = document.createElement("li");
+        item.id = `${list.id}-${index}`;
+        item.dataset.index = String(index);
+        item.setAttribute("role", "option");
+        item.setAttribute("aria-selected", "false");
+        item.textContent = counterpartyLabel(entry);
+        return item;
+      }));
+      list.hidden = !found.length;
+      input.setAttribute("aria-expanded", String(!list.hidden));
+    };
+
+    const cancelSearch = () => {
+      clearTimeout(timer);
+      timer = undefined;
+      search?.abort();
+      search = undefined;
+      show([]);
+    };
+
+    function close() {
+      cancelSearch();
+      input.value = "";
+      if (!saving) status.textContent = "";
+    }
+
+    async function save(id) {
+      if (saving) return;
+      cancelSearch();
+      saving = true;
+      input.readOnly = true;
+      remove.disabled = true;
+      status.textContent = "Сохраняем…";
+      try {
+        const saved = await request(path, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ supplier, id }),
+        });
+        const mapping = saved.find((entry) => entry.supplier === supplier);
+        if (mapping) mappings.set(supplier, mapping);
+        else mappings.delete(supplier);
+        revision++;
+        paint(mapping);
+        input.value = "";
+        status.textContent = id ? "Контрагент сохранён." : "Сопоставление удалено.";
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        saving = input.readOnly = remove.disabled = false;
+      }
+    }
+
+    const scheduleSearch = () => {
+      cancelSearch();
+      const query = input.value.trim();
+      status.textContent = "";
+      if (!query || saving) return;
+      timer = setTimeout(async () => {
+        timer = undefined;
+        const controller = new AbortController();
+        search = controller;
+        status.textContent = "Ищем в 1С…";
+        try {
+          const found = await request(`${path}/search?${new URLSearchParams({ q: query })}`, { signal: controller.signal });
+          if (controller.signal.aborted) return;
+          show(found);
+          status.textContent = found.length === 0 ? "Поставщики не найдены." : found.length === 50 ? "Уточните название или ИНН." : "";
+        } catch (error) {
+          if (!controller.signal.aborted) status.textContent = error.message;
+        } finally {
+          if (search === controller) search = undefined;
+        }
+      }, searchDelay);
+    };
+
+    input.addEventListener("input", (event) => { if (!event.isComposing) scheduleSearch(); });
+    input.addEventListener("compositionstart", cancelSearch);
+    input.addEventListener("compositionend", scheduleSearch);
+    input.addEventListener("keydown", (event) => {
+      if (event.isComposing) return;
+      if (event.key === "Escape" && (entries.length || search || timer)) {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelSearch();
         status.textContent = "";
-        form.hidden = false;
-        form.querySelector("[data-counterparty-search-label]").textContent = `Контрагент ${name}`;
-        form.elements.query.value = "";
-        form.elements.query.focus();
-      });
-      choose.setAttribute("aria-label", `${choose.textContent} контрагента ${name}`);
-      row.append(label, description, choose);
-      if (entry) {
-        const remove = button("Убрать", () => void save(id, null));
-        remove.setAttribute("aria-label", `Убрать контрагента ${name}`);
-        row.append(remove);
+        return;
       }
-      return row;
-    }));
-  };
-
-  async function save(supplierId, id) {
-    if (saving) return;
-    saving = true;
-    status.textContent = "Сохраняем…";
-    try {
-      render(await request(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ supplier: supplierId, id }) }));
-      if (supplier === supplierId) {
-        searching?.abort();
-        supplier = undefined;
-        form.hidden = true;
-        results.replaceChildren();
+      if (!entries.length) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const next = event.key === "ArrowDown" ? selected + 1 : selected < 0 ? entries.length - 1 : selected - 1;
+        selectIndex((next + entries.length) % entries.length);
+      } else if (event.key === "Enter" && selected >= 0) {
+        event.preventDefault();
+        void save(entries[selected].id);
       }
-      status.textContent = id ? "Контрагент сохранён для всех пользователей." : "Сопоставление удалено для всех пользователей.";
-    } catch (error) { status.textContent = error.message; }
-    finally { saving = false; }
+    });
+    list.addEventListener("click", (event) => {
+      const option = event.target.closest("[role=option]");
+      if (option) void save(entries[Number(option.dataset.index)].id);
+    });
+    remove.addEventListener("click", () => void save(null));
+    section.addEventListener("toggle", () => {
+      if (!section.open) { close(); return; }
+      paint(mappings.get(supplier));
+      void refresh().catch((error) => { if (section.open && !search && !saving) status.textContent = error.message; });
+    });
   }
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const target = supplier;
-    if (!target || saving) return;
-    searching?.abort();
-    const controller = new AbortController();
-    searching = controller;
-    status.textContent = "Ищем в 1С…";
-    results.replaceChildren();
-    try {
-      const query = new URLSearchParams({ q: form.elements.query.value.trim() });
-      const found = await request(`${path}/search?${query}`, { signal: controller.signal });
-      if (controller.signal.aborted) return;
-      results.replaceChildren(...found.map(({ id, name, taxId }) => {
-        const row = document.createElement("div");
-        row.className = "supplier-counterparty-row";
-        const label = document.createElement("span");
-        label.textContent = `${name}${taxId ? ` · ${taxId}` : ""}`;
-        const choose = button("Сохранить", () => void save(target, id));
-        choose.setAttribute("aria-label", `Сохранить ${name} для ${suppliers[target]}`);
-        row.append(label, choose);
-        return row;
-      }));
-      status.textContent = found.length === 0 ? "В 1С не найдено поставщиков. Уточните название или ИНН."
-        : found.length === 50 ? "Показаны первые 50 поставщиков. Уточните название или ИНН." : "";
-    } catch (error) { if (!controller.signal.aborted) status.textContent = error.message; }
-  });
-
-  panel.addEventListener("toggle", async () => {
-    if (!panel.open) { searching?.abort(); return; }
-    status.textContent = "Загружаем настройки…";
-    try { render(await request(path)); status.textContent = ""; }
-    catch (error) { status.textContent = error.message; }
-  });
+  const close = () => {
+    loaded = false;
+    for (const card of cards.values()) card.close();
+  };
+  panel.addEventListener("toggle", () => { if (!panel.open) close(); });
+  return { close, refresh: () => { if (panel.open && panel.querySelector(".supplier-counterparty-settings[open]")) void refresh().catch(() => {}); } };
 }

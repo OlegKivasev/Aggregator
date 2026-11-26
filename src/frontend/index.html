@@ -693,19 +693,6 @@
           </div>
         </details>
 
-        <details class="suppliers-panel nomenclature-settings" id="supplier-counterparties-settings" data-admin-only>
-          <summary class="suppliers-panel__summary">Контрагенты 1С для поставщиков</summary>
-          <div class="nomenclature-settings__content">
-            <div data-mappings></div>
-            <form class="auth-form" data-counterparty-search hidden>
-              <label class="field"><span data-counterparty-search-label></span><input type="search" name="query" maxlength="100" placeholder="Название или ИНН"></label>
-              <div class="auth-actions"><button class="btn btn-light" type="submit">Найти в 1С</button></div>
-            </form>
-            <div data-counterparty-results></div>
-            <p class="auth-feedback" data-counterparty-status role="status"></p>
-          </div>
-        </details>
-
         <details class="suppliers-panel nomenclature-settings" id="nomenclature-settings" data-admin-only>
           <summary class="suppliers-panel__summary">Номенклатура</summary>
           <div class="nomenclature-settings__content">
@@ -789,8 +776,24 @@
           <button type="button" class="table-columns-settings__reset" id="table-columns-reset">Показать все столбцы</button>
         </details>
 
-        <details class="suppliers-panel" data-admin-only>
+        <details class="suppliers-panel" id="suppliers-settings" data-admin-only>
           <summary class="suppliers-panel__summary">Поставщики</summary>
+          <template id="supplier-counterparty-template">
+            <details class="supplier-options supplier-counterparty-settings">
+              <summary class="supplier-options__summary">Контрагент 1С</summary>
+              <div class="supplier-options__content">
+                <div class="supplier-counterparty-current" hidden>
+                  <span data-selected></span><button class="btn btn-light" type="button">Убрать</button>
+                </div>
+                <label class="field">
+                  <span>Название или ИНН</span>
+                  <input type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" autocomplete="off" maxlength="100">
+                </label>
+                <ul class="supplier-counterparty-suggestions" role="listbox" aria-label="Поставщики в 1С" hidden></ul>
+                <p class="auth-feedback" role="status"></p>
+              </div>
+            </details>
+          </template>
 
           <p>Поиск автоматически использует всех подключённых поставщиков для всех сотрудников.</p>
           <article class="auth-card" data-supplier="mladov">
@@ -833,8 +836,9 @@
             </form>
 
             <p class="auth-feedback" id="rossko-auth-feedback"></p>
-            <section id="rossko-order-settings" class="rossko-order-settings" aria-label="Параметры заказа Rossko" hidden>
-              <h4>Параметры заказа</h4>
+            <details id="rossko-order-settings" class="supplier-options rossko-order-settings" hidden>
+              <summary class="supplier-options__summary">Параметры заказа</summary>
+              <div class="supplier-options__content">
               <form id="rossko-order-settings-form">
                 <fieldset disabled>
                   <label class="field"><span>Покупатель</span><select name="companyId" required></select></label>
@@ -847,7 +851,8 @@
               </form>
               <button id="rossko-order-reload" type="button" class="btn btn-light">Обновить данные Rossko</button>
               <p class="auth-feedback" role="status" aria-live="polite"></p>
-            </section>
+              </div>
+            </details>
           </article>
 
           <article class="auth-card" data-supplier="armtek">
