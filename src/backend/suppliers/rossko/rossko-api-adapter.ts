@@ -307,6 +307,17 @@ function rosskoOrdersEnvelope(credentials: RosskoApiCredentials, ids: string[]):
     + `<ros:order_ids>${orderIds}</ros:order_ids></ros:GetOrders></soapenv:Body></soapenv:Envelope>`;
 }
 
+function rosskoReceiptDetails(order: XmlElement) {
+  const detail = child(order, "detail");
+  const total = parsePositiveNumber(elementText(order, "total_price"));
+  const deliveryType = detail && historyText(elementText(detail, "delivery_type"), 200);
+  const deliveryAddress = detail && historyText(elementText(detail, "delivery_address"), 200);
+  const paymentType = detail && historyText(elementText(detail, "payment_type"), 200);
+  return { ...(total !== null ? { orderTotal: total } : {}),
+    ...(deliveryType ? { deliveryType } : {}), ...(deliveryAddress ? { deliveryAddress } : {}), ...(paymentType ? { paymentType } : {}),
+  };
+}
+
 export function parseRosskoOrdersDetails(xml: string, result: OrderGroupResult, lines: PurchaseLine[]): void {
   const root = findDescendant(parseRosskoXml(xml), "OrdersResult");
   if (!root || !parseSuccess(root)) return;
@@ -325,22 +336,17 @@ export function parseRosskoOrdersDetails(xml: string, result: OrderGroupResult, 
         && elementText(part, "guid") === partGuid
         && parseNonNegativeInteger(elementText(part, "count")) === receipt.quantity);
       if (!matching) continue;
-      const detail = child(order, "detail");
       const optional = (node: XmlElement | null, name: string, limit = 200) => {
         const value = node ? elementText(node, name) : null;
         return value && value.length <= limit ? value : undefined;
       };
       const statusCode = parseNonNegativeInteger(elementText(matching, "status"));
-      const orderTotal = parsePositiveNumber(elementText(order, "total_price"));
       const status = statusCode === null ? undefined : orderStatuses[statusCode];
       Object.assign(receipt, {
         ...(optional(order, "created_date", 40) ? { createdAt: optional(order, "created_date", 40) } : {}),
         ...(optional(order, "delivery_date", 40) ? { deliveryAt: optional(order, "delivery_date", 40) } : {}),
         ...(status ? { status } : {}),
-        ...(orderTotal !== null ? { orderTotal } : {}),
-        ...(optional(detail, "delivery_type") ? { deliveryType: optional(detail, "delivery_type") } : {}),
-        ...(optional(detail, "delivery_address") ? { deliveryAddress: optional(detail, "delivery_address") } : {}),
-        ...(optional(detail, "payment_type") ? { paymentType: optional(detail, "payment_type") } : {}),
+        ...rosskoReceiptDetails(order),
       });
     }
   }
@@ -361,13 +367,17 @@ export function parseRosskoOrderHistory(xml: string): OrderHistory {
     if (!number || !/^[1-9]\d{0,19}$/.test(number) || !parts || !children(parts, "part").length) {
       throw new SupplierIntegrationError("Rossko history order is incomplete");
     }
-    return { number, date: historyDate(elementText(row, "created_date"), "russian"), items: children(parts, "part").map((item) => {
+    const receipt = rosskoReceiptDetails(row);
+    return { number, date: historyDate(elementText(row, "created_date"), "russian"),
+      ...(Object.keys(receipt).length ? { receipt } : {}), items: children(parts, "part").map((item) => {
       const article = historyText(elementText(item, "partnumber"), 128);
       const quantity = historyNumber(elementText(item, "count"));
       if (!article || quantity === null || quantity <= 0) throw new SupplierIntegrationError("Rossko history item is incomplete");
       const code = parseNonNegativeInteger(elementText(item, "status"));
+      const total = historyNumber(elementText(item, "total_price"));
       return { article, brand: historyText(elementText(item, "brand"), 200), title: historyText(elementText(item, "name")), quantity,
         price: historyNumber(elementText(item, "price")), status: code === null ? null : orderStatuses[code] ?? `Код статуса: ${code}`,
+        ...(total === null ? {} : { receipt: { total } }),
         fulfillment: code === null ? "unknown" : historyFulfillment[code] ?? "unknown",
         expectedDate: historyDate(elementText(row, "delivery_date"), "russian"), guaranteedDate: null,
         warehouse: historyText(elementText(row, "stock_address"), 200) };

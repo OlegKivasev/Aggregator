@@ -1,6 +1,7 @@
 import { formatOrderDate } from "./order-date-formatting.js";
 import { armtekReturnSource, formatArmtekReturnDays, hasSupplierWeekendDelivery } from "./order-notices.js";
 import { historyItemRows } from "./order-history-presentation.js";
+import { renderHistoryReceipt } from "./order-receipts.js";
 
 const suppliers = [
   ["part-kom", "PartKOM"], ["armtek", "Armtek"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"], ["autopiter", "Автопитер"],
@@ -197,7 +198,7 @@ function renderOrder(order, limited, supplierName, supplier, openPreview) {
     const button = element("button", "btn btn-light", "Тестовый предпросмотр");
     button.type = "button";
     button.setAttribute("aria-label", `Тестовый предпросмотр заказа ${order.number}`);
-    button.addEventListener("click", () => openPreview(order, limited, supplierName, supplier));
+    button.addEventListener("click", () => openPreview(order, limited, supplier));
     actions.append(button);
     card.append(actions);
   }
@@ -227,13 +228,12 @@ async function historyImportData(order, supplier) {
 }
 
 function createHistoryPreview() {
-  const dialog = element("dialog", "cart-modal history-modal cart-order-confirm is-success");
+  const dialog = element("dialog", "cart-modal cart-order-confirm is-success");
   dialog.id = "history-order-preview";
   dialog.setAttribute("aria-labelledby", "history-preview-title");
   dialog.innerHTML = `<header class="analogs-modal__header"><h2 id="history-preview-title">Тестовый предпросмотр</h2></header>
     <div class="cart-content">
       <div class="cart-order-receipt"></div>
-      <details class="supplier-options"><summary class="supplier-options__summary">Данные истории (JSON)</summary><pre></pre></details>
       <p class="cart-order-status" role="status"></p>
     </div>
     <footer class="cart-footer">
@@ -259,22 +259,25 @@ function createHistoryPreview() {
     if (!current?.payload || !current.counterpartyId) return;
     try {
       await navigator.clipboard.writeText(JSON.stringify({ ...current.payload, counterpartyId: current.counterpartyId }));
-      if (context === current) status.textContent = "Заказ скопирован. В 1С нажмите «Добавить из агрегатора».";
+      if (context === current) status.textContent = current.shownItemsOnly
+        ? "Показанные позиции скопированы. В 1С нажмите «Добавить из агрегатора»."
+        : "Заказ скопирован. В 1С нажмите «Добавить из агрегатора».";
     } catch {
       if (context === current) status.textContent = "Не удалось скопировать заказ. Проверьте доступ к буферу обмена.";
     }
   });
-  return async (order, limited, name, supplier) => {
+  return async (order, limited, supplier) => {
     context?.stream?.close();
-    const current = { issue: "Подготавливаем данные для 1С…" };
+    const incomplete = order.itemsLimited === true;
+    const shownItemsOnly = supplier === "part-kom" && limited;
+    const current = { issue: "Подготавливаем данные для 1С…", shownItemsOnly };
     context = current;
-    dialog.querySelector(".cart-order-receipt").replaceChildren(renderOrder(order, limited, name, supplier));
-    dialog.querySelector("pre").textContent = JSON.stringify(order, null, 2);
-    // PartKOM caps individual rows before they can be grouped by order number.
-    const incomplete = order.itemsLimited || supplier === "part-kom" && limited;
+    dialog.querySelector(".cart-order-receipt").replaceChildren(renderHistoryReceipt(order, supplier,
+      { shownItemsOnly: shownItemsOnly || incomplete }));
     const missing = order.items.some((item) => item.price === null || item.price < 0.005 || !item.brand?.trim());
     status.textContent = incomplete ? "Выдача ограничена. Для переноса нужен полный состав заказа."
-      : missing ? "По некоторым товарам нужно уточнить бренд или цену в 1С." : "";
+      : [shownItemsOnly && "В 1С попадут показанные позиции этого заказа.",
+        missing && "По некоторым товарам нужно уточнить бренд или цену в 1С."].filter(Boolean).join(" ");
     availability();
     if (!dialog.open) dialog.showModal();
     if (incomplete || !order.number.trim() || order.number.length > 100 || order.items.length > 500

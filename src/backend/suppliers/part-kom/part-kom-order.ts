@@ -121,11 +121,21 @@ export function parsePartKomOrderHistory(payload: unknown): OrderHistory {
     if (!number || !article || typeof quantity !== "number" || !Number.isSafeInteger(quantity) || quantity < 1) {
       throw new SupplierIntegrationError("PartKOM order history item is incomplete");
     }
+    const receipt: NonNullable<OrderHistoryItem["receipt"]> = {};
+    const status = historyText(row.stateTxt, 300);
+    const comment = historyText(row.comment, 500);
+    if (status) receipt.status = status;
+    if (comment) receipt.comment = comment;
+    for (const key of ["refusalCount", "storeCount", "releaseCount"] as const) {
+      const count = historyNumber(row[key]);
+      if (count !== null && Number.isSafeInteger(count) && count <= quantity) receipt[key] = count;
+    }
     const item: OrderHistoryItem = {
       article, brand: historyText(row.maker, 200), title: historyText(row.description, 500), quantity,
       price: historyPrice(row.price), ...partKomHistoryStatus(row, quantity),
       expectedDate: historyDate(row.expectedDate), guaranteedDate: historyDate(row.guaranteedDate),
       warehouse: historyText(row.placement, 200),
+      ...(Object.keys(receipt).length ? { receipt } : {}),
     };
     const order = orders.get(number);
     if (order) {

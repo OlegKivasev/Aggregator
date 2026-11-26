@@ -358,7 +358,9 @@ export function parseForumAutoOrderHistory(payload: unknown): OrderHistory {
     // did identifies the order; nr is a document reference that can appear/change later.
     const number = String(id);
     const documentNumber = historyText(row.nr, 100);
+    const orderStatus = historyText(row.status, 300);
     return { number, ...(documentNumber && documentNumber !== number ? { documentNumber } : {}),
+      ...(orderStatus ? { receipt: { status: orderStatus } } : {}),
       date: historyDate(row.dtc, "russian"), items: row.arTovs.map((entry) => {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new SupplierIntegrationError("Forum-Auto history item is invalid");
       const item = entry as Record<string, unknown>;
@@ -367,12 +369,19 @@ export function parseForumAutoOrderHistory(payload: unknown): OrderHistory {
       if (!article || quantity === null || quantity <= 0) throw new SupplierIntegrationError("Forum-Auto history item is incomplete");
       const fulfillment = forumAutoHistoryFulfillment(row);
       const confirmed = historyNumber(item.k3);
+      const reserved = historyNumber(item.k2);
+      const total = historyNumber(item.sum);
+      const receipt = { ...(confirmed !== null && confirmed <= quantity ? { confirmedQuantity: confirmed } : {}),
+        ...(reserved !== null && reserved <= quantity ? { reservedQuantity: reserved } : {}),
+        ...(total === null ? {} : { total }),
+      };
       const issued = fulfillment === "delivered" && confirmed !== null && confirmed <= quantity ? confirmed : null;
       return { article, brand: historyText(item.brand, 200), title: historyText(item.tovname), quantity,
         price: historyNumber(item.price), status: issued === null ? historyText(row.status, 300) : `Выдано ${issued} из ${quantity} шт.`,
         expectedDate: historyDate(row.mdt, "russian"),
         fulfillment: issued !== null && issued < quantity ? issued === 0 ? "unknown" : "partial" : fulfillment,
         ...(issued !== null && issued > 0 ? { deliveredQuantity: issued } : {}),
+        ...(Object.keys(receipt).length ? { receipt } : {}),
         guaranteedDate: null, warehouse: null };
     }) };
   });

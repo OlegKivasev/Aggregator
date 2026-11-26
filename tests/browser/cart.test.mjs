@@ -1339,13 +1339,18 @@ test("Autopiter adds goods, restores its supplier tab and orders selected goods 
 
 test("live counterparties and test preview from supplier history", async () => {
   const suppliers = [["armtek", "Armtek"], ["part-kom", "PartKOM"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"], ["autopiter", "Автопитер"]];
-  const history = Object.fromEntries(suppliers.map(([id], index) => [id, { limited: id === "rossko", orders: [{
+  const history = Object.fromEntries(suppliers.map(([id], index) => [id, { limited: id === "rossko" || id === "part-kom", orders: [{
     number: `OR-${index + 1}`, date: "2026-11-25T10:30:00", items: [{
       article: "A1", brand: id === "armtek" ? null : "TEST", title: "Деталь из истории", quantity: index + 1,
       price: id === "armtek" ? null : 132, status: "Ожидает поставки", fulfillment: "processing",
       expectedDate: "2026-11-30", guaranteedDate: null, warehouse: "Склад поставщика",
     }],
   }] }]));
+  Object.assign(history["part-kom"].orders[0].items[0], { price: 5032.5, guaranteedDate: "2026-11-30 14:00:00",
+    receipt: { releaseCount: 2, status: "Выдан", comment: "Комментарий поставщика" } });
+  history["forum-auto"].orders[0].items[0].receipt = { reservedQuantity: 2, confirmedQuantity: 3 };
+  history.rossko.orders[0].receipt = { orderTotal: 528, deliveryType: "Курьерская доставка",
+    deliveryAddress: "Тестовый адрес", paymentType: "Оплата банковским платежом" };
   history.rossko.orders.push({ ...history.rossko.orders[0], number: "PARTIAL", itemsLimited: true });
   await withCartPage(async (page, { origin, orderCalls }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
@@ -1416,7 +1421,7 @@ test("live counterparties and test preview from supplier history", async () => {
     const openPreview = (number) => page.getByRole("button", { name: `Тестовый предпросмотр заказа ${number}` });
     const copy = async () => {
       await preview.getByRole("button", { name: "В 1С", exact: true }).click();
-      await preview.getByText(/Заказ скопирован/).waitFor();
+      await preview.getByText(/(?:Заказ скопирован|Показанные позиции скопированы)/).waitFor();
       return JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
     };
     const payloads = [];
@@ -1426,10 +1431,26 @@ test("live counterparties and test preview from supplier history", async () => {
       await openPreview(number).waitFor();
       const before = historyRequests(supplier);
       await openPreview(number).click();
+      const receipt = preview.locator(".cart-order-receipt");
+      assert.equal(await receipt.locator("table, pre").count(), 0);
+      assert.match(await receipt.locator("h4").textContent(), new RegExp(`заказ № ${number}`));
+      assert.equal(await receipt.locator("dl").first().evaluate((node) => getComputedStyle(node).display), "grid");
+      if (supplier === "part-kom") {
+        await preview.getByText("В 1С попадут показанные позиции этого заказа.").waitFor();
+        assert.match(await receipt.textContent(), /Гарантированный срок/);
+        assert.match(await receipt.textContent(), /Отгружено2/);
+        assert.match(await receipt.textContent(), /Комментарий поставщика/);
+      }
+      if (supplier === "forum-auto") assert.match(await receipt.textContent(), /Забронировано2Подтверждено3/);
+      if (supplier === "rossko") {
+        assert.match(await receipt.textContent(), /Сумма позиции/);
+        assert.match(await receipt.textContent(), /Курьерская доставка/);
+        assert.match(await receipt.textContent(), /Тестовый адрес/);
+        assert.match(await receipt.textContent(), /Оплата банковским платежом/);
+        if (process.env.TEST_CAPTURE_DIR) await preview.screenshot({ path: join(process.env.TEST_CAPTURE_DIR, "history-rossko-receipt.png") });
+      }
       const payload = await copy();
       payloads.push(payload);
-      assert.equal(JSON.parse(await preview.locator("pre").textContent()).number, number);
-      assert.match(await preview.locator(".cart-order-receipt").textContent(), /Склад поставщика/);
       assert.equal(payload.sourceOrderNumber, number);
       assert.equal(payload.counterpartyId, mappings[supplier]);
       assert.equal(payload.items[0].quantity, index + 1);
@@ -1439,6 +1460,7 @@ test("live counterparties and test preview from supplier history", async () => {
     assert.equal(new Set(payloads.map(({ id }) => id)).size, 5);
     assert.ok(payloads.every(({ format, version, testOnly }) => format === "aggregator.supplier-order" && version === 1 && testOnly === true));
     assert.equal(payloads[0].items[0].price, null);
+    assert.equal(payloads[1].items[0].price, 5032.5);
     await page.locator("#history-tab-rossko").click();
     await openPreview("PARTIAL").click();
     await preview.getByText(/Для переноса нужен полный состав/).waitFor();

@@ -337,7 +337,6 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .history-preview-actions { display: flex; justify-content: flex-end; padding: 10px 14px; border-top: 1px solid var(--line); }
 #history-order-preview .cart-order-receipt { margin-top: 0; }
 #history-order-preview .cart-footer [hidden] { display: none; }
-#history-order-preview pre { max-height: 300px; overflow: auto; margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cart-copy-order-unavailable { padding: 5px 8px; border: 1px dashed #859085; border-radius: 6px; color: #59665d; font-size: 12px; cursor: help; }
 .cart-footer span { display: block; color: var(--muted); font-size: 12px; }
 .cart-footer strong { display: block; margin: 0; font-size: 23px; font-weight: 700; line-height: 1.3; font-variant-numeric: tabular-nums; }

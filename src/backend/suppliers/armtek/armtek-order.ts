@@ -92,7 +92,10 @@ export function parseArmtekOrderHistory(payload: unknown): OrderHistory {
       expectedDate: historyDate(row.DLVRD, "compact"), guaranteedDate: historyDate(row.WRNTD, "compact"), warehouse: null };
     const order = orders.get(number);
     if (order) order.items.push(item);
-    else orders.set(number, { number, date: historyDate(row.ORDER_DATE, "compact"), items: [item] });
+    else {
+      const status = historyText(row.ORDER_STATUS, 300);
+      orders.set(number, { number, date: historyDate(row.ORDER_DATE, "compact"), ...(status ? { receipt: { status } } : {}), items: [item] });
+    }
   }
   return finishOrderHistory([...orders.values()]);
 }
