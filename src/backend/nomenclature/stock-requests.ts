@@ -29,6 +29,7 @@ export const stockWorkerConditions = `AND (query='' OR ?=1)
     AND json_extract(NULLIF(options, ''), '$.productCard') IS NULL) OR ?=1)
   AND (options='' OR COALESCE(json_extract(NULLIF(options, ''), '$.productCard.view'), '') NOT IN ('preview','details') OR ?=1)
   AND (options='' OR COALESCE(json_extract(NULLIF(options, ''), '$.productCard.view'), '') <> 'progressive' OR ?=1)
+  AND (options='' OR COALESCE(json_extract(NULLIF(options, ''), '$.supplierOrders.view'), '') <> 'counterparties' OR ?=1)
   AND COALESCE(json_extract(NULLIF(options, ''), '$.productCard.testPlatform'),
     json_extract(NULLIF(options, ''), '$.incomingDetails.testPlatform'), -1) IN (-1, ?)`;
 
@@ -263,5 +264,5 @@ export class StockRequests {
 }
 
 export const stockWorkerFlags = (version: number, testPlatform: boolean | null): (number | null)[] =>
-  [...[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((minimum) => Number(version >= minimum)),
+  [...[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].map((minimum) => Number(version >= minimum)),
     testPlatform === null || version < 11 ? null : Number(testPlatform)];

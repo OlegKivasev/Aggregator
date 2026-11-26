@@ -55,6 +55,8 @@ import type { AuthenticatedUser, UserAuthService, UserPermission } from "../auth
 import { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
 import { serveNomenclature } from "./nomenclature.ts";
 import { serveSupplierOrders } from "./supplier-orders.ts";
+import { serveSupplierCounterparties } from "./supplier-counterparties.ts";
+import { SupplierCounterparties } from "../purchasing/supplier-counterparties.ts";
 import { SupplierOrderNotes } from "../purchasing/supplier-order-notes.ts";
 
 export interface AggregatorApplication extends RosskoOrderSettingsApplication {
@@ -268,6 +270,7 @@ export function createAggregatorServer({
   const repairs = new SqliteRepairRepository(getGarageDatabasePath());
   const nomenclature = new NomenclatureService(getGarageDatabasePath());
   const supplierOrderNotes = new SupplierOrderNotes(getGarageDatabasePath());
+  const supplierCounterparties = new SupplierCounterparties(getGarageDatabasePath());
 
   const server = createServer(async (request, response) => {
     if (!request.url) {
@@ -295,6 +298,9 @@ export function createAggregatorServer({
       () => reportError({ operation: "repairs", category: "internal" }), authenticatedUser ?? undefined, readCurrentUser)) return;
     if (await serveNomenclature(request, response, url, nomenclature, authenticatedUser,
       () => reportError({ operation: "nomenclature", category: "internal" }), readCurrentUser)) return;
+    if (await serveSupplierCounterparties(request, response, url, supplierCounterparties, nomenclature,
+      () => !auth?.enabled || Boolean(auth.authorize(request, response, "admin")),
+      () => reportError({ operation: "supplier-counterparties", category: "internal" }))) return;
     if (url.pathname.startsWith("/api/purchasing/")) {
       await serveSupplierOrders(request, response, url, nomenclature, supplierOrderNotes,
         () => !auth?.enabled || Boolean(auth.authorize(request, response, "purchasing")),
@@ -420,7 +426,8 @@ export function createAggregatorServer({
             || url.pathname === "/api/cart/uncertain/resolve"
             || url.pathname === "/api/cart/order-options") && request.method === "POST") {
           const payload = await readJsonBody(request, url.pathname === "/api/cart/items/batch" ? 64 * 1024
-            : url.pathname === "/api/cart/items" && request.method === "DELETE" ? 32 * 1024 : undefined);
+            : url.pathname === "/api/cart/test-order" || url.pathname === "/api/cart/items" && request.method === "DELETE"
+              ? 32 * 1024 : undefined);
           if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new CartError("Неверные параметры корзины.");
           const fields = payload as Record<string, unknown>;
           if (url.pathname === "/api/cart/order-options") {
@@ -437,8 +444,9 @@ export function createAggregatorServer({
             const result = await cart.order(fields.revision, fields.supplier, fields.itemIds, details, controller.signal);
             if (!controller.signal.aborted) serveJson(response, 200, result);
           } else if (url.pathname === "/api/cart/test-order") {
-            const result = await cart.test(fields.revision, controller.signal, fields.supplier);
-            if (!controller.signal.aborted) serveJson(response, 200, result);
+            const result = await cart.test(fields.revision, controller.signal, fields.supplier, fields.itemIds);
+            if (!controller.signal.aborted) serveJson(response, 200,
+              result.orders ? { ...result, counterparties: supplierCounterparties.ids() } : result);
           } else if (url.pathname === "/api/cart/items" && request.method === "DELETE") {
             serveJson(response, 200, cart.clear(fields.supplier, fields.revision, fields.itemIds));
           } else {
@@ -896,7 +904,7 @@ export function createAggregatorServer({
     serveJson(response, 405, { message: "Method not allowed" });
   });
   server.once("close", () => {
-    garage.close(); cart.close(); cancellations.close(); repairs.close(); nomenclature.close(); supplierOrderNotes.close(); auth?.close();
+    garage.close(); cart.close(); cancellations.close(); repairs.close(); nomenclature.close(); supplierOrderNotes.close(); supplierCounterparties.close(); auth?.close();
   });
   return server;
 }

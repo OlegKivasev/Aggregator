@@ -5,6 +5,7 @@ import { getPurchaseReference, purchaseOfferKey, type PurchaseLine, type Purchas
 import { SqliteCartRepository, type CartTab } from "./sqlite-cart-repository.ts";
 import type { CheckoutDetails, OrderChoices, OrderGroupResult, OrderSupplier } from "./order-contract.ts";
 import type { OrderHistory } from "./order-history-contract.ts";
+import { makeTestSupplierOrders } from "./onec-test-order.ts";
 
 export interface CartRefreshIssue {
   reason: "not_found" | "insufficient_stock" | "check_failed";
@@ -340,12 +341,14 @@ export class CartApplicationService {
     } finally { this.testing = false; }
   }
 
-  async test(revision: unknown, signal: AbortSignal, supplier: unknown = "all") {
+  async test(revision: unknown, signal: AbortSignal, supplier: unknown = "all", itemIds?: unknown) {
     if (this.testing) throw new CartError("Заказ уже проверяется.", 409);
     const scope = normalizeCartSupplier(supplier);
     const cart = this.load();
     if (revision !== cart.revision) throw new CartError("Корзина изменилась. Обновите её перед проверкой.", 409);
-    const lines = scope === "all" ? cart.lines : cart.lines.filter((line) => line.reference.supplier === scope);
+    const lines = itemIds === undefined
+      ? cart.lines.filter((line) => scope === "all" || line.reference.supplier === scope)
+      : selectedOrderLines(cart.lines, scope, itemIds);
     if (!lines.length) throw new CartError("Добавьте товары в выбранную вкладку корзины.");
     this.testing = true;
     try {
@@ -353,7 +356,8 @@ export class CartApplicationService {
       combinedSignal.throwIfAborted();
       const results = await this.testOrder(structuredClone(lines), combinedSignal);
       combinedSignal.throwIfAborted();
-      return { testOnly: true, revision: cart.revision, supplier: scope, results };
+      return { testOnly: true, revision: cart.revision, supplier: scope, results,
+        ...(itemIds === undefined ? {} : { orders: makeTestSupplierOrders(lines) }) };
     } finally { this.testing = false; }
   }
 

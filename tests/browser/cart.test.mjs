@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -1340,6 +1341,97 @@ test("Autopiter adds goods, restores its supplier tab and orders selected goods 
       orderId: "10001", quantity: line.quantity, price: line.result.price, deliveryAt: "2026-11-14T00:00:00+03:00",
     }],
   })) }) });
+});
+
+test("selected test orders copy one marked 1C payload per supplier without real checkout", async () => {
+  const extra = offer("armtek", 5, { supplier: "armtek", keyzak: "EXTRA" }, { article: "SKIP" }, "Не выбран");
+  await withCartPage(async (page, { origin, orderCalls }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
+    const integration = "/api/integration/1c/nomenclature";
+    const settings = "/api/suppliers/onec-counterparties";
+    const { token } = await (await page.request.post(origin + "/api/nomenclature/connection", { data: {} })).json();
+    const headers = { Authorization: `Bearer ${token}` };
+    const claim = async (version, waitSeconds) => {
+      const response = await fetch(`${origin}${integration}/requests?stock=${version}&testPlatform=false&waitSeconds=${waitSeconds}`, { headers });
+      assert.equal(response.status, 200);
+      return (await response.json()).request;
+    };
+    const workerReply = async (job, counterparties) => {
+      const result = await page.request.post(origin + integration + "/stock-results", { headers, data: {
+        requestId: job.id, leaseId: job.leaseId, status: "completed", products: [], hasMore: false,
+        lastSortValue: null, supplierOrders: { view: "counterparties", counterparties },
+      } });
+      assert.equal(result.status(), 200);
+    };
+    assert.equal(await claim(13, 0), null);
+    assert.equal((await page.request.get(origin + settings + "/search?q=Armtek")).status(), 503);
+    assert.equal(await claim(14, 0), null);
+    const mappings = {};
+    await page.locator("#settings-toggle").click();
+    await page.getByText("Контрагенты 1С для поставщиков", { exact: true }).click();
+    for (const [supplier, label] of [["armtek", "Armtek"], ["part-kom", "PartKOM"], ["forum-auto", "Forum Auto"], ["rossko", "Rossko"], ["autopiter", "Автопитер"]]) {
+      const counterparty = { id: randomUUID(), name: `ООО ${label}`, taxId: "1234567890" };
+      mappings[supplier] = counterparty.id;
+      await page.getByRole("button", { name: `Выбрать контрагента ${label}` }).click();
+      await page.getByRole("searchbox", { name: `Контрагент ${label}` }).fill(label);
+      await page.getByRole("button", { name: "Найти в 1С" }).click();
+      const lookup = await claim(14, 5);
+      assert.deepEqual(lookup.options.supplierOrders, { view: "counterparties", query: label, id: null });
+      await workerReply(lookup, [counterparty]);
+      await page.getByRole("button", { name: `Сохранить ${counterparty.name} для ${label}` }).click();
+      const verify = await claim(14, 5);
+      assert.deepEqual(verify.options.supplierOrders, { view: "counterparties", query: "", id: counterparty.id });
+      await workerReply(verify, [counterparty]);
+      await page.getByRole("button", { name: `Убрать контрагента ${label}` }).waitFor();
+    }
+    await page.locator("#settings-close").click();
+    const addButtons = page.locator("#results-body .cart-offer-button");
+    for (let index = 0; index < 6; index++) {
+      await addButtons.nth(index).click();
+      await page.waitForFunction((count) => document.querySelector("#cart-badge").textContent === String(count), index + 1);
+    }
+    await page.locator("#cart-toggle").click();
+    const simulate = page.locator("#cart-simulate-order");
+    assert.equal(await simulate.isVisible(), false);
+    await page.locator("#cart-select-all").check();
+    await page.getByRole("checkbox", { name: "Выбрать для заказа SKIP" }).uncheck();
+    const requests = [];
+    page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+    await simulate.click();
+    const dialog = page.getByRole("dialog", { name: "Тестовые заказы" });
+    const copyButtons = dialog.getByRole("button", { name: /^В 1С, заказ TEST-/ });
+    await copyButtons.last().waitFor();
+    const testRequests = ["/api/cart/test-order", "/api/cart/test-order/counterparties/events"];
+    assert.equal(orderCalls.length, 1);
+    assert.equal(orderCalls[0].length, 5);
+    assert.equal(await copyButtons.count(), 5);
+    const orders = [];
+    for (const button of await copyButtons.all()) {
+      await button.click();
+      await dialog.getByText(/скопирован\. В 1С нажмите/).waitFor();
+      orders.push(JSON.parse(await page.evaluate(() => navigator.clipboard.readText())));
+    }
+    assert.deepEqual(orders.map((order) => order.supplier).sort(), ["armtek", "autopiter", "forum-auto", "part-kom", "rossko"]);
+    assert.equal(new Set(orders.map((order) => order.id)).size, 5);
+    for (const order of orders) {
+      assert.equal(order.format, "aggregator.supplier-order");
+      assert.equal(order.version, 1);
+      assert.equal(order.testOnly, true);
+      assert.equal(order.counterpartyId, mappings[order.supplier]);
+      assert.equal(order.items.length, 1);
+      assert.equal(order.items[0].article, "A1");
+      assert.equal(order.items[0].quantity, 1);
+    }
+    assert.equal(orders.find((order) => order.supplier === "armtek").items[0].returnDays, 14);
+    const removed = await page.request.put(origin + settings, { data: { supplier: "armtek", id: null } });
+    assert.equal(removed.status(), 200);
+    await dialog.locator(".cart-armtek-receipt .cart-copy-order-unavailable").waitFor();
+    assert.equal(await dialog.locator(".cart-armtek-receipt button").isVisible(), false);
+    assert.match(await dialog.locator(".cart-armtek-receipt .cart-copy-order-unavailable").getAttribute("title"), /Контрагент не выбран/);
+    await dialog.getByRole("button", { name: "Закрыть" }).click();
+    assert.equal(await page.locator("#cart-badge").textContent(), "6");
+    assert.deepEqual(requests, testRequests);
+  }, { allSuppliers: true, autopiter: true, extraOffers: [extra], armtekReturnDays: 14 });
 });
 
 test("cart adds bounded quantities, persists, orders and removes confirmed items", async () => {

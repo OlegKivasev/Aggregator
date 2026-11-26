@@ -336,6 +336,18 @@ body:has(.cart-modal[open]) { overflow: hidden; }
 .cart-status:empty { display: none; }
 .cart-footer { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; border-top: 1px solid var(--line); background: var(--surface); }
 .cart-footer__summary { display: grid; grid-template-columns: max-content minmax(0, 260px); gap: 4px 32px; }
+.cart-checkout-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-left: auto; }
+.cart-test-submit[hidden] { display: none; }
+.cart-test-submit { background: #e8eaed; }
+#cart-test-receipts .cart-order-receipt { margin-top: 0; }
+#cart-test-receipts h4 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+#cart-test-receipts [hidden] { display: none; }
+.cart-copy-order-unavailable { padding: 5px 8px; border: 1px dashed #859085; border-radius: 6px; color: #59665d; font-size: 12px; cursor: help; }
+.supplier-counterparty-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.supplier-counterparty-row strong { min-width: 90px; }
+.supplier-counterparty-row span { flex: 1; overflow-wrap: anywhere; }
+#cart-test-receipts ul { margin: 6px 0 0; padding-left: 20px; overflow-wrap: anywhere; }
+#cart-test-receipts .cart-footer { justify-content: flex-end; }
 .cart-footer span { display: block; color: var(--muted); font-size: 12px; }
 .cart-footer strong { display: block; margin: 0; font-size: 23px; font-weight: 700; line-height: 1.3; font-variant-numeric: tabular-nums; }
 .cart-order-confirm { width: min(1040px, calc(100vw - 24px)); border: 3px solid transparent; }
@@ -420,6 +432,7 @@ body:has(.garage-add-modal:not([hidden])) { overflow: hidden; }
   #cart-modal .cart-footer__summary > * { min-width: 0; overflow-wrap: anywhere; }
   #cart-modal .cart-footer strong { font-size: 20px; }
   #cart-modal .cart-footer > .btn { width: 100%; margin-left: 0; min-height: 44px; }
+  #cart-modal .cart-checkout-actions, #cart-modal .cart-checkout-actions > .btn { width: 100%; min-height: 44px; }
   #cart-modal .cart-table-scroll, #cart-order-confirm .cart-table-scroll { overflow: visible; }
   #cart-modal .cart-table, #cart-order-confirm .cart-order-table { display: block; width: 100%; min-width: 0; }
   #cart-modal .cart-table thead, #cart-modal .cart-table thead tr { display: block; }
