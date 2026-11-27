@@ -128,7 +128,7 @@ export function bootstrapOrderNotifications() {
       for (const item of visibleItems) {
         const product = element("li");
         const description = element("div");
-        description.append(element("strong", "", [item.brand, item.article].filter(Boolean).join(" ")));
+        description.append(element("strong", "", [item.brand, item.article || "Артикул не указан"].filter(Boolean).join(" ")));
         if (item.title) description.append(element("span", "order-notification-products__title", item.title));
         const amount = element("div", "order-notification-products__amount");
         amount.append(element("strong", "", `${item.quantity.toLocaleString("ru-RU")} шт.`));

@@ -76,7 +76,7 @@ test("Autopiter maps confirmed received and cancelled quantities, and never labe
 });
 
 test("Autopiter rejects malformed historical quantities and positions without turning errors into empty history", () => {
-  for (const fields of [{ Number: "" }, { OrderCount: "0" }, { OrderCount: "1.5" }, { GetCount: "6" }, { GetCount: "-1" },
+  for (const fields of [{ Number: "<Unexpected/>" }, { Number: "A".repeat(201) }, { OrderCount: "0" }, { OrderCount: "1.5" }, { GetCount: "6" }, { GetCount: "-1" },
     { GetCount: "" }, { status: "invalid" }, { Price: "not-a-price" }, { Id: "-1" }]) {
     assert.throws(() => parsed(fields), SupplierIntegrationError);
   }
@@ -198,24 +198,27 @@ test("Autopiter history HTTP validates dates, supplies cancellation notices and 
   }
 });
 
-test("Autopiter history HTTP loads numbered invoices even when the SOAP lists contain nullable entries", async () => {
+test("Autopiter history HTTP loads numbered invoices with nullable entries and missing articles", async () => {
   const directory = mkdtempSync(join(tmpdir(), "autopiter-history-nullable-"));
   const previous = process.env.GARAGE_DB_PATH;
   process.env.GARAGE_DB_PATH = join(directory, "garage.sqlite");
   const calls = [];
   const reports = [];
   const unnumbered = invoiceXml().replace("<OrderNumber>10001</OrderNumber>", '<OrderNumber xsi:nil="true"/>');
+  const numbered = invoiceXml().replace("<Quantity>5", "<Quantity>8");
+  const missingArticle = itemXml({ Id: "11", Number: undefined, NumberChange: "REPLACEMENT", Name: "Позиция без артикула", OrderCount: "2" });
+  const emptyArticle = itemXml({ Id: "12", Number: "", Name: undefined, OrderCount: "1" });
   let detailsFailure;
   let invalidInvoices = false;
   const adapter = new AutopiterApiAdapter(async (method, fields) => {
     calls.push({ method, fields });
     if (method === "GetInvoiceOrderByDateTime") {
       return response(method, invalidInvoices ? '<InvoiceModel><OrderNumber/></InvoiceModel>'
-        : unnumbered + '<InvoiceModel xsi:nil="true"/>' + invoiceXml() + invoiceXml());
+        : unnumbered + '<InvoiceModel xsi:nil="true"/>' + numbered + numbered);
     }
     assert.equal(method, "GetFullInvoiceOrder");
     if (detailsFailure) return detailsFailure;
-    return response(method, '<OrderInformationItemModel xmlns:n="http://www.w3.org/2001/XMLSchema-instance" n:nil="1"/>' + itemXml());
+    return response(method, '<OrderInformationItemModel xmlns:n="http://www.w3.org/2001/XMLSchema-instance" n:nil="1"/>' + itemXml() + missingArticle + emptyArticle);
   });
   const orders = new RealOrderApplicationService(sessions(), async () => assert.fail("History must not search for parts"), null, adapter);
   const server = createAggregatorServer({ publicDir: resolve("src/frontend"), application: {
@@ -226,7 +229,14 @@ test("Autopiter history HTTP loads numbered invoices even when the SOAP lists co
     const url = `http://127.0.0.1:${server.address().port}/api/order-history/autopiter?from=2026-10-29&to=2026-11-27`;
     const result = await fetch(url);
     assert.equal(result.status, 200);
-    assert.deepEqual((await result.json()).orders, [parsed()]);
+    const { orders: history } = await result.json();
+    assert.equal(history.length, 1);
+    assert.equal(history[0].number, "10001");
+    assert.deepEqual(history[0].items[0], parsed().items[0]);
+    assert.deepEqual(history[0].items.slice(1).map(({ article, title, quantity, positionId }) => ({ article, title, quantity, positionId })), [
+      { article: "", title: "Позиция без артикула", quantity: 2, positionId: "11" },
+      { article: "", title: null, quantity: 1, positionId: "12" },
+    ]);
     assert.deepEqual(calls, [
       { method: "GetInvoiceOrderByDateTime", fields: { DateStart: "2026-10-29T00:00:00", DateFinish: "2026-11-27T23:59:59.9999999" } },
       { method: "GetFullInvoiceOrder", fields: { OrderNumber: "10001" } },
@@ -235,7 +245,7 @@ test("Autopiter history HTTP loads numbered invoices even when the SOAP lists co
 
     const method = "GetFullInvoiceOrder";
     for (const [failure, expected, code] of [
-      [response(method, itemXml({ Number: undefined })), /отсутствует артикул \(Number\)/, "missing_article"],
+      [response(method, itemXml({ Number: "<Unexpected/>" })), /поле Number содержит вложенные элементы/, "nested_field"],
       [response(method, itemXml({ GetCount: "8" })), /GetCount.*превышает.*OrderCount/, "received_exceeds_ordered"],
       [response(method, itemXml() + itemXml()), /повторяется идентификатор позиции \(Id\)/, "duplicate_position_id"],
       [response(method, '<OrderInformationItemModel xsi:nil="true"/>'), /в счёте указано количество товаров, но список позиций пуст/, "missing_items"],
@@ -272,7 +282,8 @@ test("Autopiter uses the shared background source and sends new orders, cancella
   const directory = mkdtempSync(join(tmpdir(), "autopiter-history-vk-")); const path = join(directory, "orders.sqlite");
   const manager = sessions(); let timestamp = now; let fields = {}; let includeNew = false; const queries = []; const messages = [];
   const adapter = new AutopiterApiAdapter(async (method, requestFields) => response(method, method === "GetInvoiceOrderByDateTime"
-    ? invoiceXml() + (includeNew ? invoiceXml("10002") : "") : itemXml(requestFields.OrderNumber === "10001" ? fields : {})));
+    ? invoiceXml().replace("<Quantity>5", "<Quantity>10") + (includeNew ? invoiceXml("10002") : "")
+    : requestFields.OrderNumber === "10001" ? itemXml(fields) + itemXml({ Id: "0", Number: undefined, status: "9" }) : itemXml()));
   const application = new RealOrderApplicationService(manager, async () => assert.fail("History must not run product searches"), null, adapter);
   const repository = new SqliteNotificationRepository(path);
   const settings = new EncryptedVkSettings(join(directory, "vk.enc.json"), Buffer.alloc(32, 17));
@@ -286,14 +297,17 @@ test("Autopiter uses the shared background source and sends new orders, cancella
     await service.runOnce(); assert.equal(messages.length, 0, "first scan establishes a baseline");
     assert.deepEqual(queries[0], { supplier: "autopiter", from: "2026-08-12", to: "2026-11-12" });
     assert.equal(service.state().suppliers.find((item) => item.supplier === "autopiter").error, null);
-    timestamp += 600_000; includeNew = true; fields = { status: "9", statusName: "Отказ", GetCount: "2" };
+    assert.deepEqual(cancellations.unread().notices, [], "a row without article or position ID must not create a line alert");
+    timestamp += 600_000; includeNew = true; fields = { Number: undefined, status: "9", statusName: "Отказ", GetCount: "2" };
     await service.runOnce();
     assert.equal(messages.length, 1); assert.match(messages[0].text, /НОВЫЙ ЗАКАЗ · Автопитер/);
     assert.match(messages[0].text, /ОТМЕНЕНО · Автопитер/); assert.match(messages[0].text, /ПОЛУЧЕНО · Автопитер/);
-    assert.match(messages[0].text, /3 шт\./); assert.match(messages[0].text, /2 шт\./);
-    assert.equal(service.orderFeed().entries.length, 3); assert.ok(service.orderFeed().entries.every((event) => event.supplier === "autopiter"));
+    assert.match(messages[0].text, /3 шт\./); assert.match(messages[0].text, /2 шт\./); assert.match(messages[0].text, /Артикул не указан/);
+    const entries = service.orderFeed().entries;
+    assert.equal(entries.length, 3); assert.ok(entries.every((event) => event.supplier === "autopiter"));
+    assert.equal(entries.find((event) => event.kind === "cancelled").items[0].article, "");
     const notice = cancellations.unread().notices[0]; assert.equal(notice.supplier, "autopiter"); assert.equal(notice.order.items[0].quantity, 3);
-    timestamp += 600_000; await service.runOnce(); assert.equal(messages.length, 1);
+    timestamp += 600_000; fields.Number = "A1"; await service.runOnce(); assert.equal(messages.length, 1);
     const afterRestart = new SqliteNotificationRepository(path);
     try { afterRestart.observe("77:2000000001", [{ supplier: "autopiter", histories: [await source.load("autopiter", signal(), timestamp).then((value) => value[0])] }], timestamp); assert.equal(afterRestart.counts("77:2000000001").pending, 0); }
     finally { afterRestart.close(); }

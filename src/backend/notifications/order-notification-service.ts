@@ -291,7 +291,7 @@ export class OrderNotificationService {
         bounded.signal.throwIfAborted();
         if (!this.source.available(check.supplier)) { check.error = "Поставщик отключён во время проверки."; continue; }
         if (!histories.length) throw new Error("Missing history feeds");
-        for (const history of histories) monitoredOrders(history);
+        for (const history of histories) monitoredOrders(history, check.supplier);
         for (const history of histories) this.source.observe(check.supplier, history);
         observations.push({ supplier: check.supplier, histories });
         check.lastSuccessAt = new Date(this.now()).toISOString(); check.limited = histories.some((history) => history.limited); check.error = null;

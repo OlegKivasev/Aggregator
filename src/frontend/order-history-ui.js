@@ -157,7 +157,7 @@ function renderOrder(order, limited, supplierName, supplier, copyControls) {
   for (const item of rows) {
     const row = element("tr");
     const part = element("td", "history-item-part");
-    part.append(element("strong", "", [item.brand, item.article].filter(Boolean).join(" ")));
+    part.append(element("strong", "", [item.brand, item.article || "Артикул не указан"].filter(Boolean).join(" ")));
     if (item.title) part.append(element("span", "", item.title));
     const delivery = element("td", "history-item-delivery");
     delivery.dataset.label = "Доставка";

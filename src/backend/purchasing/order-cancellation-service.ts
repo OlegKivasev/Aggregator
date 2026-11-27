@@ -20,6 +20,7 @@ export class OrderCancellationService {
         const quantity = item.fulfillment === "cancelled" ? item.quantity : item.cancelledQuantity ?? item.fulfillmentQuantities?.cancelled;
         if (typeof item.article !== "string" || !Number.isFinite(item.quantity) || typeof quantity !== "number"
           || !Number.isFinite(quantity) || quantity <= 0 || quantity > item.quantity) continue;
+        if (supplier === "autopiter" && !item.positionId && !item.article) continue;
         const cancelled: OrderHistoryItem = { article: item.article, brand: item.brand, title: item.title, quantity,
           price: item.price, status: `Отменено ${quantity} шт.`, fulfillment: "cancelled", cancelledQuantity: quantity,
           expectedDate: item.expectedDate, guaranteedDate: item.guaranteedDate, warehouse: item.warehouse,

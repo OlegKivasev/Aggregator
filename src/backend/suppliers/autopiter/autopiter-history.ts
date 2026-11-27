@@ -77,10 +77,9 @@ export function parseAutopiterInvoiceItems(invoice: AutopiterInvoice, rows: XmlE
   for (const row of rows) {
     if (emptyNil(row, "OrderInformationItemModel")) continue;
     if (row.text.trim()) return invalid("item_text", "в элементе позиции (OrderInformationItemModel) обнаружен текст вне полей");
-    const article = text(row, "Number", 200);
+    const article = text(row, "Number", 200) ?? "";
     const quantity = integer(text(row, "OrderCount"), "OrderCount", 1);
     const received = integer(text(row, "GetCount"), "GetCount");
-    if (!article) return invalid("missing_article", "в позиции отсутствует артикул (Number)");
     if (received > quantity) return invalid("received_exceeds_ordered", "выданное количество (GetCount) превышает заказанное (OrderCount)");
     const status = child(row, "Status");
     if (status?.text.trim()) return invalid("status_text", "в элементе статуса (Status) обнаружен текст вне полей");

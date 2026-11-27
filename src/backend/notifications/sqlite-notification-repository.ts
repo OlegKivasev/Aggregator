@@ -46,7 +46,7 @@ export class SqliteNotificationRepository {
   }
 
   private recordObservations(target: string, batches: Array<{ supplier: OrderHistorySupplier; histories: OrderHistory[] }>, now: number, feed: boolean): void {
-    const prepared = batches.map(({ supplier, histories }) => ({ supplier, orders: this.combine(histories), complete: histories.length > 0 && histories.every((history) => !history.limited) }));
+    const prepared = batches.map(({ supplier, histories }) => ({ supplier, orders: this.combine(supplier, histories), complete: histories.length > 0 && histories.every((history) => !history.limited) }));
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const events: OrderEvent[] = [];
@@ -138,9 +138,9 @@ export class SqliteNotificationRepository {
     return events;
   }
 
-  private combine(histories: OrderHistory[]): MonitoredOrder[] {
+  private combine(supplier: OrderHistorySupplier, histories: OrderHistory[]): MonitoredOrder[] {
     const combined = new Map<string, MonitoredOrder>();
-    for (const history of histories) for (const order of monitoredOrders(history)) {
+    for (const history of histories) for (const order of monitoredOrders(history, supplier)) {
       const previous = combined.get(order.number);
       if (!previous) { combined.set(order.number, order); continue; }
       for (const [key, item] of Object.entries(order.items)) {

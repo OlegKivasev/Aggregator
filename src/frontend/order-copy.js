@@ -36,12 +36,14 @@ function watchCounterparties(listener) {
 
 function orderCopyIssue(order) {
   if (order.itemsLimited) return "Выдача ограничена. Для переноса нужен полный состав заказа.";
-  if (!order.number.trim() || order.number.length > 100 || !order.items.length || order.items.length > 500
-    || order.items.some((item) => !item.article?.trim() || item.article.length > 128 || item.brand?.length > 128
+  const invalidData = "Часть данных заказа выходит за допустимые пределы для импорта в 1С.";
+  if (!order.number.trim() || order.number.length > 100 || !order.items.length || order.items.length > 500) return invalidData;
+  for (const item of order.items) {
+    if (!item.article?.trim()) return "Для переноса в 1С нужны артикулы всех позиций заказа.";
+    if (item.article.length > 128 || item.brand?.length > 128
       || item.title?.length > 4000 || !Number.isFinite(item.quantity) || item.quantity <= 0 || item.quantity > 1e6
       || item.price != null && (!Number.isFinite(item.price) || item.price < 0 || item.price >= 1e12 || item.price * item.quantity >= 1e12)
-      || Math.abs(item.quantity * 1000 - Math.round(item.quantity * 1000)) > 0.0001)) {
-    return "Часть данных заказа выходит за допустимые пределы для импорта в 1С.";
+      || Math.abs(item.quantity * 1000 - Math.round(item.quantity * 1000)) > 0.0001) return invalidData;
   }
   return "";
 }

@@ -35,8 +35,9 @@ async function withFeed(check) {
         available: () => false, load: async () => { throw new Error("Reading the feed must not query suppliers"); }, observe: () => {},
       }, () => now + 600_000);
     const addOrder = (number, cancelled = false, supplier = "rossko") => {
-      repository.observeFeed([{ supplier, histories: [history([item(2)], number)] }], now + 1_200_000);
-      if (cancelled) repository.observeFeed([{ supplier, histories: [history([{ ...item(2), fulfillment: "cancelled" }], number)] }], now + 1_800_000);
+      const row = supplier === "autopiter" ? { ...item(2), article: "", positionId: "10" } : item(2);
+      repository.observeFeed([{ supplier, histories: [history([row], number)] }], now + 1_200_000);
+      if (cancelled) repository.observeFeed([{ supplier, histories: [history([{ ...row, fulfillment: "cancelled" }], number)] }], now + 1_800_000);
     };
     let mode = "ok"; let onRead = null;
     const source = await readFile("src/frontend/index.html", "utf8");
@@ -88,6 +89,7 @@ test("Autopiter notifications appear in the shared feed and can be marked as rea
     assert.equal(await cards.count(), 2);
     assert.match(await cards.allTextContents().then((values) => values.join(" ")), /AUTOPITER-NEW/);
     assert.equal(await cards.locator(".order-notification-products li").count(), 2);
+    assert.equal(await cards.getByText(/Артикул не указан/).count(), 2);
     assert.equal(await page.locator(".order-notification-card--cancelled").filter({ hasText: "Автопитер" }).count(), 1);
     await page.locator("#order-notifications-read").click();
     await page.waitForFunction(() => document.querySelector("#order-notifications-count").hidden);

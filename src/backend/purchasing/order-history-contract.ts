@@ -4,6 +4,7 @@ export interface OrderHistoryItem {
   positionId?: string;
   /** Armtek offer terms saved when this position was ordered through the aggregator. */
   returnDays?: number;
+  /** Autopiter history can omit the original article, represented as an empty string. */
   article: string;
   brand: string | null;
   title: string | null;

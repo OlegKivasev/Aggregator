@@ -4008,6 +4008,7 @@ test("Autopiter history uses shared filters, cancellation notices, all suppliers
       <Price>100</Price><Status><Id>${status}</Id><Name>Статус поставщика</Name></Status><DeliveryDate>2026-11-14T00:00:00</DeliveryDate>
       </OrderInformationItemModel></rows>`).children);
   const history = { orders: [order("10001", 9, 2), order("10002", 1546, 0), order("10003", 128, 5)], limited: false };
+  const withoutArticle = { ...history.orders[1], number: "10004", items: [{ ...history.orders[1].items[0], article: "", title: "Позиция без номера детали" }] };
   await withCartPage(async (page) => {
     await page.locator("#history-toggle").click();
     await page.locator("#history-tab-autopiter").click();
@@ -4052,10 +4053,23 @@ test("Autopiter history uses shared filters, cancellation notices, all suppliers
     const error = page.locator(".history-message.is-error").filter({ hasText: detailError });
     await error.waitFor();
     assert.equal(calls.length, beforeInvalid + 1, "the detailed error uses the history response");
+    await page.locator("#history-from").fill("2026-11-03");
+    const missing = page.locator(".history-card").filter({ has: page.getByRole("heading", { name: /10004/ }) });
+    await missing.waitFor();
+    assert.match(await missing.locator(".history-item-part").innerText(), /Артикул не указан[\s\S]*Позиция без номера детали/);
+    const copy = missing.getByRole("button", { name: /Скопировать заказ.*в 1С/ });
+    assert.equal(await copy.getAttribute("aria-disabled"), "true");
+    assert.match(await copy.getAttribute("title"), /нужны артикулы/);
+    const beforeSearch = calls.length;
+    await page.locator("#history-search").fill("Позиция без номера детали");
+    assert.equal(await page.locator(".history-card").count(), 1);
+    assert.equal(await missing.count(), 1);
+    assert.equal(calls.length, beforeSearch);
   }, { autopiter: true, fixedTime: "2026-11-12T12:00:00Z", supplierOrderHistory: async (query) => {
     if (query.supplier !== "autopiter") return { orders: [], limited: false };
     calls.push(query);
     if (query.from === "2026-11-02") throw new SupplierIntegrationError("fixture", { publicMessage: detailError });
+    if (query.from === "2026-11-03") return { ...history, orders: [...history.orders, withoutArticle] };
     return history;
   } });
 });

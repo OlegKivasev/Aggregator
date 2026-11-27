@@ -11,7 +11,7 @@ export interface OrderEvent { supplier: OrderHistorySupplier; number: string; ki
 const text = (value: unknown, maximum: number): string | null => typeof value === "string" && value.trim() && value.length <= maximum ? value.trim() : null;
 const quantity = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000;
 
-export function monitoredOrders(history: OrderHistory): MonitoredOrder[] {
+export function monitoredOrders(history: OrderHistory, supplier?: OrderHistorySupplier): MonitoredOrder[] {
   if (!history || !Array.isArray(history.orders) || history.orders.length > 500 || typeof history.limited !== "boolean") throw new Error("Invalid order history");
   const orders = new Map<string, MonitoredOrder>();
   let count = 0;
@@ -20,10 +20,14 @@ export function monitoredOrders(history: OrderHistory): MonitoredOrder[] {
     let current = orders.get(order.number);
     if (!current) { current = { number: order.number, date: text(order.date, 32), items: {} }; orders.set(order.number, current); }
     for (const item of order.items) {
-      if (++count > 5_000 || !item || !text(item.article, 200) || !quantity(item.quantity) || item.quantity === 0) throw new Error("Invalid order history item");
+      const missingArticle = supplier === "autopiter" && item?.article === "";
+      if (++count > 5_000 || !item || (!missingArticle && !text(item.article, 200))
+        || !quantity(item.quantity) || item.quantity === 0) throw new Error("Invalid order history item");
       const cancelled = item.fulfillment === "cancelled" ? item.quantity : item.cancelledQuantity ?? item.fulfillmentQuantities?.cancelled ?? 0;
       const received = item.fulfillment === "delivered" ? item.quantity : item.deliveredQuantity ?? item.fulfillmentQuantities?.delivered ?? 0;
       if (!quantity(cancelled) || !quantity(received) || cancelled + received > item.quantity) throw new Error("Invalid order quantities");
+      // History can show the row, but a notification needs an identity that survives polling.
+      if (missingArticle && !item.positionId) continue;
       const key = item.positionId ? JSON.stringify(["position", item.positionId])
         : JSON.stringify(["part", text(item.brand, 200)?.toLocaleUpperCase() ?? null, item.article.toLocaleUpperCase()]);
       const previous = current.items[key];
@@ -69,7 +73,7 @@ export function formatOrderEvents(events: OrderEvent[]): string[] {
       + (event.kind === "missing" ? "\nЗаказ исчез из списка активных. Проверьте у поставщика: он мог быть получен или отменён.\nПоследние известные товары:" : "");
     let block = header;
     for (const item of event.items) {
-      const line = `\n• ${clean([item.brand, item.article].filter(Boolean).join(" "))}${item.title ? ` — ${clean(item.title)}` : ""}\n  ${amount(item.quantity)} шт.${item.price === null ? "" : ` · ${amount(item.price * item.quantity)} ₽`}`;
+      const line = `\n• ${clean([item.brand, item.article || "Артикул не указан"].filter(Boolean).join(" "))}${item.title ? ` — ${clean(item.title)}` : ""}\n  ${amount(item.quantity)} шт.${item.price === null ? "" : ` · ${amount(item.price * item.quantity)} ₽`}`;
       if (block.length + line.length > 3_400) {
         if (message.length + block.length > 3_800) { messages.push(message); message = "Заказы: обновления"; }
         message += block; block = `${header}\nПродолжение`;
