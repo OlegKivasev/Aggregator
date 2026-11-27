@@ -205,7 +205,7 @@ test("Autopiter history HTTP loads numbered invoices even when the SOAP lists co
   const calls = [];
   const reports = [];
   const unnumbered = invoiceXml().replace("<OrderNumber>10001</OrderNumber>", '<OrderNumber xsi:nil="true"/>');
-  let invalidDetails = false;
+  let detailsFailure;
   let invalidInvoices = false;
   const adapter = new AutopiterApiAdapter(async (method, fields) => {
     calls.push({ method, fields });
@@ -214,8 +214,8 @@ test("Autopiter history HTTP loads numbered invoices even when the SOAP lists co
         : unnumbered + '<InvoiceModel xsi:nil="true"/>' + invoiceXml() + invoiceXml());
     }
     assert.equal(method, "GetFullInvoiceOrder");
-    return response(method, invalidDetails ? '<OrderInformationItemModel xsi:nil="true"/>'
-      : '<OrderInformationItemModel xmlns:n="http://www.w3.org/2001/XMLSchema-instance" n:nil="1"/>' + itemXml());
+    if (detailsFailure) return detailsFailure;
+    return response(method, '<OrderInformationItemModel xmlns:n="http://www.w3.org/2001/XMLSchema-instance" n:nil="1"/>' + itemXml());
   });
   const orders = new RealOrderApplicationService(sessions(), async () => assert.fail("History must not search for parts"), null, adapter);
   const server = createAggregatorServer({ publicDir: resolve("src/frontend"), application: {
@@ -233,17 +233,33 @@ test("Autopiter history HTTP loads numbered invoices even when the SOAP lists co
     ]);
     assert.deepEqual(reports, []);
 
-    invalidDetails = true;
-    const detailsError = await fetch(url);
-    assert.equal(detailsError.status, 502);
-    assert.match((await detailsError.json()).message, /позиции по счетам/);
+    const method = "GetFullInvoiceOrder";
+    for (const [failure, expected, code] of [
+      [response(method, itemXml({ Number: undefined })), /отсутствует артикул \(Number\)/, "missing_article"],
+      [response(method, itemXml({ GetCount: "8" })), /GetCount.*превышает.*OrderCount/, "received_exceeds_ordered"],
+      [response(method, itemXml() + itemXml()), /повторяется идентификатор позиции \(Id\)/, "duplicate_position_id"],
+      [response(method, '<OrderInformationItemModel xsi:nil="true"/>'), /в счёте указано количество товаров, но список позиций пуст/, "missing_items"],
+      [{ ...response(method), body: "<broken>" }, /повреждённый XML/, "xml"],
+      [{ ...response(method), status: 503, contentType: "text/html", body: "private-fixture" }, /ответ неподдерживаемого типа \(HTTP 503\)/, "content_type"],
+      [{ ...response(method), status: 500, body: '<s:Envelope><s:Body><s:Fault><faultcode>s:Server</faultcode><faultstring>private-fixture</faultstring></s:Fault></s:Body></s:Envelope>' }, /SOAP Fault Server \(HTTP 500\)/, "soap_fault"],
+    ]) {
+      detailsFailure = failure;
+      const before = calls.length;
+      const detailsError = await fetch(url);
+      assert.equal(detailsError.status, 502);
+      const { message } = await detailsError.json();
+      assert.match(message, /GetFullInvoiceOrder/);
+      assert.match(message, expected);
+      assert.doesNotMatch(message, /private-fixture/);
+      assert.equal(calls.length - before, 2, "diagnostics do not issue extra reads");
+      assert.deepEqual(reports.pop(), { operation: "autopiter-order-history", category: "integration", diagnosticCode: `autopiter_history_details_${code}` });
+    }
     invalidInvoices = true;
     const invoicesError = await fetch(url);
     assert.equal(invoicesError.status, 502);
-    assert.match((await invoicesError.json()).message, /список счетов/);
+    assert.match((await invoicesError.json()).message, /GetInvoiceOrderByDateTime.*пустой или некорректный номер счёта \(OrderNumber\)/);
     assert.deepEqual(reports, [
-      { operation: "autopiter-order-history", category: "integration", diagnosticCode: "autopiter_history_details" },
-      { operation: "autopiter-order-history", category: "integration", diagnosticCode: "autopiter_history_invoices" },
+      { operation: "autopiter-order-history", category: "integration", diagnosticCode: "autopiter_history_invoices_invalid_order_number" },
     ]);
   } finally {
     server.closeAllConnections(); await new Promise((resolve) => server.close(resolve));

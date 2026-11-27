@@ -13,7 +13,7 @@ import { createAggregatorServer } from "../../src/backend/http/create-server.ts"
 import { attachPurchaseReference } from "../../src/backend/purchasing/purchase-offer.ts";
 import { formatDeliveryDate } from "../../src/frontend/supplier-search-summary.js";
 import { CartError } from "../../src/backend/purchasing/cart-application-service.ts";
-import { SupplierAuthError } from "../../src/backend/errors.ts";
+import { SupplierAuthError, SupplierIntegrationError } from "../../src/backend/errors.ts";
 import { parsePartKomOrderHistory } from "../../src/backend/suppliers/part-kom/part-kom-order.ts";
 import { parseArmtekOrderHistory } from "../../src/backend/suppliers/armtek/armtek-order.ts";
 import { parseRosskoOrderHistory } from "../../src/backend/suppliers/rossko/rossko-api-adapter.ts";
@@ -4001,6 +4001,7 @@ test("arriving today tab uses local delivery dates, excludes finished items and 
 
 test("Autopiter history uses shared filters, cancellation notices, all suppliers and one opening request", async () => {
   const calls = [];
+  const detailError = "Ошибка GetFullInvoiceOrder — в счёте повторяется идентификатор позиции (Id).";
   const order = (number, status, received) => parseAutopiterInvoiceItems({ number, date: "2026-11-12 12:30:00", quantity: 5 },
     parseSupplierXml(`<rows><OrderInformationItemModel><Id>1</Id><Number>A1</Number><CatalogName>TEST</CatalogName>
       <Name>Фильтр &lt;img src=x onerror=window.autopiterXss=1&gt;</Name><OrderCount>5</OrderCount><GetCount>${received}</GetCount>
@@ -4047,9 +4048,15 @@ test("Autopiter history uses shared filters, cancellation notices, all suppliers
     await page.locator(".history-message.is-error").waitFor();
     assert.match(await page.locator(".history-message.is-error").innerText(), /Автопитер.*93 дней/);
     assert.equal(calls.length, beforeInvalid);
+    await page.locator("#history-from").fill("2026-11-02");
+    const error = page.locator(".history-message.is-error").filter({ hasText: detailError });
+    await error.waitFor();
+    assert.equal(calls.length, beforeInvalid + 1, "the detailed error uses the history response");
   }, { autopiter: true, fixedTime: "2026-11-12T12:00:00Z", supplierOrderHistory: async (query) => {
     if (query.supplier !== "autopiter") return { orders: [], limited: false };
-    calls.push(query); return history;
+    calls.push(query);
+    if (query.from === "2026-11-02") throw new SupplierIntegrationError("fixture", { publicMessage: detailError });
+    return history;
   } });
 });
 

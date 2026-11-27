@@ -35,11 +35,15 @@ const responseReasons = new Map<string, { code: string; label: string }>([
 ]);
 const networkErrors = new Set(["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ETIMEDOUT", "ERR_TLS_CERT_ALTNAME_INVALID", "CERT_HAS_EXPIRED", "UNABLE_TO_VERIFY_LEAF_SIGNATURE"]);
 
+export function autopiterResponseReason(error: SupplierIntegrationError): { code: string; label: string } | undefined {
+  return responseReasons.get(error.message);
+}
+
 export function autopiterSearchError(error: unknown, progress?: { index: number; total: number }): Error {
   if (error instanceof SupplierAuthError || error instanceof SupplierTimeoutError || error instanceof SupplierSessionInvalidatedError) return error;
   // Only local, allowlisted descriptions reach SSE. Never forward fault text, values, cookies or arbitrary error messages.
   const networkError = error instanceof Error && "code" in error && typeof error.code === "string" && networkErrors.has(error.code);
-  const reason = error instanceof SupplierIntegrationError && responseReasons.get(error.message)
+  const reason = error instanceof SupplierIntegrationError && autopiterResponseReason(error)
     || (networkError ? { code: "connection", label: "ошибка соединения с поставщиком" }
       : { code: "unknown", label: "не удалось завершить обработку ответа" });
   const stage = progress ? `Ошибка получения цен (каталог ${progress.index} из ${progress.total})` : "Ошибка получения списка производителей";

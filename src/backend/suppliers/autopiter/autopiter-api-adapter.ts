@@ -8,7 +8,7 @@ import type { SupplierAdapter } from "../supplier-adapter.ts";
 import { attachPurchaseReference, type PurchaseLine } from "../../purchasing/purchase-offer.ts";
 import { autopiterOrderFields, parseAutopiterOrderResult } from "./autopiter-order.ts";
 import { parseAutopiterInvoiceItems, parseAutopiterInvoices } from "./autopiter-history.ts";
-import { autopiterOfferError, autopiterSearchError } from "./autopiter-search-error.ts";
+import { autopiterOfferError, autopiterResponseReason, autopiterSearchError } from "./autopiter-search-error.ts";
 import { finishOrderHistory, historyDate } from "../../purchasing/order-history-values.ts";
 import type { OrderHistory, OrderHistoryOrder } from "../../purchasing/order-history-contract.ts";
 
@@ -45,11 +45,16 @@ export const autopiterSoapRequest: AutopiterRequester = (method, fields, signal,
   body: `<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><${method} xmlns="${namespace}">${serializeFields(fields)}</${method}></soap:Body></soap:Envelope>`,
 });
 
+function soapResponseError(method: AutopiterMethod, status: number, message: string, description: string): SupplierIntegrationError {
+  const history = method === "GetInvoiceOrderByDateTime" || method === "GetFullInvoiceOrder";
+  return new SupplierIntegrationError(message, history ? { publicMessage: `${description} (HTTP ${status})` } : undefined);
+}
+
 function methodResponse(response: SiteHttpResponse, method: AutopiterMethod): XmlElement {
   if (response.status === 401 || response.status === 403) throw new SupplierAuthError("Autopiter authorization is required");
   const mediaType = response.contentType?.split(";", 1)[0]?.trim().toLowerCase();
   if (mediaType !== "text/xml" && mediaType !== "application/soap+xml" && mediaType !== "application/xml") {
-    throw new SupplierIntegrationError("Autopiter returned an unexpected content type");
+    throw soapResponseError(method, response.status, "Autopiter returned an unexpected content type", "получен ответ неподдерживаемого типа");
   }
   const root = parseSupplierXml(response.body);
   const body = children(root, "Body")[0];
@@ -57,9 +62,11 @@ function methodResponse(response: SiteHttpResponse, method: AutopiterMethod): Xm
   const fault = children(body, "Fault")[0];
   if (fault) {
     if (/авторизац|authoriz|not authenticated/i.test(text(fault, "faultstring"))) throw new SupplierAuthError("Autopiter authorization is required");
-    throw new SupplierIntegrationError("Autopiter returned a SOAP fault");
+    const faultCode = text(fault, "faultcode").split(":").at(-1) ?? "";
+    const knownCode = ["Client", "Server", "VersionMismatch", "MustUnderstand"].includes(faultCode);
+    throw soapResponseError(method, response.status, "Autopiter returned a SOAP fault", `Автопитер вернул SOAP Fault${knownCode ? ` ${faultCode}` : ""}`);
   }
-  if (response.status !== 200) throw new SupplierIntegrationError("Autopiter request failed");
+  if (response.status !== 200) throw soapResponseError(method, response.status, "Autopiter request failed", "сервер поставщика отклонил запрос");
   const wrapper = children(body, `${method}Response`)[0];
   if (!wrapper || body.children.length !== 1 || body.text.trim()) throw new SupplierIntegrationError("Autopiter did not return a method result");
   return wrapper;
@@ -131,12 +138,19 @@ export async function verifyAutopiterCredentials(credentials: AutopiterCredentia
 function listResult(response: SiteHttpResponse, method: "FindCatalog" | "GetPriceId" | "GetInvoiceOrderByDateTime" | "GetFullInvoiceOrder", itemName: string): XmlElement[] {
   const wrapper = methodResponse(response, method);
   const nilResult = new RegExp(`<(?:(?:[\\w.-]+):)?${method}(?:Response|Result)\\b[^>]*\\s(?:[\\w.-]+:)?nil\\s*=\\s*["'](?:true|1)["']`).test(response.body);
-  if (nilResult || wrapper.text.trim()) throw new SupplierIntegrationError("Autopiter returned an invalid result list");
+  if (nilResult || wrapper.text.trim()) {
+    throw new SupplierIntegrationError("Autopiter returned an invalid result list", {
+      publicMessage: nilResult ? "результат помечен как пустой (xsi:nil)" : "в ответе обнаружен текст вне списка",
+    });
+  }
   // List results have minOccurs=0 in the supplier's WSDL: an empty method response is valid.
   if (wrapper.children.length === 0) return [];
-  const result = children(wrapper, `${method}Result`)[0];
-  if (!result || wrapper.children.length !== 1 || result.text.trim() || result.children.some((item) => localName(item) !== itemName)) {
-    throw new SupplierIntegrationError("Autopiter returned an invalid result list");
+  const result = wrapper.children[0];
+  if (wrapper.children.length !== 1 || localName(result) !== `${method}Result`) {
+    throw new SupplierIntegrationError("Autopiter returned an invalid result list", { publicMessage: `ожидался один элемент ${method}Result` });
+  }
+  if (result.text.trim() || result.children.some((item) => localName(item) !== itemName)) {
+    throw new SupplierIntegrationError("Autopiter returned an invalid result list", { publicMessage: `ожидался список элементов ${itemName}` });
   }
   return result.children;
 }
@@ -314,11 +328,13 @@ export class AutopiterApiAdapter implements SupplierAdapter {
       return finishOrderHistory(orders, limited);
     } catch (error) {
       if (!(error instanceof SupplierIntegrationError)) throw error;
+      const reason = autopiterResponseReason(error);
+      const method = stage === "invoices" ? "GetInvoiceOrderByDateTime" : "GetFullInvoiceOrder";
+      const detail = error.publicMessage ?? reason?.label ?? "не удалось обработать ответ API";
       throw new SupplierIntegrationError("Autopiter order history failed", {
         cause: error,
-        diagnosticCode: `autopiter_history_${stage}`,
-        publicMessage: stage === "invoices" ? "Не удалось загрузить список счетов Автопитера."
-          : "Не удалось загрузить позиции по счетам Автопитера.",
+        diagnosticCode: `autopiter_history_${stage}_${error.diagnosticCode ?? reason?.code ?? "unknown"}`,
+        publicMessage: `Ошибка ${method} — ${detail}.`,
       });
     } finally { controller.abort(); operation.dispose(); }
   }
