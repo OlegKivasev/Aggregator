@@ -379,7 +379,10 @@ export function createAggregatorServer({
         if (!controller.signal.aborted) {
           if (error instanceof SupplierAuthError) serveJson(response, 401, { message: `Авторизация ${name} недоступна.` });
           else if (error instanceof SupplierTimeoutError) serveJson(response, 504, { message: `${name} не ответил вовремя.` });
-          else if (error instanceof SupplierIntegrationError) serveJson(response, 502, { message: `Не удалось получить историю заказов ${name}.` });
+          else if (error instanceof SupplierIntegrationError) {
+            if (error.diagnosticCode) reportError({ operation: `${supplier}-order-history`, category: "integration", diagnosticCode: error.diagnosticCode });
+            serveJson(response, 502, { message: error.publicMessage ?? `Не удалось получить историю заказов ${name}.` });
+          }
           else {
             reportError({ operation: `${supplier}-order-history`, category: classifyOperationalError(error) });
             serveJson(response, 500, { message: "Не удалось получить историю заказов." });

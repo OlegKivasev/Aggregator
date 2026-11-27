@@ -4,7 +4,10 @@ export interface XmlElement {
   name: string;
   text: string;
   children: XmlElement[];
+  nil?: true;
 }
+
+const schemaInstanceNamespace = "http://www.w3.org/2001/XMLSchema-instance";
 
 function decodeXmlText(value: string): string {
   return value.replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);/gi, (entity) => {
@@ -33,6 +36,7 @@ export function parseSupplierXml(xml: string): XmlElement {
 
   const root: XmlElement = { name: "#document", text: "", children: [] };
   const stack = [root];
+  const namespaces = new WeakMap<XmlElement, Map<string, string>>();
   const tokens = xml.match(/<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<[^>]+>|[^<]+/g) || [];
   if (tokens.join("") !== xml) {
     throw new SupplierIntegrationError("Supplier SOAP API returned malformed XML");
@@ -64,13 +68,31 @@ export function parseSupplierXml(xml: string): XmlElement {
       continue;
     }
 
-    const match = token.match(/^<\s*([A-Za-z_][\w:.-]*)(?:\s[^<>]*?)?\s*(\/?)>$/);
+    const match = token.match(/^<\s*([A-Za-z_][\w:.-]*)(?:\s([^<>]*?))?\s*(\/?)>$/);
     if (!match) {
       throw new SupplierIntegrationError("Supplier SOAP API returned malformed XML");
     }
     const element: XmlElement = { name: match[1], text: "", children: [] };
+    const attributes = match[2];
+    if (attributes?.includes("xmlns:") || attributes?.includes(":nil")) {
+      const declared = new Map<string, string>();
+      let nilPrefix: string | undefined;
+      for (const [, name, doubleQuoted, singleQuoted] of attributes.matchAll(/([A-Za-z_][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+        const value = doubleQuoted ?? singleQuoted;
+        if (name.startsWith("xmlns:")) declared.set(name.slice(6), decodeXmlText(value));
+        else if (name.endsWith(":nil") && (value === "true" || value === "1")) nilPrefix = name.slice(0, -4);
+      }
+      if (declared.size) namespaces.set(element, declared);
+      if (nilPrefix) {
+        let namespace = declared.get(nilPrefix);
+        for (let index = stack.length - 1; index >= 0 && namespace === undefined; index--) {
+          namespace = namespaces.get(stack[index])?.get(nilPrefix);
+        }
+        if (namespace === schemaInstanceNamespace) element.nil = true;
+      }
+    }
     current.children.push(element);
-    if (!match[2]) {
+    if (!match[3]) {
       stack.push(element);
     }
   }

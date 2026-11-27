@@ -20,9 +20,9 @@ import { SqliteOrderCancellationRepository } from "../src/backend/purchasing/sql
 // All SOAP and VK responses are fictional. No production account is contacted.
 const signal = () => new AbortController().signal;
 const now = Date.parse("2026-11-12T10:00:00Z");
-const xmlRows = (xml) => parseSupplierXml(`<rows>${xml}</rows>`).children;
+const xmlRows = (xml) => parseSupplierXml(`<rows xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${xml}</rows>`).children;
 const response = (method, xml = "") => ({ status: 200, setCookie: [], contentType: "text/xml",
-  body: `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><${method}Response><${method}Result>${xml}</${method}Result></${method}Response></s:Body></s:Envelope>` });
+  body: `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><s:Body><${method}Response><${method}Result>${xml}</${method}Result></${method}Response></s:Body></s:Envelope>` });
 const invoiceXml = (number = "10001", fields = "") => `<InvoiceModel><OrderNumber>${number}</OrderNumber><DateInvoice>2026-11-12T00:30:00+04:00</DateInvoice><Quantity>5</Quantity>${fields}</InvoiceModel>`;
 const itemXml = (fields = {}) => {
   const values = { Id: "10", DetailUid: "fixture-offer", Number: "A1", CatalogName: "TEST", Name: "Тестовый фильтр &amp; комплект",
@@ -46,7 +46,10 @@ test("Autopiter history validates invoices, removes duplicate numbers and preser
   for (const value of ["0001-01-01T00:00:00", "2026-02-30T12:00:00Z", "2026-01-01T24:00:00", "broken"]) assert.equal(autopiterHistoryDate(value), null);
   for (const xml of [invoiceXml("0"), invoiceXml("2147483648"), invoiceXml().replace("2026-11-12T00:30:00+04:00", "broken"),
     invoiceXml().replace("<Quantity>5", "<Quantity>-1"), invoiceXml() + invoiceXml().replace("<Quantity>5", "<Quantity>4"),
-    invoiceXml("10001", "<OrderNumber>10002</OrderNumber>")]) assert.throws(() => parseAutopiterInvoices(xmlRows(xml)), SupplierIntegrationError);
+    invoiceXml("10001", "<OrderNumber>10002</OrderNumber>"),
+    invoiceXml().replace("<OrderNumber>", '<OrderNumber xsi:nil="true">'),
+    invoiceXml().replace("<OrderNumber>10001</OrderNumber>", '<OrderNumber xmlns:xsi="urn:other" xsi:nil="true"/>'),
+  ]) assert.throws(() => parseAutopiterInvoices(xmlRows(xml)), SupplierIntegrationError);
 });
 
 test("Autopiter maps confirmed received and cancelled quantities, and never labels shipment or branch arrival as receipt", () => {
@@ -122,7 +125,8 @@ test("Autopiter history recovers expired sessions once and preserves auth, trans
   await assert.rejects(adapter.orderHistory("2026-11-01", "2026-11-12", signal(), new SupplierSessionManager()), SupplierAuthError);
   for (const failure of [new SupplierTimeoutError("fixture"), new SupplierIntegrationError("fixture")]) {
     const failing = new AutopiterApiAdapter(async () => { throw failure; });
-    await assert.rejects(failing.orderHistory("2026-11-01", "2026-11-12", signal(), sessions()), (error) => error === failure);
+    await assert.rejects(failing.orderHistory("2026-11-01", "2026-11-12", signal(), sessions()),
+      (error) => failure instanceof SupplierTimeoutError ? error === failure : error.cause === failure);
   }
   for (const body of ["broken", '<s:Envelope xmlns:s="soap"><s:Body><GetInvoiceOrderByDateTimeResponse><GetInvoiceOrderByDateTimeResult xsi:nil="true" /></GetInvoiceOrderByDateTimeResponse></s:Body></s:Envelope>']) {
     await assert.rejects(new AutopiterApiAdapter(async () => ({ ...response("GetInvoiceOrderByDateTime"), body }))
@@ -187,6 +191,60 @@ test("Autopiter history HTTP validates dates, supplies cancellation notices and 
     for (const [error, status] of [[new SupplierAuthError(), 401], [new SupplierTimeoutError(), 504], [new SupplierIntegrationError("secret upstream"), 502]]) {
       failure = error; const response = await fetch(origin + path); assert.equal(response.status, status); assert.doesNotMatch(await response.text(), /secret/);
     }
+  } finally {
+    server.closeAllConnections(); await new Promise((resolve) => server.close(resolve));
+    if (previous === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previous;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Autopiter history HTTP loads numbered invoices even when the SOAP lists contain nullable entries", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "autopiter-history-nullable-"));
+  const previous = process.env.GARAGE_DB_PATH;
+  process.env.GARAGE_DB_PATH = join(directory, "garage.sqlite");
+  const calls = [];
+  const reports = [];
+  const unnumbered = invoiceXml().replace("<OrderNumber>10001</OrderNumber>", '<OrderNumber xsi:nil="true"/>');
+  let invalidDetails = false;
+  let invalidInvoices = false;
+  const adapter = new AutopiterApiAdapter(async (method, fields) => {
+    calls.push({ method, fields });
+    if (method === "GetInvoiceOrderByDateTime") {
+      return response(method, invalidInvoices ? '<InvoiceModel><OrderNumber/></InvoiceModel>'
+        : unnumbered + '<InvoiceModel xsi:nil="true"/>' + invoiceXml() + invoiceXml());
+    }
+    assert.equal(method, "GetFullInvoiceOrder");
+    return response(method, invalidDetails ? '<OrderInformationItemModel xsi:nil="true"/>'
+      : '<OrderInformationItemModel xmlns:n="http://www.w3.org/2001/XMLSchema-instance" n:nil="1"/>' + itemXml());
+  });
+  const orders = new RealOrderApplicationService(sessions(), async () => assert.fail("History must not search for parts"), null, adapter);
+  const server = createAggregatorServer({ publicDir: resolve("src/frontend"), application: {
+    streamSearch: async () => {}, supplierOrderHistory: orders.supplierOrderHistory.bind(orders),
+  }, reportError: (event) => reports.push(event) });
+  try {
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${server.address().port}/api/order-history/autopiter?from=2026-10-29&to=2026-11-27`;
+    const result = await fetch(url);
+    assert.equal(result.status, 200);
+    assert.deepEqual((await result.json()).orders, [parsed()]);
+    assert.deepEqual(calls, [
+      { method: "GetInvoiceOrderByDateTime", fields: { DateStart: "2026-10-29T00:00:00", DateFinish: "2026-11-27T23:59:59.9999999" } },
+      { method: "GetFullInvoiceOrder", fields: { OrderNumber: "10001" } },
+    ]);
+    assert.deepEqual(reports, []);
+
+    invalidDetails = true;
+    const detailsError = await fetch(url);
+    assert.equal(detailsError.status, 502);
+    assert.match((await detailsError.json()).message, /позиции по счетам/);
+    invalidInvoices = true;
+    const invoicesError = await fetch(url);
+    assert.equal(invoicesError.status, 502);
+    assert.match((await invoicesError.json()).message, /список счетов/);
+    assert.deepEqual(reports, [
+      { operation: "autopiter-order-history", category: "integration", diagnosticCode: "autopiter_history_details" },
+      { operation: "autopiter-order-history", category: "integration", diagnosticCode: "autopiter_history_invoices" },
+    ]);
   } finally {
     server.closeAllConnections(); await new Promise((resolve) => server.close(resolve));
     if (previous === undefined) delete process.env.GARAGE_DB_PATH; else process.env.GARAGE_DB_PATH = previous;

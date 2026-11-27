@@ -285,6 +285,7 @@ export class AutopiterApiAdapter implements SupplierAdapter {
     const controller = new AbortController();
     const context = { signal: AbortSignal.any([operation.signal, controller.signal]), timeoutMs: this.timeoutMs };
     const recovery: AutopiterSessionRecovery = {};
+    let stage: "invoices" | "details" = "invoices";
     try {
       const invoices = await this.requestWithSession("GetInvoiceOrderByDateTime", {
         DateStart: `${from}T00:00:00`, DateFinish: `${to}T23:59:59.9999999`,
@@ -293,6 +294,7 @@ export class AutopiterApiAdapter implements SupplierAdapter {
       let count = 0;
       let limited = invoices.length > 500;
       const selected = invoices.slice(0, 500);
+      stage = "details";
       for (let offset = 0; offset < selected.length; offset += 4) {
         context.signal.throwIfAborted();
         // The API only accepts one invoice number. Bound independent reads and cancel the entire window on failure.
@@ -310,6 +312,14 @@ export class AutopiterApiAdapter implements SupplierAdapter {
       }
       context.signal.throwIfAborted();
       return finishOrderHistory(orders, limited);
+    } catch (error) {
+      if (!(error instanceof SupplierIntegrationError)) throw error;
+      throw new SupplierIntegrationError("Autopiter order history failed", {
+        cause: error,
+        diagnosticCode: `autopiter_history_${stage}`,
+        publicMessage: stage === "invoices" ? "Не удалось загрузить список счетов Автопитера."
+          : "Не удалось загрузить позиции по счетам Автопитера.",
+      });
     } finally { controller.abort(); operation.dispose(); }
   }
 

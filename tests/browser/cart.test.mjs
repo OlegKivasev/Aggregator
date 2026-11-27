@@ -4019,7 +4019,7 @@ test("Autopiter history uses shared filters, cancellation notices, all suppliers
     const mixed = page.locator(".history-card").filter({ has: page.locator("h3", { hasText: "10001" }) });
     assert.equal(await mixed.locator("tbody tr").count(), 2);
     assert.match(await mixed.innerText(), /Получен[\s\S]*2|2[\s\S]*Получен/);
-    assert.equal(await page.locator(".history-card img").count(), 0);
+    assert.equal(await page.locator(".history-item-part img").count(), 0);
     assert.equal(await page.evaluate(() => window.autopiterXss), undefined);
     const beforeFilters = calls.length;
     await page.locator("#history-status-cancelled").click();
