@@ -1,4 +1,4 @@
-import type { OrderHistory, OrderHistoryItem } from "./order-history-contract.ts";
+import { ambiguousOrderPosition, type OrderHistory, type OrderHistoryItem } from "./order-history-contract.ts";
 import type { CancellationGroup, CancellationSnapshot, OrderHistorySupplier } from "./order-cancellation-contract.ts";
 import type { SqliteOrderCancellationRepository } from "./sqlite-order-cancellation-repository.ts";
 
@@ -16,7 +16,7 @@ export class OrderCancellationService {
       if (typeof order?.number !== "string" || !Array.isArray(order.items)) continue;
       const groups = new Map<string, CancellationGroup>();
       for (const item of order.items) {
-        if (!item || !["cancelled", "partially_cancelled", "partial"].includes(item.fulfillment)) continue;
+        if (!item || item[ambiguousOrderPosition] || !["cancelled", "partially_cancelled", "partial"].includes(item.fulfillment)) continue;
         const quantity = item.fulfillment === "cancelled" ? item.quantity : item.cancelledQuantity ?? item.fulfillmentQuantities?.cancelled;
         if (typeof item.article !== "string" || !Number.isFinite(item.quantity) || typeof quantity !== "number"
           || !Number.isFinite(quantity) || quantity <= 0 || quantity > item.quantity) continue;

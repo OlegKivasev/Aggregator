@@ -4001,7 +4001,7 @@ test("arriving today tab uses local delivery dates, excludes finished items and 
 
 test("Autopiter history uses shared filters, cancellation notices, all suppliers and one opening request", async () => {
   const calls = [];
-  const detailError = "Ошибка GetFullInvoiceOrder — в счёте повторяется идентификатор позиции (Id).";
+  const detailError = "Ошибка GetFullInvoiceOrder — выданное количество (GetCount) превышает заказанное (OrderCount).";
   const order = (number, status, received) => parseAutopiterInvoiceItems({ number, date: "2026-11-12 12:30:00", quantity: 5 },
     parseSupplierXml(`<rows><OrderInformationItemModel><Id>1</Id><Number>A1</Number><CatalogName>TEST</CatalogName>
       <Name>Фильтр &lt;img src=x onerror=window.autopiterXss=1&gt;</Name><OrderCount>5</OrderCount><GetCount>${received}</GetCount>
@@ -4009,6 +4009,8 @@ test("Autopiter history uses shared filters, cancellation notices, all suppliers
       </OrderInformationItemModel></rows>`).children);
   const history = { orders: [order("10001", 9, 2), order("10002", 1546, 0), order("10003", 128, 5)], limited: false };
   const withoutArticle = { ...history.orders[1], number: "10004", items: [{ ...history.orders[1].items[0], article: "", title: "Позиция без номера детали" }] };
+  const position = history.orders[1].items[0];
+  const repeatedId = { ...history.orders[1], number: "10005", items: [position, { ...position, article: "B2", title: "Другая позиция счёта" }] };
   await withCartPage(async (page) => {
     await page.locator("#history-toggle").click();
     await page.locator("#history-tab-autopiter").click();
@@ -4060,6 +4062,11 @@ test("Autopiter history uses shared filters, cancellation notices, all suppliers
     const copy = missing.getByRole("button", { name: /Скопировать заказ.*в 1С/ });
     assert.equal(await copy.getAttribute("aria-disabled"), "true");
     assert.match(await copy.getAttribute("title"), /нужны артикулы/);
+    const repeated = page.locator(".history-card").filter({ has: page.getByRole("heading", { name: /10005/ }) });
+    assert.deepEqual(await repeated.locator(".history-item-part strong").allTextContents(), ["TEST A1", "TEST B2"]);
+    const copyRepeated = repeated.getByRole("button", { name: /Скопировать заказ.*в 1С/ });
+    assert.equal(await copyRepeated.getAttribute("aria-disabled"), "true");
+    assert.match(await copyRepeated.getAttribute("title"), /одинаковый идентификатор/);
     const beforeSearch = calls.length;
     await page.locator("#history-search").fill("Позиция без номера детали");
     assert.equal(await page.locator(".history-card").count(), 1);
@@ -4069,7 +4076,7 @@ test("Autopiter history uses shared filters, cancellation notices, all suppliers
     if (query.supplier !== "autopiter") return { orders: [], limited: false };
     calls.push(query);
     if (query.from === "2026-11-02") throw new SupplierIntegrationError("fixture", { publicMessage: detailError });
-    if (query.from === "2026-11-03") return { ...history, orders: [...history.orders, withoutArticle] };
+    if (query.from === "2026-11-03") return { ...history, orders: [...history.orders, withoutArticle, repeatedId] };
     return history;
   } });
 });

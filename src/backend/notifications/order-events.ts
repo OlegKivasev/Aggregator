@@ -1,4 +1,4 @@
-import type { OrderHistory } from "../purchasing/order-history-contract.ts";
+import { ambiguousOrderPosition, type OrderHistory } from "../purchasing/order-history-contract.ts";
 import type { OrderHistorySupplier } from "../purchasing/order-cancellation-contract.ts";
 
 export const supplierNames: Record<OrderHistorySupplier, string> = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko", autopiter: "Автопитер" };
@@ -27,7 +27,7 @@ export function monitoredOrders(history: OrderHistory, supplier?: OrderHistorySu
       const received = item.fulfillment === "delivered" ? item.quantity : item.deliveredQuantity ?? item.fulfillmentQuantities?.delivered ?? 0;
       if (!quantity(cancelled) || !quantity(received) || cancelled + received > item.quantity) throw new Error("Invalid order quantities");
       // History can show the row, but a notification needs an identity that survives polling.
-      if (missingArticle && !item.positionId) continue;
+      if (item[ambiguousOrderPosition] || (missingArticle && !item.positionId)) continue;
       const key = item.positionId ? JSON.stringify(["position", item.positionId])
         : JSON.stringify(["part", text(item.brand, 200)?.toLocaleUpperCase() ?? null, item.article.toLocaleUpperCase()]);
       const previous = current.items[key];

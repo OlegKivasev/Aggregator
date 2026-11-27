@@ -34,11 +34,16 @@ function watchCounterparties(listener) {
   };
 }
 
-function orderCopyIssue(order) {
+function orderCopyIssue(order, supplier) {
   if (order.itemsLimited) return "Выдача ограничена. Для переноса нужен полный состав заказа.";
   const invalidData = "Часть данных заказа выходит за допустимые пределы для импорта в 1С.";
   if (!order.number.trim() || order.number.length > 100 || !order.items.length || order.items.length > 500) return invalidData;
+  const positionIds = supplier === "autopiter" ? new Set() : null;
   for (const item of order.items) {
+    if (positionIds && item.positionId) {
+      if (positionIds.has(item.positionId)) return "У нескольких позиций одинаковый идентификатор. Для переноса в 1С нужен подтверждённый состав счёта.";
+      positionIds.add(item.positionId);
+    }
     if (!item.article?.trim()) return "Для переноса в 1С нужны артикулы всех позиций заказа.";
     if (item.article.length > 128 || item.brand?.length > 128
       || item.title?.length > 4000 || !Number.isFinite(item.quantity) || item.quantity <= 0 || item.quantity > 1e6
@@ -89,7 +94,7 @@ export function createOrderCopyControls(dialog) {
   });
   return {
     clear() { controls.clear(); },
-    add(order, supplier, { shownItemsOnly = false, issue = orderCopyIssue(order) } = {}) {
+    add(order, supplier, { shownItemsOnly = false, issue = orderCopyIssue(order, supplier) } = {}) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "btn btn-light cart-copy-order";

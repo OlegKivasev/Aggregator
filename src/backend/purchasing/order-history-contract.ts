@@ -1,6 +1,10 @@
 export type OrderFulfillment = "processing" | "in_transit" | "ready" | "delivered" | "cancelled" | "partially_cancelled" | "partial" | "returned" | "unknown";
 
+/** Server-only marker for ambiguous positions, preserved when history is sliced but omitted from JSON. */
+export const ambiguousOrderPosition = Symbol("ambiguousOrderPosition");
+
 export interface OrderHistoryItem {
+  [ambiguousOrderPosition]?: true;
   positionId?: string;
   /** Armtek offer terms saved when this position was ordered through the aggregator. */
   returnDays?: number;

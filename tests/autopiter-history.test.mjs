@@ -12,6 +12,7 @@ import { RealOrderApplicationService } from "../src/backend/application/real-ord
 import { createAggregatorServer } from "../src/backend/http/create-server.ts";
 import { createNotificationHistorySource } from "../src/backend/notifications/create-order-notifications.ts";
 import { OrderNotificationService } from "../src/backend/notifications/order-notification-service.ts";
+import { monitoredOrders } from "../src/backend/notifications/order-events.ts";
 import { EncryptedVkSettings } from "../src/backend/notifications/encrypted-vk-settings.ts";
 import { SqliteNotificationRepository } from "../src/backend/notifications/sqlite-notification-repository.ts";
 import { OrderCancellationService } from "../src/backend/purchasing/order-cancellation-service.ts";
@@ -81,7 +82,8 @@ test("Autopiter rejects malformed historical quantities and positions without tu
     assert.throws(() => parsed(fields), SupplierIntegrationError);
   }
   assert.throws(() => parseAutopiterInvoiceItems(invoice, []), SupplierIntegrationError);
-  assert.throws(() => parseAutopiterInvoiceItems(invoice, xmlRows(itemXml() + itemXml())), SupplierIntegrationError);
+  const repeated = parseAutopiterInvoiceItems(invoice, xmlRows(itemXml() + itemXml()));
+  assert.deepEqual(repeated.items.map((item) => [item.positionId, item.article, item.quantity]), [["10", "A1", 5], ["10", "A1", 5]]);
 });
 
 test("Autopiter loads each distinct invoice once, bounds concurrent requests and uses only read methods", async (t) => {
@@ -106,10 +108,16 @@ test("Autopiter bounds the returned history and does not fetch remaining invoice
   const adapter = new AutopiterApiAdapter(async (method) => {
     if (method === "GetInvoiceOrderByDateTime") return response(method, Array.from({ length: 20 }, (_, i) => invoiceXml(String(i + 1))).join(""));
     details++;
-    return response(method, Array.from({ length: 150 }, (_, i) => itemXml({ Id: String(i + 1) })).join(""));
+    return response(method, Array.from({ length: 150 }, (_, i) => itemXml({ Id: String(i === 149 ? 1 : i + 1) })).join(""));
   });
   const result = await adapter.orderHistory("2026-11-01", "2026-11-12", signal(), sessions());
   assert.equal(result.orders.flatMap((order) => order.items).length, 500); assert.equal(result.limited, true); assert.equal(details, 4);
+  const truncated = result.orders.at(-1);
+  assert.equal(truncated.itemsLimited, true);
+  assert.equal(truncated.items.filter((item) => item.positionId === "1").length, 1);
+  const snapshot = monitoredOrders(result, "autopiter").find((order) => order.number === truncated.number);
+  assert.equal(snapshot.items[JSON.stringify(["position", "1"])], undefined, "a duplicate ID stays ambiguous after the other row is truncated");
+  assert.ok(snapshot.items[JSON.stringify(["position", "2"])]);
 });
 
 test("Autopiter history recovers expired sessions once and preserves auth, transport, empty and malformed responses", async () => {
@@ -198,7 +206,7 @@ test("Autopiter history HTTP validates dates, supplies cancellation notices and 
   }
 });
 
-test("Autopiter history HTTP loads numbered invoices with nullable entries and missing articles", async () => {
+test("Autopiter history HTTP loads numbered invoices with nullable entries, missing articles and repeated position IDs", async () => {
   const directory = mkdtempSync(join(tmpdir(), "autopiter-history-nullable-"));
   const previous = process.env.GARAGE_DB_PATH;
   process.env.GARAGE_DB_PATH = join(directory, "garage.sqlite");
@@ -206,7 +214,7 @@ test("Autopiter history HTTP loads numbered invoices with nullable entries and m
   const reports = [];
   const unnumbered = invoiceXml().replace("<OrderNumber>10001</OrderNumber>", '<OrderNumber xsi:nil="true"/>');
   const numbered = invoiceXml().replace("<Quantity>5", "<Quantity>8");
-  const missingArticle = itemXml({ Id: "11", Number: undefined, NumberChange: "REPLACEMENT", Name: "Позиция без артикула", OrderCount: "2" });
+  const missingArticle = itemXml({ Id: "10", Number: undefined, NumberChange: "REPLACEMENT", Name: "Позиция без артикула", OrderCount: "2" });
   const emptyArticle = itemXml({ Id: "12", Number: "", Name: undefined, OrderCount: "1" });
   let detailsFailure;
   let invalidInvoices = false;
@@ -234,7 +242,7 @@ test("Autopiter history HTTP loads numbered invoices with nullable entries and m
     assert.equal(history[0].number, "10001");
     assert.deepEqual(history[0].items[0], parsed().items[0]);
     assert.deepEqual(history[0].items.slice(1).map(({ article, title, quantity, positionId }) => ({ article, title, quantity, positionId })), [
-      { article: "", title: "Позиция без артикула", quantity: 2, positionId: "11" },
+      { article: "", title: "Позиция без артикула", quantity: 2, positionId: "10" },
       { article: "", title: null, quantity: 1, positionId: "12" },
     ]);
     assert.deepEqual(calls, [
@@ -247,7 +255,7 @@ test("Autopiter history HTTP loads numbered invoices with nullable entries and m
     for (const [failure, expected, code] of [
       [response(method, itemXml({ Number: "<Unexpected/>" })), /поле Number содержит вложенные элементы/, "nested_field"],
       [response(method, itemXml({ GetCount: "8" })), /GetCount.*превышает.*OrderCount/, "received_exceeds_ordered"],
-      [response(method, itemXml() + itemXml()), /повторяется идентификатор позиции \(Id\)/, "duplicate_position_id"],
+      [response(method, itemXml().replace("<Id>10</Id>", "<Id>10</Id><Id>10</Id>")), /поле Id передано несколько раз/, "duplicate_field"],
       [response(method, '<OrderInformationItemModel xsi:nil="true"/>'), /в счёте указано количество товаров, но список позиций пуст/, "missing_items"],
       [{ ...response(method), body: "<broken>" }, /повреждённый XML/, "xml"],
       [{ ...response(method), status: 503, contentType: "text/html", body: "private-fixture" }, /ответ неподдерживаемого типа \(HTTP 503\)/, "content_type"],
@@ -281,9 +289,11 @@ test("Autopiter history HTTP loads numbered invoices with nullable entries and m
 test("Autopiter uses the shared background source and sends new orders, cancellation and receipt deltas to VK exactly once", async () => {
   const directory = mkdtempSync(join(tmpdir(), "autopiter-history-vk-")); const path = join(directory, "orders.sqlite");
   const manager = sessions(); let timestamp = now; let fields = {}; let includeNew = false; const queries = []; const messages = [];
+  const repeatedRows = () => itemXml({ Id: "20", Number: "AMBIGUOUS-1", status: includeNew ? "9" : "677" })
+    + itemXml({ Id: "20", Number: "AMBIGUOUS-2", status: includeNew ? "11" : "677", GetCount: includeNew ? "5" : "0" });
   const adapter = new AutopiterApiAdapter(async (method, requestFields) => response(method, method === "GetInvoiceOrderByDateTime"
-    ? invoiceXml().replace("<Quantity>5", "<Quantity>10") + (includeNew ? invoiceXml("10002") : "")
-    : requestFields.OrderNumber === "10001" ? itemXml(fields) + itemXml({ Id: "0", Number: undefined, status: "9" }) : itemXml()));
+    ? invoiceXml().replace("<Quantity>5", "<Quantity>20") + (includeNew ? invoiceXml("10002") : "")
+    : requestFields.OrderNumber === "10001" ? itemXml(fields) + itemXml({ Id: "0", Number: undefined, status: "9" }) + repeatedRows() : itemXml()));
   const application = new RealOrderApplicationService(manager, async () => assert.fail("History must not run product searches"), null, adapter);
   const repository = new SqliteNotificationRepository(path);
   const settings = new EncryptedVkSettings(join(directory, "vk.enc.json"), Buffer.alloc(32, 17));
@@ -303,10 +313,12 @@ test("Autopiter uses the shared background source and sends new orders, cancella
     assert.equal(messages.length, 1); assert.match(messages[0].text, /НОВЫЙ ЗАКАЗ · Автопитер/);
     assert.match(messages[0].text, /ОТМЕНЕНО · Автопитер/); assert.match(messages[0].text, /ПОЛУЧЕНО · Автопитер/);
     assert.match(messages[0].text, /3 шт\./); assert.match(messages[0].text, /2 шт\./); assert.match(messages[0].text, /Артикул не указан/);
+    assert.doesNotMatch(messages[0].text, /AMBIGUOUS/);
     const entries = service.orderFeed().entries;
     assert.equal(entries.length, 3); assert.ok(entries.every((event) => event.supplier === "autopiter"));
     assert.equal(entries.find((event) => event.kind === "cancelled").items[0].article, "");
-    const notice = cancellations.unread().notices[0]; assert.equal(notice.supplier, "autopiter"); assert.equal(notice.order.items[0].quantity, 3);
+    const notice = cancellations.unread().notices[0]; assert.equal(notice.supplier, "autopiter");
+    assert.deepEqual(notice.order.items.map((item) => item.quantity), [3]);
     timestamp += 600_000; fields.Number = "A1"; await service.runOnce(); assert.equal(messages.length, 1);
     const afterRestart = new SqliteNotificationRepository(path);
     try { afterRestart.observe("77:2000000001", [{ supplier: "autopiter", histories: [await source.load("autopiter", signal(), timestamp).then((value) => value[0])] }], timestamp); assert.equal(afterRestart.counts("77:2000000001").pending, 0); }

@@ -1,4 +1,4 @@
-import type { OrderHistoryItem, OrderHistoryOrder } from "../../purchasing/order-history-contract.ts";
+import { ambiguousOrderPosition, type OrderHistoryItem, type OrderHistoryOrder } from "../../purchasing/order-history-contract.ts";
 import { historyDate, historyNumber, historyText } from "../../purchasing/order-history-values.ts";
 import { SupplierIntegrationError } from "../errors.ts";
 import type { XmlElement } from "../soap-xml.ts";
@@ -72,7 +72,7 @@ export function parseAutopiterInvoices(rows: XmlElement[]): AutopiterInvoice[] {
 }
 
 export function parseAutopiterInvoiceItems(invoice: AutopiterInvoice, rows: XmlElement[]): OrderHistoryOrder {
-  const positions = new Set<string>();
+  const positions = new Map<string, OrderHistoryItem>();
   const items: OrderHistoryItem[] = [];
   for (const row of rows) {
     if (emptyNil(row, "OrderInformationItemModel")) continue;
@@ -90,10 +90,8 @@ export function parseAutopiterInvoiceItems(invoice: AutopiterInvoice, rows: XmlE
     const rawPositionId = text(row, "Id", 100);
     const positionId = rawPositionId === "0" ? null : rawPositionId;
     // Id is present in WSDL, though omitted from the prose documentation. DetailUid identifies an offer, not a historical position.
-    if (positionId) {
-      if (!/^[1-9]\d{0,9}$/.test(positionId) || Number(positionId) > 2147483647) return invalid("invalid_position_id", "некорректный идентификатор позиции (Id)");
-      if (positions.has(positionId)) return invalid("duplicate_position_id", "в счёте повторяется идентификатор позиции (Id)");
-      positions.add(positionId);
+    if (positionId && (!/^[1-9]\d{0,9}$/.test(positionId) || Number(positionId) > 2147483647)) {
+      return invalid("invalid_position_id", "некорректный идентификатор позиции (Id)");
     }
     const rawPrice = text(row, "Price");
     const price = rawPrice === null ? null : historyNumber(rawPrice);
@@ -103,11 +101,19 @@ export function parseAutopiterInvoiceItems(invoice: AutopiterInvoice, rows: XmlE
         : cancelled > 0 || delivered > 0 ? "partial"
           : statusId !== null && [677, 1309, 1546, 1919].includes(statusId) ? "in_transit"
             : statusId === 11 || statusId === 1858 || statusId === 149 || statusId === null ? "unknown" : "processing";
-    items.push({ ...(positionId ? { positionId } : {}), article, brand: text(row, "CatalogName", 200),
+    const item: OrderHistoryItem = { ...(positionId ? { positionId } : {}), article, brand: text(row, "CatalogName", 200),
       title: text(row, "Name"), quantity, price, status: status ? text(status, "Name") : null, fulfillment,
       ...(cancelled > 0 ? { cancelledQuantity: cancelled } : {}), ...(delivered > 0 ? { deliveredQuantity: delivered } : {}),
       ...(fulfillment === "partially_cancelled" ? { fulfillmentQuantities: { delivered, cancelled } } : {}),
-      expectedDate: autopiterHistoryDate(text(row, "DeliveryDate", 40)), guaranteedDate: null, warehouse: text(row, "Region") });
+      expectedDate: autopiterHistoryDate(text(row, "DeliveryDate", 40)), guaranteedDate: null, warehouse: text(row, "Region") };
+    if (positionId) {
+      const first = positions.get(positionId);
+      if (first) {
+        first[ambiguousOrderPosition] = true;
+        item[ambiguousOrderPosition] = true;
+      } else positions.set(positionId, item);
+    }
+    items.push(item);
   }
   if (!items.length && invoice.quantity > 0) return invalid("missing_items", "в счёте указано количество товаров, но список позиций пуст");
   return { number: invoice.number, date: invoice.date, items };
