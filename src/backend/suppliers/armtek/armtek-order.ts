@@ -47,9 +47,9 @@ function armtekHistoryStatus(row: ArmtekHistoryMovement, quantity: number): Pick
       ...(issued ? { deliveredQuantity: issued } : {}),
       ...(settled ? { fulfillmentQuantities: { delivered: issued, cancelled } } : {}) };
   }
-  const text = historyText(row.STATUS)?.toLocaleLowerCase().replaceAll("ё", "е");
+  const text = historyText(row.STATUS)?.toLocaleLowerCase().replaceAll("ё", "е").replace(/[.!]+$/, "");
   if (text === "позиция полностью отклонена") return { status, fulfillment: "cancelled" };
-  if (issued === null && (text === "позиция полностью поставлена" || text === "позиция поставлена")) {
+  if (text === "позиция полностью поставлена" || issued === null && text === "позиция поставлена") {
     return { status, fulfillment: "delivered" };
   }
   if (text === "позиция частично поставлена" || text === "позиция частично отклонена"

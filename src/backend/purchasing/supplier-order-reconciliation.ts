@@ -13,7 +13,7 @@ export interface ReconciliationItem {
 interface LocalReconciliationItem extends ReconciliationItem { brandAliases: string }
 interface ReconciliationCounterparty { id: string | null; name: string; items: LocalReconciliationItem[] }
 type ReconciliationInput = { from: string; to: string; counterparties: ReconciliationCounterparty[] }
-  & ({ all: true } | { all: false; counterpartyId: string });
+  & ({ all: true; scopeIds?: string[] } | { all: false; counterpartyId: string });
 
 function invalidInput(): never {
   throw new NomenclatureError(400, "invalid_reconciliation", "Некорректные данные сверки заказа поставщику.");
@@ -23,7 +23,7 @@ export const reconciliationBodyLimit = 6 * 1024 * 1024;
 const reconciliationItemLimit = 6000;
 
 export function parseReconciliation(value: unknown): ReconciliationInput {
-  const data = objectFields(value, ["counterpartyId", "from", "to", "items", "counterparties"]);
+  const data = objectFields(value, ["counterpartyId", "from", "to", "items", "counterparties", "scopeIds"]);
   const { from, to } = data;
   if (typeof from !== "string" || typeof to !== "string" || from.length !== 10 || to.length !== 10
     || historyDate(from) !== from || historyDate(to) !== to || from > to
@@ -45,12 +45,18 @@ export function parseReconciliation(value: unknown): ReconciliationInput {
     });
   };
   if (!Object.hasOwn(data, "counterparties")) {
+    if (Object.hasOwn(data, "scopeIds")) invalidInput();
     const id = parseUuid(data.counterpartyId);
     return { all: false, counterpartyId: id, from, to, counterparties: [{ id, name: "", items: parseItems(data.items, 2000) }] };
   }
   if (Object.hasOwn(data, "items") || Object.hasOwn(data, "counterpartyId") || !Array.isArray(data.counterparties)
     || data.counterparties.length > reconciliationItemLimit) invalidInput();
   const ids = new Set<string | null>();
+  let scopeIds: string[] | undefined;
+  if (Object.hasOwn(data, "scopeIds")) {
+    if (!Array.isArray(data.scopeIds) || data.scopeIds.length > 8) invalidInput();
+    scopeIds = data.scopeIds.map(parseUuid);
+  }
   const counterparties = data.counterparties.map((value: unknown) => {
     const entry = objectFields(value, ["id", "name", "items"]);
     const id = entry.id === null ? null : parseUuid(entry.id);
@@ -58,7 +64,7 @@ export function parseReconciliation(value: unknown): ReconciliationInput {
     ids.add(id);
     return { id, name: string(entry.name, 500), items: parseItems(entry.items, reconciliationItemLimit) };
   });
-  return { all: true, from, to, counterparties };
+  return { all: true, from, to, counterparties, scopeIds };
 }
 
 const compact = (value: string) => value.toUpperCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -72,8 +78,10 @@ function articleKey(article: string, exactArticle: string): string {
   return key;
 }
 
+export const reconciliationArticleKey = (article: string): string => articleKey(article, compact(article));
+
 interface ReconciliationRow {
-  status: "shortage" | "extra" | "unverified";
+  status: "shortage" | "extra" | "unverified" | "received" | "cancelled";
   article: string;
   brand: string;
   title: string;
@@ -81,6 +89,8 @@ interface ReconciliationRow {
   confirmed: number;
   possible: number;
   cancelled: number;
+  received: number;
+  highlight?: "received" | "cancelled";
   reason: string;
 }
 
@@ -91,6 +101,7 @@ interface ComparisonGroup {
   confirmed: number;
   possible: number;
   cancelled: number;
+  received: number;
   hasSupplierItem: boolean;
   hasOnecItem: boolean;
   ambiguous: boolean;
@@ -100,9 +111,16 @@ function supplierQuantity(item: OrderHistoryItem) {
   const { quantity, fulfillment, fulfillmentQuantities } = item;
   const cancelled = fulfillment === "cancelled" ? quantity : item.cancelledQuantity ?? fulfillmentQuantities?.cancelled ?? 0;
   const possible = Math.max(0, quantity - cancelled);
+  const received = fulfillment === "delivered" ? possible : Math.min(possible, item.deliveredQuantity ?? fulfillmentQuantities?.delivered ?? 0);
   const confirmed = fulfillment === "unknown" || (fulfillment === "partial" && cancelled === 0)
-    || (fulfillment === "partially_cancelled" && cancelled === 0) ? Math.min(possible, item.deliveredQuantity ?? 0) : possible;
-  return { confirmed, possible, cancelled };
+    || (fulfillment === "partially_cancelled" && cancelled === 0) ? received : possible;
+  return { confirmed, possible, cancelled, received };
+}
+
+function positionHighlight(onec: number, received: number, cancelled: number): ReconciliationRow["highlight"] {
+  if (onec <= 0) return undefined;
+  if (cancelled > 0) return "cancelled";
+  return received > 0 && received + 1e-8 >= onec ? "received" : undefined;
 }
 
 export function compareReconciliation(onecItems: LocalReconciliationItem[], supplierItems: OrderHistoryItem[],
@@ -127,7 +145,7 @@ export function compareReconciliation(onecItems: LocalReconciliationItem[], supp
     if (!groups) articles.set(article, groups = new Map());
     let group = groups.get(brand);
     if (!group) groups.set(brand, group = { label, exactArticle,
-      onec: 0, confirmed: 0, possible: 0, cancelled: 0, hasOnecItem: false, hasSupplierItem: false, ambiguous: false });
+      onec: 0, confirmed: 0, possible: 0, cancelled: 0, received: 0, hasOnecItem: false, hasSupplierItem: false, ambiguous: false });
     else if (group.exactArticle !== exactArticle) group.exactArticle = null;
     return group;
   }
@@ -137,7 +155,7 @@ export function compareReconciliation(onecItems: LocalReconciliationItem[], supp
     if (!exactArticle) {
       onecWithoutArticle ||= item.quantity > 0;
       rows.push({ status: "unverified", article: item.article, brand: item.brand, title: item.title,
-        onec: item.quantity, confirmed: 0, possible: 0, cancelled: 0, reason: "В строке 1С нет артикула." });
+        onec: item.quantity, confirmed: 0, possible: 0, cancelled: 0, received: 0, reason: "В строке 1С нет артикула." });
       continue;
     }
     const group = groupFor(articleKey(item.article, exactArticle), exactArticle, compact(item.brand), item);
@@ -165,6 +183,7 @@ export function compareReconciliation(onecItems: LocalReconciliationItem[], supp
     group.confirmed += quantity.confirmed;
     group.possible += quantity.possible;
     group.cancelled += quantity.cancelled;
+    group.received += quantity.received;
   }
 
   const epsilon = 1e-8;
@@ -198,8 +217,10 @@ export function compareReconciliation(onecItems: LocalReconciliationItem[], supp
           const onec = groups.get(local[0])!;
           rows.push({ status: "unverified", article: onec.label.article, brand: `${onec.label.brand} / ${supplier.label.brand}`,
             title: onec.label.title || supplier.label.title, onec: onec.onec, confirmed: supplier.confirmed,
-            possible: supplier.possible, cancelled: supplier.cancelled,
-            reason: `Разные бренды. В 1С указан «${onec.label.brand}», у поставщика «${supplier.label.brand}».` });
+            possible: supplier.possible, cancelled: supplier.cancelled, received: supplier.received,
+            highlight: positionHighlight(onec.onec, supplier.received, supplier.cancelled),
+            reason: `Разные бренды. В 1С указан «${onec.label.brand}», у поставщика «${supplier.label.brand}».`
+              + (supplier.received > epsilon ? ` У поставщика получено ${supplier.received} шт.` : "") });
           groups.delete(local[0]);
           groups.delete(remote[0]);
         } else {
@@ -209,7 +230,7 @@ export function compareReconciliation(onecItems: LocalReconciliationItem[], supp
         }
       }
     }
-    for (const [brand, { label, onec, confirmed, possible, cancelled, ambiguous }] of groups) {
+    for (const [brand, { label, onec, confirmed, possible, cancelled, received, ambiguous }] of groups) {
       let status: ReconciliationRow["status"];
       let reason: string;
       if (missingBrand || ambiguous || ambiguousArticles.has(article)) {
@@ -228,8 +249,16 @@ export function compareReconciliation(onecItems: LocalReconciliationItem[], supp
       } else if (possible - confirmed > epsilon) {
         status = "unverified";
         reason = "Статус позиции у поставщика не подтверждает всё количество.";
+      } else if (onec > epsilon && cancelled > epsilon) {
+        status = "cancelled";
+        reason = `У поставщика отменено ${cancelled} шт.`;
+      } else if (onec > epsilon && received > epsilon) {
+        status = "received";
+        reason = `У поставщика получено ${received} шт.`;
       } else continue;
-      rows.push({ status, article: label.article, brand: label.brand, title: label.title, onec, confirmed, possible, cancelled, reason });
+      if (!ambiguous && status !== "received" && received > epsilon) reason += ` У поставщика получено ${received} шт.`;
+      rows.push({ status, article: label.article, brand: label.brand, title: label.title, onec, confirmed, possible, cancelled, received,
+        highlight: ambiguous || ambiguousArticles.has(article) ? undefined : positionHighlight(onec, received, cancelled), reason });
     }
   }
   return rows;

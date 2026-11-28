@@ -8,6 +8,7 @@ import { supplierOrderReconciliationPath } from "../src/backend/http/supplier-or
 import { NomenclatureService } from "../src/backend/nomenclature/nomenclature-service.ts";
 import { compareReconciliation } from "../src/backend/purchasing/supplier-order-reconciliation.ts";
 import { SupplierCounterparties } from "../src/backend/purchasing/supplier-counterparties.ts";
+import { parseArmtekOrderHistory } from "../src/backend/suppliers/armtek/armtek-order.ts";
 
 const supplierItem = (article, quantity, details = {}) => ({ article, brand: "LADA", title: article, quantity,
   fulfillment: "in_transit", ...details });
@@ -22,9 +23,14 @@ test("a single POST compares positions from the 1C period with supplier orders b
   let limited = false;
   const day = "2026-11-28";
   const partKomArticle = "482034581R";
-  const connected = ["part-kom", "armtek", "rossko", "forum-auto"];
+  const connected = ["part-kom", "armtek", "rossko", "forum-auto", "stparts"];
+  const { orders: armtekOrders } = parseArmtekOrderHistory({ DATA: [
+    { ORDER: "0498323681", ORDER_DATE: "20261128", PIN: "SP2111", BRAND: "HI-Q", KWMENG: "2", KWMENG_R: "2", Issued: "0",
+      STATUS: "Позиция полностью поставлена" },
+    { ORDER: "A-CANCELLED", ORDER_DATE: "20261128", PIN: "A-CANCELLED", BRAND: "LADA", KWMENG: "3", Issued: "0", REJECTED: "3" },
+  ] });
   const otherHistories = {
-    armtek: { limited: false, orders: [{ number: "A-1", date: day, items: [supplierItem("ACTIVE", 2)] }] },
+    armtek: { limited: false, orders: [{ number: "A-1", date: day, items: [supplierItem("ACTIVE", 2)] }, ...armtekOrders] },
     rossko: { limited: false, orders: [{ number: "R-1", date: day, items: [supplierItem("MISSING-IN-1C", 3)] }] },
     "forum-auto": { limited: false, orders: [{ number: "F-1", date: day, items: [supplierItem("WITHOUT-MAPPING", 5)] }] },
   };
@@ -89,13 +95,23 @@ test("a single POST compares positions from the 1C period with supplier orders b
     const partKomId = "23456781-abcd-1234-abcd-123456789abc";
     const armtekId = "34567891-abcd-1234-abcd-123456789abc";
     const rosskoId = "45678912-abcd-1234-abcd-123456789abc";
+    const marketId = "56789123-abcd-1234-abcd-123456789abc";
     counterparties.save("part-kom", { id: partKomId, name: "Автоконтракты", taxId: "" });
     counterparties.save("armtek", { id: armtekId, name: "Армтек", taxId: "" });
     counterparties.save("rossko", { id: rosskoId, name: "Росско", taxId: "" });
-    const allBody = { from: day, to: day, counterparties: [
+    counterparties.save("stparts", { id: marketId, name: "Рынок", taxId: "" });
+    assert.equal((await fetch(url)).status, 401);
+    const scopeResponse = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(scopeResponse.status, 200);
+    const { counterpartyIds: scopeIds } = await scopeResponse.json();
+    assert.deepEqual(scopeIds, [partKomId, armtekId, rosskoId]);
+    assert.equal(calls.length, 2, "the scope lookup must not contact suppliers");
+    const allBody = { from: day, to: day, scopeIds, counterparties: [
       { id: partKomId, name: "Автоконтракты", items: [localItem(partKomArticle, 4), localItem("PARTIALLY-RECEIVED", 2), localItem("PK-UNCERTAIN", 1)] },
-      { id: armtekId, name: "Армтек", items: [localItem("ACTIVE", 2), localItem(partKomArticle, 1)] },
+      { id: armtekId, name: "Армтек", items: [localItem("ACTIVE", 2), localItem(partKomArticle, 1), localItem("SP2111", 2, { brand: "Sangsin" }),
+        localItem("A-CANCELLED", 2)] },
       { id: counterpartyId, name: "Автопитер", items: [localItem("OFFLINE", 2)] },
+      { id: marketId, name: "Рынок", items: [localItem("MARKET", 2)] },
       { id: null, name: "Без поставщика", items: [localItem("NO-COUNTERPARTY", 3)] },
     ] };
     assert.equal((await post({ ...allBody, counterparties: [...allBody.counterparties, allBody.counterparties[0]] }, token)).status, 400);
@@ -104,11 +120,12 @@ test("a single POST compares positions from the 1C period with supplier orders b
     assert.equal(allResponse.status, 200);
     const all = await allResponse.json();
     assert.equal(all.scope, "all-active");
-    assert.equal(all.sourcesRead, 4);
+    assert.equal(all.sourcesRead, 3);
     assert.deepEqual(calls.slice(2), [{ supplier: "part-kom", archive: false }, { supplier: "armtek", from: day, to: day },
-      { supplier: "forum-auto" }, { supplier: "rossko" }]);
+      { supplier: "rossko", period: { from: day, to: day } }]);
     const byArticle = new Map(all.rows.map((row) => [row.article, row]));
     assert.equal(all.rows.length, 7);
+    assert.deepEqual(all.warnings, ["PartKOM · история достигла предела выдачи."]);
     const [partKomBrandQuestion, armtekShortage] = all.rows.filter((row) => row.article === partKomArticle);
     assert.match(partKomBrandQuestion.supplier, /PartKOM/);
     assert.deepEqual([partKomBrandQuestion.status, partKomBrandQuestion.brand, partKomBrandQuestion.onec, partKomBrandQuestion.confirmed],
@@ -119,9 +136,15 @@ test("a single POST compares positions from the 1C period with supplier orders b
     assert.equal(byArticle.get("MISSING-IN-1C").status, "extra");
     assert.match(byArticle.get("MISSING-IN-1C").supplier, /Rossko/);
     assert.match(byArticle.get("PK-UNCERTAIN").reason, /PartKOM.*предела/);
-    assert.match(byArticle.get("WITHOUT-MAPPING").reason, /сопоставьте/i);
-    assert.match(byArticle.get("OFFLINE").reason, /не подключён/);
-    assert.equal(byArticle.get("NO-COUNTERPARTY").status, "unverified");
+    assert.equal(byArticle.get("PARTIALLY-RECEIVED").highlight, "received");
+    const armtekDisk = byArticle.get("SP2111");
+    assert.deepEqual([armtekDisk.status, armtekDisk.received, armtekDisk.highlight], ["unverified", 2, "received"]);
+    assert.match(armtekDisk.reason, /Sangsin.*HI-Q.*получено 2 шт/);
+    assert.equal(byArticle.get("A-CANCELLED").highlight, "cancelled");
+    assert.equal(byArticle.get("A-CANCELLED").cancelled, 3);
+    for (const article of ["COMPLETED", "CANCELLED", "MARKET", "WITHOUT-MAPPING", "OFFLINE", "NO-COUNTERPARTY", "OTHER-DAY"]) {
+      assert.equal(byArticle.has(article), false, article);
+    }
   } finally {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));

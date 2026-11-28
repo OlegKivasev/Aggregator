@@ -4452,6 +4452,7 @@ test("Armtek actual issue overrides stale status and splits settled cancellation
     STATUS: "позиция частично поставлена", DLVRD: "20261017090000", WRNTD: "20261017120000" };
   const history = parseArmtekOrderHistory({ DATA: [
     { ...base, ORDER: "ISSUED" },
+    { ...base, ORDER: "TEXT-DELIVERED", Issued: "0", KWMENG_R: "1", STATUS: "Позиция полностью поставлена" },
     { ...base, ORDER: "SPLIT", ZZKWMENG: "10", KWMENG: "4", Issued: "4", REJECTED: "6" },
     { ...base, ORDER: "PENDING", ZZKWMENG: "10", KWMENG: "4", Issued: "3", REJECTED: "6" },
     { ...base, ORDER: "SHIPPED", Issued: "0", KWMENG_R: "1", STATUS: "", ORDER_STATUS: "Закрыт" },
@@ -4461,13 +4462,17 @@ test("Armtek actual issue overrides stale status and splits settled cancellation
   await withCartPage(async (page) => {
     await page.locator("#history-toggle").click();
     await page.locator("#history-tab-armtek").click();
-    await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 4);
+    await page.waitForFunction(() => document.querySelectorAll(".history-card").length === 5);
     const card = (number) => page.locator(".history-card").filter({ has: page.locator("h3", { hasText: `Заказ № ${number}` }) });
     const issued = card("ISSUED");
     assert.equal(await issued.getAttribute("data-fulfillment"), "delivered");
     assert.equal(await issued.locator("tbody tr").count(), 1);
     assert.match(await issued.locator(".history-item-status").innerText(), /Получен.*Получено 1 из 1 шт\./s);
     assert.doesNotMatch(await issued.innerText(), /Частичная поставка|частично поставлена/);
+    const deliveredByStatus = card("TEXT-DELIVERED");
+    assert.equal(await deliveredByStatus.getAttribute("data-fulfillment"), "delivered");
+    assert.match(await deliveredByStatus.locator(".history-item-status").innerText(), /Получен.*Позиция полностью поставлена/s);
+    assert.equal(await deliveredByStatus.locator("tbody tr").evaluate((row) => getComputedStyle(row).backgroundColor), "rgb(229, 245, 235)");
     const split = card("SPLIT");
     assert.equal(await split.getAttribute("data-fulfillment"), "mixed");
     assert.equal(await split.locator("tbody tr").count(), 2);
@@ -4482,12 +4487,13 @@ test("Armtek actual issue overrides stale status and splits settled cancellation
       assert.match(await row.locator(".order-return-terms").innerText(), /Возврат: 14 дн\./);
     }
     assert.equal(await split.locator(".history-item-status .history-status--cancelled").evaluate((node) => getComputedStyle(node).color), "rgb(161, 46, 53)");
+    assert.equal(await split.locator('tbody tr[data-fulfillment="cancelled"]').evaluate((row) => getComputedStyle(row).backgroundColor), "rgb(253, 235, 236)");
     assert.equal(await split.locator(".history-item-status .history-status--delivered").evaluate((node) => getComputedStyle(node).color),
       await issued.locator(".history-item-status .history-status--delivered").evaluate((node) => getComputedStyle(node).color));
     assert.equal(await card("PENDING").getAttribute("data-fulfillment"), "mixed");
     assert.equal(await card("PENDING").locator("tbody tr").count(), 3);
     assert.equal(await card("SHIPPED").getAttribute("data-fulfillment"), "in_transit");
-    for (const [status, expected] of [["delivered", 3], ["cancelled", 2], ["today", 2], ["active", 2]]) {
+    for (const [status, expected] of [["delivered", 4], ["cancelled", 2], ["today", 2], ["active", 2]]) {
       await page.locator(`#history-status-${status}`).click();
       assert.equal(await page.locator(".history-card").count(), expected);
     }

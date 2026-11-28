@@ -62,5 +62,7 @@ export interface OrderHistory {
 }
 
 export type SupplierOrderHistoryQuery =
-  | { supplier: "armtek" | "autopiter"; from: string; to: string }
-  | { supplier: "forum-auto" | "rossko" };
+  | { supplier: "armtek"; from: string; to: string }
+  | { supplier: "autopiter"; from: string; to: string }
+  | { supplier: "forum-auto" }
+  | { supplier: "rossko"; period?: { from: string; to: string } };

@@ -198,7 +198,7 @@ export class RealOrderApplicationService implements RealOrderGateway {
       }
       const credentials = this.sessions.getRosskoApiCredentials();
       if (!credentials) throw new SupplierAuthError("Rossko API credentials are missing");
-      return await listRosskoOrderHistory(credentials, bounded.signal);
+      return await listRosskoOrderHistory(credentials, bounded.signal, query.period);
     } catch (error) {
       if (bounded.signal.aborted) throw bounded.signal.reason;
       throw error;

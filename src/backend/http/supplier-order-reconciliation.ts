@@ -5,7 +5,7 @@ import { NomenclatureError } from "../nomenclature/contract.ts";
 import type { NomenclatureService } from "../nomenclature/nomenclature-service.ts";
 import type { OrderHistorySupplier } from "../purchasing/order-cancellation-contract.ts";
 import type { OrderFulfillment, OrderHistory, OrderHistoryItem } from "../purchasing/order-history-contract.ts";
-import { compareReconciliation, parseReconciliation, reconciliationBodyLimit } from "../purchasing/supplier-order-reconciliation.ts";
+import { compareReconciliation, parseReconciliation, reconciliationArticleKey, reconciliationBodyLimit } from "../purchasing/supplier-order-reconciliation.ts";
 import type { SupplierCounterparties } from "../purchasing/supplier-counterparties.ts";
 import type { AggregatorApplication } from "./create-server.ts";
 import { readJsonBody, RequestBodyError } from "./request-body.ts";
@@ -15,16 +15,27 @@ export const supplierOrderReconciliationPath = "/api/integration/1c/nomenclature
 const supplierNames: Record<OrderHistorySupplier, string> = {
   "part-kom": "PartKOM", armtek: "Armtek", "forum-auto": "Forum Auto", rossko: "Rossko", autopiter: "Автопитер",
 };
+const historySuppliers = Object.keys(supplierNames) as OrderHistorySupplier[];
 const finishedStatuses = new Set<OrderFulfillment>(["delivered", "cancelled", "partially_cancelled", "returned"]);
 
 interface ReconciliationScope {
   name: string;
   local: Parameters<typeof compareReconciliation>[0];
+  localArticles: Set<string>;
   remote: OrderHistoryItem[];
   suppliers: OrderHistorySupplier[];
   warnings: string[];
-  mapped: boolean;
   sourcesRead: number;
+}
+
+function mappedHistorySources(app: AggregatorApplication, counterparties: SupplierCounterparties, connectedOnly: boolean) {
+  const mappings = new Map(counterparties.list().map((mapping) => [mapping.supplier, mapping]));
+  const connected = new Set(connectedOnly ? app.listSupplierSessions().filter(({ authorized }) => authorized).map(({ supplier }) => supplier) : []);
+  return historySuppliers.flatMap((supplier) => {
+    const mapping = mappings.get(supplier);
+    const hasHistory = supplier === "part-kom" ? app.partKomOrderHistory : app.supplierOrderHistory;
+    return mapping && (!connectedOnly || connected.has(supplier) && hasHistory) ? [{ ...mapping, supplier }] : [];
+  });
 }
 
 function collectHistory(scope: ReconciliationScope, supplier: OrderHistorySupplier, history: OrderHistory,
@@ -40,13 +51,15 @@ function collectHistory(scope: ReconciliationScope, supplier: OrderHistorySuppli
   let incomplete = history.limited;
   let skippedRepeated = false;
   for (const order of history.orders) {
-    if (activeOnly && !order.itemsLimited && !order.items.some((item) => !finishedStatuses.has(item.fulfillment))) continue;
     const day = order.date?.slice(0, 10);
     if (!day) { missingDate = true; continue; }
     if (day < from || day > to) continue;
     incomplete ||= order.itemsLimited === true;
     if (repeated.has(order.number)) { skippedRepeated = true; continue; }
-    for (const item of order.items) scope.remote.push(item);
+    for (const item of order.items) {
+      if (!activeOnly || !finishedStatuses.has(item.fulfillment)
+        || scope.localArticles.has(reconciliationArticleKey(item.article))) scope.remote.push(item);
+    }
   }
   if (incomplete) scope.warnings.push(`${name} · история достигла предела выдачи.`);
   if (skippedRepeated) scope.warnings.push(`${name} · заказы с повторяющимися номерами пропущены.`);
@@ -65,38 +78,42 @@ export async function serveSupplierOrderReconciliation(request: IncomingMessage,
   try {
     const token = /^Bearer ([A-Za-z0-9_-]{32,256})$/.exec(request.headers.authorization ?? "")?.[1];
     nomenclature.authenticate(token);
-    if (request.method !== "POST") throw new NomenclatureError(405, "method", "Метод не поддерживается.");
     if (url.search) throw new NomenclatureError(400, "query", "Неизвестные параметры запроса.");
+    if (request.method === "GET") {
+      const ids = new Set(mappedHistorySources(app, counterparties, true).map(({ id }) => id));
+      serveJson(response, 200, { counterpartyIds: [...ids] });
+      return;
+    }
+    if (request.method !== "POST") throw new NomenclatureError(405, "method", "Метод не поддерживается.");
     if (request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
       throw new NomenclatureError(415, "content_type", "Требуется Content-Type: application/json.");
     }
     const input = parseReconciliation(await readJsonBody(request, reconciliationBodyLimit));
-    const mappings = new Map(counterparties.list().map((mapping) => [mapping.supplier, mapping]));
-    const connected = new Set(input.all ? app.listSupplierSessions().filter(({ authorized }) => authorized).map(({ supplier }) => supplier) : []);
-    const scopes = new Map<string | null, ReconciliationScope>();
-    for (const { id, name, items } of input.counterparties) {
-      scopes.set(id, { name, local: items, remote: [], suppliers: [], warnings: [], mapped: false, sourcesRead: 0 });
-    }
-    const suppliers: OrderHistorySupplier[] = [];
+    const requestedIds = input.all && input.scopeIds ? new Set(input.scopeIds) : null;
+    const mappings = mappedHistorySources(app, counterparties, input.all)
+      .filter(({ id }) => input.all ? !requestedIds || requestedIds.has(id) : id === input.counterpartyId);
+    const local = new Map(input.counterparties.map((entry) => [entry.id, entry]));
+    const scopes = new Map<string, ReconciliationScope>();
     const reads: { supplier: OrderHistorySupplier; scope: ReconciliationScope }[] = [];
-    for (const supplier of Object.keys(supplierNames) as OrderHistorySupplier[]) {
-      const mapping = mappings.get(supplier);
-      const online = !input.all || connected.has(supplier);
-      if (input.all ? !online && (!mapping || !scopes.has(mapping.id)) : mapping?.id !== input.counterpartyId) continue;
-      const key = mapping?.id ?? `supplier:${supplier}`;
-      let scope = scopes.get(key);
+    for (const { supplier, id, name } of mappings) {
+      let scope = scopes.get(id);
       if (!scope) {
-        scope = { name: mapping?.name ?? supplierNames[supplier], local: [], remote: [], suppliers: [], warnings: [], mapped: false, sourcesRead: 0 };
-        scopes.set(key, scope);
+        const entry = local.get(id);
+        const items = entry?.items ?? [];
+        const localArticles = new Set<string>();
+        if (input.all) {
+          for (const item of items) {
+            const article = item.quantity > 0 && reconciliationArticleKey(item.article);
+            if (article) localArticles.add(article);
+          }
+        }
+        scope = { name: entry?.name || name, local: items, localArticles, remote: [], suppliers: [], warnings: [], sourcesRead: 0 };
+        scopes.set(id, scope);
       }
-      suppliers.push(supplier);
       scope.suppliers.push(supplier);
-      scope.mapped = Boolean(mapping);
-      if (!mapping) scope.warnings.push(`${supplierNames[supplier]} · сопоставьте поставщика с контрагентом 1С.`);
-      if (online) reads.push({ supplier, scope });
-      else scope.warnings.push(`${supplierNames[supplier]} · поставщик не подключён.`);
+      reads.push({ supplier, scope });
     }
-    if (!input.all && !suppliers.length) {
+    if (!input.all && !reads.length) {
       throw new NomenclatureError(422, "supplier_mapping_missing", "Для этого контрагента настройте соответствие с поставщиком в агрегаторе.");
     }
     const bounded = createBoundedAbortSignal(controller.signal, 35_000, "Supplier order reconciliation timed out");
@@ -106,7 +123,8 @@ export async function serveSupplierOrderReconciliation(request: IncomingMessage,
       histories = await Promise.allSettled(reads.map(async ({ supplier }) => {
         const history = supplier === "part-kom" ? await app.partKomOrderHistory?.(false, bounded.signal)
           : await app.supplierOrderHistory?.(supplier === "armtek" || supplier === "autopiter"
-            ? { supplier, from: input.from, to: input.to } : { supplier }, bounded.signal);
+            ? { supplier, from: input.from, to: input.to }
+            : supplier === "rossko" ? { supplier, period: { from: input.from, to: input.to } } : { supplier }, bounded.signal);
         bounded.signal.throwIfAborted();
         if (!history) throw new NomenclatureError(503, "history_unavailable", "История заказов недоступна.");
         return history;
@@ -133,28 +151,22 @@ export async function serveSupplierOrderReconciliation(request: IncomingMessage,
       scope.sourcesRead++;
       collectHistory(scope, supplier, history.value, input.from, input.to, input.all);
     }
-    if (input.all && !reads.length) warnings.push("Нет подключённых поставщиков с доступной историей заказов.");
-    for (const id of connected) {
-      if (!Object.hasOwn(supplierNames, id)) warnings.push(`${id} · история заказов для сверки недоступна.`);
-    }
     const rows = [];
     for (const scope of scopes.values()) {
       const names = scope.suppliers.map((supplier) => supplierNames[supplier]).join(", ");
       const label = names && scope.name && scope.name !== names ? `${scope.name} · ${names}` : scope.name || names;
-      if (!scope.suppliers.length) scope.warnings.push(`${label} · для контрагента 1С нет связи с историей поставщика.`);
       warnings.push(...scope.warnings);
       if (!input.all && !scope.sourcesRead) continue;
-      const compare = compareReconciliation(scope.local, scope.remote, scope.mapped && scope.warnings.length === 0, {
+      const compare = compareReconciliation(scope.local, scope.remote, scope.warnings.length === 0, {
         incompleteReason: scope.warnings[0],
       });
       for (const row of compare) {
-        rows.push(!scope.mapped ? { ...row, supplier: label, status: "unverified", reason: scope.warnings[0] }
-          : { ...row, supplier: label });
+        rows.push({ ...row, supplier: label });
       }
     }
     response.setHeader("Server-Timing", `supplier-order-reconciliation;dur=${(performance.now() - started).toFixed(1)}`);
     serveJson(response, 200, { ...(input.all ? { scope: "all-active" } : {}),
-      sources: suppliers.map((supplier) => supplierNames[supplier]), sourcesRead, warnings, rows });
+      sources: reads.map(({ supplier }) => supplierNames[supplier]), sourcesRead, warnings, rows });
   } catch (error) {
     if (response.destroyed) return;
     if (error instanceof NomenclatureError || error instanceof RequestBodyError) {

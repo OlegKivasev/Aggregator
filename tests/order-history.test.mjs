@@ -163,7 +163,8 @@ test("Armtek report v2 uses actual issued quantities before stale partial or clo
     assert.equal(result.quantity, 1);
   }
   assert.equal(item({ STATUS: "позиция поставлена" }).fulfillment, "delivered");
-  assert.equal(item({ Issued: "0", KWMENG_R: "2", STATUS: "позиция полностью поставлена" }).fulfillment, "in_transit");
+  assert.equal(item({ Issued: "0", KWMENG_R: "2", STATUS: "Позиция полностью поставлена." }).fulfillment, "delivered");
+  assert.equal(item({ Issued: "0", KWMENG_R: "2", STATUS: "позиция поставлена" }).fulfillment, "in_transit");
   assert.equal(item({ Issued: "0", KWMENG_R: "2", STATUS: "", ORDER_STATUS: "Закрыт" }).fulfillment, "in_transit");
   assert.equal(item({ Issued: "1", STATUS: "позиция полностью поставлена" }).fulfillment, "partial");
   for (const Issued of [true, -1, 3, Infinity, "1 шт."]) {
@@ -287,6 +288,24 @@ test("Rossko history retains delivery, address, payment and totals used by the c
   assert.deepEqual(order.receipt, { orderTotal: 201, deliveryType: "Курьерская доставка",
     deliveryAddress: "Тестовый адрес", paymentType: "Банковский платёж" });
   assert.equal(order.items[0].receipt.total, 201);
+});
+
+test("Rossko reconciliation queries the requested period once and retains all positions within the supplier response", async (t) => {
+  const part = rosskoRow.match(/<part>[\s\S]*<\/part>/)[0];
+  const xml = rosskoXml(rosskoRow.replace(part, Array.from({ length: 501 }, (_, index) => part.replace("A1", `A${index}`)).join("")));
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    calls.push({ url, body: options.body });
+    return new Response(xml, { headers: { "Content-Type": "text/xml" } });
+  });
+  const history = await listRosskoOrderHistory({ key1: "fixture", key2: "fixture" }, new AbortController().signal,
+    { from: "2026-10-15", to: "2026-10-16" });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].body, /<ros:start_date>2026-10-15<\/ros:start_date><ros:end_date>2026-10-16<\/ros:end_date>/);
+  assert.equal(history.limited, false);
+  assert.equal(history.orders[0].items.length, 501);
+  assert.equal(parseRosskoOrderHistory(xml).orders[0].items.length, 500);
+  assert.equal(parseRosskoOrderHistory(xml).limited, true);
 });
 
 test("Rossko terminal status 2 matches the portal's handed-to-customer state for every order position", () => {

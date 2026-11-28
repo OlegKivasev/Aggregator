@@ -156,6 +156,7 @@ function renderOrder(order, limited, supplierName, supplier, copyControls) {
   const tbody = element("tbody");
   for (const item of rows) {
     const row = element("tr");
+    row.dataset.fulfillment = item.fulfillment;
     const part = element("td", "history-item-part");
     part.append(element("strong", "", [item.brand, item.article || "Артикул не указан"].filter(Boolean).join(" ")));
     if (item.title) part.append(element("span", "", item.title));

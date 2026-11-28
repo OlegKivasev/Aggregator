@@ -352,7 +352,7 @@ export function parseRosskoOrdersDetails(xml: string, result: OrderGroupResult, 
   }
 }
 
-export function parseRosskoOrderHistory(xml: string): OrderHistory {
+export function parseRosskoOrderHistory(xml: string, fullPeriod = false): OrderHistory {
   const root = findDescendant(parseRosskoXml(xml), "OrdersResult");
   if (!root) throw new SupplierIntegrationError("Rossko order history is missing");
   const list = child(root, "OrdersList");
@@ -383,15 +383,19 @@ export function parseRosskoOrderHistory(xml: string): OrderHistory {
         warehouse: historyText(elementText(row, "stock_address"), 200) };
     }) };
   });
-  return finishOrderHistory(orders, rows.length >= 500);
+  const limited = rows.length >= 500;
+  return fullPeriod ? { orders, limited } : finishOrderHistory(orders, limited);
 }
 
-export async function listRosskoOrderHistory(credentials: RosskoApiCredentials, signal: AbortSignal): Promise<OrderHistory> {
+export async function listRosskoOrderHistory(credentials: RosskoApiCredentials, signal: AbortSignal,
+  period?: { from: string; to: string }): Promise<OrderHistory> {
   const envelope = `<?xml version="1.0" encoding="UTF-8"?>`
     + `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ros="${rosskoApiOrigin}/">`
     + `<soapenv:Body><ros:GetOrders><ros:KEY1>${escapeXml(credentials.key1)}</ros:KEY1><ros:KEY2>${escapeXml(credentials.key2)}</ros:KEY2>`
-    + `<ros:limit>500</ros:limit></ros:GetOrders></soapenv:Body></soapenv:Envelope>`;
-  return parseRosskoOrderHistory(await callRosskoApi("GetOrders", {}, signal, envelope));
+    + `<ros:limit>500</ros:limit>`
+    + (period ? `<ros:start_date>${escapeXml(period.from)}</ros:start_date><ros:end_date>${escapeXml(period.to)}</ros:end_date>` : "")
+    + `</ros:GetOrders></soapenv:Body></soapenv:Envelope>`;
+  return parseRosskoOrderHistory(await callRosskoApi("GetOrders", {}, signal, envelope), Boolean(period));
 }
 
 export async function placeRosskoOrder(lines: PurchaseLine[], credentials: RosskoApiCredentials, details: CheckoutDetails,
