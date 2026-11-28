@@ -145,7 +145,6 @@ export async function serveSupplierOrderReconciliation(request: IncomingMessage,
       warnings.push(...scope.warnings);
       if (!input.all && !scope.sourcesRead) continue;
       const compare = compareReconciliation(scope.local, scope.remote, scope.mapped && scope.warnings.length === 0, {
-        matchPartKomArticle: scope.suppliers.length === 1 && scope.suppliers[0] === "part-kom",
         incompleteReason: scope.warnings[0],
       });
       for (const row of compare) {

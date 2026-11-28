@@ -108,9 +108,14 @@ test("a single POST compares positions from the 1C period with supplier orders b
     assert.deepEqual(calls.slice(2), [{ supplier: "part-kom", archive: false }, { supplier: "armtek", from: day, to: day },
       { supplier: "forum-auto" }, { supplier: "rossko" }]);
     const byArticle = new Map(all.rows.map((row) => [row.article, row]));
-    assert.equal(all.rows.length, 6);
-    assert.equal(byArticle.get(partKomArticle).status, "shortage");
-    assert.match(byArticle.get(partKomArticle).supplier, /Armtek/);
+    assert.equal(all.rows.length, 7);
+    const [partKomBrandQuestion, armtekShortage] = all.rows.filter((row) => row.article === partKomArticle);
+    assert.match(partKomBrandQuestion.supplier, /PartKOM/);
+    assert.deepEqual([partKomBrandQuestion.status, partKomBrandQuestion.brand, partKomBrandQuestion.onec, partKomBrandQuestion.confirmed],
+      ["unverified", "LADA / Тольятти", 4, 4]);
+    assert.match(partKomBrandQuestion.reason, /Разные бренды.*1С.*LADA.*у поставщика.*Тольятти/);
+    assert.equal(armtekShortage.status, "shortage");
+    assert.match(armtekShortage.supplier, /Armtek/);
     assert.equal(byArticle.get("MISSING-IN-1C").status, "extra");
     assert.match(byArticle.get("MISSING-IN-1C").supplier, /Rossko/);
     assert.match(byArticle.get("PK-UNCERTAIN").reason, /PartKOM.*предела/);
@@ -128,17 +133,22 @@ test("a single POST compares positions from the 1C period with supplier orders b
   }
 });
 
-test("PartKOM matches a unique exact article under different brand names and preserves real ambiguity", () => {
+test("different brands for the same exact article stay unverified even when quantities agree", () => {
   const article = "482034581R";
   const local = [localItem(article, 4)];
   const remote = [supplierItem(article, 4, { brand: "Тольятти" })];
-  const options = { matchPartKomArticle: true };
-  assert.deepEqual(compareReconciliation(local, remote, false, options), []);
-  assert.equal(compareReconciliation(local, [{ ...remote[0], quantity: 5 }], true, options)[0].status, "extra");
-  assert.equal(compareReconciliation([...local, localItem(article, 1, { brand: "OTHER" })], remote, true, options).length, 3);
+  const [question] = compareReconciliation(local, remote, false);
+  assert.deepEqual([question.status, question.brand, question.onec, question.confirmed], ["unverified", "LADA / Тольятти", 4, 4]);
+  const [differentQuantity] = compareReconciliation(local, [{ ...remote[0], quantity: 5 }], true);
+  assert.deepEqual([differentQuantity.status, differentQuantity.onec, differentQuantity.confirmed], ["unverified", 4, 5]);
+  const ambiguous = compareReconciliation([...local, localItem(article, 1, { brand: "OTHER" })], remote, true);
+  assert.deepEqual(ambiguous.map(({ brand, status }) => [brand, status]),
+    [["LADA", "unverified"], ["OTHER", "unverified"], ["Тольятти", "unverified"]]);
+  const [extraBrand] = compareReconciliation(local, [...remote, supplierItem(article, 4)], true);
+  assert.deepEqual([extraBrand.brand, extraBrand.status], ["Тольятти", "unverified"]);
   assert.equal(compareReconciliation([localItem("1119-2902712", 4)],
-    [supplierItem("11190-2902712", 4, { brand: "Тольятти" })], true, options).length, 2);
-  assert.equal(compareReconciliation(local, remote, true).length, 2);
+    [supplierItem("11190-2902712", 4, { brand: "Тольятти" })], true).length, 2);
+  assert.deepEqual(compareReconciliation([localItem(article, 4, { brandAliases: "Тольятти" })], remote, true), []);
 });
 
 test("conflicting brands and unconfirmed supplier quantities do not appear as certain discrepancies", () => {

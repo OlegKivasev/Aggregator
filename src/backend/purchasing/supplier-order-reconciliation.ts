@@ -63,8 +63,8 @@ export function parseReconciliation(value: unknown): ReconciliationInput {
 
 const compact = (value: string) => value.toUpperCase().replace(/[^\p{L}\p{N}]/gu, "");
 
-function articleKey(article: string): string {
-  let key = compact(article);
+function articleKey(article: string, exactArticle: string): string {
+  let key = exactArticle;
   for (const variant of additionalArticleVariants(article)) {
     const alternative = compact(variant.article);
     if (alternative < key) key = alternative;
@@ -106,7 +106,7 @@ function supplierQuantity(item: OrderHistoryItem) {
 }
 
 export function compareReconciliation(onecItems: LocalReconciliationItem[], supplierItems: OrderHistoryItem[],
-  complete: boolean, { matchPartKomArticle = false, incompleteReason = "Недостаточно данных поставщика." } = {}): ReconciliationRow[] {
+  complete: boolean, { incompleteReason = "Недостаточно данных поставщика." } = {}): ReconciliationRow[] {
   const aliases = new Map<string, string | null>();
   for (const item of onecItems) {
     const key = compact(item.brand);
@@ -122,42 +122,44 @@ export function compareReconciliation(onecItems: LocalReconciliationItem[], supp
   const rows: ReconciliationRow[] = [];
   let onecWithoutArticle = false;
   let supplierWithoutArticle = false;
-  function groupFor(article: string, brand: string, label: ReconciliationItem) {
+  function groupFor(article: string, exactArticle: string, brand: string, label: ReconciliationItem) {
     let groups = articles.get(article);
     if (!groups) articles.set(article, groups = new Map());
     let group = groups.get(brand);
-    if (!group) groups.set(brand, group = { label, exactArticle: matchPartKomArticle ? compact(label.article) : null,
+    if (!group) groups.set(brand, group = { label, exactArticle,
       onec: 0, confirmed: 0, possible: 0, cancelled: 0, hasOnecItem: false, hasSupplierItem: false, ambiguous: false });
-    else if (group.exactArticle && group.exactArticle !== compact(label.article)) group.exactArticle = null;
+    else if (group.exactArticle !== exactArticle) group.exactArticle = null;
     return group;
   }
 
   for (const item of onecItems) {
-    const article = articleKey(item.article);
-    if (!article) {
+    const exactArticle = compact(item.article);
+    if (!exactArticle) {
       onecWithoutArticle ||= item.quantity > 0;
       rows.push({ status: "unverified", article: item.article, brand: item.brand, title: item.title,
         onec: item.quantity, confirmed: 0, possible: 0, cancelled: 0, reason: "В строке 1С нет артикула." });
       continue;
     }
-    const group = groupFor(article, compact(item.brand), item);
+    const group = groupFor(articleKey(item.article, exactArticle), exactArticle, compact(item.brand), item);
     group.hasOnecItem = true;
     group.onec += item.quantity;
   }
 
   for (const item of supplierItems) {
-    const article = articleKey(item.article);
+    const exactArticle = compact(item.article);
     const brand = compact(item.brand ?? "");
     const quantity = supplierQuantity(item);
-    if (!article) {
+    if (!exactArticle) {
       supplierWithoutArticle ||= quantity.possible > 0;
       rows.push({ status: "unverified", article: item.article, brand: item.brand ?? "", title: item.title ?? "",
         onec: 0, ...quantity, reason: "Поставщик не указал артикул." });
       continue;
     }
+    const article = articleKey(item.article, exactArticle);
     const alias = aliases.get(brand);
     if (alias === null) ambiguousArticles.add(article);
-    const group = groupFor(article, alias ?? brand, { article: item.article, brand: item.brand ?? "", title: item.title ?? "", quantity: 0 });
+    const group = groupFor(article, exactArticle, alias ?? brand,
+      { article: item.article, brand: item.brand ?? "", title: item.title ?? "", quantity: 0 });
     group.hasSupplierItem = true;
     group.ambiguous ||= item[ambiguousOrderPosition] === true;
     group.confirmed += quantity.confirmed;
@@ -167,17 +169,6 @@ export function compareReconciliation(onecItems: LocalReconciliationItem[], supp
 
   const epsilon = 1e-8;
   for (const [article, groups] of articles) {
-    // PartKOM can label a locally recorded article with a different brand. Only match a single candidate on each side.
-    if (matchPartKomArticle && groups.size === 2 && !groups.has("") && !ambiguousArticles.has(article)) {
-      const onec = [...groups.values()].find((group) => group.hasOnecItem && !group.hasSupplierItem);
-      const remote = [...groups].find(([, group]) => group.hasSupplierItem && !group.hasOnecItem);
-      if (onec?.exactArticle && remote && !remote[1].ambiguous && onec.exactArticle === remote[1].exactArticle) {
-        onec.confirmed = remote[1].confirmed;
-        onec.possible = remote[1].possible;
-        onec.cancelled = remote[1].cancelled;
-        groups.delete(remote[0]);
-      }
-    }
     const withoutBrand = groups.get("");
     let missingBrand = false;
     if (withoutBrand) {
@@ -185,12 +176,48 @@ export function compareReconciliation(onecItems: LocalReconciliationItem[], supp
         missingBrand ||= withoutBrand.hasOnecItem && group.hasSupplierItem || withoutBrand.hasSupplierItem && group.hasOnecItem;
       }
     }
-    for (const { label, onec, confirmed, possible, cancelled, ambiguous } of groups.values()) {
+    let brandConflicts: Set<string> | undefined;
+    if (groups.size > 1 && !missingBrand && !ambiguousArticles.has(article)) {
+      const brandGroupsByArticle = new Map<string, { local: string[]; remote: string[]; hasLocal: boolean; hasRemote: boolean }>();
+      for (const [brand, group] of groups) {
+        if (!brand || !group.exactArticle) continue;
+        const hasLocal = group.onec > epsilon;
+        const hasRemote = group.possible + group.cancelled > epsilon;
+        if (!hasLocal && !hasRemote) continue;
+        let candidates = brandGroupsByArticle.get(group.exactArticle);
+        if (!candidates) brandGroupsByArticle.set(group.exactArticle, candidates = { local: [], remote: [], hasLocal: false, hasRemote: false });
+        candidates.hasLocal ||= hasLocal;
+        candidates.hasRemote ||= hasRemote;
+        if (hasLocal && !group.hasSupplierItem) candidates.local.push(brand);
+        if (hasRemote && !group.hasOnecItem) candidates.remote.push(brand);
+      }
+      for (const { local, remote, hasLocal, hasRemote } of brandGroupsByArticle.values()) {
+        if (!hasLocal || !hasRemote || (!local.length && !remote.length)) continue;
+        const supplier = groups.get(remote[0]);
+        if (local.length === 1 && remote.length === 1 && supplier && !supplier.ambiguous) {
+          const onec = groups.get(local[0])!;
+          rows.push({ status: "unverified", article: onec.label.article, brand: `${onec.label.brand} / ${supplier.label.brand}`,
+            title: onec.label.title || supplier.label.title, onec: onec.onec, confirmed: supplier.confirmed,
+            possible: supplier.possible, cancelled: supplier.cancelled,
+            reason: `Разные бренды. В 1С указан «${onec.label.brand}», у поставщика «${supplier.label.brand}».` });
+          groups.delete(local[0]);
+          groups.delete(remote[0]);
+        } else {
+          brandConflicts ??= new Set();
+          for (const brand of local) brandConflicts.add(brand);
+          for (const brand of remote) brandConflicts.add(brand);
+        }
+      }
+    }
+    for (const [brand, { label, onec, confirmed, possible, cancelled, ambiguous }] of groups) {
       let status: ReconciliationRow["status"];
       let reason: string;
       if (missingBrand || ambiguous || ambiguousArticles.has(article)) {
         status = "unverified";
         reason = missingBrand ? "Нужно уточнить бренд у одного из товаров с этим артикулом." : "Неоднозначные данные о позиции.";
+      } else if (brandConflicts?.has(brand)) {
+        status = "unverified";
+        reason = "Разные бренды. Сверьте бренд в 1С и в истории поставщика.";
       } else if (onec - possible > epsilon) {
         status = complete && !supplierWithoutArticle ? "shortage" : "unverified";
         reason = status === "unverified" ? supplierWithoutArticle ? "В истории есть позиции без артикула." : incompleteReason
