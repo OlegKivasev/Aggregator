@@ -4020,6 +4020,11 @@ test("Autopiter history uses shared filters, cancellation notices, all suppliers
   const withoutArticle = { ...history.orders[1], number: "10004", items: [{ ...history.orders[1].items[0], article: "", title: "Позиция без номера детали" }] };
   const position = history.orders[1].items[0];
   const repeatedId = { ...history.orders[1], number: "10005", items: [position, { ...position, article: "B2", title: "Другая позиция счёта" }] };
+  const repeatedDisk = `<OrderInformationItemModel><Id>20</Id><Number>GD0366</Number><CatalogName>Ctr</CatalogName>
+    <Name>Диск тормозной</Name><OrderCount>2</OrderCount><GetCount>0</GetCount><Price>1842</Price>
+    <Status><Id>677</Id><Name>Транзит г. Москва</Name></Status></OrderInformationItemModel>`;
+  const diskOrder = parseAutopiterInvoiceItems({ number: "10006", date: "2026-11-12 08:11:00", quantity: 2 },
+    parseSupplierXml(`<rows>${repeatedDisk}${repeatedDisk}</rows>`).children);
   await withCartPage(async (page) => {
     await page.locator("#history-toggle").click();
     await page.locator("#history-tab-autopiter").click();
@@ -4076,6 +4081,10 @@ test("Autopiter history uses shared filters, cancellation notices, all suppliers
     const copyRepeated = repeated.getByRole("button", { name: /Скопировать заказ.*в 1С/ });
     assert.equal(await copyRepeated.getAttribute("aria-disabled"), "true");
     assert.match(await copyRepeated.getAttribute("title"), /одинаковый идентификатор/);
+    const disk = page.locator(".history-card").filter({ has: page.getByRole("heading", { name: /10006/ }) });
+    assert.equal(await disk.locator("tbody tr").count(), 1);
+    assert.equal(await disk.locator(".history-card__quantity strong").textContent(), "1 / 2");
+    assert.match(await disk.locator(".history-card__total").textContent(), /3\s684,00/);
     const beforeSearch = calls.length;
     await page.locator("#history-search").fill("Позиция без номера детали");
     assert.equal(await page.locator(".history-card").count(), 1);
@@ -4085,7 +4094,7 @@ test("Autopiter history uses shared filters, cancellation notices, all suppliers
     if (query.supplier !== "autopiter") return { orders: [], limited: false };
     calls.push(query);
     if (query.from === "2026-11-02") throw new SupplierIntegrationError("fixture", { publicMessage: detailError });
-    if (query.from === "2026-11-03") return { ...history, orders: [...history.orders, withoutArticle, repeatedId] };
+    if (query.from === "2026-11-03") return { ...history, orders: [...history.orders, withoutArticle, repeatedId, diskOrder] };
     return history;
   } });
 });

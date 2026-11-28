@@ -17,6 +17,7 @@ import { EncryptedVkSettings } from "../src/backend/notifications/encrypted-vk-s
 import { SqliteNotificationRepository } from "../src/backend/notifications/sqlite-notification-repository.ts";
 import { OrderCancellationService } from "../src/backend/purchasing/order-cancellation-service.ts";
 import { SqliteOrderCancellationRepository } from "../src/backend/purchasing/sqlite-order-cancellation-repository.ts";
+import { ambiguousOrderPosition } from "../src/backend/purchasing/order-history-contract.ts";
 
 // All SOAP and VK responses are fictional. No production account is contacted.
 const signal = () => new AbortController().signal;
@@ -82,8 +83,26 @@ test("Autopiter rejects malformed historical quantities and positions without tu
     assert.throws(() => parsed(fields), SupplierIntegrationError);
   }
   assert.throws(() => parseAutopiterInvoiceItems(invoice, []), SupplierIntegrationError);
-  const repeated = parseAutopiterInvoiceItems(invoice, xmlRows(itemXml() + itemXml()));
-  assert.deepEqual(repeated.items.map((item) => [item.positionId, item.article, item.quantity]), [["10", "A1", 5], ["10", "A1", 5]]);
+});
+
+test("Autopiter counts identical rows with a position ID once and preserves separate or conflicting positions", () => {
+  const first = { Number: "GD0366", CatalogName: "Ctr", OrderCount: "2", Price: "1842" };
+  const row = itemXml(first);
+  const clone = row.replaceAll("><", ">\n<");
+  const duplicated = parseAutopiterInvoiceItems(invoice, xmlRows(row + clone));
+  assert.deepEqual(duplicated.items.map(({ positionId, quantity, price }) => [positionId, quantity, price]), [["10", 2, 1842]]);
+  assert.equal(duplicated.items[0][ambiguousOrderPosition], undefined);
+
+  const changedOffer = itemXml({ ...first, DetailUid: "distinct-offer" });
+  const changedStatus = itemXml({ ...first, status: "9" });
+  const otherPosition = itemXml({ ...first, Id: "11" });
+  const unidentified = itemXml({ ...first, Id: "0" });
+  const mixed = parseAutopiterInvoiceItems(invoice,
+    xmlRows(row + changedOffer + clone + changedStatus + changedOffer + otherPosition + unidentified + unidentified));
+  assert.deepEqual(mixed.items.map(({ positionId, fulfillment, [ambiguousOrderPosition]: ambiguous }) => [positionId, fulfillment, ambiguous]), [
+    ["10", "in_transit", true], ["10", "in_transit", true], ["10", "cancelled", true],
+    ["11", "in_transit", undefined], [undefined, "in_transit", undefined], [undefined, "in_transit", undefined],
+  ]);
 });
 
 test("Autopiter loads each distinct invoice once, bounds concurrent requests and uses only read methods", async (t) => {
@@ -108,7 +127,8 @@ test("Autopiter bounds the returned history and does not fetch remaining invoice
   const adapter = new AutopiterApiAdapter(async (method) => {
     if (method === "GetInvoiceOrderByDateTime") return response(method, Array.from({ length: 20 }, (_, i) => invoiceXml(String(i + 1))).join(""));
     details++;
-    return response(method, Array.from({ length: 150 }, (_, i) => itemXml({ Id: String(i === 149 ? 1 : i + 1) })).join(""));
+    return response(method, Array.from({ length: 150 }, (_, i) =>
+      itemXml(i === 149 ? { Id: "1", OrderCount: "3" } : { Id: String(i + 1) })).join(""));
   });
   const result = await adapter.orderHistory("2026-11-01", "2026-11-12", signal(), sessions());
   assert.equal(result.orders.flatMap((order) => order.items).length, 500); assert.equal(result.limited, true); assert.equal(details, 4);
@@ -226,7 +246,8 @@ test("Autopiter history HTTP loads numbered invoices with nullable entries, miss
     }
     assert.equal(method, "GetFullInvoiceOrder");
     if (detailsFailure) return detailsFailure;
-    return response(method, '<OrderInformationItemModel xmlns:n="http://www.w3.org/2001/XMLSchema-instance" n:nil="1"/>' + itemXml() + missingArticle + emptyArticle);
+    return response(method, '<OrderInformationItemModel xmlns:n="http://www.w3.org/2001/XMLSchema-instance" n:nil="1"/>'
+      + itemXml() + itemXml() + missingArticle + emptyArticle);
   });
   const orders = new RealOrderApplicationService(sessions(), async () => assert.fail("History must not search for parts"), null, adapter);
   const server = createAggregatorServer({ publicDir: resolve("src/frontend"), application: {

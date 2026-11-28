@@ -48,6 +48,11 @@ export function autopiterHistoryDate(value: string | null): string | null {
 
 export interface AutopiterInvoice { number: string; date: string; quantity: number }
 
+function positionFingerprint(row: XmlElement): string {
+  // Include supplier fields that history does not display, such as DetailUid and NumberChange.
+  return JSON.stringify(row, (key, value: unknown) => key === "text" && typeof value === "string" ? value.trim() : value);
+}
+
 export function parseAutopiterInvoices(rows: XmlElement[]): AutopiterInvoice[] {
   const invoices = new Map<string, AutopiterInvoice>();
   for (const row of rows) {
@@ -72,7 +77,7 @@ export function parseAutopiterInvoices(rows: XmlElement[]): AutopiterInvoice[] {
 }
 
 export function parseAutopiterInvoiceItems(invoice: AutopiterInvoice, rows: XmlElement[]): OrderHistoryOrder {
-  const positions = new Map<string, OrderHistoryItem>();
+  const positions = new Map<string, { row: XmlElement; item: OrderHistoryItem; fingerprints?: Set<string> }>();
   const items: OrderHistoryItem[] = [];
   for (const row of rows) {
     if (emptyNil(row, "OrderInformationItemModel")) continue;
@@ -109,9 +114,13 @@ export function parseAutopiterInvoiceItems(invoice: AutopiterInvoice, rows: XmlE
     if (positionId) {
       const first = positions.get(positionId);
       if (first) {
-        first[ambiguousOrderPosition] = true;
+        const fingerprints = first.fingerprints ??= new Set([positionFingerprint(first.row)]);
+        const fingerprint = positionFingerprint(row);
+        if (fingerprints.has(fingerprint)) continue;
+        fingerprints.add(fingerprint);
+        first.item[ambiguousOrderPosition] = true;
         item[ambiguousOrderPosition] = true;
-      } else positions.set(positionId, item);
+      } else positions.set(positionId, { row, item });
     }
     items.push(item);
   }
