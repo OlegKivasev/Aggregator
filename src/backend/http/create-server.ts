@@ -57,6 +57,7 @@ import { serveSupplierOrders } from "./supplier-orders.ts";
 import { serveSupplierCounterparties } from "./supplier-counterparties.ts";
 import { SupplierCounterparties } from "../purchasing/supplier-counterparties.ts";
 import { SupplierOrderNotes } from "../purchasing/supplier-order-notes.ts";
+import { serveSupplierOrderReconciliation, supplierOrderReconciliationPath } from "./supplier-order-reconciliation.ts";
 
 export interface AggregatorApplication extends RosskoOrderSettingsApplication {
   realCartOrder?: RealOrderGateway;
@@ -291,6 +292,13 @@ export function createAggregatorServer({
     const readCurrentUser = auth && authenticatedUser ? () => auth.currentUser(request) : undefined;
     if (await serveRepairs(request, response, url, repairs, nomenclature, repairIntegrationSecret,
       () => reportError({ operation: "repairs", category: "internal" }), authenticatedUser ?? undefined, readCurrentUser)) return;
+    if (url.pathname === supplierOrderReconciliationPath) {
+      await serveSupplierOrderReconciliation(request, response, url, application, nomenclature, supplierCounterparties,
+        () => notifications?.beginForegroundOperation(),
+        (error) => reportError({ operation: "supplier-order-reconciliation", category: classifyOperationalError(error),
+          ...(error instanceof SupplierIntegrationError && error.diagnosticCode ? { diagnosticCode: error.diagnosticCode } : {}) }));
+      return;
+    }
     if (await serveNomenclature(request, response, url, nomenclature, authenticatedUser,
       () => reportError({ operation: "nomenclature", category: "internal" }), readCurrentUser)) return;
     if (await serveSupplierCounterparties(request, response, url, supplierCounterparties, nomenclature,
