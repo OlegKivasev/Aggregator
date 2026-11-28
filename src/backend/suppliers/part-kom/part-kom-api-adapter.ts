@@ -102,13 +102,13 @@ function parseApiDate(value: unknown): string | null {
   return date.toISOString();
 }
 
-function dateFromDuration(hours: unknown, days: unknown): string | null {
+function dateFromDuration(hours: unknown, days: unknown, receivedAt: number): string | null {
   const parsedHours = typeof hours === "number" || typeof hours === "string" && hours.trim() ? Number(hours) : Number.NaN;
   const parsedDays = typeof days === "number" || typeof days === "string" && days.trim() ? Number(days) : Number.NaN;
   const durationHours = Number.isFinite(parsedHours) && parsedHours >= 0
     ? parsedHours
     : Number.isFinite(parsedDays) && parsedDays >= 0 ? parsedDays * 24 : null;
-  return durationHours === null ? null : new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
+  return durationHours === null ? null : new Date(receivedAt + durationHours * 60 * 60 * 1000).toISOString();
 }
 
 function apiItems(payload: unknown, responseName: string): unknown[] {
@@ -198,7 +198,7 @@ export function parsePartKomApiResponse(response: SiteHttpResponse): unknown {
   return payload;
 }
 
-function normalizePartKomOffer(offer: PartKomOffer, isAnalog: boolean): NormalizedSearchResult | null {
+function normalizePartKomOffer(offer: PartKomOffer, isAnalog: boolean, receivedAt: number): NormalizedSearchResult | null {
   const article = typeof offer.number === "string" ? offer.number.trim() : "";
   const brand = typeof offer.maker === "string" ? offer.maker.trim() : "";
   const title = typeof offer.description === "string" ? offer.description.trim() : "";
@@ -207,8 +207,9 @@ function normalizePartKomOffer(offer: PartKomOffer, isAnalog: boolean): Normaliz
   if (!article || !brand || !title || price === null || quantity === null) {
     return null;
   }
-  const expectedDate = parseApiDate(offer.expectedDate) ?? dateFromDuration(offer.expectedHours, offer.expectedDays);
-  const guaranteedDate = parseApiDate(offer.guaranteedDate) ?? dateFromDuration(offer.guaranteedHours, offer.guaranteedDays);
+  const reportedExpectedDate = parseApiDate(offer.expectedDate);
+  const expectedDate = reportedExpectedDate ?? dateFromDuration(offer.expectedHours, offer.expectedDays, receivedAt);
+  const guaranteedDate = parseApiDate(offer.guaranteedDate) ?? dateFromDuration(offer.guaranteedHours, offer.guaranteedDays, receivedAt);
   const deliveryDateTo = expectedDate && guaranteedDate && Date.parse(guaranteedDate) > Date.parse(expectedDate)
     ? guaranteedDate
     : null;
@@ -223,7 +224,7 @@ function normalizePartKomOffer(offer: PartKomOffer, isAnalog: boolean): Normaliz
     warehouse: typeof offer.placement === "string" && offer.placement.trim() ? offer.placement.trim() : null,
     deliveryDate: expectedDate,
     deliveryDateTo,
-    deliveryDateApproximate: !parseApiDate(offer.expectedDate),
+    deliveryDateApproximate: !reportedExpectedDate,
     ...(isPartKomReturnImpossible(offer.flagReturnImpossible) ? { isReturnable: false } : {}),
     link: new URL(`/new/#/search/0/0/0/${encodeURIComponent(article.replace(/\//g, ""))}/${encodeURIComponent(makerId)}`, partKomSiteBaseUrl).toString(),
     ...(isAnalog ? { isAnalog: true } : {}),
@@ -238,6 +239,7 @@ function normalizePartKomOffer(offer: PartKomOffer, isAnalog: boolean): Normaliz
 export function parsePartKomApiResults(payload: unknown, requestedArticle: string): NormalizedSearchResult[] {
   const target = normalizeArticle(requestedArticle);
   const results: NormalizedSearchResult[] = [];
+  const receivedAt = Date.now();
 
   for (const value of apiItems(payload, "offers")) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -248,7 +250,7 @@ export function parsePartKomApiResults(payload: unknown, requestedArticle: strin
     if (!article || normalizeArticle(article) !== target) {
       continue;
     }
-    const result = normalizePartKomOffer(offer, false);
+    const result = normalizePartKomOffer(offer, false, receivedAt);
     if (result) {
       results.push(result);
     }
@@ -258,6 +260,7 @@ export function parsePartKomApiResults(payload: unknown, requestedArticle: strin
 
 export function parsePartKomApiAnalogResults(payload: unknown): NormalizedSearchResult[] {
   const results: NormalizedSearchResult[] = [];
+  const receivedAt = Date.now();
   for (const value of apiItems(payload, "analog offers")) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       continue;
@@ -266,7 +269,7 @@ export function parsePartKomApiAnalogResults(payload: unknown): NormalizedSearch
     if (offer.detailGroup !== "ReplacementOriginal" && offer.detailGroup !== "ReplacementNonOriginal") {
       continue;
     }
-    const result = normalizePartKomOffer(offer, true);
+    const result = normalizePartKomOffer(offer, true, receivedAt);
     if (result) {
       results.push(result);
     }

@@ -387,9 +387,12 @@ test("garage refresh updates real delivery dates and clearly flags failed or exp
 test("garage opening and refresh keep the selected PartKOM provider among duplicate warehouses just like cart opening", async () => {
   let price = 100;
   let deliveryDate = "2028-03-10";
+  let equivalentPrice = null;
   const streamSearch = async (query, emit) => {
     emit({ type: "search_started", article: query.article, suppliers: ["armtek", "part-kom"] });
-    for (const [providerId, currentPrice] of [["202", price], ["303", 150]]) {
+    const offers = [["202", price], ["303", 150]];
+    if (equivalentPrice !== null) offers.push(["202", equivalentPrice]);
+    for (const [providerId, currentPrice] of offers) {
       const current = offer("part-kom", 3, { supplier: "part-kom", makerId: "101", providerId },
         { price: currentPrice, deliveryDate, deliveryDateApproximate: false }, "Цилиндр сцепления рабочий");
       emit({ type: "result", result: current });
@@ -398,7 +401,7 @@ test("garage opening and refresh keep the selected PartKOM provider among duplic
     emit({ type: "search_completed", article: query.article });
   };
   const cartRefresh = new RealOrderApplicationService(new SupplierSessionManager(), streamSearch);
-  await withCartPage(async (page, { origin, orderCalls }) => {
+  await withCartPage(async (page, { origin, orderCalls, refreshCalls }) => {
     const vehicleId = await openGarageWithFirstOffer(page, { quantity: 2, beforeOpen: () => { price = 180; } });
     const row = page.locator('#garage-items tr[data-garage-item-id]');
     assert.equal(await row.evaluate((node) => node.classList.contains("garage-item--unconfirmed")), false);
@@ -431,13 +434,19 @@ test("garage opening and refresh keep the selected PartKOM provider among duplic
     await row.locator(".garage-cart-button").click();
     await page.waitForFunction(() => document.querySelector("#garage-status").textContent.includes("Добавлено позиций"));
     price = 230;
+    equivalentPrice = 229.99;
+    const refreshCount = refreshCalls.length;
     await page.locator("#cart-toggle").click();
     await page.waitForFunction(() => document.querySelector("#cart-refresh-overlay").hidden);
     const cart = await (await page.request.get(`${origin}/api/cart`)).json();
     assert.equal(cart.items.length, 1);
     assert.equal(cart.items[0].unavailable, null);
-    assert.equal(cart.items[0].result.price, 230);
+    assert.equal(cart.items[0].result.price, 229.99);
+    assert.equal(await page.locator('#cart-items input[type="checkbox"]').isEnabled(), true);
+    assert.equal(refreshCalls.length, refreshCount + 1);
     await page.locator("#cart-close").click();
+    price = equivalentPrice;
+    equivalentPrice = null;
     await refreshGarage();
     assert.equal((await readItem()).purchasePrice, cart.items[0].result.price);
     assert.deepEqual(orderCalls, [], "refresh never submits a supplier order");

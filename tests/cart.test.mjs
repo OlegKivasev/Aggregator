@@ -679,6 +679,73 @@ test("supplier refresh matches a legacy Forum Auto row and rejects ambiguous or 
   assert.equal((await insufficient.refresh([oldLine], new AbortController().signal))[0].refreshIssue.reason, "insufficient_stock");
 });
 
+test("cart refresh uses the current PartKOM price for equivalent offers with sufficient stock and preserves the selected terms", async () => {
+  const offer = { number: "64193", maker: "Osram", makerId: 101, providerId: 202, description: "Лампа H4",
+    placement: "Н. Новгород", expectedDate: "2026-12-05", price: 136.39, quantity: 1000 };
+  const [saved] = parsePartKomApiResults([offer], offer.number);
+  const searches = [];
+  const submissions = [];
+  const service = new RealOrderApplicationService(new SupplierSessionManager(), async (query, emit) => {
+    searches.push(query);
+    const refreshed = [offer, { ...offer, price: 136.38 }, { ...offer, price: 136.37, quantity: 4 },
+      { ...offer, price: 99, providerId: 303 }, { ...offer, price: 98, placement: "Другой склад" },
+      { ...offer, price: 97, expectedDate: "2026-12-08" }, { ...offer, price: 96, flagReturnImpossible: 1 }];
+    for (const result of parsePartKomApiResults(refreshed, query.article)) emit({ type: "result", result });
+    emit({ type: "supplier_status", supplier: "part-kom", status: "completed" });
+  });
+  const gateway = { refresh: service.refresh.bind(service), choices: async () => ({}), prepare: async (_supplier, lines) => async () => {
+    submissions.push(...lines);
+    return { confirmed: [{ id: lines[0].id, acceptedQuantity: 5, orderIds: ["fixture-1"] }], rejected: [] };
+  } };
+  await withCart(async (cart, reopen) => {
+    const offerId = randomUUID();
+    assert.equal(cart.registerOffer(offerId, saved), true);
+    cart.mutate("add", { offerId, quantity: 5, revision: 0 });
+    cart = reopen();
+    const signal = new AbortController().signal;
+    const refreshed = await cart.refreshForOrder(1, "all", signal);
+    const [item] = refreshed.items;
+    assert.equal(item.unavailable, null);
+    assert.equal(item.result.price, 136.38);
+    assert.equal(item.result.warehouse, saved.warehouse);
+    assert.equal(item.result.deliveryDate, saved.deliveryDate);
+    assert.equal(item.result.quantity, 1000);
+    assert.equal(item.quantity, 5);
+    assert.equal(submissions.length, 0);
+    await cart.order(refreshed.revision, "part-kom", [item.id], { partKom: { deliveryId: "regular" } }, signal);
+    assert.equal(submissions[0].result.price, 136.38);
+    assert.deepEqual(submissions[0].reference, reference("part-kom"));
+    assert.deepEqual(searches, [{ article: "64193", suppliers: ["part-kom"], preserveArticleSuffix: true }]);
+  }, gateway);
+});
+
+test("PartKOM refresh accepts equivalent relative delivery times and blocks conflicting dates or insufficient stock", async (t) => {
+  const offer = { number: "A1", maker: "TEST", makerId: 101, providerId: 202, description: "Тестовая деталь",
+    placement: "Тестовый склад", expectedHours: 24, guaranteedHours: 48, price: 100, quantity: 1 };
+  const saved = line("part-kom");
+  let now = new Date("2026-11-28T12:00:00Z").getTime();
+  const currentTime = t.mock.method(Date, "now", () => now++);
+  const options = [offer, { ...offer, price: 101 }];
+  let emitted = [];
+  const service = new RealOrderApplicationService(new SupplierSessionManager(), async (query, emit) => {
+    emitted = parsePartKomApiResults(options, query.article);
+    for (const result of emitted) emit({ type: "result", result });
+    emit({ type: "supplier_status", supplier: "part-kom", status: "completed" });
+  });
+  const signal = new AbortController().signal;
+  assert.equal((await service.refresh([saved], signal))[0].refreshIssue.reason, "insufficient_stock");
+  assert.equal(emitted[0].deliveryDate, emitted[1].deliveryDate);
+  assert.equal(emitted[0].deliveryDateTo, emitted[1].deliveryDateTo);
+  assert.equal(currentTime.mock.callCount(), 1);
+
+  options[0].quantity = 5;
+  options[1].quantity = 7;
+  assert.equal((await service.refresh([saved], signal))[0].result.price, 100);
+
+  options[1].expectedHours = 36;
+  assert.equal((await service.refresh([saved], signal))[0].refreshIssue.reason, "check_failed");
+});
+
 test("refresh failure keeps the cart unchanged and cannot authorize a real order", async () => {
   let sends = 0;
   const gateway = { refresh: async () => { throw new Error("Supplier unavailable"); }, choices: async () => ({}),

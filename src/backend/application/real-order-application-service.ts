@@ -1,8 +1,8 @@
 import { CartError, type CartRefreshIssue, type RealOrderGateway, type RefreshedPurchaseLine } from "../purchasing/cart-application-service.ts";
 import type { CheckoutDetails, OrderChoices, OrderSupplier, RosskoOrderChoices } from "../purchasing/order-contract.ts";
-import { getPurchaseReference, samePurchaseOffer, type PurchaseLine, type PurchaseReference } from "../purchasing/purchase-offer.ts";
+import { getPurchaseReference, samePurchaseOffer, type PurchaseLine } from "../purchasing/purchase-offer.ts";
 import type { SupplierSessionManager } from "../session/session-manager.ts";
-import type { SearchStreamEvent, SupplierSearchQuery } from "../types.ts";
+import type { NormalizedSearchResult, SearchStreamEvent, SupplierSearchQuery } from "../types.ts";
 import { SupplierAuthError, SupplierIntegrationError, SupplierTimeoutError } from "../suppliers/errors.ts";
 import { listArmtekOrderHistory, placeArmtekOrder } from "../suppliers/armtek/armtek-order.ts";
 import { resolveArmtekConfig } from "../suppliers/armtek/armtek-api-adapter.ts";
@@ -20,6 +20,33 @@ import { AutopiterApiAdapter } from "../suppliers/autopiter/autopiter-api-adapte
 const validPhone = (value: unknown): value is string => typeof value === "string" && /^[+\d()\s-]{6,40}$/.test(value);
 const sameText = (left: string, right: string): boolean => left.trim().toLocaleUpperCase() === right.trim().toLocaleUpperCase();
 const supplierNames: Record<OrderSupplier, string> = { armtek: "Armtek", "part-kom": "PartKOM", "forum-auto": "Forum Auto", rossko: "Rossko", autopiter: "Автопитер" };
+type RefreshedOffer = Pick<PurchaseLine, "result" | "reference">;
+
+function hasRequiredStock(offer: NormalizedSearchResult, quantity: number): offer is NormalizedSearchResult & { quantity: number } {
+  return typeof offer.quantity === "number" && Number.isSafeInteger(offer.quantity) && offer.quantity >= quantity;
+}
+
+function selectPartKomOffer(line: PurchaseLine, matches: RefreshedOffer[]): RefreshedOffer | undefined {
+  const current = line.result;
+  const sameArticleAndDelivery = (left: NormalizedSearchResult, right: NormalizedSearchResult) => sameText(left.article, right.article)
+    && left.deliveryDate === right.deliveryDate && (left.deliveryDateTo ?? null) === (right.deliveryDateTo ?? null)
+    && left.deliveryDateApproximate === right.deliveryDateApproximate;
+  const sameWarehouseAndReturns = matches.filter(({ result }) => sameText(result.warehouse ?? "", current.warehouse ?? "")
+    && (result.isReturnable === false) === (current.isReturnable === false));
+  if (sameWarehouseAndReturns.length <= 1) return sameWarehouseAndReturns[0];
+
+  const savedTerms = sameWarehouseAndReturns.filter(({ result }) => sameArticleAndDelivery(current, result));
+  const candidates = savedTerms.length ? savedTerms : sameWarehouseAndReturns;
+  if (!savedTerms.length && candidates.some(({ result }) => !sameArticleAndDelivery(candidates[0].result, result))) return undefined;
+
+  let best = candidates[0];
+  for (const candidate of candidates) {
+    if (!hasRequiredStock(candidate.result, line.quantity)) continue;
+    if (!hasRequiredStock(best.result, line.quantity) || candidate.result.price < best.result.price
+      || (candidate.result.price === best.result.price && candidate.result.quantity > best.result.quantity)) best = candidate;
+  }
+  return best;
+}
 
 export function allowedRosskoOrderChoices(options: RosskoOrderChoices): RosskoOrderChoices {
   const deliveries = options.deliveries.filter((item) => item.addressId !== null);
@@ -179,11 +206,11 @@ export class RealOrderApplicationService implements RealOrderGateway {
   }
 
   async refresh(lines: PurchaseLine[], signal: AbortSignal): Promise<RefreshedPurchaseLine[]> {
-    const found = new Map<string, { offers: Array<{ result: PurchaseLine["result"]; reference: PurchaseReference }>; issue?: CartRefreshIssue }>();
+    const found = new Map<string, { offers: RefreshedOffer[]; issue?: CartRefreshIssue }>();
     for (const line of lines) {
       const key = JSON.stringify([line.reference.supplier, line.result.article]);
       if (found.has(key)) continue;
-      const offers: Array<{ result: PurchaseLine["result"]; reference: PurchaseReference }> = [];
+      const offers: RefreshedOffer[] = [];
       let status: string | null = null;
       const failed = (message: string): void => { found.set(key, { offers: [], issue: { reason: "check_failed", message } }); };
       try {
@@ -211,12 +238,11 @@ export class RealOrderApplicationService implements RealOrderGateway {
       if (!lookup) throw new Error("Cart offer refresh result is missing");
       if (lookup.issue) return { ...line, refreshIssue: lookup.issue };
       const matches = lookup.offers.filter((offer) => samePurchaseOffer(line, offer));
-      if (matches.length !== 1) return { ...line, refreshIssue: matches.length
+      const offer = matches.length <= 1 ? matches[0] : line.reference.supplier === "part-kom" ? selectPartKomOffer(line, matches) : undefined;
+      if (!offer) return { ...line, refreshIssue: matches.length
         ? { reason: "check_failed", message: "Найдено несколько подходящих предложений. Товар недоступен для заказа." }
         : { reason: "not_found", message: "Товара больше нет у поставщика." } };
-      const offer = matches[0];
-      if (typeof offer.result.quantity !== "number" || !Number.isSafeInteger(offer.result.quantity)
-        || offer.result.quantity < line.quantity) {
+      if (!hasRequiredStock(offer.result, line.quantity)) {
         return { ...line, refreshIssue: { reason: "insufficient_stock", message: "У поставщика недостаточно товара для этого количества." } };
       }
       return { id: line.id, quantity: line.quantity, result: offer.result, reference: offer.reference };
