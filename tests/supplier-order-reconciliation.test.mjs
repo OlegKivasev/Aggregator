@@ -21,14 +21,34 @@ test("a single POST compares positions from the 1C period with supplier orders b
   const calls = [];
   let limited = false;
   const day = "2026-11-28";
+  const partKomArticle = "482034581R";
+  const connected = ["part-kom", "armtek", "rossko", "forum-auto"];
+  const otherHistories = {
+    armtek: { limited: false, orders: [{ number: "A-1", date: day, items: [supplierItem("ACTIVE", 2)] }] },
+    rossko: { limited: false, orders: [{ number: "R-1", date: day, items: [supplierItem("MISSING-IN-1C", 3)] }] },
+    "forum-auto": { limited: false, orders: [{ number: "F-1", date: day, items: [supplierItem("WITHOUT-MAPPING", 5)] }] },
+  };
   const supplierHistory = [
     { number: "AUT-99", date: day, items: [supplierItem("11190-2902712-00", 1, { brand: "Лада" }), supplierItem("LOCAL-ONLY", 1, { fulfillment: "cancelled" })] },
     { number: "AUT-02", date: `${day} 15:40:00`, items: [supplierItem("1119-2902712", 1), supplierItem("SP1181", 2), supplierItem("REMOTE-ONLY", 3)] },
     { number: "OTHER-DAY", date: "2026-11-27", items: [supplierItem("LOCAL-ONLY", 50)] },
   ];
   const server = createAggregatorServer({ publicDir: resolve("src/frontend"), application: {
-    streamSearch: async () => {}, listSupplierSessions: () => [],
-    supplierOrderHistory: async (query) => { calls.push(query); return { limited, orders: supplierHistory }; },
+    streamSearch: async () => {}, listSupplierSessions: () => connected.map((supplier) => ({ supplier, authorized: true })),
+    supplierOrderHistory: async (query) => {
+      calls.push(query);
+      return query.supplier === "autopiter" ? { limited, orders: supplierHistory } : otherHistories[query.supplier];
+    },
+    partKomOrderHistory: async (archive) => {
+      calls.push({ supplier: "part-kom", archive });
+      return { limited: true, orders: [
+        { number: "PK-1", date: `${day} 14:52:00`, items: [supplierItem(partKomArticle, 4, { brand: "Тольятти" }),
+          supplierItem("PARTIALLY-RECEIVED", 2, { fulfillment: "delivered" })] },
+        { number: "PK-2", date: day, items: [supplierItem("COMPLETED", 8, { fulfillment: "delivered" })] },
+        { number: "PK-3", date: day, items: [supplierItem("CANCELLED", 8, { fulfillment: "cancelled" })] },
+        { number: "PK-4", date: "2026-11-27", items: [supplierItem("OTHER-DAY", 8)] },
+      ] };
+    },
   } });
   const counterparties = new SupplierCounterparties(db);
   const nomenclature = new NomenclatureService(db);
@@ -65,6 +85,38 @@ test("a single POST compares positions from the 1C period with supplier orders b
     assert.equal(calls.length, 2);
     assert.equal(incomplete.warnings.length, 2);
     assert.ok(incomplete.rows.every(({ status }) => status === "unverified"));
+
+    const partKomId = "23456781-abcd-1234-abcd-123456789abc";
+    const armtekId = "34567891-abcd-1234-abcd-123456789abc";
+    const rosskoId = "45678912-abcd-1234-abcd-123456789abc";
+    counterparties.save("part-kom", { id: partKomId, name: "Автоконтракты", taxId: "" });
+    counterparties.save("armtek", { id: armtekId, name: "Армтек", taxId: "" });
+    counterparties.save("rossko", { id: rosskoId, name: "Росско", taxId: "" });
+    const allBody = { from: day, to: day, counterparties: [
+      { id: partKomId, name: "Автоконтракты", items: [localItem(partKomArticle, 4), localItem("PARTIALLY-RECEIVED", 2), localItem("PK-UNCERTAIN", 1)] },
+      { id: armtekId, name: "Армтек", items: [localItem("ACTIVE", 2), localItem(partKomArticle, 1)] },
+      { id: counterpartyId, name: "Автопитер", items: [localItem("OFFLINE", 2)] },
+      { id: null, name: "Без поставщика", items: [localItem("NO-COUNTERPARTY", 3)] },
+    ] };
+    assert.equal((await post({ ...allBody, counterparties: [...allBody.counterparties, allBody.counterparties[0]] }, token)).status, 400);
+    assert.equal(calls.length, 2);
+    const allResponse = await post(allBody, token);
+    assert.equal(allResponse.status, 200);
+    const all = await allResponse.json();
+    assert.equal(all.scope, "all-active");
+    assert.equal(all.sourcesRead, 4);
+    assert.deepEqual(calls.slice(2), [{ supplier: "part-kom", archive: false }, { supplier: "armtek", from: day, to: day },
+      { supplier: "forum-auto" }, { supplier: "rossko" }]);
+    const byArticle = new Map(all.rows.map((row) => [row.article, row]));
+    assert.equal(all.rows.length, 6);
+    assert.equal(byArticle.get(partKomArticle).status, "shortage");
+    assert.match(byArticle.get(partKomArticle).supplier, /Armtek/);
+    assert.equal(byArticle.get("MISSING-IN-1C").status, "extra");
+    assert.match(byArticle.get("MISSING-IN-1C").supplier, /Rossko/);
+    assert.match(byArticle.get("PK-UNCERTAIN").reason, /PartKOM.*предела/);
+    assert.match(byArticle.get("WITHOUT-MAPPING").reason, /сопоставьте/i);
+    assert.match(byArticle.get("OFFLINE").reason, /не подключён/);
+    assert.equal(byArticle.get("NO-COUNTERPARTY").status, "unverified");
   } finally {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
@@ -74,6 +126,19 @@ test("a single POST compares positions from the 1C period with supplier orders b
     else process.env.GARAGE_DB_PATH = previousPath;
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("PartKOM matches a unique exact article under different brand names and preserves real ambiguity", () => {
+  const article = "482034581R";
+  const local = [localItem(article, 4)];
+  const remote = [supplierItem(article, 4, { brand: "Тольятти" })];
+  const options = { matchPartKomArticle: true };
+  assert.deepEqual(compareReconciliation(local, remote, false, options), []);
+  assert.equal(compareReconciliation(local, [{ ...remote[0], quantity: 5 }], true, options)[0].status, "extra");
+  assert.equal(compareReconciliation([...local, localItem(article, 1, { brand: "OTHER" })], remote, true, options).length, 3);
+  assert.equal(compareReconciliation([localItem("1119-2902712", 4)],
+    [supplierItem("11190-2902712", 4, { brand: "Тольятти" })], true, options).length, 2);
+  assert.equal(compareReconciliation(local, remote, true).length, 2);
 });
 
 test("conflicting brands and unconfirmed supplier quantities do not appear as certain discrepancies", () => {
