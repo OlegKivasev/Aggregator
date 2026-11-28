@@ -158,7 +158,7 @@ export function compareReconciliation(onecItems: ReturnType<typeof parseReconcil
         reason = status === "unverified" ? "Недостаточно данных поставщика." : cancelled > 0 ? "Есть отменённое количество." : "У поставщика меньше, чем указано в 1С.";
       } else if (confirmed - onec > epsilon) {
         status = onecWithoutArticle ? "unverified" : "extra";
-        reason = onecWithoutArticle ? "В 1С есть строки без артикула." : "В документе 1С меньше, чем заказано у поставщика за период.";
+        reason = onecWithoutArticle ? "В 1С есть строки без артикула." : "В 1С за период учтено меньше, чем заказано у поставщика.";
       } else if (possible - confirmed > epsilon) {
         status = "unverified";
         reason = "Статус позиции у поставщика не подтверждает всё количество.";

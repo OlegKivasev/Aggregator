@@ -13,7 +13,7 @@ const supplierItem = (article, quantity, details = {}) => ({ article, brand: "LA
   fulfillment: "in_transit", ...details });
 const localItem = (article, quantity, details = {}) => ({ article, brand: "LADA", title: article, quantity, brandAliases: "", ...details });
 
-test("a single POST compares the selected 1C document with all dated supplier positions by product", async () => {
+test("a single POST compares positions from the 1C period with supplier orders by product", async () => {
   const dir = await mkdtemp(join(tmpdir(), "supplier-reconciliation-"));
   const db = join(dir, "orders.sqlite");
   const previousPath = process.env.GARAGE_DB_PATH;
@@ -23,7 +23,7 @@ test("a single POST compares the selected 1C document with all dated supplier po
   const day = "2026-11-28";
   const supplierHistory = [
     { number: "AUT-99", date: day, items: [supplierItem("11190-2902712-00", 1, { brand: "Лада" }), supplierItem("LOCAL-ONLY", 1, { fulfillment: "cancelled" })] },
-    { number: "AUT-02", date: `${day} 15:40:00`, items: [supplierItem("1119-2902712", 1), supplierItem("REMOTE-ONLY", 3)] },
+    { number: "AUT-02", date: `${day} 15:40:00`, items: [supplierItem("1119-2902712", 1), supplierItem("SP1181", 2), supplierItem("REMOTE-ONLY", 3)] },
     { number: "OTHER-DAY", date: "2026-11-27", items: [supplierItem("LOCAL-ONLY", 50)] },
   ];
   const server = createAggregatorServer({ publicDir: resolve("src/frontend"), application: {
@@ -38,8 +38,10 @@ test("a single POST compares the selected 1C document with all dated supplier po
     const token = nomenclature.rotateKey();
     await new Promise((resolve, reject) => server.once("error", reject).listen(0, "127.0.0.1", resolve));
     const url = `http://127.0.0.1:${server.address().port}${supplierOrderReconciliationPath}`;
-    const body = { counterpartyId, from: day, to: day, items: [localItem("1119-2902712", 1, { brandAliases: "Лада" }),
-      localItem("1119-2902712", 1), localItem("LOCAL-ONLY", 2), ...Array.from({ length: 500 }, (_, i) => localItem(`zero-${i}`, 0))] };
+    const firstDocument = [localItem("1119-2902712", 1, { brandAliases: "Лада" }), localItem("LOCAL-ONLY", 2)];
+    const otherDocuments = [localItem("1119-2902712", 1), localItem("SP1181", 2),
+      ...Array.from({ length: 500 }, (_, i) => localItem(`zero-${i}`, 0))];
+    const body = { counterpartyId, from: day, to: day, items: [...firstDocument, ...otherDocuments] };
     const post = (data, key) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify(data) });
     assert.equal((await post(body, "invalid")).status, 401);
     assert.equal((await post({ ...body, to: "2026-02-30" }, token)).status, 400);
@@ -55,6 +57,7 @@ test("a single POST compares the selected 1C document with all dated supplier po
     assert.deepEqual(result.rows.map(({ article, status, onec, confirmed, cancelled }) => [article, status, onec, confirmed, cancelled]), [
       ["LOCAL-ONLY", "shortage", 2, 0, 1], ["REMOTE-ONLY", "extra", 0, 3, 0],
     ]);
+    assert.match(result.rows[1].reason, /В 1С за период/);
 
     limited = true;
     supplierHistory.push({ number: "AUT-02", date: day, items: [supplierItem("REMOTE-ONLY", 3)] });
